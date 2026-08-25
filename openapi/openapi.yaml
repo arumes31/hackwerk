@@ -1,0 +1,696 @@
+openapi: 3.1.0
+info:
+  title: HackWerk HTTP API
+  version: 0.4.0
+  description: Interner Vertrag des serverseitig gerenderten HackWerk-Webdienstes.
+servers:
+  - url: http://localhost:18533
+paths:
+  /login:
+    get:
+      operationId: getLogin
+      responses:
+        "200": { description: Deutsches Anmeldeformular. }
+    post:
+      operationId: postLogin
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string, format: password, writeOnly: true }
+      responses:
+        "303": { description: Anmeldung erfolgreich; opaque Session wurde rotiert. }
+        "401": { description: Generische ungültige Zugangsdaten. }
+        "429": { description: Loginlimit erreicht, mit derselben generischen sichtbaren Meldung. }
+  /logout:
+    post:
+      operationId: postLogout
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Session serverseitig widerrufen. }
+        "403": { description: CSRF-Prüfung fehlgeschlagen. }
+  /password:
+    get:
+      operationId: getPasswordChange
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Passwortänderungsformular. }
+    post:
+      operationId: postPasswordChange
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Passwort geändert und bestehende Sessions widerrufen. }
+        "403": { description: CSRF-Prüfung fehlgeschlagen. }
+        "422": { description: Passwortpolicy oder Bestätigung ungültig. }
+  /admin/users:
+    get:
+      operationId: listUsers
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Adminliste der Benutzer und Fahrerzuordnung. }
+        "403": { description: Adminberechtigung fehlt. }
+    post:
+      operationId: createUser
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Benutzer atomar angelegt und auditiert. }
+        "403": { description: Adminberechtigung oder CSRF fehlt. }
+  /customers:
+    get:
+      operationId: listCustomers
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Serverseitig paginierte aktive Kundenliste ohne Kontaktwerte in der URL. }
+        "401": { description: Anmeldung erforderlich. }
+    post:
+      operationId: createCustomerIntake
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/CustomerIntakeForm" }
+      responses:
+        "303": { description: Kunde, Auftrag und Wartelisteneintrag atomar angelegt; Redirect zur Kundenakte. }
+        "403": { description: Berechtigung oder CSRF fehlt. }
+        "422": { description: Kontakt-, Mengen-, Dauer-, Zeitraum- oder Transportvalidierung fehlgeschlagen. }
+  /customers/search:
+    post:
+      operationId: searchCustomers
+      description: POST verhindert, dass Telefonnummern oder E-Mail-Adressen in URL, Browserhistorie oder Access Logs gelangen.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [csrf_token]
+              properties:
+                csrf_token: { type: string, writeOnly: true }
+                q: { type: string, maxLength: 320 }
+                page: { type: integer, minimum: 1, default: 1 }
+      responses:
+        "200": { description: Suchergebnis nach Name, Firma, Ort, Telefon oder Auftragsnummer. }
+        "403": { description: Berechtigung oder CSRF fehlt. }
+  /customers/{customerID}:
+    parameters:
+      - $ref: "#/components/parameters/CustomerID"
+    get:
+      operationId: getCustomer
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Kundenakte mit getrennten Aufträgen, append-only Notizen und sicherem Maps-Link. }
+        "404": { description: Kundenakte nicht gefunden. }
+    post:
+      operationId: updateCustomer
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/CustomerUpdateForm" }
+      responses:
+        "303": { description: Kundendaten aktualisiert. }
+        "403": { description: Berechtigung oder CSRF fehlt. }
+        "409": { description: Erwartete Version ist veraltet. }
+        "422": { description: Eingabe fachlich ungültig. }
+  /customers/{customerID}/archive:
+    parameters:
+      - $ref: "#/components/parameters/CustomerID"
+    post:
+      operationId: archiveCustomer
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/VersionForm" }
+      responses:
+        "303": { description: Kunde archiviert; Historie bleibt erhalten. }
+        "403": { description: Adminberechtigung oder CSRF fehlt. }
+        "409": { description: Erwartete Version ist veraltet. }
+  /customers/{customerID}/jobs:
+    parameters:
+      - $ref: "#/components/parameters/CustomerID"
+    post:
+      operationId: createCustomerJob
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/JobForm" }
+      responses:
+        "303": { description: Separater Auftrag und Wartelisteneintrag für bestehenden aktiven Kunden angelegt. }
+        "403": { description: Berechtigung oder CSRF fehlt. }
+        "404": { description: Aktiver Kunde nicht gefunden. }
+        "422": { description: Auftrag fachlich ungültig. }
+  /jobs/{jobID}:
+    parameters:
+      - $ref: "#/components/parameters/JobID"
+    post:
+      operationId: updateJob
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/JobForm"
+                - $ref: "#/components/schemas/VersionForm"
+      responses:
+        "303": { description: Auftrag aktualisiert. }
+        "403": { description: Berechtigung oder CSRF fehlt. }
+        "409": { description: Erwartete Version ist veraltet oder Auftrag nicht mehr bearbeitbar. }
+        "422": { description: Auftrag fachlich ungültig. }
+  /jobs/{jobID}/archive:
+    parameters:
+      - $ref: "#/components/parameters/JobID"
+    post:
+      operationId: archiveJob
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/VersionForm" }
+      responses:
+        "303": { description: Auftrag archiviert und aktiver Wartelisteneintrag atomar entfernt. }
+        "403": { description: Adminberechtigung oder CSRF fehlt. }
+        "409": { description: Erwartete Version ist veraltet oder Auftrag nicht archivierungsfähig. }
+  /jobs/{jobID}/notes:
+    parameters:
+      - $ref: "#/components/parameters/JobID"
+    post:
+      operationId: appendJobNote
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [csrf_token, body]
+              properties:
+                csrf_token: { type: string, writeOnly: true }
+                body: { type: string, minLength: 1, maxLength: 4000 }
+                customer_id: { type: string, format: uuid }
+      responses:
+        "303": { description: Neue unveränderliche Notiz mit Autor und Zeitstempel angehängt. }
+        "403": { description: Berechtigung oder CSRF fehlt. }
+        "422": { description: Notiz leer oder zu lang. }
+  /waitlist:
+    get:
+      operationId: listWaitlist
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { type: string, enum: [chipping_only, chipping_with_transport] } }
+        - { name: region, in: query, schema: { type: string } }
+        - { name: urgency, in: query, schema: { type: string, enum: [low, normal, high, urgent] } }
+        - { name: month, in: query, schema: { type: string, pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$" } }
+        - { name: sort, in: query, schema: { type: string, enum: [entered, preferred, urgency, volume, region], default: entered } }
+        - { name: direction, in: query, schema: { type: string, enum: [asc, desc], default: asc } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+      responses:
+        "200": { description: Responsive, stabil paginierte und serverseitig sortierte/gefilterte Warteliste. }
+        "401": { description: Anmeldung erforderlich. }
+  /waitlist/{waitlistID}/priority:
+    parameters:
+      - $ref: "#/components/parameters/WaitlistID"
+    post:
+      operationId: updateWaitlistPriority
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [csrf_token, version, priority]
+              properties:
+                csrf_token: { type: string, writeOnly: true }
+                version: { type: integer, minimum: 1 }
+                priority: { type: integer, minimum: -100, maximum: 100 }
+      responses:
+        "303": { description: Adminpriorität aktualisiert und auditiert. }
+        "403": { description: Adminberechtigung oder CSRF fehlt. }
+        "409": { description: Erwartete Version ist veraltet. }
+  /waitlist/{waitlistID}/remove:
+    parameters:
+      - $ref: "#/components/parameters/WaitlistID"
+    post:
+      operationId: removeWaitlistEntry
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [csrf_token, version, reason]
+              properties:
+                csrf_token: { type: string, writeOnly: true }
+                version: { type: integer, minimum: 1 }
+                reason: { type: string, enum: [scheduled, cancelled, duplicate, other] }
+      responses:
+        "303": { description: Wartelisteneintrag historisch entfernt und auditiert. }
+        "403": { description: Adminberechtigung oder CSRF fehlt. }
+        "409": { description: Erwartete Version ist veraltet. }
+  /availability:
+    get:
+      operationId: getOwnAvailability
+      description: Mobile HTML-Verwaltung der eigenen Wochenregeln und Ausnahmen; das Zielprofil stammt ausschließlich aus der Session.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Wochenplan, Ausnahmen und normalisierte 14-Tage-Vorschau in Europe/Vienna. }
+        "403": { description: Kein zugeordnetes eigenes Fahrerprofil. }
+  /admin/drivers:
+    get:
+      operationId: listDriverProfiles
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Fahrerprofile mit gemeinsamer Verfügbarkeitsübersicht der nächsten sieben Tage. }
+        "403": { description: Adminberechtigung fehlt. }
+    post:
+      operationId: createDriverProfile
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Eigenständiges, optional mit einem Login verknüpftes Fahrerprofil angelegt. }
+        "403": { description: Adminberechtigung oder CSRF fehlt. }
+        "422": { description: Profil oder Loginzuordnung ungültig. }
+  /admin/resources:
+    get:
+      operationId: listResources
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Generische Maschinen- und Transportressourcen. }
+        "403": { description: Adminberechtigung fehlt. }
+    post:
+      operationId: createResource
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Ressource mit typisierten Kapazitätsdaten angelegt. }
+        "403": { description: Adminberechtigung oder CSRF fehlt. }
+        "422": { description: Typ, Name oder Kapazität ungültig. }
+  /api/v1/me/availability:
+    get:
+      operationId: resolveOwnAvailability
+      description: Liefert UTC-Intervalle für das Fahrerprofil der Session. Interne Notizen werden nie in das Overlay serialisiert.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: "#/components/parameters/AvailabilityFrom"
+        - $ref: "#/components/parameters/AvailabilityTo"
+      responses:
+        "200":
+          description: Normalisierte Intervalle samt minimaler Provenienz.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AvailabilityResponse" }
+        "403": { description: Eigenes Fahrerprofil fehlt. }
+        "422": { description: Zeitraum ungültig oder länger als 90 Tage. }
+  /api/v1/drivers/{driverID}/availability:
+    parameters:
+      - $ref: "#/components/parameters/DriverID"
+    get:
+      operationId: resolveDriverAvailability
+      description: Admin-Overlay eines Fahrerprofils; Fahrer können diesen Fremdpfad nicht verwenden.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: "#/components/parameters/AvailabilityFrom"
+        - $ref: "#/components/parameters/AvailabilityTo"
+      responses:
+        "200":
+          description: Normalisierte Intervalle samt minimaler Provenienz.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AvailabilityResponse" }
+        "403": { description: Adminberechtigung fehlt. }
+        "422": { description: Zeitraum ungültig oder länger als 90 Tage. }
+  /calendar:
+    get:
+      operationId: getCalendarPage
+      description: Responsive Tages-/Wochen-/Agendaansicht; Fahrer sehen alle Termine read-only, Admins zusätzlich Warteliste und Einplanungsdialog.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Serverseitig gerenderte Kalenderseite mit lokal gebündeltem FullCalendar Standard. }
+        "403": { description: Kalenderberechtigung fehlt. }
+  /api/v1/calendar:
+    get:
+      operationId: listCalendarEvents
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CalendarFrom"
+        - $ref: "#/components/parameters/CalendarTo"
+      responses:
+        "200":
+          description: Begrenzte FullCalendar-Events ohne Telefon/E-Mail.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CalendarEvent" }
+        "403": { description: Kalenderberechtigung fehlt. }
+        "422": { description: Zeitraum ungültig oder länger als 93 Tage. }
+  /api/v1/calendar/conflicts:
+    get:
+      operationId: listCalendarConflicts
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: "#/components/parameters/CalendarFrom"
+        - $ref: "#/components/parameters/CalendarTo"
+        - { name: driver_id, in: query, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: resource_id, in: query, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: exclude_appointment_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Datensparsame aktive Fahrer-/Ressourcenüberschneidungen. }
+        "422": { description: Zeitraum oder ID ungültig. }
+  /api/v1/calendar/plan:
+    post:
+      operationId: planWaitlistProposal
+      description: Erzeugt Draft, geprüfte Zuweisungen und Proposal; fixiert nie und versendet nichts.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/PlanAppointmentForm" }
+      responses:
+        "201": { description: Proposal gespeichert. }
+        "403": { description: Adminberechtigung oder CSRF fehlt. }
+        "409": { description: Version oder exklusive Reservierung kollidiert. }
+        "422": { description: Zeit, Verfügbarkeit, Transport oder Zuweisung ungültig. }
+  /api/v1/appointments/{appointmentID}/move:
+    parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
+    post:
+      operationId: moveAppointment
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/AppointmentTimeMutation" }
+      responses:
+        "200": { description: Zeit und neue Version gespeichert; fixierte Bestätigung wieder pending. }
+        "403": { description: Nur Administratoren dürfen verschieben. }
+        "409": { description: Stale Version oder physische Überschneidung; Browser muss revertieren. }
+        "422": { description: Zeit oder Verfügbarkeit ungültig. }
+  /api/v1/appointments/{appointmentID}/assign:
+    parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
+    post:
+      operationId: assignAppointment
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/VersionForm"
+                - $ref: "#/components/schemas/AppointmentAssignments"
+      responses:
+        "200": { description: Aktive Fahrer/Ressourcen typgerecht zugewiesen und Version erhöht. }
+        "403": { description: Nur Administratoren dürfen zuweisen. }
+        "409": { description: Stale Version oder exklusive Reservierungskollision. }
+        "422": { description: Inaktive/falsche Zuweisung, Transport oder Verfügbarkeit ungültig. }
+  /api/v1/appointments/{appointmentID}/propose:
+    parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
+    post:
+      operationId: proposeAppointment
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/VersionForm"
+                - type: object
+                  properties: { override_reason: { type: string, maxLength: 1000 } }
+      responses:
+        "200": { description: Draft als blockierendes Proposal aktiviert. }
+        "403": { description: Nur Administratoren dürfen vorschlagen. }
+        "409": { description: Stale Version oder exklusive Reservierungskollision. }
+        "422": { description: Zuweisung, Transport oder Verfügbarkeit ungültig. }
+  /api/v1/appointments/{appointmentID}/resize:
+    parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
+    post:
+      operationId: resizeAppointment
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/AppointmentTimeMutation" }
+      responses:
+        "200": { description: Dauer und neue Version gespeichert. }
+        "403": { description: Nur Administratoren dürfen die Dauer ändern. }
+        "409": { description: Stale Version oder physische Überschneidung. }
+        "422": { description: Zeit oder Verfügbarkeit ungültig. }
+  /api/v1/appointments/{appointmentID}/fix:
+    parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
+    post:
+      operationId: fixAppointment
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/VersionForm" }
+      responses:
+        "200": { description: Termin, Auftrag, Warteliste, Reservierungen, Audit und appointment.fixed-Outboxevent atomar gespeichert; kein HTTP-Versand. }
+        "403": { description: Nur Administratoren dürfen fixieren. }
+        "409": { description: Stale Version oder Reservierungskonflikt. }
+        "422": { description: Fahrer, Hackressource, Transport oder Verfügbarkeit nicht fixierbar. }
+  /api/v1/appointments/{appointmentID}/cancel:
+    parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
+    post:
+      operationId: cancelAppointment
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/VersionForm"
+                - type: object
+                  properties: { reason: { type: string, maxLength: 1000 } }
+      responses:
+        "200": { description: Termin storniert und Reservierungen atomar freigegeben. }
+        "403": { description: Nur Administratoren dürfen absagen. }
+        "409": { description: Stale Version. }
+        "422": { description: Status oder erforderlicher Grund ungültig. }
+  /api/v1/appointments/{appointmentID}/complete:
+    parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
+    post:
+      operationId: completeAppointment
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/VersionForm"
+                - type: object
+                  properties: { override_reason: { type: string, maxLength: 1000 } }
+      responses:
+        "200": { description: Fixierter gestarteter Termin durch Admin oder zugewiesenen berechtigten Fahrer abgeschlossen. }
+        "403": { description: Abschlussrecht oder Objektzuweisung fehlt. }
+        "409": { description: Stale Version. }
+        "422": { description: Status/Zeitpunkt ungültig oder Admin-Override fehlt. }
+  /health/live:
+    get:
+      operationId: getLiveness
+      responses:
+        "200":
+          description: Prozess ist aktiv.
+  /health/ready:
+    get:
+      operationId: getReadiness
+      responses:
+        "200":
+          description: Dienst und Datenbank sind bereit.
+        "503":
+          description: Datenbank ist nicht erreichbar.
+components:
+  parameters:
+    CustomerID:
+      name: customerID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    JobID:
+      name: jobID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    WaitlistID:
+      name: waitlistID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DriverID:
+      name: driverID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AvailabilityFrom:
+      name: from
+      in: query
+      required: true
+      schema: { type: string, format: date-time }
+    AvailabilityTo:
+      name: to
+      in: query
+      required: true
+      schema: { type: string, format: date-time }
+    CalendarFrom:
+      name: from
+      in: query
+      required: true
+      schema: { type: string, format: date-time }
+    CalendarTo:
+      name: to
+      in: query
+      required: true
+      schema: { type: string, format: date-time }
+    AppointmentID:
+      name: appointmentID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    CalendarEvent:
+      type: object
+      additionalProperties: false
+      required: [id, title, start, end, editable, className, color, contrastColor, extendedProps]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        editable: { type: boolean, description: Nur für Admin und editierbare Lifecycle-Zustände true. }
+        className: { type: string, description: FullCalendar-v7-Klassen für Lifecycle und Bestätigung. }
+        color: { type: string, pattern: "^#[0-9a-fA-F]{6}$" }
+        contrastColor: { type: string, pattern: "^#[0-9a-fA-F]{6}$" }
+        extendedProps:
+          type: object
+          description: Auftrag, Ort, m³, Status, Zuweisungen, Version und erlaubte Aktionen; niemals Telefon oder E-Mail.
+          additionalProperties: true
+    PlanAppointmentForm:
+      type: object
+      required: [csrf_token, job_id, starts_at, duration_minutes, driver_id, primary_driver_id, chipper_resource_id]
+      properties:
+        csrf_token: { type: string, writeOnly: true }
+        job_id: { type: string, format: uuid }
+        starts_at: { type: string, format: local-date-time, description: Strikte Europe/Vienna-Ortszeit aus datetime-local. }
+        duration_minutes: { type: integer, minimum: 15, maximum: 10080 }
+        driver_id: { type: array, minItems: 1, items: { type: string, format: uuid } }
+        primary_driver_id: { type: string, format: uuid }
+        chipper_resource_id: { type: array, minItems: 1, items: { type: string, format: uuid } }
+        transport_resource_id: { type: array, items: { type: string, format: uuid } }
+        trailer_resource_id: { type: array, items: { type: string, format: uuid } }
+        override_reason: { type: string, maxLength: 1000 }
+    AppointmentTimeMutation:
+      type: object
+      required: [csrf_token, version, starts_at, ends_at]
+      properties:
+        csrf_token: { type: string, writeOnly: true }
+        version: { type: integer, minimum: 1 }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        override_reason: { type: string, maxLength: 1000 }
+    AppointmentAssignments:
+      type: object
+      required: [driver_id, primary_driver_id, chipper_resource_id]
+      properties:
+        driver_id: { type: array, minItems: 1, items: { type: string, format: uuid } }
+        primary_driver_id: { type: string, format: uuid }
+        chipper_resource_id: { type: array, minItems: 1, items: { type: string, format: uuid } }
+        transport_resource_id: { type: array, items: { type: string, format: uuid } }
+        trailer_resource_id: { type: array, items: { type: string, format: uuid } }
+        override_reason: { type: string, maxLength: 1000 }
+    AvailabilityInterval:
+      type: object
+      additionalProperties: false
+      required: [starts_at, ends_at, status, source, reason]
+      properties:
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        status: { type: string, enum: [available, limited, unavailable] }
+        source: { type: string, enum: [none, rule, exception, inactive_driver] }
+        source_type: { type: string }
+        reason: { type: string, description: Minimierter deutscher Grund ohne interne Bemerkung. }
+    AvailabilityResponse:
+      type: object
+      additionalProperties: false
+      required: [driver_id, timezone, intervals]
+      properties:
+        driver_id: { type: string, format: uuid }
+        timezone: { type: string, const: Europe/Vienna }
+        intervals:
+          type: array
+          items: { $ref: "#/components/schemas/AvailabilityInterval" }
+    VersionForm:
+      type: object
+      required: [csrf_token, version]
+      properties:
+        csrf_token: { type: string, writeOnly: true }
+        version: { type: integer, minimum: 1 }
+        customer_id: { type: string, format: uuid }
+    CustomerFields:
+      type: object
+      required: [notification]
+      properties:
+        first_name: { type: string, maxLength: 200 }
+        last_name: { type: string, maxLength: 200 }
+        company_name: { type: string, maxLength: 200 }
+        street: { type: string, maxLength: 250 }
+        postal_code: { type: string, maxLength: 32 }
+        locality: { type: string, maxLength: 120 }
+        region: { type: string, maxLength: 120 }
+        address_freeform: { type: string, maxLength: 1000 }
+        phone: { type: string, maxLength: 64 }
+        email: { type: string, format: email, maxLength: 320 }
+        notification: { type: string, enum: [email, sms, both, none] }
+    CustomerUpdateForm:
+      allOf:
+        - $ref: "#/components/schemas/CustomerFields"
+        - $ref: "#/components/schemas/VersionForm"
+    JobForm:
+      type: object
+      required: [csrf_token, job_type, volume_m3, hack_duration, transport_mode, urgency, source]
+      properties:
+        csrf_token: { type: string, writeOnly: true }
+        job_type: { type: string, enum: [chipping_only, chipping_with_transport] }
+        volume_m3: { type: string, pattern: "^[0-9]+([.,][0-9]+)?$" }
+        hack_duration: { type: string, description: Minuten oder Stunden:Minuten. }
+        transport_duration: { type: string, description: Minuten oder Stunden:Minuten. }
+        transport_trips: { type: integer, minimum: 0 }
+        transport_mode: { type: string, enum: [none, internal, external, undecided] }
+        external_confirmed: { type: boolean, default: false }
+        preferred_start: { type: string, format: date }
+        preferred_end: { type: string, format: date }
+        preference_text: { type: string, maxLength: 1000 }
+        urgency: { type: string, enum: [low, normal, high, urgent] }
+        region: { type: string, maxLength: 120 }
+        source: { type: string, enum: [phone, voice, email, in_person, other] }
+        note: { type: string, maxLength: 4000 }
+    CustomerIntakeForm:
+      allOf:
+        - $ref: "#/components/schemas/CustomerFields"
+        - $ref: "#/components/schemas/JobForm"
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: hackplan_session

@@ -1,0 +1,296 @@
+package web
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"example.invalid/hackplan/internal/auth"
+	"example.invalid/hackplan/internal/buildinfo"
+	"example.invalid/hackplan/internal/customers"
+)
+
+const (
+	testCustomerID = "10000000-0000-0000-0000-000000000001"
+	testJobID      = "20000000-0000-0000-0000-000000000001"
+	testWaitlistID = "30000000-0000-0000-0000-000000000001"
+)
+
+type customerHTTPStore struct {
+	detail   customers.CustomerDetail
+	waitlist customers.Page[customers.WaitlistItem]
+
+	created customers.CreatedIntake
+	input   customers.IntakeInput
+
+	createCalls          int
+	updateCustomerCalls  int
+	archiveCustomerCalls int
+	archiveJobCalls      int
+	priorityCalls        int
+	removeCalls          int
+
+	updateCustomerErr error
+}
+
+func (store *customerHTTPStore) FindDuplicates(context.Context, customers.CustomerInput) ([]customers.Duplicate, error) {
+	return store.created.Duplicates, nil
+}
+
+func (store *customerHTTPStore) CreateIntake(_ context.Context, _ auth.Actor, input customers.IntakeInput, _ string) (customers.CreatedIntake, error) {
+	store.createCalls++
+	store.input = input
+	return store.created, nil
+}
+
+func (store *customerHTTPStore) CreateJob(context.Context, auth.Actor, customers.CreateJobInput) (customers.CreatedIntake, error) {
+	return store.created, nil
+}
+
+func (store *customerHTTPStore) UpdateJob(context.Context, auth.Actor, customers.UpdateJobInput) error {
+	return nil
+}
+
+func (store *customerHTTPStore) ArchiveJob(context.Context, auth.Actor, string, int32, string) error {
+	store.archiveJobCalls++
+	return nil
+}
+
+func (store *customerHTTPStore) ListCustomers(context.Context, string, int, int) (customers.Page[customers.CustomerSummary], error) {
+	return customers.Page[customers.CustomerSummary]{Page: 1, PageSize: 25}, nil
+}
+
+func (store *customerHTTPStore) CustomerDetail(context.Context, string) (customers.CustomerDetail, error) {
+	return store.detail, nil
+}
+
+func (store *customerHTTPStore) UpdateCustomer(context.Context, auth.Actor, customers.UpdateCustomerInput) error {
+	store.updateCustomerCalls++
+	return store.updateCustomerErr
+}
+
+func (store *customerHTTPStore) ArchiveCustomer(context.Context, auth.Actor, string, int32, string) error {
+	store.archiveCustomerCalls++
+	return nil
+}
+
+func (store *customerHTTPStore) ListWaitlist(context.Context, customers.WaitlistFilter) (customers.Page[customers.WaitlistItem], error) {
+	return store.waitlist, nil
+}
+
+func (store *customerHTTPStore) UpdateWaitlistPriority(context.Context, auth.Actor, string, int32, int32, string) error {
+	store.priorityCalls++
+	return nil
+}
+
+func (store *customerHTTPStore) RemoveWaitlist(context.Context, auth.Actor, string, int32, string, string) error {
+	store.removeCalls++
+	return nil
+}
+
+func (store *customerHTTPStore) AddNote(context.Context, auth.Actor, string, string, string, string) (string, error) {
+	return "note-id", nil
+}
+
+func TestCustomerHTTPDriverIntakeUsesCSRFAndPRG(t *testing.T) {
+	store := &customerHTTPStore{created: customers.CreatedIntake{
+		CustomerID: testCustomerID, JobID: testJobID, WaitlistID: testWaitlistID, JobNumber: "HA-2026-0001",
+		Duplicates: []customers.Duplicate{{ID: "existing"}},
+	}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	form := validCustomerHTTPForm(csrfToken)
+	request := authenticatedCustomerRequest(t, http.MethodPost, "/customers", form, sessionToken, csrfToken)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, body = %q", response.Code, response.Body.String())
+	}
+	if location := response.Header().Get("Location"); location != "/customers/"+testCustomerID+"?duplicate_warning=1" {
+		t.Fatalf("Location = %q", location)
+	}
+	if store.createCalls != 1 || store.input.Customer.LastName != "Huber" || store.input.Job.EstimatedHackMinutes != 210 {
+		t.Fatalf("CreateIntake calls = %d, input = %#v", store.createCalls, store.input)
+	}
+
+	missingCSRF := validCustomerHTTPForm("")
+	request = authenticatedCustomerRequest(t, http.MethodPost, "/customers", missingCSRF, sessionToken, csrfToken)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || store.createCalls != 1 {
+		t.Fatalf("missing CSRF status = %d, create calls = %d", response.Code, store.createCalls)
+	}
+}
+
+func TestCustomerHTTPStaleEditReturnsConflict(t *testing.T) {
+	store := &customerHTTPStore{updateCustomerErr: customers.ErrConflict}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	form := url.Values{
+		"csrf_token": {csrfToken}, "version": {"1"}, "first_name": {"Maria"},
+		"last_name": {"Maier"}, "notification": {"none"},
+	}
+	request := authenticatedCustomerRequest(t, http.MethodPost, "/customers/"+testCustomerID, form, sessionToken, csrfToken)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "zwischenzeitlich geändert") {
+		t.Fatalf("stale response = %d %q", response.Code, response.Body.String())
+	}
+	if store.updateCustomerCalls != 1 {
+		t.Fatalf("update customer calls = %d", store.updateCustomerCalls)
+	}
+}
+
+func TestCustomerHTTPTemplatesEscapeAllFreeText(t *testing.T) {
+	payload := `<script>alert("xss")</script>`
+	store := &customerHTTPStore{detail: customers.CustomerDetail{
+		Customer: customers.Customer{
+			ID: testCustomerID, FirstName: payload, LastName: "Huber", Street: payload,
+			CountryCode: "AT", NotificationPreference: customers.NotifyNone, GeocodingStatus: payload, Version: 1,
+		},
+		Jobs: []customers.Job{{
+			ID: testJobID, JobNumber: "HA-2026-0001", JobType: customers.JobTypeChippingOnly,
+			VolumeM3: "80.00", EstimatedHackMinutes: 180, TransportMode: customers.TransportNone,
+			Urgency: customers.UrgencyNormal, Source: customers.SourcePhone, WorkflowStatus: "waitlist",
+			PreferenceText: payload, Region: payload, Version: 1,
+		}},
+		Notes: map[string][]customers.Note{testJobID: {{
+			ID: "note", JobID: testJobID, AuthorName: payload, Body: payload, CreatedAt: time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC),
+		}}},
+		MapsURL: "https://www.google.com/maps/search/?api=1&query=Unterneukirchen",
+	}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	request := authenticatedCustomerRequest(t, http.MethodGet, "/customers/"+testCustomerID, nil, sessionToken, csrfToken)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	body := response.Body.String()
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", response.Code, body)
+	}
+	if strings.Contains(body, payload) || strings.Contains(body, "<script>") {
+		t.Fatalf("response contains executable payload: %s", body)
+	}
+	if !strings.Contains(body, "&lt;script&gt;") || !strings.Contains(body, "https://www.google.com/maps/search/") {
+		t.Fatalf("response does not contain escaped text or safe maps link: %s", body)
+	}
+}
+
+func TestCustomerHTTPDriverCannotCallAdminMutations(t *testing.T) {
+	store := &customerHTTPStore{}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	tests := []struct {
+		name string
+		path string
+		form url.Values
+	}{
+		{name: "archive customer", path: "/customers/" + testCustomerID + "/archive", form: url.Values{"version": {"1"}}},
+		{name: "archive job", path: "/jobs/" + testJobID + "/archive", form: url.Values{"version": {"1"}, "customer_id": {testCustomerID}}},
+		{name: "change priority", path: "/waitlist/" + testWaitlistID + "/priority", form: url.Values{"version": {"1"}, "priority": {"10"}}},
+		{name: "remove waitlist", path: "/waitlist/" + testWaitlistID + "/remove", form: url.Values{"version": {"1"}, "reason": {"other"}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.form.Set("csrf_token", csrfToken)
+			request := authenticatedCustomerRequest(t, http.MethodPost, test.path, test.form, sessionToken, csrfToken)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, body = %q", response.Code, response.Body.String())
+			}
+		})
+	}
+	if store.archiveCustomerCalls != 0 || store.archiveJobCalls != 0 || store.priorityCalls != 0 || store.removeCalls != 0 {
+		t.Fatalf("admin store calls = archive customer %d, archive job %d, priority %d, remove %d",
+			store.archiveCustomerCalls, store.archiveJobCalls, store.priorityCalls, store.removeCalls)
+	}
+}
+
+func TestCustomerHTTPDriverWaitlistIsNotCachedAndHidesAdminPlanningControls(t *testing.T) {
+	store := &customerHTTPStore{waitlist: customers.Page[customers.WaitlistItem]{
+		Page: 1, PageSize: 25, Total: 1, TotalPages: 1,
+		Items: []customers.WaitlistItem{{
+			WaitlistID: testWaitlistID, JobID: testJobID, CustomerID: testCustomerID,
+			JobNumber: "HW-2026-000001", FirstName: "Franz", LastName: "Huber",
+			VolumeM3: "80.00", EstimatedHackMinutes: 180, JobType: customers.JobTypeChippingOnly,
+			TransportMode: customers.TransportNone, Urgency: customers.UrgencyNormal,
+		}},
+	}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	request := authenticatedCustomerRequest(t, http.MethodGet, "/waitlist", nil, sessionToken, csrfToken)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("waitlist status = %d, cache-control = %q", response.Code, response.Header().Get("Cache-Control"))
+	}
+	if strings.Contains(response.Body.String(), "Einplanen (bald)") || strings.Contains(response.Body.String(), "data-drag-source") {
+		t.Fatalf("driver waitlist contains admin-only planning controls: %s", response.Body.String())
+	}
+}
+
+func customerTestRouter(t *testing.T, role auth.Role, customerStore *customerHTTPStore) (http.Handler, string, string) {
+	t.Helper()
+	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	sessionToken := "test-session-token"
+	csrfToken := "test-csrf-token"
+	identityStore := &identityTestStore{
+		user: auth.User{ID: "40000000-0000-0000-0000-000000000001", Username: "intern", DisplayName: "Interner Benutzer", Role: role, Active: true, Version: 1},
+		session: auth.Session{
+			ID: "session-id", Actor: auth.Actor{UserID: "40000000-0000-0000-0000-000000000001", Username: "intern", DisplayName: "Interner Benutzer", Role: role, UserVersion: 1},
+			CSRFTokenHash: auth.TokenHash(csrfToken), IdleExpiresAt: now.Add(time.Hour), AbsoluteExpiresAt: now.Add(8 * time.Hour), UserActive: true,
+		},
+	}
+	hasher, err := auth.NewPasswordHasher(auth.PasswordParameters{MemoryKiB: 8, Iterations: 1, Parallelism: 1, SaltLength: 16, KeyLength: 16, MinLength: 14})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := auth.NewService(identityStore, hasher, func() time.Time { return now }, time.Hour, 8*time.Hour, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	customerService, err := customers.NewService(customerStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := NewRouter(Dependencies{
+		Config: configForWebTest(), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Database: pinger{}, Build: buildinfo.Info{Version: "test"}, Identity: identity, Customers: customerService,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return router, sessionToken, csrfToken
+}
+
+func authenticatedCustomerRequest(t *testing.T, method string, path string, form url.Values, sessionToken string, csrfToken string) *http.Request {
+	t.Helper()
+	var body io.Reader
+	if form != nil {
+		body = strings.NewReader(form.Encode())
+	}
+	request := httptest.NewRequestWithContext(t.Context(), method, "https://example.test"+path, body)
+	if form != nil {
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Origin", "https://example.test")
+	}
+	request.AddCookie(&http.Cookie{Name: "hackplan_session", Value: sessionToken})
+	request.AddCookie(&http.Cookie{Name: "hackplan_csrf", Value: csrfToken})
+	return request
+}
+
+func validCustomerHTTPForm(csrfToken string) url.Values {
+	return url.Values{
+		"csrf_token": {csrfToken}, "first_name": {"Franz"}, "last_name": {"Huber"},
+		"street": {"Unterneukirchen 15"}, "locality": {"Unterneukirchen"}, "region": {"Unterneukirchen"},
+		"phone": {"0664 1234567"}, "email": {"franz.huber@example.test"}, "notification": {"none"},
+		"job_type": {"chipping_only"}, "volume_m3": {"80"}, "hack_duration": {"3:30"},
+		"transport_mode": {"none"}, "urgency": {"normal"}, "source": {"phone"}, "note": {"Interne Bemerkung"},
+	}
+}

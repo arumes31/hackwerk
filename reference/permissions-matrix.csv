@@ -1,0 +1,26 @@
+capability,admin,driver,notes
+calendar.view_all,true,true,All drivers see all appointments
+customer.create,true,true,
+customer.update,true,true,
+customer.archive,true,false,
+job.create,true,true,
+job.update,true,true,
+waitlist.add,true,true,
+waitlist.prioritize,true,false,
+appointment.create_draft,true,false,
+appointment.move,true,false,
+appointment.resize,true,false,
+appointment.fix,true,false,Admin-only invariant
+appointment.cancel,true,false,
+appointment.complete,true,configurable,Driver profile flag
+availability.update_own,true,true,
+availability.update_other,true,false,
+resource.manage,true,false,
+driver.manage,true,false,
+user.manage,true,false,
+notification.resend,true,false,
+planning.view,true,optional_read_only,
+planning.adopt,true,false,Creates proposal only
+settings.manage,true,false,
+audit.view,true,false,
+calendar_feed.manage_own,true,true,

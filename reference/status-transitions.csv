@@ -1,0 +1,18 @@
+entity,from,to,actor,requirements
+appointment,none,draft,admin,active job and valid time
+appointment,draft,proposal,admin,server conflict check
+appointment,proposal,fixed,admin,driver resource transport version and DB constraints
+appointment,draft,cancelled,admin,
+appointment,proposal,cancelled,admin,
+appointment,fixed,cancelled,admin,reason required
+appointment,fixed,completed,admin_or_allowed_driver,after start or admin override
+confirmation,not_requested,pending,system,appointment fixed
+confirmation,pending,confirmed,customer,valid token and nonce
+confirmation,pending,declined,customer,valid token and nonce
+confirmation,pending,callback_requested,customer,valid token and nonce
+confirmation,callback_requested,confirmed,customer,valid token
+confirmation,callback_requested,declined,customer,valid token
+job,waitlist,planning,system,active proposal
+job,planning,scheduled,system,appointment fixed
+job,scheduled,completed,system,appointment completed
+job,any,cancelled,admin,reason and no active execution

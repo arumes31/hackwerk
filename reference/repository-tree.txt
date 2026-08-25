@@ -1,0 +1,77 @@
+.
+├── AGENTS.md
+├── PLANS.md
+├── Makefile
+├── go.mod
+├── go.sum
+├── Dockerfile
+├── compose.yaml
+├── compose.prod.example.yaml
+├── cmd/
+│   └── hackwerk/
+│       └── main.go
+├── internal/
+│   ├── app/
+│   ├── config/
+│   ├── auth/
+│   ├── users/
+│   ├── customers/
+│   ├── jobs/
+│   ├── waitlist/
+│   ├── drivers/
+│   ├── availability/
+│   ├── resources/
+│   ├── scheduling/
+│   ├── notifications/
+│   ├── confirmation/
+│   ├── calendarfeed/
+│   ├── planning/
+│   ├── voice/
+│   ├── audit/
+│   ├── dashboard/
+│   ├── adapters/
+│   │   ├── postgres/
+│   │   ├── smtp/
+│   │   ├── smswebhook/
+│   │   ├── routing/
+│   │   └── speech/
+│   └── web/
+│       ├── handlers/
+│       ├── middleware/
+│       ├── dto/
+│       └── viewmodel/
+├── db/
+│   ├── migrations/
+│   ├── queries/
+│   └── sqlc.yaml
+├── web/
+│   ├── templates/
+│   │   ├── layouts/
+│   │   ├── components/
+│   │   └── pages/
+│   └── assets/
+│       └── static/
+│           ├── calendar.js
+│           ├── voice.js
+│           ├── app.js
+│           └── app.css
+├── openapi/
+│   └── openapi.yaml
+├── tests/
+│   ├── integration/
+│   ├── e2e/
+│   └── fixtures/
+├── docs/
+│   ├── adr/
+│   ├── exec-plans/
+│   └── ...
+├── acceptance/
+├── reference/
+├── .agents/
+│   └── skills/
+├── .github/
+│   └── workflows/
+└── scripts/
+    ├── backup.sh
+    ├── restore-smoke.sh
+    └── wait-for-db.sh

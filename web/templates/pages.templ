@@ -1,0 +1,99 @@
+package templates
+
+import "fmt"
+
+type PageData struct {
+	AppName string
+	Version string
+	CSSPath string
+	JSPath  string
+	FullCalendarJSPath string
+	FullCalendarThemeJSPath string
+	FullCalendarSkeletonCSSPath string
+	FullCalendarThemeCSSPath string
+	FullCalendarPaletteCSSPath string
+}
+
+templ documentHead(data PageData, title string) {
+	<head>
+		<meta charset="utf-8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1"/>
+		<meta name="color-scheme" content="light"/>
+		<title>{ title }</title>
+		<link rel="stylesheet" href={ data.CSSPath }/>
+		<link rel="stylesheet" href={ data.FullCalendarSkeletonCSSPath }/>
+		<link rel="stylesheet" href={ data.FullCalendarThemeCSSPath }/>
+		<link rel="stylesheet" href={ data.FullCalendarPaletteCSSPath }/>
+		<script src={ data.FullCalendarJSPath } defer></script>
+		<script src={ data.FullCalendarThemeJSPath } defer></script>
+		<script type="module" src={ data.JSPath } defer></script>
+	</head>
+}
+
+templ Home(data PageData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data, data.AppName+" – Einsatzplanung")
+		<body>
+			<a class="skip-link" href="#hauptinhalt">Zum Inhalt springen</a>
+			<header class="site-header">
+				<div class="site-header__inner">
+					<a class="wordmark" href="/" aria-label={ data.AppName + " Startseite" }>
+						<span class="wordmark__mark" aria-hidden="true">H</span>
+						<span>{ data.AppName }</span>
+					</a>
+					<span class="build-pill">Version { data.Version }</span>
+				</div>
+			</header>
+			<main id="hauptinhalt" class="page">
+				<section class="hero" aria-labelledby="hero-title">
+					<div>
+						<p class="eyebrow">Planung für Hackeinsätze</p>
+						<h1 id="hero-title">Ein klarer Takt für Maschine, Fahrer und Auftrag.</h1>
+						<p class="hero__lead">Das technische Fundament läuft. Kunden, Warteliste, Kalender und Benachrichtigungen werden als getrennte, nachvollziehbare Arbeitsbereiche aufgebaut.</p>
+					</div>
+					<aside class="readiness-card" aria-labelledby="status-title">
+						<span class="status-badge status-badge--ready">Webdienst bereit</span>
+						<h2 id="status-title">Sicheres Fundament</h2>
+						<p>Lokale Assets, kontrolliertes Herunterfahren und getrennte Live-/Datenbankprüfung sind aktiv.</p>
+					</aside>
+				</section>
+				<section class="principles" aria-label="Produktprinzipien">
+					<article class="principle">
+						<span class="principle__number">01</span>
+						<h2>Menschen fixieren Termine</h2>
+						<p>Automatik unterstützt. Verbindliche Planung bleibt eine ausdrückliche Adminentscheidung.</p>
+					</article>
+					<article class="principle">
+						<span class="principle__number">02</span>
+						<h2>Alle sehen denselben Plan</h2>
+						<p>Fahrer erhalten den vollständigen Kalender, unabhängig von der eigenen Zuweisung.</p>
+					</article>
+					<article class="principle">
+						<span class="principle__number">03</span>
+						<h2>Mobil ohne Drag-Zwang</h2>
+						<p>Jeder Kernfluss erhält eine robuste Touch- und Tastaturalternative.</p>
+					</article>
+				</section>
+			</main>
+			<footer class="site-footer"><div class="site-footer__inner">{ data.AppName } · Europe/Vienna · de-AT</div></footer>
+			<div class="visually-hidden" aria-live="polite" data-live-status></div>
+		</body>
+	</html>
+}
+
+templ Error(data PageData, status int, heading string, message string) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data, heading+" – "+data.AppName)
+		<body>
+			<a class="skip-link" href="#hauptinhalt">Zum Inhalt springen</a>
+			<main id="hauptinhalt" class="page error-page">
+				<div class="error-code" aria-hidden="true">{ fmt.Sprint(status) }</div>
+				<h1>{ heading }</h1>
+				<p>{ message }</p>
+				<a class="button" href="/">Zur Startseite</a>
+			</main>
+		</body>
+	</html>
+}

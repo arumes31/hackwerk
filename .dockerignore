@@ -1,0 +1,14 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+.idea
+.vscode
+bin
+.cache
+coverage
+playwright-report
+test-results
+graphify-out
+*.log

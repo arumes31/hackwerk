@@ -1,0 +1,302 @@
+package templates
+
+import (
+	"example.invalid/hackplan/internal/auth"
+	"example.invalid/hackplan/internal/customers"
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+)
+
+type CustomerListData struct {
+	Shell  ShellData
+	Page   customers.Page[customers.CustomerSummary]
+	Search string
+}
+
+type IntakeValues struct {
+	FirstName, LastName, CompanyName, Street, PostalCode, Locality, Region, AddressFreeform string
+	Phone, Email, Notification, JobType, Volume, HackDuration, TransportDuration, Trips     string
+	TransportMode, PreferredStart, PreferredEnd, PreferenceText, Urgency, Source, Note      string
+	ExternalConfirmed                                                                       bool
+}
+
+type IntakeData struct {
+	Shell  ShellData
+	Values IntakeValues
+	Error  string
+}
+
+type CustomerDetailData struct {
+	Shell  ShellData
+	Detail customers.CustomerDetail
+	Error  string
+}
+
+type WaitlistData struct {
+	Shell  ShellData
+	Page   customers.Page[customers.WaitlistItem]
+	Filter customers.WaitlistFilter
+	Error  string
+}
+
+type JobFormData struct {
+	Shell                    ShellData
+	CustomerID, CustomerName string
+	Values                   IntakeValues
+	Error                    string
+}
+
+templ Customers(data CustomerListData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data.Shell.Page, "Kunden – "+data.Shell.Page.AppName)
+		<body>
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page">
+				<div class="page-heading"><div><p class="eyebrow">Kundenakten</p><h1>Kunden &amp; Aufträge</h1></div><a class="button" href="/customers/new">Neuen Auftrag erfassen</a></div>
+				<form method="post" action="/customers/search" class="filter-bar"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label for="customer-search">Suche</label><input id="customer-search" name="q" value={ data.Search } placeholder="Name, Firma, Ort, Telefon oder Auftragsnummer"/><button class="button button--quiet" type="submit">Suchen</button></form>
+				<div class="card-list">
+					for _, customer := range data.Page.Items {
+						<article class="record-card"><div><p class="eyebrow">{ customer.Locality }</p><h2><a href={ "/customers/" + customer.ID }>{ customerName(customer.FirstName, customer.LastName, customer.CompanyName) }</a></h2><p>{ customer.Region } · { fmt.Sprint(customer.JobCount) } Auftrag/Aufträge</p></div><span class="status-badge">Aktiv</span></article>
+					}
+					if len(data.Page.Items) == 0 {
+						<div class="empty-state"><h2>Keine Kunden gefunden</h2><p>Ändern Sie die Suche oder erfassen Sie einen neuen Auftrag.</p></div>
+					}
+				</div>@customerPagination(data)
+			</main>@appFooter(data.Shell.Page)
+		</body>
+	</html>
+}
+
+templ Intake(data IntakeData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data.Shell.Page, "Neuer Auftrag – "+data.Shell.Page.AppName)
+		<body>
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page">
+				<div class="page-heading"><div><p class="eyebrow">Erfassung</p><h1>Kunde &amp; Auftrag anlegen</h1><p>Die drei Objekte Kunde, Auftrag und Wartelisteneintrag werden gemeinsam gespeichert.</p></div><a class="button button--quiet" href="/customers">Abbrechen</a></div>
+				if data.Error != "" {
+					<div class="form-alert" role="alert">{ data.Error }</div>
+				}
+				<form method="post" action="/customers" class="intake-form" data-transport-form>
+					<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="transport_mode" value="none" data-transport-default disabled/>
+					<fieldset><legend>1 · Kunde</legend><div class="form-grid"><label>Vorname<input name="first_name" value={ data.Values.FirstName }/></label><label>Nachname<input name="last_name" value={ data.Values.LastName }/></label><label class="span-2">Firma<input name="company_name" value={ data.Values.CompanyName }/></label><label class="span-2">Straße / Hausnummer<input name="street" value={ data.Values.Street }/></label><label>Postleitzahl<input name="postal_code" inputmode="numeric" value={ data.Values.PostalCode }/></label><label>Ort<input name="locality" value={ data.Values.Locality }/></label><label>Region<input name="region" value={ data.Values.Region }/></label><label>Telefon<input name="phone" type="tel" value={ data.Values.Phone }/></label><label>E-Mail<input name="email" type="email" value={ data.Values.Email }/></label><label>Benachrichtigung<select name="notification"><option value="none" selected?={ data.Values.Notification == "none" }>Keine</option><option value="email" selected?={ data.Values.Notification == "email" }>E-Mail</option><option value="sms" selected?={ data.Values.Notification == "sms" }>SMS</option><option value="both" selected?={ data.Values.Notification == "both" }>Beide</option></select></label><label class="span-2">Freie Adressangabe<textarea name="address_freeform">{ data.Values.AddressFreeform }</textarea></label></div></fieldset>
+					<fieldset><legend>2 · Hackauftrag</legend><div class="form-grid"><label>Auftragstyp<select name="job_type" required data-job-type><option value="chipping_only" selected?={ data.Values.JobType == "chipping_only" }>Nur Hackmaschine</option><option value="chipping_with_transport" selected?={ data.Values.JobType == "chipping_with_transport" }>Hackmaschine mit Transport</option></select></label><label>Menge in m³<input name="volume_m3" inputmode="decimal" value={ data.Values.Volume } required/></label><label>Hackdauer<input name="hack_duration" placeholder="z. B. 3:30" value={ data.Values.HackDuration } required/><small>Stunden:Minuten oder Gesamtminuten</small></label><label data-transport-field>Transportdauer<input name="transport_duration" placeholder="z. B. 1:00" value={ data.Values.TransportDuration } data-transport-control/></label><label data-transport-field>Transportfahrten<input name="transport_trips" type="number" min="0" value={ data.Values.Trips } data-transport-control/></label><label data-transport-field>Transportmodus<select name="transport_mode" data-transport-control data-transport-mode><option value="none" selected?={ data.Values.TransportMode == "none" }>Kein Transport</option><option value="undecided" selected?={ data.Values.TransportMode == "undecided" }>Noch offen</option><option value="internal" selected?={ data.Values.TransportMode == "internal" }>Intern</option><option value="external" selected?={ data.Values.TransportMode == "external" }>Extern</option></select></label><label class="check-label" data-external-confirmation><input name="external_confirmed" type="checkbox" value="true" checked?={ data.Values.ExternalConfirmed }/> externer Transport bestätigt</label></div></fieldset>
+					<fieldset><legend>3 · Wunsch &amp; Warteliste</legend><div class="form-grid"><label>Frühestes Datum<input name="preferred_start" type="date" value={ data.Values.PreferredStart }/></label><label>Spätestes Datum<input name="preferred_end" type="date" value={ data.Values.PreferredEnd }/></label><label>Dringlichkeit<select name="urgency"><option value="normal" selected?={ data.Values.Urgency == "normal" }>Normal</option><option value="low" selected?={ data.Values.Urgency == "low" }>Niedrig</option><option value="high" selected?={ data.Values.Urgency == "high" }>Hoch</option><option value="urgent" selected?={ data.Values.Urgency == "urgent" }>Dringend</option></select></label><label>Quelle<select name="source"><option value="phone" selected?={ data.Values.Source == "phone" }>Telefon</option><option value="email" selected?={ data.Values.Source == "email" }>E-Mail</option><option value="in_person" selected?={ data.Values.Source == "in_person" }>Persönlich</option><option value="other" selected?={ data.Values.Source == "other" }>Sonstige</option></select></label><label class="span-2">Wunsch als Freitext<textarea name="preference_text">{ data.Values.PreferenceText }</textarea></label><label class="span-2">Interne Bemerkung<textarea name="note" maxlength="4000">{ data.Values.Note }</textarea></label></div></fieldset>
+					<div class="form-actions"><button class="button" type="submit">Kunde &amp; Auftrag auf Warteliste setzen</button><p>Es wird noch kein Termin erzeugt.</p></div>
+				</form>
+			</main>@appFooter(data.Shell.Page)
+		</body>
+	</html>
+}
+
+templ CustomerDetail(data CustomerDetailData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data.Shell.Page, customerName(data.Detail.Customer.FirstName, data.Detail.Customer.LastName, data.Detail.Customer.CompanyName)+" – "+data.Shell.Page.AppName)
+		<body>
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page">
+				<div class="page-heading">
+					<div><p class="eyebrow">Kundenakte</p><h1>{ customerName(data.Detail.Customer.FirstName, data.Detail.Customer.LastName, data.Detail.Customer.CompanyName) }</h1><p>{ addressLine(data.Detail.Customer) }</p></div>
+					<div class="action-row">
+						<a class="button button--quiet" href={ data.Detail.MapsURL } target="_blank" rel="noopener noreferrer">In Google Maps öffnen</a>
+						if data.Shell.Actor.Role == auth.RoleAdmin && data.Detail.Customer.ArchivedAt == nil {
+							<form method="post" action={ "/customers/" + data.Detail.Customer.ID + "/archive" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(data.Detail.Customer.Version) }/><button class="button button--danger" type="submit">Kunde archivieren</button></form>
+						}
+					</div>
+				</div>
+				if data.Detail.Customer.ArchivedAt != nil {
+					<div class="form-alert">Dieser Kunde ist archiviert. Die Historie bleibt sichtbar.</div>
+				}
+				if data.Error != "" {
+					<div class="form-alert" role="alert">{ data.Error }</div>
+				}
+				<section class="detail-grid"><article class="record-card"><div><h2>Kontakt</h2><dl class="profile-list"><div><dt>Telefon</dt><dd>{ fallback(data.Detail.Customer.PhoneRaw) }</dd></div><div><dt>E-Mail</dt><dd>{ fallback(data.Detail.Customer.Email) }</dd></div><div><dt>Standort</dt><dd>{ data.Detail.Customer.GeocodingStatus }</dd></div></dl></div></article><article class="record-card"><div><h2>Terminhistorie</h2><p>Noch keine Termine angelegt.</p></div></article></section>
+				if data.Detail.Customer.ArchivedAt == nil {
+					<details class="edit-card"><summary>Kundendaten bearbeiten</summary><form method="post" action={ "/customers/" + data.Detail.Customer.ID } class="form-grid"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(data.Detail.Customer.Version) }/><label>Vorname<input name="first_name" value={ data.Detail.Customer.FirstName }/></label><label>Nachname<input name="last_name" value={ data.Detail.Customer.LastName }/></label><label>Firma<input name="company_name" value={ data.Detail.Customer.CompanyName }/></label><label>Straße<input name="street" value={ data.Detail.Customer.Street }/></label><label>Postleitzahl<input name="postal_code" value={ data.Detail.Customer.PostalCode }/></label><label>Ort<input name="locality" value={ data.Detail.Customer.Locality }/></label><label>Region<input name="region" value={ data.Detail.Customer.Region }/></label><label>Telefon<input name="phone" type="tel" value={ data.Detail.Customer.PhoneRaw }/></label><label>E-Mail<input name="email" type="email" value={ data.Detail.Customer.Email }/></label><label>Benachrichtigung<select name="notification"><option value="none" selected?={ data.Detail.Customer.NotificationPreference == customers.NotifyNone }>Keine</option><option value="email" selected?={ data.Detail.Customer.NotificationPreference == customers.NotifyEmail }>E-Mail</option><option value="sms" selected?={ data.Detail.Customer.NotificationPreference == customers.NotifySMS }>SMS</option><option value="both" selected?={ data.Detail.Customer.NotificationPreference == customers.NotifyBoth }>Beide</option></select></label><label class="span-2">Freie Adressangabe<textarea name="address_freeform">{ data.Detail.Customer.AddressFreeform }</textarea></label><button class="button" type="submit">Kundendaten speichern</button></form></details>
+				}
+				<section>
+					<div class="page-heading">
+						<h2>Aufträge</h2>
+						<div class="action-row">
+							<span class="status-badge">{ fmt.Sprint(len(data.Detail.Jobs)) }</span>
+							if data.Detail.Customer.ArchivedAt == nil {
+								<a class="button button--quiet" href={ "/customers/" + data.Detail.Customer.ID + "/jobs/new" }>Weiteren Auftrag anlegen</a>
+							}
+						</div>
+					</div>
+					<div class="card-list">
+						for _, job := range data.Detail.Jobs {
+							<article class="job-card">
+								<div class="job-card__heading"><div><p class="eyebrow">{ job.JobNumber }</p><h3>{ jobTypeLabel(job.JobType) } · { job.VolumeM3 } m³</h3></div><span class="status-badge">{ workflowLabel(job.WorkflowStatus) }</span></div>
+								<p>{ durationLabel(job.EstimatedHackMinutes) } Hackdauer · { urgencyLabel(job.Urgency) }</p>
+								if job.ArchivedAt == nil {
+									<details class="job-edit">
+										<summary>Auftrag bearbeiten</summary>
+										<form method="post" action={ "/jobs/" + job.ID } class="form-grid" data-transport-form><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="customer_id" value={ data.Detail.Customer.ID }/><input type="hidden" name="version" value={ fmt.Sprint(job.Version) }/><input type="hidden" name="transport_mode" value="none" data-transport-default disabled/><label>Typ<select name="job_type" data-job-type><option value="chipping_only" selected?={ job.JobType == customers.JobTypeChippingOnly }>Nur Hackmaschine</option><option value="chipping_with_transport" selected?={ job.JobType == customers.JobTypeChippingWithTransport }>Mit Transport</option></select></label><label>Menge in m³<input name="volume_m3" value={ job.VolumeM3 } required/></label><label>Hackdauer<input name="hack_duration" value={ durationInput(job.EstimatedHackMinutes) } required/></label><label data-transport-field>Transportdauer<input name="transport_duration" value={ optionalDurationInput(job.EstimatedTransportMinutes) } data-transport-control/></label><label data-transport-field>Fahrten<input name="transport_trips" type="number" min="0" value={ fmt.Sprint(job.TransportTripCount) } data-transport-control/></label><label data-transport-field>Transportmodus<select name="transport_mode" data-transport-control data-transport-mode><option value="none" selected?={ job.TransportMode == customers.TransportNone }>Kein Transport</option><option value="undecided" selected?={ job.TransportMode == customers.TransportUndecided }>Noch offen</option><option value="internal" selected?={ job.TransportMode == customers.TransportInternal }>Intern</option><option value="external" selected?={ job.TransportMode == customers.TransportExternal }>Extern</option></select></label><label class="check-label" data-external-confirmation><input name="external_confirmed" type="checkbox" value="true" checked?={ job.ExternalTransportConfirmed }/> externer Transport bestätigt</label><label>Frühestes Datum<input name="preferred_start" type="date" value={ job.PreferredStartDate }/></label><label>Spätestes Datum<input name="preferred_end" type="date" value={ job.PreferredEndDate }/></label><label>Dringlichkeit<select name="urgency"><option value="low" selected?={ job.Urgency == customers.UrgencyLow }>Niedrig</option><option value="normal" selected?={ job.Urgency == customers.UrgencyNormal }>Normal</option><option value="high" selected?={ job.Urgency == customers.UrgencyHigh }>Hoch</option><option value="urgent" selected?={ job.Urgency == customers.UrgencyUrgent }>Dringend</option></select></label><label>Quelle<select name="source"><option value="phone" selected?={ job.Source == customers.SourcePhone }>Telefon</option><option value="email" selected?={ job.Source == customers.SourceEmail }>E-Mail</option><option value="in_person" selected?={ job.Source == customers.SourceInPerson }>Persönlich</option><option value="other" selected?={ job.Source == customers.SourceOther }>Sonstige</option></select></label><label>Region<input name="region" value={ job.Region }/></label><label class="span-2">Wunsch<textarea name="preference_text">{ job.PreferenceText }</textarea></label><button class="button" type="submit">Auftrag speichern</button></form>
+										if data.Shell.Actor.Role == auth.RoleAdmin {
+											<form method="post" action={ "/jobs/" + job.ID + "/archive" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="customer_id" value={ data.Detail.Customer.ID }/><input type="hidden" name="version" value={ fmt.Sprint(job.Version) }/><button class="button button--danger" type="submit">Auftrag archivieren</button></form>
+										}
+									</details>
+								}
+								<div class="notes">
+									<h4>Interne Bemerkungen</h4>
+									for _, note := range data.Detail.Notes[job.ID] {
+										<blockquote><p>{ note.Body }</p><footer>{ note.AuthorName } · { note.CreatedAt.Format("02.01.2006 15:04") }</footer></blockquote>
+									}
+									<form method="post" action={ "/jobs/" + job.ID + "/notes" } class="inline-note"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="customer_id" value={ data.Detail.Customer.ID }/><label><span>Bemerkung ergänzen</span><textarea name="body" maxlength="4000" required></textarea></label><button class="button button--quiet" type="submit">Hinzufügen</button></form>
+								</div>
+							</article>
+						}
+					</div>
+				</section>
+			</main>@appFooter(data.Shell.Page)
+		</body>
+	</html>
+}
+
+templ JobForm(data JobFormData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data.Shell.Page, "Weiterer Auftrag – "+data.Shell.Page.AppName)
+		<body>
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page">
+				<div class="page-heading"><div><p class="eyebrow">Bestehender Kunde</p><h1>Auftrag für { data.CustomerName }</h1></div><a class="button button--quiet" href={ "/customers/" + data.CustomerID }>Abbrechen</a></div>
+				if data.Error != "" {
+					<div class="form-alert" role="alert">{ data.Error }</div>
+				}
+				<form method="post" action={ "/customers/" + data.CustomerID + "/jobs" } class="intake-form" data-transport-form><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="transport_mode" value="none" data-transport-default disabled/><fieldset><legend>Hackauftrag</legend><div class="form-grid"><label>Auftragstyp<select name="job_type" data-job-type><option value="chipping_only" selected?={ data.Values.JobType == "chipping_only" }>Nur Hackmaschine</option><option value="chipping_with_transport" selected?={ data.Values.JobType == "chipping_with_transport" }>Mit Transport</option></select></label><label>Menge in m³<input name="volume_m3" inputmode="decimal" value={ data.Values.Volume } required/></label><label>Hackdauer<input name="hack_duration" placeholder="3:30" value={ data.Values.HackDuration } required/></label><label data-transport-field>Transportdauer<input name="transport_duration" value={ data.Values.TransportDuration } data-transport-control/></label><label data-transport-field>Transportfahrten<input name="transport_trips" type="number" min="0" value={ data.Values.Trips } data-transport-control/></label><label data-transport-field>Transportmodus<select name="transport_mode" data-transport-control data-transport-mode><option value="none" selected?={ data.Values.TransportMode == "none" }>Kein Transport</option><option value="undecided" selected?={ data.Values.TransportMode == "undecided" }>Noch offen</option><option value="internal" selected?={ data.Values.TransportMode == "internal" }>Intern</option><option value="external" selected?={ data.Values.TransportMode == "external" }>Extern</option></select></label><label class="check-label" data-external-confirmation><input name="external_confirmed" type="checkbox" value="true" checked?={ data.Values.ExternalConfirmed }/> externer Transport bestätigt</label><label>Frühestes Datum<input name="preferred_start" type="date" value={ data.Values.PreferredStart }/></label><label>Spätestes Datum<input name="preferred_end" type="date" value={ data.Values.PreferredEnd }/></label><label>Region<input name="region" value={ data.Values.Region }/></label><label>Dringlichkeit<select name="urgency"><option value="normal" selected?={ data.Values.Urgency == "normal" }>Normal</option><option value="low" selected?={ data.Values.Urgency == "low" }>Niedrig</option><option value="high" selected?={ data.Values.Urgency == "high" }>Hoch</option><option value="urgent" selected?={ data.Values.Urgency == "urgent" }>Dringend</option></select></label><label>Quelle<select name="source"><option value="phone">Telefon</option><option value="email" selected?={ data.Values.Source == "email" }>E-Mail</option><option value="in_person" selected?={ data.Values.Source == "in_person" }>Persönlich</option><option value="other" selected?={ data.Values.Source == "other" }>Sonstige</option></select></label><label class="span-2">Wunsch<textarea name="preference_text">{ data.Values.PreferenceText }</textarea></label><label class="span-2">Bemerkung<textarea name="note" maxlength="4000">{ data.Values.Note }</textarea></label></div></fieldset><button class="button" type="submit">Auf Warteliste setzen</button></form>
+			</main>@appFooter(data.Shell.Page)
+		</body>
+	</html>
+}
+
+templ Waitlist(data WaitlistData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data.Shell.Page, "Warteliste – "+data.Shell.Page.AppName)
+		<body>
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page">
+				<div class="page-heading"><div><p class="eyebrow">Arbeitsvorrat</p><h1>Warteliste</h1><p>{ fmt.Sprint(data.Page.Total) } aktive Aufträge</p></div><a class="button" href="/customers/new">Neuen Auftrag erfassen</a></div>
+				if data.Error != "" {
+					<div class="form-alert" role="alert">{ data.Error }</div>
+				}
+				<form method="get" action="/waitlist" class="filter-grid"><label>Suche<input name="q" value={ data.Filter.Query }/></label><label>Typ<select name="type"><option value="">Alle</option><option value="chipping_only" selected?={ data.Filter.JobType == "chipping_only" }>Nur Hackmaschine</option><option value="chipping_with_transport" selected?={ data.Filter.JobType == "chipping_with_transport" }>Mit Transport</option></select></label><label>Region<input name="region" value={ data.Filter.Region }/></label><label>Dringlichkeit<select name="urgency"><option value="">Alle</option><option value="low" selected?={ data.Filter.Urgency == "low" }>Niedrig</option><option value="normal" selected?={ data.Filter.Urgency == "normal" }>Normal</option><option value="high" selected?={ data.Filter.Urgency == "high" }>Hoch</option><option value="urgent" selected?={ data.Filter.Urgency == "urgent" }>Dringend</option></select></label><label>Wunschmonat<input name="month" type="month" value={ data.Filter.PreferredMonth }/></label><label>Sortierung<select name="sort"><option value="entered" selected?={ data.Filter.Sort == "entered" }>Eingang</option><option value="preferred" selected?={ data.Filter.Sort == "preferred" }>Wunschzeitraum</option><option value="urgency" selected?={ data.Filter.Sort == "urgency" }>Dringlichkeit</option><option value="volume" selected?={ data.Filter.Sort == "volume" }>Holzmenge</option><option value="region" selected?={ data.Filter.Sort == "region" }>Region</option></select></label><label>Richtung<select name="direction"><option value="asc" selected?={ data.Filter.Direction == "asc" }>Aufsteigend</option><option value="desc" selected?={ data.Filter.Direction == "desc" }>Absteigend</option></select></label><button class="button button--quiet" type="submit">Ansicht anwenden</button></form>
+				<div class="waitlist-grid">
+					for _, item := range data.Page.Items {
+						<article class="waitlist-card" draggable="false" data-job-id={ item.JobID }>
+							<div class="job-card__heading"><div><p class="eyebrow">{ item.JobNumber } · Eingang { item.EnteredAt.Format("02.01.2006") } · { ageLabel(item.AgeDays) }</p><h2><a href={ "/customers/" + item.CustomerID }>{ customerName(item.FirstName,item.LastName,item.CompanyName) }</a></h2></div><span class="status-badge">{ urgencyLabel(item.Urgency) }</span></div>
+							<p><strong>{ item.VolumeM3 } m³</strong> · { durationLabel(item.EstimatedHackMinutes) } · { jobTypeLabel(item.JobType) }</p>
+							<p>{ fallback(item.Region) } · { fallback(item.PreferenceText) }</p>
+							if item.NoteExcerpt != "" {
+								<p class="note-excerpt">{ item.NoteExcerpt }</p>
+							}
+							<div class="action-row">
+								if data.Shell.Actor.Role == auth.RoleAdmin {
+									<a class="button button--quiet" href={ "/calendar?job=" + item.JobID }>Einplanen</a>
+									<form method="post" action={ "/waitlist/" + item.WaitlistID + "/priority" } class="inline-form"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.WaitlistVersion) }/><label>Priorität<input name="priority" type="number" min="-100" max="100" value={ fmt.Sprint(item.ManualPriority) }/></label><button class="button button--quiet" type="submit">Speichern</button></form>
+									<form method="post" action={ "/waitlist/" + item.WaitlistID + "/remove" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.WaitlistVersion) }/><input type="hidden" name="reason" value="other"/><button class="button button--danger" type="submit">Entfernen</button></form>
+								}
+							</div>
+						</article>
+					}
+					if len(data.Page.Items) == 0 {
+						<div class="empty-state"><h2>Warteliste ist leer</h2><p>Neue Aufträge erscheinen nach der Erfassung hier.</p></div>
+					}
+				</div>@pagination("/waitlist", data.Page.Page, data.Page.TotalPages, waitlistQuery(data.Filter))
+			</main>@appFooter(data.Shell.Page)
+		</body>
+	</html>
+}
+
+templ pagination(base string, page int, total int, query string) {
+	if total > 1 {
+		<nav class="pagination" aria-label="Seitennavigation">
+			if page > 1 {
+				<a class="button button--quiet" href={ base + "?" + query + "&page=" + strconv.Itoa(page-1) }>Zurück</a>
+			}
+			<span>Seite { fmt.Sprint(page) } von { fmt.Sprint(total) }</span>
+			if page < total {
+				<a class="button button--quiet" href={ base + "?" + query + "&page=" + strconv.Itoa(page+1) }>Weiter</a>
+			}
+		</nav>
+	}
+}
+
+templ customerPagination(data CustomerListData) {
+	if data.Page.TotalPages > 1 {
+		<nav class="pagination" aria-label="Seitennavigation">
+			if data.Page.Page > 1 {
+				<form method="post" action="/customers/search"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="q" value={ data.Search }/><input type="hidden" name="page" value={ strconv.Itoa(data.Page.Page - 1) }/><button class="button button--quiet" type="submit">Zurück</button></form>
+			}
+			<span>Seite { fmt.Sprint(data.Page.Page) } von { fmt.Sprint(data.Page.TotalPages) }</span>
+			if data.Page.Page < data.Page.TotalPages {
+				<form method="post" action="/customers/search"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="q" value={ data.Search }/><input type="hidden" name="page" value={ strconv.Itoa(data.Page.Page + 1) }/><button class="button button--quiet" type="submit">Weiter</button></form>
+			}
+		</nav>
+	}
+}
+
+func customerName(first, last, company string) string {
+	if strings.TrimSpace(company) != "" {
+		return company + " · " + strings.TrimSpace(first+" "+last)
+	}
+	return strings.TrimSpace(first + " " + last)
+}
+func fallback(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "Nicht angegeben"
+	}
+	return value
+}
+func addressLine(c customers.Customer) string {
+	return strings.TrimSpace(strings.Join([]string{c.Street, c.PostalCode, c.Locality, c.Region}, " "))
+}
+func durationLabel(minutes int32) string { return fmt.Sprintf("%d:%02d Std.", minutes/60, minutes%60) }
+func durationInput(minutes int32) string { return fmt.Sprintf("%d:%02d", minutes/60, minutes%60) }
+func optionalDurationInput(minutes int32) string {
+	if minutes == 0 {
+		return ""
+	}
+	return durationInput(minutes)
+}
+func ageLabel(days int32) string {
+	if days == 0 {
+		return "heute"
+	}
+	if days == 1 {
+		return "seit 1 Tag"
+	}
+	return fmt.Sprintf("seit %d Tagen", days)
+}
+func jobTypeLabel(value customers.JobType) string {
+	if value == customers.JobTypeChippingWithTransport {
+		return "Hackmaschine mit Transport"
+	}
+	return "Nur Hackmaschine"
+}
+func urgencyLabel(value customers.Urgency) string {
+	labels := map[customers.Urgency]string{customers.UrgencyLow: "Niedrig", customers.UrgencyNormal: "Normal", customers.UrgencyHigh: "Hoch", customers.UrgencyUrgent: "Dringend"}
+	return labels[value]
+}
+func workflowLabel(value string) string {
+	labels := map[string]string{"waitlist": "Warteliste", "planning": "Planung", "scheduled": "Geplant", "completed": "Erledigt", "cancelled": "Abgebrochen"}
+	return labels[value]
+}
+func waitlistQuery(filter customers.WaitlistFilter) string {
+	values := url.Values{}
+	values.Set("q", filter.Query)
+	values.Set("type", filter.JobType)
+	values.Set("region", filter.Region)
+	values.Set("urgency", filter.Urgency)
+	values.Set("month", filter.PreferredMonth)
+	values.Set("sort", filter.Sort)
+	values.Set("direction", filter.Direction)
+	return values.Encode()
+}
