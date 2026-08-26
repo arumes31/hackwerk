@@ -106,27 +106,53 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 		t.Fatalf("dashboard note action = %q: %s", noteHref, browserDiagnostics(browserContext, err))
 	}
 	var quickMenuAudit struct {
-		OutsideViewport, RawLink, SmallTarget bool
-		Columns                               string
+		OutsideViewport, RawLink, SmallTarget, VisibleText bool
+		Columns, AccessibleName, Title                     string
+		IconCount                                          int
 	}
 	if err := chromedp.Run(browserContext,
 		chromedp.Click("[data-quick-menu] summary", chromedp.ByQuery),
 		chromedp.WaitVisible("[data-quick-menu] .nav-menu__panel", chromedp.ByQuery),
 		chromedp.Evaluate(`(() => {
+			const trigger=document.querySelector('[data-quick-menu] summary');
 			const panel=document.querySelector('[data-quick-menu] .nav-menu__panel');
 			const rect=panel.getBoundingClientRect();
 			const actions=[...panel.querySelectorAll(':scope > a,:scope > button')];
 			return {OutsideViewport:rect.left<0||rect.right>window.innerWidth,
 				RawLink:actions.some(node=>getComputedStyle(node).textDecorationLine!=='none'),
 				SmallTarget:actions.some(node=>node.getBoundingClientRect().height<44),
-				Columns:getComputedStyle(panel).gridTemplateColumns};
+				VisibleText:[...trigger.childNodes].some(node=>node.nodeType===Node.TEXT_NODE&&node.textContent.trim()!==''),
+				Columns:getComputedStyle(panel).gridTemplateColumns,
+				AccessibleName:trigger.getAttribute('aria-label')||'',Title:trigger.getAttribute('title')||'',
+				IconCount:trigger.querySelectorAll('svg.nav-menu__icon[aria-hidden=true]').length};
 		})()`, &quickMenuAudit),
 		chromedp.Click("[data-quick-menu] summary", chromedp.ByQuery),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
-	if quickMenuAudit.OutsideViewport || quickMenuAudit.RawLink || quickMenuAudit.SmallTarget || !strings.Contains(quickMenuAudit.Columns, " ") {
+	if quickMenuAudit.OutsideViewport || quickMenuAudit.RawLink || quickMenuAudit.SmallTarget || quickMenuAudit.VisibleText ||
+		quickMenuAudit.AccessibleName != "Schnellzugriff" || quickMenuAudit.Title != "Schnellzugriff" || quickMenuAudit.IconCount != 1 ||
+		!strings.Contains(quickMenuAudit.Columns, " ") {
 		t.Fatalf("quick menu CSS audit = %+v", quickMenuAudit)
+	}
+	var adminMenuAudit struct {
+		VisibleText           bool
+		AccessibleName, Title string
+		IconCount             int
+		Width, Height         float64
+	}
+	if err := chromedp.Run(browserContext, chromedp.Evaluate(`(() => {
+		const trigger=document.querySelector('[data-admin-menu] summary');
+		const rect=trigger.getBoundingClientRect();
+		return {VisibleText:[...trigger.childNodes].some(node=>node.nodeType===Node.TEXT_NODE&&node.textContent.trim()!==''),
+			AccessibleName:trigger.getAttribute('aria-label')||'',Title:trigger.getAttribute('title')||'',
+			IconCount:trigger.querySelectorAll('svg.nav-menu__icon[aria-hidden=true]').length,Width:rect.width,Height:rect.height};
+	})()`, &adminMenuAudit)); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if adminMenuAudit.VisibleText || adminMenuAudit.AccessibleName != "Verwaltung" || adminMenuAudit.Title != "Verwaltung" ||
+		adminMenuAudit.IconCount != 1 || adminMenuAudit.Width < 44 || adminMenuAudit.Height < 44 {
+		t.Fatalf("admin menu icon audit = %+v", adminMenuAudit)
 	}
 
 	var tabletAudit struct {

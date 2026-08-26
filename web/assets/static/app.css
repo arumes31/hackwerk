@@ -749,6 +749,8 @@ textarea { min-height: 6rem; resize: vertical; }
 }
 .nav-menu > summary::-webkit-details-marker { display: none; }
 .nav-menu > summary::after { color: var(--muted); content: "▾"; font-size: .7rem; }
+.nav-menu > summary.nav-menu__icon-trigger { min-width: 48px; justify-content: center; gap: .25rem; padding-inline: .55rem; }
+.nav-menu__icon { width: 20px; height: 20px; flex: 0 0 20px; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .nav-menu > summary:hover, .nav-menu > summary:focus-visible, .nav-menu[open] > summary { border-color: var(--line); background: var(--paper); }
 .nav-menu:has(.nav-link--active) > summary { color: var(--moss); background: var(--moss-light); }
 .nav-menu__panel {
