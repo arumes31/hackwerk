@@ -81,7 +81,7 @@ func TestEmbeddedAssets(t *testing.T) {
 		{path: "/assets/app.css", contentType: "text/css", bodyPart: ":root"},
 		{path: "/assets/login.css", contentType: "text/css", bodyPart: ".login-body"},
 		{path: "/assets/login-original.css", contentType: "text/css", bodyPart: ".scene"},
-		{path: "/assets/login-background.js", contentType: "javascript", bodyPart: "runSim"},
+		{path: "/assets/login-background.js", contentType: "javascript", bodyPart: "prefers-reduced-motion"},
 		{path: "/assets/login-background-loader.js", contentType: "javascript", bodyPart: "desktopScene"},
 		{path: "/assets/app.js", contentType: "javascript", bodyPart: "document.documentElement"},
 		{path: "/assets/maplibre-gl-csp.js", contentType: "javascript", bodyPart: "MapLibre GL JS"},

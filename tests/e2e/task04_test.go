@@ -535,7 +535,8 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
 
-	futureStart := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Hour)
+	futureDay := time.Now().In(vienna).AddDate(0, 0, 2)
+	futureStart := time.Date(futureDay.Year(), futureDay.Month(), futureDay.Day(), 10, 0, 0, 0, vienna).UTC()
 	futureEnd := futureStart.Add(2 * time.Hour)
 	futureDate := futureStart.In(vienna).Format("2006-01-02")
 	if _, err := pool.Exec(t.Context(), `UPDATE appointments SET lifecycle_status='fixed', confirmation_status='not_requested', starts_at=$2, ends_at=$3, fixed_by_user_id=$4, fixed_at=now(), version=version+1 WHERE id=$1`, secondAppointment.ID, futureStart, futureEnd, adminUserID); err != nil {

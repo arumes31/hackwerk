@@ -186,6 +186,11 @@ func TestCustomerHTTPNewJobOffersExistingCustomerWithoutLeakingSearchInURL(t *te
 	if strings.Contains(body, `data-new-customer-panel open`) {
 		t.Fatalf("new-customer form is open by default: %s", body)
 	}
+	newCustomerPosition := strings.Index(body, `data-new-customer-panel`)
+	existingCustomerPosition := strings.Index(body, `data-existing-customer-job`)
+	if newCustomerPosition < 0 || existingCustomerPosition < 0 || newCustomerPosition >= existingCustomerPosition {
+		t.Fatalf("new-customer action must appear before existing customer rows: new=%d existing=%d", newCustomerPosition, existingCustomerPosition)
+	}
 
 	searchValue := "+43 660 123 45 67"
 	form := url.Values{"csrf_token": {csrfToken}, "q": {searchValue}}

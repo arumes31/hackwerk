@@ -4,12 +4,80 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOFLAGS: -mod=readonly
+
 jobs:
-  release:
+  quality:
+    name: Generate, format and lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify module graph
+        run: |
+          tidy_diff="$(go mod tidy -diff)"
+          if [ -n "$tidy_diff" ]; then
+            printf '%s\n' "$tidy_diff"
+            exit 1
+          fi
+          go mod verify
+      - name: Verify generated code and minified assets
+        run: make generate-check
+      - name: Validate GitHub workflows
+        run: make workflow-lint
+      - name: Verify formatting
+        run: make format-check
+      - name: Vet and lint (revive and gosec included)
+        run: make lint
+
+  test:
+    name: Unit, race and binary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run unit tests
+        run: go test -count=1 ./...
+      - name: Run race detector
+        run: go test -race -count=1 ./...
+      - name: Build versioned binary
+        run: make build
+      - name: Upload binary
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: hackwerk-linux-amd64
+          path: bin/hackwerk
+          if-no-files-found: error
+          retention-days: 7
+
+  integration:
+    name: PostgreSQL integration
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -27,19 +95,84 @@ jobs:
           --health-retries 30
     env:
       TEST_DATABASE_URL: postgres://hackplan:test-only@localhost:5432/hackplan_test?sslmode=disable
+      DATABASE_URL: postgres://hackplan:test-only@localhost:5432/hackplan_test?sslmode=disable
       APP_ENV: test
       APP_BASE_URL: http://localhost:18533
-      DATABASE_URL: postgres://hackplan:test-only@localhost:5432/hackplan_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          go-version: 1.27.0
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
           cache: true
-      - run: make release-check
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - name: Run integration tests
+        run: go test -count=1 -tags=integration ./tests/integration/...
+
+  e2e:
+    name: Chromium E2E (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - name: identity-users
+            pattern: ^TestTask01UserDetailsBrowserJourney$
+          - name: forced-password
+            pattern: ^TestTask01ForcedPasswordChangeBrowserJourney$
+          - name: customers
+            pattern: ^TestTask02BrowserJourney$
+          - name: drivers-resources
+            pattern: ^TestTask03BrowserJourney$
+          - name: calendar
+            pattern: ^TestTask04CalendarBrowserJourney$
+          - name: notifications
+            pattern: ^TestTask05NotificationConfirmationBrowserJourney$
+          - name: dashboard
+            pattern: ^TestTask06ResponsiveDashboardForAdminAndDriver$
+          - name: calendar-feed
+            pattern: ^TestTask07PrivateCalendarFeedBrowserJourney$
+          - name: planning
+            pattern: ^TestTask08PlanningSuggestionsMobileJourney$
+          - name: voice
+            pattern: ^TestTask09VoiceReviewMobileJourney$
+          - name: routes
+            pattern: ^TestTask12RoutePlannerDesktopAndDriverMobileJourney$
+          - name: all-pages
+            pattern: ^TestTask13AllMainPagesDesktopAndMobileUsability$
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_DB: hackplan_test
+          POSTGRES_USER: hackplan
+          POSTGRES_PASSWORD: test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hackplan -d hackplan_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://hackplan:test-only@localhost:5432/hackplan_test?sslmode=disable
+      DATABASE_URL: postgres://hackplan:test-only@localhost:5432/hackplan_test?sslmode=disable
+      APP_ENV: test
+      APP_BASE_URL: http://localhost:18533
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          name: hackwerk-sbom
-          path: dist/hackwerk.*.json
-          if-no-files-found: warn
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run browser journeys
+        run: go test -count=1 -tags=e2e ./tests/e2e/... -run '${{ matrix.pattern }}'

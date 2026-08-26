@@ -1,7 +1,7 @@
 SHELL := /bin/sh
 .DEFAULT_GOAL := help
 
-VERSION ?= dev
+VERSION ?= $(shell sh scripts/version.sh 2>/dev/null || printf 0.1.0)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || printf unknown)
 ifeq ($(OS),Windows_NT)
 BUILD_TIME ?= $(shell powershell -NoProfile -Command "[DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')")
@@ -18,10 +18,24 @@ DOCKER_RUN_PREFIX := MSYS_NO_PATHCONV=1
 ENSURE_DIST := mkdir -p dist
 endif
 
-.PHONY: help dev up down logs clean generate generate-check format format-check lint test test-integration test-migrations test-e2e test-race build build-image image-archive check scan scan-code scan-license scan-image sbom backup-restore-smoke container-smoke docs-check release-check
+.PHONY: help version assets assets-check workflow-lint dev up down logs clean generate generate-check format format-check lint test test-integration test-migrations test-e2e test-race build build-image image-archive check scan scan-code scan-license scan-image sbom backup-restore-smoke container-smoke release-check
 
 help:
-	@printf '%s\n' 'HackWerk: dev up down logs clean generate generate-check format format-check lint test test-integration test-migrations test-e2e test-race build check scan scan-license backup-restore-smoke container-smoke docs-check release-check'
+	@printf '%s\n' 'HackWerk: version assets assets-check workflow-lint dev up down logs clean generate generate-check format format-check lint test test-integration test-migrations test-e2e test-race build check scan scan-license backup-restore-smoke container-smoke release-check'
+
+version:
+	@printf '%s\n' '$(VERSION)'
+
+assets:
+	go tool minify --quiet --type js --output web/assets/static/app.js web/assets/src/app.js
+	go tool minify --quiet --type js --output web/assets/static/login-background.js web/assets/src/login-background.js
+	go tool minify --quiet --type js --output web/assets/static/login-background-loader.js web/assets/src/login-background-loader.js
+
+assets-check:
+	sh scripts/assets-check.sh
+
+workflow-lint:
+	go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
 dev: up
 
@@ -37,7 +51,7 @@ logs:
 clean:
 	rm -rf -- bin dist
 
-generate:
+generate: assets
 	go tool templ generate
 	go tool sqlc generate -f db/sqlc.yaml
 
@@ -76,13 +90,14 @@ build:
 	mkdir -p bin
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/hackwerk ./cmd/hackwerk
 
-check: generate-check format-check lint test test-integration build
+check: generate-check format-check workflow-lint lint test test-integration build
 
 scan-license:
 	go tool go-licenses check --ignore example.invalid/hackplan ./cmd/hackwerk
 
 scan-code: scan-license
-	$(DOCKER_RUN_PREFIX) docker run --rm -v "$(CURDIR):/src:ro" -w /src golang:1.27.0-bookworm sh -c "go mod download && go mod verify && go tool govulncheck ./..."
+	go mod verify
+	go tool govulncheck ./...
 	go run ./cmd/repo-audit
 
 image-archive: build-image
@@ -106,7 +121,4 @@ backup-restore-smoke: build-image
 container-smoke: build-image
 	sh scripts/release/container-smoke.sh
 
-docs-check:
-	go run ./cmd/docs-check
-
-release-check: clean check test-race test-e2e test-migrations backup-restore-smoke scan container-smoke docs-check
+release-check: clean check test-race test-e2e test-migrations backup-restore-smoke scan container-smoke

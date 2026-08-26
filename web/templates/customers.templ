@@ -371,13 +371,46 @@ templ Intake(data IntakeData) {
 			<main id="hauptinhalt" class="page compact-page">
 				<div class="page-heading"><div><p class="eyebrow">Erfassung</p><h1>Neuer Auftrag</h1><p>Wählen Sie zuerst einen bestehenden Kunden oder legen Sie eine neue Kundenakte an.</p></div><a class="button button--quiet" href="/customers">Abbrechen</a></div>
 				<section class="intake-customer-picker" aria-labelledby="existing-customer-heading">
-					<div class="section-heading"><div><p class="eyebrow">Schnellauswahl</p><h2 id="existing-customer-heading">1 · Bestehenden Kunden auswählen</h2></div><span class="status-badge">{ fmt.Sprint(data.Customers.Total) } Treffer</span></div>
+					<div class="section-heading"><div><p class="eyebrow">Schnellauswahl</p><h2 id="existing-customer-heading">Kunde für den Auftrag auswählen</h2></div><span class="status-badge">{ fmt.Sprint(data.Customers.Total) } Treffer</span></div>
 					<form method="post" action="/customers/new/search" class="filter-bar compact-filter">
 						<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
 						<label for="intake-customer-search">Kunde suchen</label>
 						<input id="intake-customer-search" name="q" value={ data.CustomerSearch } placeholder="Name, Firma, Ort, Telefon oder Auftragsnummer"/>
 						<button class="button button--quiet" type="submit">Suchen</button>
 					</form>
+					@formErrorSummary(data.Error, data.FieldErrors)
+					<details class="compact-create-panel intake-new-customer" data-new-customer-panel open?={ data.Error != "" }>
+						<summary>+ Neuer Kunde mit Auftrag</summary>
+						<form method="post" action="/customers" class="intake-form" data-transport-form>
+							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="transport_mode" value="none" data-transport-default disabled/>
+							<fieldset>
+								<legend>Kundendaten</legend>
+								<div class="form-grid">
+									<label>
+										Vorname<input id="first_name" name="first_name" value={ data.Values.FirstName } aria-invalid={ formFieldInvalid(data.FieldErrors, "first_name") } aria-describedby={ formFieldDescription(data.FieldErrors, "first_name") }/>@formFieldMessage(data.FieldErrors, "first_name")
+									</label>
+									<label>Nachname<input name="last_name" value={ data.Values.LastName }/></label>
+									<label class="span-2">Firma<input name="company_name" value={ data.Values.CompanyName }/></label>
+									<label class="span-2">Straße / Hausnummer<input name="street" value={ data.Values.Street }/></label>
+									<label>Postleitzahl<input name="postal_code" inputmode="numeric" value={ data.Values.PostalCode }/></label>
+									<label>Ort<input name="locality" value={ data.Values.Locality }/></label>
+									<label>Region<input name="region" value={ data.Values.Region }/></label>
+									<label>
+										Telefon<input id="phone" name="phone" type="tel" value={ data.Values.Phone } aria-invalid={ formFieldInvalid(data.FieldErrors, "phone") } aria-describedby={ formFieldDescription(data.FieldErrors, "phone") }/>@formFieldMessage(data.FieldErrors, "phone")
+									</label>
+									<label>
+										E-Mail<input id="email" name="email" type="email" value={ data.Values.Email } aria-invalid={ formFieldInvalid(data.FieldErrors, "email") } aria-describedby={ formFieldDescription(data.FieldErrors, "email") }/>@formFieldMessage(data.FieldErrors, "email")
+									</label>
+									<label>
+										Benachrichtigung<select id="notification" name="notification" aria-invalid={ formFieldInvalid(data.FieldErrors, "notification") } aria-describedby={ formFieldDescription(data.FieldErrors, "notification") }><option value="none" selected?={ data.Values.Notification == "none" }>Keine</option><option value="email" selected?={ data.Values.Notification == "email" }>E-Mail</option><option value="sms" selected?={ data.Values.Notification == "sms" }>SMS</option><option value="both" selected?={ data.Values.Notification == "both" }>Beide</option></select>@formFieldMessage(data.FieldErrors, "notification")
+									</label>
+									<label class="span-2">Freie Adressangabe<textarea name="address_freeform">{ data.Values.AddressFreeform }</textarea></label>
+								</div>
+							</fieldset>
+							@jobIntakeFields(data.Shell.Page, "new-intake-job", data.Values, data.FieldErrors, false, "", "", data.Values.Region)
+							<div class="form-actions" data-sticky-actions><button class="button" type="submit">Kunde &amp; Auftrag auf Warteliste setzen</button><p>Es wird noch kein Termin erzeugt.</p></div>
+						</form>
+					</details>
 					if len(data.Customers.Items) > 0 {
 						<div class="table-card compact-table-wrap">
 							<table class="compact-table responsive-table intake-customer-table">
@@ -396,42 +429,9 @@ templ Intake(data IntakeData) {
 							</table>
 						</div>
 					} else {
-						<div class="empty-state compact-empty"><strong>Kein passender Kunde gefunden.</strong><p>Ändern Sie die Suche oder legen Sie unten eine neue Kundenakte an.</p></div>
+						<div class="empty-state compact-empty"><strong>Kein passender Kunde gefunden.</strong><p>Ändern Sie die Suche oder legen Sie oben eine neue Kundenakte an.</p></div>
 					}
 				</section>
-				@formErrorSummary(data.Error, data.FieldErrors)
-				<details class="compact-create-panel intake-new-customer" data-new-customer-panel open?={ data.Error != "" }>
-					<summary>+ Neuer Kunde mit Auftrag</summary>
-					<form method="post" action="/customers" class="intake-form" data-transport-form>
-						<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="transport_mode" value="none" data-transport-default disabled/>
-						<fieldset>
-							<legend>Kundendaten</legend>
-							<div class="form-grid">
-								<label>
-									Vorname<input id="first_name" name="first_name" value={ data.Values.FirstName } aria-invalid={ formFieldInvalid(data.FieldErrors, "first_name") } aria-describedby={ formFieldDescription(data.FieldErrors, "first_name") }/>@formFieldMessage(data.FieldErrors, "first_name")
-								</label>
-								<label>Nachname<input name="last_name" value={ data.Values.LastName }/></label>
-								<label class="span-2">Firma<input name="company_name" value={ data.Values.CompanyName }/></label>
-								<label class="span-2">Straße / Hausnummer<input name="street" value={ data.Values.Street }/></label>
-								<label>Postleitzahl<input name="postal_code" inputmode="numeric" value={ data.Values.PostalCode }/></label>
-								<label>Ort<input name="locality" value={ data.Values.Locality }/></label>
-								<label>Region<input name="region" value={ data.Values.Region }/></label>
-								<label>
-									Telefon<input id="phone" name="phone" type="tel" value={ data.Values.Phone } aria-invalid={ formFieldInvalid(data.FieldErrors, "phone") } aria-describedby={ formFieldDescription(data.FieldErrors, "phone") }/>@formFieldMessage(data.FieldErrors, "phone")
-								</label>
-								<label>
-									E-Mail<input id="email" name="email" type="email" value={ data.Values.Email } aria-invalid={ formFieldInvalid(data.FieldErrors, "email") } aria-describedby={ formFieldDescription(data.FieldErrors, "email") }/>@formFieldMessage(data.FieldErrors, "email")
-								</label>
-								<label>
-									Benachrichtigung<select id="notification" name="notification" aria-invalid={ formFieldInvalid(data.FieldErrors, "notification") } aria-describedby={ formFieldDescription(data.FieldErrors, "notification") }><option value="none" selected?={ data.Values.Notification == "none" }>Keine</option><option value="email" selected?={ data.Values.Notification == "email" }>E-Mail</option><option value="sms" selected?={ data.Values.Notification == "sms" }>SMS</option><option value="both" selected?={ data.Values.Notification == "both" }>Beide</option></select>@formFieldMessage(data.FieldErrors, "notification")
-								</label>
-								<label class="span-2">Freie Adressangabe<textarea name="address_freeform">{ data.Values.AddressFreeform }</textarea></label>
-							</div>
-						</fieldset>
-						@jobIntakeFields(data.Shell.Page, "new-intake-job", data.Values, data.FieldErrors, false, "", "", data.Values.Region)
-						<div class="form-actions" data-sticky-actions><button class="button" type="submit">Kunde &amp; Auftrag auf Warteliste setzen</button><p>Es wird noch kein Termin erzeugt.</p></div>
-					</form>
-				</details>
 			</main>@appFooter(data.Shell.Page)
 		</body>
 	</html>

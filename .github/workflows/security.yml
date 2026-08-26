@@ -1,0 +1,43 @@
+name: Go Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOFLAGS: -mod=readonly
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify downloaded modules
+        run: go mod verify
+      - name: Scan reachable Go vulnerabilities
+        run: go tool govulncheck ./...
+      - name: Scan Go code with gosec
+        run: go tool golangci-lint run --enable-only gosec ./...
+      - name: Check runtime licenses
+        run: go tool go-licenses check --ignore example.invalid/hackplan ./cmd/hackwerk
+      - name: Audit repository for forbidden Node artifacts and secret candidates
+        run: go run ./cmd/repo-audit
