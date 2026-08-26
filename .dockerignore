@@ -5,6 +5,8 @@
 !.env.example
 .idea
 .vscode
+.agents
+AGENTS.md
 bin
 dist
 temp

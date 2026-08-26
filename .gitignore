@@ -4,6 +4,10 @@
 /.idea/
 /.vscode/
 /.DS_Store
+/AGENTS.md
+/CHANGELOG.md
+/.agents/
+/codex/
 /bin/
 /*.exe
 /coverage/
