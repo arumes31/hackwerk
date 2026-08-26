@@ -315,11 +315,7 @@ func e2eDashboard(t *testing.T, pool *pgxpool.Pool) *dashboard.Service {
 }
 
 func runBrowserStep(ctx context.Context, name string, actions ...chromedp.Action) error {
-	return runBrowserStepWithTimeout(ctx, name, 15*time.Second, actions...)
-}
-
-func runBrowserStepWithTimeout(ctx context.Context, name string, timeout time.Duration, actions ...chromedp.Action) error {
-	stepContext, cancel := context.WithTimeout(ctx, timeout)
+	stepContext, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	if err := chromedp.Run(stepContext, actions...); err != nil {
 		return fmt.Errorf("%s: %w", name, err)
