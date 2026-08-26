@@ -1696,7 +1696,7 @@ function initializeJobLocationEditor(editor, maplibregl) {
   let draftSource = editor.dataset.initialSource || "coordinates";
   let marker = null;
   const initialPoint = mapPoint(editor.dataset.initialLatitude, editor.dataset.initialLongitude);
-  const map = createJobLocationMap(maplibregl, canvas, initialPoint, true);
+  const map = maplibregl ? createJobLocationMap(maplibregl, canvas, initialPoint, true) : null;
 
   const announce = (text, status = "Ungespeichert") => {
     if (message) message.textContent = text;
@@ -1707,6 +1707,7 @@ function initializeJobLocationEditor(editor, maplibregl) {
     longitudeInput.setAttribute("aria-invalid", String(!valid));
   };
   const setMarker = (point, center = true) => {
+    if (!map || !maplibregl) return;
     if (!point) {
       marker?.remove();
       marker = null;
@@ -1739,8 +1740,97 @@ function initializeJobLocationEditor(editor, maplibregl) {
   };
   const readDraft = () => mapPoint(latitudeInput.value, longitudeInput.value);
 
+  const searchInput = editor.querySelector("[data-location-search-input]");
+  const searchSubmit = editor.querySelector("[data-location-search-submit]");
+  const searchStatus = editor.querySelector("[data-location-search-status]");
+  const searchResults = editor.querySelector("[data-location-search-results]");
+  const clearSearchResults = () => {
+    searchResults?.replaceChildren();
+    if (searchResults) searchResults.hidden = true;
+  };
+  const showSearchStatus = (text) => {
+    if (searchStatus) searchStatus.textContent = text;
+  };
+  const searchAddress = async () => {
+    if (!map) {
+      clearSearchResults();
+      showSearchStatus("Die Karte ist derzeit nicht verfügbar. Koordinaten können weiterhin direkt eingegeben werden.");
+      return;
+    }
+    const query = String(searchInput?.value || "").trim();
+    if (query.length < 3) {
+      clearSearchResults();
+      showSearchStatus("Bitte mindestens drei Zeichen eingeben.");
+      searchInput?.focus();
+      return;
+    }
+    const csrf = editor.closest("form")?.querySelector("[name='csrf_token']")?.value;
+    if (!csrf) {
+      showSearchStatus("Die Sicherheitsprüfung ist abgelaufen. Bitte laden Sie die Seite neu.");
+      return;
+    }
+    clearSearchResults();
+    searchSubmit.disabled = true;
+    searchSubmit.setAttribute("aria-busy", "true");
+    showSearchStatus("Adresse wird gesucht …");
+    try {
+      const response = await fetch("/api/v1/geocoding/search", {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrf, "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body: new URLSearchParams({ query }),
+        credentials: "same-origin",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error?.message || "Die Adresssuche ist derzeit nicht verfügbar.");
+      const results = Array.isArray(payload.results) ? payload.results.slice(0, 10) : [];
+      if (results.length === 0) {
+        showSearchStatus("Keine passende Adresse gefunden. Versuchen Sie Ort, Straße und Hausnummer gemeinsam.");
+        return;
+      }
+      for (const result of results) {
+        const point = mapPoint(result?.latitude, result?.longitude);
+        const label = String(result?.label || "").trim();
+        if (!point || !label) continue;
+        const item = document.createElement("li");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "location-search__result";
+        button.textContent = label;
+        button.addEventListener("click", () => {
+          const bounds = Array.isArray(result.bounds) ? result.bounds.map(Number) : [];
+          const boundsValid = bounds.length === 4 && bounds.every(Number.isFinite) && bounds[0] <= bounds[1] && bounds[2] <= bounds[3];
+          if (boundsValid && (bounds[0] !== bounds[1] || bounds[2] !== bounds[3])) {
+            map.fitBounds([[bounds[2], bounds[0]], [bounds[3], bounds[1]]], { padding: 48, maxZoom: 16 });
+          } else {
+            map.easeTo({ center: [point.longitude, point.latitude], zoom: Math.max(map.getZoom(), 15) });
+          }
+          showSearchStatus(`Karte auf „${label}“ ausgerichtet.`);
+          announce("Karte zur gefundenen Adresse bewegt. Klicken Sie nun den tatsächlichen Haufenstandort an.", badge?.textContent || "Fehlt");
+          canvas.focus({ preventScroll: true });
+        });
+        item.append(button);
+        searchResults.append(item);
+      }
+      searchResults.hidden = searchResults.children.length === 0;
+      showSearchStatus(searchResults.hidden ? "Keine nutzbaren Treffer erhalten." : `${searchResults.children.length} Treffer gefunden. Wählen Sie eine Adresse.`);
+    } catch (error) {
+      clearSearchResults();
+      showSearchStatus(error instanceof Error ? error.message : "Die Adresssuche ist derzeit nicht verfügbar.");
+    } finally {
+      searchSubmit.disabled = false;
+      searchSubmit.removeAttribute("aria-busy");
+    }
+  };
+
+  searchSubmit?.addEventListener("click", searchAddress);
+  searchInput?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    searchAddress();
+  });
+
   if (initialPoint) setMarker(initialPoint, false);
-  map.on("click", (event) => setDraft(
+  map?.on("click", (event) => setDraft(
     { latitude: event.lngLat.lat, longitude: event.lngLat.lng },
     "map_pin",
     "Position auf der Karte gewählt. Mit „Standort übernehmen“ in das Formular übernehmen.",
@@ -1816,6 +1906,8 @@ function initializeJobLocationEditor(editor, maplibregl) {
     setMarker(null);
     announce("Haufenstandort aus dem Formular entfernt. Speichern Sie den Auftrag, um die Änderung zu übernehmen.", "Entfernt");
   });
+
+  if (!map) markMapUnavailable(canvas);
 }
 
 function initializeJobLocationPreview(canvas, maplibregl) {
@@ -2495,11 +2587,20 @@ const jobLocationEditors = Array.from(document.querySelectorAll("[data-job-locat
 const jobLocationPreviews = Array.from(document.querySelectorAll("[data-map-preview]"));
 const routeMapCanvases = Array.from(document.querySelectorAll("[data-route-map]"));
 if (jobLocationEditors.length || jobLocationPreviews.length || routeMapCanvases.length) {
+  const initializeEditorFallback = (editor) => {
+    if (editor.dataset.mapInitialized) return;
+    editor.dataset.mapInitialized = "fallback";
+    try { initializeJobLocationEditor(editor, null); } catch { markMapUnavailable(editor.querySelector("[data-map-canvas]")); }
+  };
   loadMapLibre().then((maplibregl) => {
     const initializeEditor = (editor) => {
       if (editor.dataset.mapInitialized) return;
       editor.dataset.mapInitialized = "true";
-      try { initializeJobLocationEditor(editor, maplibregl); } catch { markMapUnavailable(editor.querySelector("[data-map-canvas]")); }
+      try {
+        initializeJobLocationEditor(editor, maplibregl);
+      } catch {
+        try { initializeJobLocationEditor(editor, null); } catch { markMapUnavailable(editor.querySelector("[data-map-canvas]")); }
+      }
     };
     jobLocationEditors.forEach((editor) => {
       const disclosure = editor.closest("details");
@@ -2533,6 +2634,7 @@ if (jobLocationEditors.length || jobLocationPreviews.length || routeMapCanvases.
     }, { rootMargin: "240px" });
     jobLocationPreviews.forEach((preview) => observer.observe(preview));
   }).catch(() => {
+    jobLocationEditors.forEach(initializeEditorFallback);
     document.querySelectorAll("[data-map-canvas], [data-map-preview]").forEach(markMapUnavailable);
     routeMapCanvases.forEach((canvas) => markRouteMapUnavailable(canvas));
   });

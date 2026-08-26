@@ -228,9 +228,12 @@ const getNotificationDelivery = `-- name: GetNotificationDelivery :one
 SELECT n.id::text, n.appointment_id::text, n.confirmation_request_id::text,
        n.channel, n.recipient_snapshot, n.template_version, n.status,
        cr.token_key_id, cr.token_version, cr.status AS confirmation_request_status, cr.expires_at,
-       a.lifecycle_status, a.starts_at, a.ends_at,
-       j.job_type, j.volume_m3::text,
-       concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, ''))::text AS customer_name
+       a.lifecycle_status,
+       COALESCE(NULLIF(n.parameters->>'starts_at', '')::timestamptz, a.starts_at) AS starts_at,
+       COALESCE(NULLIF(n.parameters->>'ends_at', '')::timestamptz, a.ends_at) AS ends_at,
+       COALESCE(NULLIF(n.parameters->>'job_type', ''), j.job_type)::text AS job_type,
+       COALESCE(NULLIF(n.parameters->>'volume_m3', ''), j.volume_m3::text)::text AS volume_m3,
+       COALESCE(NULLIF(n.parameters->>'customer_name', ''), concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, '')))::text AS customer_name
 FROM notifications n
 JOIN confirmation_requests cr ON cr.id=n.confirmation_request_id
 JOIN appointments a ON a.id=n.appointment_id
@@ -255,7 +258,7 @@ type GetNotificationDeliveryRow struct {
 	StartsAt                  pgtype.Timestamptz
 	EndsAt                    pgtype.Timestamptz
 	JobType                   string
-	JVolumeM3                 string
+	VolumeM3                  string
 	CustomerName              string
 }
 
@@ -278,7 +281,7 @@ func (q *Queries) GetNotificationDelivery(ctx context.Context, id pgtype.UUID) (
 		&i.StartsAt,
 		&i.EndsAt,
 		&i.JobType,
-		&i.JVolumeM3,
+		&i.VolumeM3,
 		&i.CustomerName,
 	)
 	return i, err

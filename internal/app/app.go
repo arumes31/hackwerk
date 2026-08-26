@@ -14,6 +14,7 @@ import (
 	"example.invalid/hackplan/internal/buildinfo"
 	"example.invalid/hackplan/internal/calendarfeed"
 	"example.invalid/hackplan/internal/config"
+	"example.invalid/hackplan/internal/geocode"
 	"example.invalid/hackplan/internal/maptile"
 	"example.invalid/hackplan/internal/notification"
 	"example.invalid/hackplan/internal/observability"
@@ -34,7 +35,7 @@ func Serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	build := buildinfo.Current()
 	metrics := observability.New(operations, cfg.Metrics.CollectionTimeout, build.Version, build.Commit, map[string]bool{
 		"email": cfg.Mail.Enabled, "sms": cfg.SMS.Enabled, "voice": cfg.Voice.Enabled,
-		"routing_external": cfg.Planning.Router == "osrm", "ics": cfg.CalendarFeed.Enabled,
+		"routing_external": cfg.Planning.Router == "osrm", "geocoding": cfg.Geocoding.Enabled, "ics": cfg.CalendarFeed.Enabled,
 	})
 	identity, err := IdentityService(cfg, pool)
 	if err != nil {
@@ -102,6 +103,18 @@ func Serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	var geocoder geocode.Searcher
+	if cfg.Geocoding.Enabled {
+		geocoder, err = geocode.New(geocode.Config{
+			SearchURL: cfg.Geocoding.SearchURL, CountryCodes: cfg.Geocoding.CountryCodes, Timeout: cfg.Geocoding.Timeout,
+			MaxResponseSize: cfg.Geocoding.MaxResponseBytes, MaxResults: cfg.Geocoding.MaxResults, MinInterval: cfg.Geocoding.MinInterval,
+			CacheTTL: cfg.Geocoding.CacheTTL, CacheEntries: cfg.Geocoding.CacheEntries,
+			UserAgent: "HackWerk/" + build.Version + " (address search)",
+		})
+		if err != nil {
+			return err
+		}
+	}
 
 	router, err := web.NewRouter(web.Dependencies{
 		Config:        cfg,
@@ -122,6 +135,7 @@ func Serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		Voice:         voiceService,
 		Metrics:       metrics,
 		MapTiles:      mapTiles,
+		Geocoder:      geocoder,
 	})
 	if err != nil {
 		return err

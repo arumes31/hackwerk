@@ -165,6 +165,18 @@ SELECT version, workflow_status FROM jobs
 WHERE id=sqlc.arg(id)::uuid AND archived_at IS NULL
 FOR UPDATE;
 
+-- name: LockJobForUpdate :one
+SELECT version, workflow_status, job_type, volume_m3::text
+FROM jobs
+WHERE id=sqlc.arg(id)::uuid AND archived_at IS NULL
+FOR UPDATE;
+
+-- name: LockFixedAppointmentForJobUpdate :one
+SELECT id::text, starts_at, ends_at
+FROM appointments
+WHERE job_id=sqlc.arg(job_id)::uuid AND lifecycle_status='fixed'
+FOR UPDATE;
+
 -- name: JobHasActiveAppointment :one
 SELECT EXISTS (
     SELECT 1 FROM appointments
@@ -303,7 +315,7 @@ UPDATE jobs SET
     pile_location_updated_at = CASE WHEN NULLIF(sqlc.arg(pile_latitude)::text, '') IS NULL THEN NULL ELSE now() END,
     version = version + 1, updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND version = sqlc.arg(expected_version)
-  AND archived_at IS NULL AND workflow_status IN ('waitlist', 'planning');
+  AND archived_at IS NULL AND workflow_status IN ('waitlist', 'planning', 'scheduled');
 
 -- name: ArchiveJob :execrows
 UPDATE jobs SET archived_at = now(), workflow_status = 'cancelled', version = version + 1, updated_at = now()

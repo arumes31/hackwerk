@@ -25,7 +25,7 @@ func TestDocumentIsValidYAMLAndContainsCurrentContract(t *testing.T) {
 	if document.OpenAPI != "3.1.0" || document.Info.Version != "0.10.0" {
 		t.Fatalf("OpenAPI/version = %q/%q", document.OpenAPI, document.Info.Version)
 	}
-	for _, path := range []string{"/dashboard", "/calendar/export.ics", "/api/v1/calendar-feeds", "/feeds/{calendarFeedToken}/calendar.ics", "/api/v1/voice/drafts", "/api/v1/planning/suggestions", "/api/v1/planning/suggestions/{suggestionID}/adopt", "/api/v1/calendar", "/api/v1/calendar/plan", "/api/v1/appointments/{appointmentID}", "/api/v1/appointments/{appointmentID}/fix", "/api/v1/appointments/{appointmentID}/reopen", "/termin/{confirmationToken}", "/termin/{confirmationToken}/antwort", "/admin/notifications/{notificationID}/retry", "/admin/notifications/{notificationID}/review", "/admin/notifications/report.csv"} {
+	for _, path := range []string{"/dashboard", "/calendar/export.ics", "/api/v1/calendar-feeds", "/feeds/{calendarFeedToken}/calendar.ics", "/api/v1/geocoding/search", "/api/v1/voice/drafts", "/api/v1/planning/suggestions", "/api/v1/planning/suggestions/{suggestionID}/adopt", "/api/v1/calendar", "/api/v1/calendar/plan", "/api/v1/appointments/{appointmentID}", "/api/v1/appointments/{appointmentID}/fix", "/api/v1/appointments/{appointmentID}/reopen", "/termin/{confirmationToken}", "/termin/{confirmationToken}/antwort", "/admin/notifications/{notificationID}/retry", "/admin/notifications/{notificationID}/review", "/admin/notifications/report.csv"} {
 		if _, ok := document.Paths[path]; !ok {
 			t.Errorf("missing path %s", path)
 		}

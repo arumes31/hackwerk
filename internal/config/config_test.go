@@ -32,6 +32,9 @@ func TestLoad(t *testing.T) {
 		{name: "map tiles reject loopback upstream", values: map[string]string{"MAP_TILE_URL": "https://127.0.0.1/{z}/{x}/{y}.png"}, expectError: "map tiles"},
 		{name: "map tiles require all placeholders", values: map[string]string{"MAP_TILE_URL": "https://tiles.example/{z}/{x}.png"}, expectError: "z, x and y"},
 		{name: "map tile token requires placeholder", values: map[string]string{"MAP_TILE_TOKEN": "secret-value"}, expectError: "configured together"},
+		{name: "geocoding requires configured URL", values: map[string]string{"GEOCODING_ENABLED": "true"}, expectError: "static non-loopback HTTPS"},
+		{name: "geocoding rejects loopback", values: map[string]string{"GEOCODING_ENABLED": "true", "GEOCODING_SEARCH_URL": "https://127.0.0.1/search"}, expectError: "static non-loopback HTTPS"},
+		{name: "geocoding URL requires enable flag", values: map[string]string{"GEOCODING_SEARCH_URL": "https://geocoder.example/search"}, expectError: "requires geocoding to be enabled"},
 		{name: "production requires https", values: map[string]string{"APP_ENV": "production"}, expectError: "https"},
 		{name: "external SMTP rejects loopback", values: map[string]string{"MAIL_ENABLED": "true", "MAIL_SMTP_HOST": "127.0.0.1"}, expectError: "external SMTP"},
 		{name: "SMS rejects loopback webhook", values: map[string]string{
@@ -109,6 +112,24 @@ func TestLoadMapConfigurationFromEnvironment(t *testing.T) {
 	}
 	if cfg.Map.TileURL != values["MAP_TILE_URL"] || cfg.Map.TileToken != values["MAP_TILE_TOKEN"] || cfg.Map.Attribution != "Beispieldaten" || cfg.Map.Timeout != 4*time.Second || cfg.Map.MaxResponseBytes != 65536 || cfg.Map.MaxZoom != 17 {
 		t.Fatalf("map config=%+v", cfg.Map)
+	}
+}
+
+func TestLoadGeocodingConfigurationFromEnvironment(t *testing.T) {
+	t.Parallel()
+	values := map[string]string{
+		"GEOCODING_ENABLED": "true", "GEOCODING_SEARCH_URL": "https://geocoder.example/search", "GEOCODING_COUNTRY_CODES": "at,de",
+		"GEOCODING_TIMEOUT": "4s", "GEOCODING_MAX_RESPONSE_BYTES": "65536", "GEOCODING_MAX_RESULTS": "4",
+		"GEOCODING_RATE_LIMIT_PER_MINUTE": "20", "GEOCODING_MIN_INTERVAL": "500ms", "GEOCODING_CACHE_TTL": "12h", "GEOCODING_CACHE_ENTRIES": "128",
+	}
+	cfg, err := load(func(name string) string { return values[name] }, func(string) ([]byte, error) { return nil, errors.New("unexpected read") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Geocoding.Enabled || cfg.Geocoding.SearchURL != values["GEOCODING_SEARCH_URL"] || strings.Join(cfg.Geocoding.CountryCodes, ",") != "at,de" ||
+		cfg.Geocoding.Timeout != 4*time.Second || cfg.Geocoding.MaxResponseBytes != 65536 || cfg.Geocoding.MaxResults != 4 || cfg.Geocoding.RateLimit != 20 ||
+		cfg.Geocoding.MinInterval != 500*time.Millisecond || cfg.Geocoding.CacheTTL != 12*time.Hour || cfg.Geocoding.CacheEntries != 128 {
+		t.Fatalf("geocoding config=%+v", cfg.Geocoding)
 	}
 }
 

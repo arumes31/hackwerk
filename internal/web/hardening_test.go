@@ -50,6 +50,22 @@ func TestHostAllowlistAndTrustedProxyHeaders(t *testing.T) {
 	}
 }
 
+func TestDevelopmentWildcardAllowsTailscaleHost(t *testing.T) {
+	boundary, err := newNetworkBoundary(config.Config{BaseURL: "http://localhost:18533", HTTP: config.HTTP{AllowedHosts: []string{"*"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := boundary.Middleware(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) { response.WriteHeader(http.StatusNoContent) }))
+	for _, host := range []string{"100.115.58.99:18533", "dr-ex-develop01.werewolf-gondola.ts.net:18533"} {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+host+"/", nil)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("host %q status = %d", host, response.Code)
+		}
+	}
+}
+
 func TestRequestLimitsAndStrictCSP(t *testing.T) {
 	handler := requestLimits(8, 10)(securityHeaders(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) { _, _ = response.Write([]byte("ok")) })))
 	wrong := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://example.com/", strings.NewReader("payload"))

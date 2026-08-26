@@ -151,6 +151,48 @@ func (store *CustomerStore) UpdateJob(ctx context.Context, actor auth.Actor, inp
 		if err != nil {
 			return customers.ErrNotFound
 		}
+		current, err := queries.LockJobForUpdate(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return customers.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if current.Version != input.ExpectedVersion || !editableJobWorkflow(current.WorkflowStatus) {
+			return customers.ErrConflict
+		}
+		var fixedAppointmentID string
+		if current.WorkflowStatus == "scheduled" {
+			fixedAppointment, lockErr := queries.LockFixedAppointmentForJobUpdate(ctx, id)
+			if errors.Is(lockErr, pgx.ErrNoRows) {
+				return customers.ErrConflict
+			}
+			if lockErr != nil {
+				return lockErr
+			}
+			fixedAppointmentID = fixedAppointment.ID
+			appointmentID, parseErr := uuid(fixedAppointmentID)
+			if parseErr != nil {
+				return parseErr
+			}
+			if _, lockErr = queries.LockAppointmentDrivers(ctx, appointmentID); lockErr != nil {
+				return lockErr
+			}
+			if _, lockErr = queries.LockAppointmentResources(ctx, appointmentID); lockErr != nil {
+				return lockErr
+			}
+			ready, readyErr := queries.AppointmentAssignmentsReady(ctx, dbgen.AppointmentAssignmentsReadyParams{
+				AppointmentID: appointmentID, JobType: string(input.Job.JobType), TransportMode: string(input.Job.TransportMode),
+				ExternalTransportConfirmed: input.Job.ExternalTransportConfirmed,
+			})
+			if readyErr != nil {
+				return readyErr
+			}
+			requiredDuration := time.Duration(input.Job.EstimatedHackMinutes+input.Job.EstimatedTransportMinutes) * time.Minute
+			if !ready || fixedAppointment.EndsAt.Time.Sub(fixedAppointment.StartsAt.Time) < requiredDuration {
+				return customers.ErrConflict
+			}
+		}
 		params, err := updateJobParams(id, input)
 		if err != nil {
 			return err
@@ -162,9 +204,32 @@ func (store *CustomerStore) UpdateJob(ctx context.Context, actor auth.Actor, inp
 		if rows == 0 {
 			return customers.ErrConflict
 		}
+		customerFacingChanged := current.JobType != string(input.Job.JobType) || current.VolumeM3 != input.Job.VolumeM3
+		if fixedAppointmentID != "" && customerFacingChanged {
+			appointmentID, _ := uuid(fixedAppointmentID)
+			reason := "job details changed"
+			if err := queries.RevokeActiveConfirmationRequests(ctx, dbgen.RevokeActiveConfirmationRequestsParams{
+				Reason: &reason, AppointmentID: appointmentID,
+			}); err != nil {
+				return err
+			}
+			if err := queries.SetAppointmentConfirmation(ctx, dbgen.SetAppointmentConfirmationParams{
+				ConfirmationStatus: "not_requested", AppointmentID: appointmentID,
+			}); err != nil {
+				return err
+			}
+			if err := insertAudit(ctx, queries, actor, "confirmation.invalidated", "appointment", fixedAppointmentID, input.RequestID,
+				[]string{"confirmation_status", "confirmation_request"}); err != nil {
+				return err
+			}
+		}
 		return insertAudit(ctx, queries, actor, "job.updated", "job", input.ID, input.RequestID,
 			[]string{"job_type", "volume_m3", "durations", "transport", "preferred_range", "urgency", "region", "source", "pile_location"})
 	})
+}
+
+func editableJobWorkflow(workflow string) bool {
+	return workflow == "waitlist" || workflow == "planning" || workflow == "scheduled"
 }
 
 func (store *CustomerStore) ArchiveJob(ctx context.Context, actor auth.Actor, id string, version int32, requestID string) error {

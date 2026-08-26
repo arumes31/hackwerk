@@ -1003,6 +1003,35 @@ textarea { min-height: 6rem; resize: vertical; }
 .job-location-preview h4 { margin: .1rem 0 0; font-family: Georgia, "Times New Roman", serif; }
 .job-location-preview { margin-block: 1rem; }
 
+.location-search {
+  margin-bottom: .75rem;
+  padding: .7rem;
+  border: 1px solid var(--line);
+  border-radius: .65rem;
+  background: var(--paper);
+}
+.location-search > label { display: block; margin-bottom: .35rem; font-weight: 800; }
+.location-search__bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; }
+.location-search__bar input,
+.location-search__bar .button { min-height: 44px; margin: 0; }
+.location-search__status:empty { display: none; }
+.location-search__results { display: grid; gap: .35rem; margin: .55rem 0 0; padding: 0; list-style: none; }
+.location-search__results[hidden] { display: none; }
+.location-search__result {
+  width: 100%;
+  min-height: 44px;
+  padding: .55rem .65rem;
+  border: 1px solid var(--line);
+  border-radius: .45rem;
+  color: var(--ink);
+  background: var(--surface);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.location-search__result:hover,
+.location-search__result:focus-visible { border-color: var(--moss); background: var(--moss-light); }
+
 .job-location-map {
   position: relative;
   width: 100%;
@@ -1033,6 +1062,7 @@ textarea { min-height: 6rem; resize: vertical; }
 .job-location-map .maplibregl-map,
 .job-location-map .maplibregl-canvas-container,
 .job-location-map .maplibregl-canvas { min-width: 0; }
+.job-location-map .maplibregl-canvas { max-width: 100%; }
 .job-location-map .maplibregl-ctrl-group button { width: 44px; height: 44px; }
 .job-location-map .maplibregl-ctrl-attrib { font-size: .72rem; }
 .job-location-map .maplibregl-ctrl-attrib.maplibregl-compact,
@@ -1092,8 +1122,12 @@ textarea { min-height: 6rem; resize: vertical; }
 @media (max-width: 680px) {
   .job-location-editor,
   .job-location-preview { padding: .75rem; }
+  .job-location-editor .section-heading,
+  .job-location-preview .section-heading { align-items: flex-start; flex-direction: column; }
   .job-location-map { min-height: 18rem; }
   .job-location-map--preview { min-height: 14rem; }
+  .location-search__bar { grid-template-columns: 1fr; }
+  .location-search__bar .button { width: 100%; }
   .coordinate-grid { grid-template-columns: 1fr; }
   .location-actions { display: grid; grid-template-columns: 1fr; }
   .location-actions .button,

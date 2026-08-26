@@ -1175,6 +1175,26 @@ func (q *Queries) LockCustomerForArchive(ctx context.Context, id pgtype.UUID) (i
 	return version, err
 }
 
+const lockFixedAppointmentForJobUpdate = `-- name: LockFixedAppointmentForJobUpdate :one
+SELECT id::text, starts_at, ends_at
+FROM appointments
+WHERE job_id=$1::uuid AND lifecycle_status='fixed'
+FOR UPDATE
+`
+
+type LockFixedAppointmentForJobUpdateRow struct {
+	ID       string
+	StartsAt pgtype.Timestamptz
+	EndsAt   pgtype.Timestamptz
+}
+
+func (q *Queries) LockFixedAppointmentForJobUpdate(ctx context.Context, jobID pgtype.UUID) (LockFixedAppointmentForJobUpdateRow, error) {
+	row := q.db.QueryRow(ctx, lockFixedAppointmentForJobUpdate, jobID)
+	var i LockFixedAppointmentForJobUpdateRow
+	err := row.Scan(&i.ID, &i.StartsAt, &i.EndsAt)
+	return i, err
+}
+
 const lockJobForArchive = `-- name: LockJobForArchive :one
 SELECT version, workflow_status FROM jobs
 WHERE id=$1::uuid AND archived_at IS NULL
@@ -1190,6 +1210,32 @@ func (q *Queries) LockJobForArchive(ctx context.Context, id pgtype.UUID) (LockJo
 	row := q.db.QueryRow(ctx, lockJobForArchive, id)
 	var i LockJobForArchiveRow
 	err := row.Scan(&i.Version, &i.WorkflowStatus)
+	return i, err
+}
+
+const lockJobForUpdate = `-- name: LockJobForUpdate :one
+SELECT version, workflow_status, job_type, volume_m3::text
+FROM jobs
+WHERE id=$1::uuid AND archived_at IS NULL
+FOR UPDATE
+`
+
+type LockJobForUpdateRow struct {
+	Version        int32
+	WorkflowStatus string
+	JobType        string
+	VolumeM3       string
+}
+
+func (q *Queries) LockJobForUpdate(ctx context.Context, id pgtype.UUID) (LockJobForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, lockJobForUpdate, id)
+	var i LockJobForUpdateRow
+	err := row.Scan(
+		&i.Version,
+		&i.WorkflowStatus,
+		&i.JobType,
+		&i.VolumeM3,
+	)
 	return i, err
 }
 
@@ -1329,7 +1375,7 @@ UPDATE jobs SET
     pile_location_updated_at = CASE WHEN NULLIF($14::text, '') IS NULL THEN NULL ELSE now() END,
     version = version + 1, updated_at = now()
 WHERE id = $17::uuid AND version = $18
-  AND archived_at IS NULL AND workflow_status IN ('waitlist', 'planning')
+  AND archived_at IS NULL AND workflow_status IN ('waitlist', 'planning', 'scheduled')
 `
 
 type UpdateJobParams struct {

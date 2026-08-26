@@ -107,6 +107,33 @@ func TestFixCreatesHashOnlyConfirmationAndIdempotentResponses(t *testing.T) {
 	}
 }
 
+func TestQueuedNotificationUsesFixTimeJobSnapshot(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	start := time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC)
+	jobID := fixture.job(t, "HW-2026-NOTIFY-SNAPSHOT")
+	proposed := fixture.proposal(t, jobID, fixture.driver1, fixture.chipper1, start, 3*time.Hour)
+	fixed, err := fixture.service.FixAppointment(fixture.ctx, fixture.admin, appointment.FixInput{MutateInput: appointment.MutateInput{
+		ID: proposed.ID, ExpectedVersion: proposed.Version, RequestID: "fix-snapshot",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var notificationID string
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT id::text FROM notifications WHERE appointment_id=$1", fixed.ID).Scan(&notificationID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE jobs SET job_type='chipping_with_transport',volume_m3=99.00 WHERE id=$1", jobID); err != nil {
+		t.Fatal(err)
+	}
+	delivery, err := postgres.NewNotificationWorkerStore(fixture.pool).LoadDelivery(fixture.ctx, notificationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delivery.JobType != "chipping_only" || delivery.VolumeM3 != "30.00" || !delivery.StartsAt.Equal(start) || !delivery.EndsAt.Equal(start.Add(3*time.Hour)) {
+		t.Fatalf("notification snapshot drifted after job edit: %#v", delivery)
+	}
+}
+
 func TestMoveRevokesOldTokenAndPlansNewVersion(t *testing.T) {
 	fixture := newCalendarFixture(t)
 	start := time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"example.invalid/hackplan/internal/appointment"
 	"example.invalid/hackplan/internal/auth"
 	"example.invalid/hackplan/internal/config"
+	"example.invalid/hackplan/internal/customers"
 	"example.invalid/hackplan/internal/driver"
 	"example.invalid/hackplan/internal/resource"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -94,6 +96,93 @@ func TestCalendarReservationsAndAtomicFix(t *testing.T) {
 	})
 	if !errors.Is(err, appointment.ErrConflict) {
 		t.Fatalf("stale move error = %v, want conflict", err)
+	}
+}
+
+func TestScheduledJobEditPreservesAndRevalidatesFixedAppointment(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	start := time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC)
+	jobID := fixture.job(t, "HW-2026-EDIT-FIXED")
+	proposed := fixture.proposal(t, jobID, fixture.driver1, fixture.chipper1, start, 3*time.Hour)
+	fixed, err := fixture.service.FixAppointment(fixture.ctx, fixture.admin, appointment.FixInput{MutateInput: appointment.MutateInput{
+		ID: proposed.ID, ExpectedVersion: proposed.Version, RequestID: "fix-before-job-edit",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var customerID string
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT customer_id::text FROM jobs WHERE id=$1", jobID).Scan(&customerID); err != nil {
+		t.Fatal(err)
+	}
+	customerService, err := customers.NewService(postgres.NewCustomerStore(fixture.pool))
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := customerService.CustomerDetail(fixture.ctx, fixture.admin, customerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latitude, longitude := 46.712345, 15.56789
+	update := customers.UpdateJobInput{
+		ID: jobID, ExpectedVersion: detail.Jobs[0].Version, RequestID: "edit-scheduled-job",
+		Job: customers.JobInput{
+			JobType: customers.JobTypeChippingOnly, VolumeM3: "42.50", EstimatedHackMinutes: 90,
+			TransportMode: customers.TransportNone, PreferredStartDate: "2026-09-01", PreferredEndDate: "2026-09-30",
+			PreferenceText: "Zufahrt vorher prüfen", Urgency: customers.UrgencyHigh, Region: "Süd", Source: customers.SourceEmail,
+			PileLatitude: &latitude, PileLongitude: &longitude, PileLocationSource: customers.PileSourceMapPin,
+		},
+	}
+	if err := customerService.UpdateJob(fixture.ctx, fixture.admin, update); err != nil {
+		t.Fatalf("update compatible scheduled job: %v", err)
+	}
+
+	var lifecycle, workflow, confirmation, volume, region, source, pileSource string
+	var appointmentStart, appointmentEnd, driverFrom, driverTo, resourceFrom, resourceTo time.Time
+	var hackMinutes, activeConfirmations int
+	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT a.lifecycle_status,j.workflow_status,a.confirmation_status,
+		j.volume_m3::text,j.estimated_hack_minutes,j.region,j.source,j.pile_location_source,
+		a.starts_at,a.ends_at,ad.reserved_starts_at,ad.reserved_ends_at,ar.reserved_starts_at,ar.reserved_ends_at,
+		(SELECT count(*) FROM confirmation_requests cr WHERE cr.appointment_id=a.id AND cr.status='active')
+		FROM appointments a JOIN jobs j ON j.id=a.job_id
+		JOIN appointment_drivers ad ON ad.appointment_id=a.id
+		JOIN appointment_resources ar ON ar.appointment_id=a.id
+		WHERE a.id=$1`, fixed.ID).Scan(
+		&lifecycle, &workflow, &confirmation, &volume, &hackMinutes, &region, &source, &pileSource,
+		&appointmentStart, &appointmentEnd, &driverFrom, &driverTo, &resourceFrom, &resourceTo, &activeConfirmations,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if lifecycle != "fixed" || workflow != "scheduled" || confirmation != "not_requested" || volume != "42.50" || hackMinutes != 90 ||
+		region != "Süd" || source != "email" || pileSource != "map_pin" || !appointmentStart.Equal(start) || !appointmentEnd.Equal(start.Add(3*time.Hour)) ||
+		!driverFrom.Equal(start) || !driverTo.Equal(start.Add(3*time.Hour)) || !resourceFrom.Equal(start) || !resourceTo.Equal(start.Add(3*time.Hour)) || activeConfirmations != 0 {
+		t.Fatalf("scheduled edit state = lifecycle=%s workflow=%s confirmation=%s volume=%s minutes=%d region=%s source=%s pile=%s appointment=%s..%s driver=%s..%s resource=%s..%s active confirmations=%d",
+			lifecycle, workflow, confirmation, volume, hackMinutes, region, source, pileSource, appointmentStart, appointmentEnd, driverFrom, driverTo, resourceFrom, resourceTo, activeConfirmations)
+	}
+	appointmentDetail, err := fixture.service.AppointmentDetail(fixture.ctx, fixture.admin, fixed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(appointmentDetail.MapsURL, "46.712345%2C15.567890") {
+		t.Fatalf("appointment navigation does not prefer updated pile location: %q", appointmentDetail.MapsURL)
+	}
+
+	refreshed, err := customerService.CustomerDetail(fixture.ctx, fixture.admin, customerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tooLong := update
+	tooLong.ExpectedVersion = refreshed.Jobs[0].Version
+	tooLong.Job.EstimatedHackMinutes = 181
+	if err := customerService.UpdateJob(fixture.ctx, fixture.admin, tooLong); !errors.Is(err, customers.ErrConflict) {
+		t.Fatalf("oversized scheduled job update error = %v, want conflict", err)
+	}
+	missingTransport := update
+	missingTransport.ExpectedVersion = refreshed.Jobs[0].Version
+	missingTransport.Job.JobType = customers.JobTypeChippingWithTransport
+	missingTransport.Job.TransportMode = customers.TransportInternal
+	missingTransport.Job.EstimatedTransportMinutes = 30
+	if err := customerService.UpdateJob(fixture.ctx, fixture.admin, missingTransport); !errors.Is(err, customers.ErrConflict) {
+		t.Fatalf("scheduled internal transport without resource error = %v, want conflict", err)
 	}
 }
 

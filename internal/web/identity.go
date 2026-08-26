@@ -55,6 +55,9 @@ func registerIdentityRoutes(router chi.Router, dependencies Dependencies, page t
 		if dependencies.MapTiles != nil {
 			registerMapTileRoutes(protected, dependencies.MapTiles)
 		}
+		if dependencies.Geocoder != nil {
+			registerGeocodingRoutes(protected, dependencies.Geocoder, dependencies.Config.Geocoding.RateLimit, dependencies.Logger)
+		}
 		if dependencies.Customers != nil {
 			registerCustomerRoutes(protected, dependencies, page)
 		}

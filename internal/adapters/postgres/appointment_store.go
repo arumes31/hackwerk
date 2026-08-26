@@ -144,10 +144,17 @@ func (s *AppointmentStore) planConfirmationAt(
 	}); err != nil {
 		return err
 	}
+	snapshot, err := json.Marshal(map[string]string{
+		"customer_name": data.CustomerName, "job_type": data.JobType, "volume_m3": data.JVolumeM3,
+		"starts_at": data.StartsAt.Time.UTC().Format(time.RFC3339Nano), "ends_at": data.EndsAt.Time.UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		return err
+	}
 	for _, item := range targets {
 		notificationID, insertErr := queries.InsertNotification(ctx, dbgen.InsertNotificationParams{
 			AppointmentID: appointmentID, ConfirmationRequestID: requestUUID, Channel: string(item.channel),
-			RecipientSnapshot: item.recipient, TemplateVersion: notification.TemplateVersion, Parameters: []byte("{}"), MaxAttempts: item.maxAttempts,
+			RecipientSnapshot: item.recipient, TemplateVersion: notification.TemplateVersion, Parameters: snapshot, MaxAttempts: item.maxAttempts,
 		})
 		if insertErr != nil {
 			return insertErr
@@ -257,9 +264,7 @@ func (s *AppointmentStore) Detail(ctx context.Context, id string) (appointment.D
 			CustomerID: row.CustomerID, CustomerName: row.CustomerName, Locality: row.Locality,
 			Street: row.Street, PostalCode: row.PostalCode, VolumeM3: row.JVolumeM3,
 			Latitude: row.Latitude, Longitude: row.Longitude,
-			MapsURL: customers.MapsURL(customers.CustomerInput{
-				Street: row.Street, PostalCode: row.PostalCode, Locality: row.Locality, CountryCode: "AT",
-			}),
+			MapsURL: appointmentMapsURL(row.Latitude, row.Longitude, row.Street, row.PostalCode, row.Locality),
 		},
 		Phone: row.Phone, Email: row.Email, NotificationPreference: row.NotificationPreference,
 	}
@@ -647,8 +652,11 @@ func (s *AppointmentStore) ListCalendar(ctx context.Context, fromUTC, toUTC time
 			CustomerID: row.CustomerID, CustomerName: row.CustomerName, Locality: row.Locality,
 			Street: row.Street, PostalCode: row.PostalCode, VolumeM3: row.JVolumeM3,
 			Latitude: row.Latitude, Longitude: row.Longitude,
-			MapsURL: customers.MapsURL(customers.CustomerInput{Street: row.Street, PostalCode: row.PostalCode, Locality: row.Locality, CountryCode: "AT"}),
+			MapsURL: customers.PointMapsURL(parseFloat(row.Latitude), parseFloat(row.Longitude)),
 		})
+		if result[len(result)-1].MapsURL == "" {
+			result[len(result)-1].MapsURL = customers.MapsURL(customers.CustomerInput{Street: row.Street, PostalCode: row.PostalCode, Locality: row.Locality, CountryCode: "AT"})
+		}
 		index[row.AID] = len(result) - 1
 	}
 	if len(ids) == 0 {
@@ -673,6 +681,13 @@ func (s *AppointmentStore) ListCalendar(ctx context.Context, fromUTC, toUTC time
 		})
 	}
 	return result, nil
+}
+
+func appointmentMapsURL(latitude, longitude, street, postalCode, locality string) string {
+	if link := customers.PointMapsURL(parseFloat(latitude), parseFloat(longitude)); link != "" {
+		return link
+	}
+	return customers.MapsURL(customers.CustomerInput{Street: street, PostalCode: postalCode, Locality: locality, CountryCode: "AT"})
 }
 
 func (s *AppointmentStore) PlanningOptions(ctx context.Context) (appointment.PlanningOptions, error) {

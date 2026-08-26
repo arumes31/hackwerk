@@ -21,6 +21,7 @@ import (
 	"example.invalid/hackplan/internal/customers"
 	"example.invalid/hackplan/internal/dashboard"
 	"example.invalid/hackplan/internal/driver"
+	"example.invalid/hackplan/internal/geocode"
 	"example.invalid/hackplan/internal/maptile"
 	"example.invalid/hackplan/internal/notification"
 	"example.invalid/hackplan/internal/observability"
@@ -66,6 +67,7 @@ type Dependencies struct {
 	Voice         *voice.Service
 	Metrics       *observability.Registry
 	MapTiles      *maptile.Client
+	Geocoder      geocode.Searcher
 }
 
 // NewRouter builds the complete Task-00 router without starting a listener.
@@ -99,6 +101,7 @@ func NewRouter(dependencies Dependencies) (http.Handler, error) {
 		MapLibreWorkerPath:          assetPaths.MapLibreWorker,
 		MapLibreCSSPath:             assetPaths.MapLibreCSS,
 		MapAttribution:              dependencies.Config.Map.Attribution,
+		GeocodingEnabled:            dependencies.Geocoder != nil,
 		FullCalendarThemeJSPath:     assetPaths.FullCalendarThemeJavaScript,
 		FullCalendarSkeletonCSSPath: assetPaths.FullCalendarSkeletonCSS,
 		FullCalendarThemeCSSPath:    assetPaths.FullCalendarThemeCSS,

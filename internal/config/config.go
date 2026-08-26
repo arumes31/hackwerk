@@ -47,6 +47,7 @@ type Config struct {
 	CalendarFeed    CalendarFeed
 	Planning        Planning
 	Map             Map
+	Geocoding       Geocoding
 	Voice           Voice
 	Metrics         Metrics
 	MaintenanceMode bool
@@ -199,6 +200,21 @@ type Map struct {
 	Timeout          time.Duration
 	MaxResponseBytes int64
 	MaxZoom          int
+}
+
+// Geocoding configures optional address search. SearchURL is startup-only and
+// receives user queries only after authentication, CSRF, and input validation.
+type Geocoding struct {
+	Enabled          bool
+	SearchURL        string
+	CountryCodes     []string
+	Timeout          time.Duration
+	MaxResponseBytes int64
+	MaxResults       int
+	RateLimit        int
+	MinInterval      time.Duration
+	CacheTTL         time.Duration
+	CacheEntries     int
 }
 
 type Voice struct {
@@ -384,6 +400,11 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 			TileToken: mapTileToken, Attribution: valueOrDefault(getenv("MAP_TILE_ATTRIBUTION"), "© OpenStreetMap-Mitwirkende"),
 			Timeout: 8 * time.Second, MaxResponseBytes: 2 << 20, MaxZoom: 19,
 		},
+		Geocoding: Geocoding{
+			SearchURL: strings.TrimSpace(getenv("GEOCODING_SEARCH_URL")), CountryCodes: splitCSV(valueOrDefault(getenv("GEOCODING_COUNTRY_CODES"), "at")),
+			Timeout: 5 * time.Second, MaxResponseBytes: 256 << 10, MaxResults: 5, RateLimit: 30,
+			MinInterval: time.Second, CacheTTL: 24 * time.Hour, CacheEntries: 512,
+		},
 		Voice: Voice{
 			Transcriber: valueOrDefault(getenv("VOICE_TRANSCRIBER"), "disabled"), Extractor: valueOrDefault(getenv("VOICE_EXTRACTOR"), "rules"),
 			OpenAIAPIKey: openAIKey, OpenAIModel: valueOrDefault(getenv("VOICE_OPENAI_MODEL"), "gpt-4o-mini-transcribe"), OpenAIExtractionModel: valueOrDefault(getenv("VOICE_OPENAI_EXTRACTION_MODEL"), "gpt-5-mini"), FakeTranscript: strings.TrimSpace(getenv("VOICE_FAKE_TRANSCRIPT")),
@@ -394,7 +415,9 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 		Metrics: Metrics{Enabled: true, ListenAddr: valueOrDefault(getenv("METRICS_LISTEN_ADDR"), "127.0.0.1:19090"), CollectionTimeout: 2 * time.Second, WorkerStaleAfter: 2 * time.Minute},
 	}
 	if len(cfg.HTTP.AllowedHosts) == 0 {
-		if parsedBase, parseErr := url.Parse(cfg.BaseURL); parseErr == nil && parsedBase.Hostname() != "" {
+		if cfg.Environment != EnvironmentProduction {
+			cfg.HTTP.AllowedHosts = []string{"*"}
+		} else if parsedBase, parseErr := url.Parse(cfg.BaseURL); parseErr == nil && parsedBase.Hostname() != "" {
 			cfg.HTTP.AllowedHosts = []string{parsedBase.Hostname()}
 		}
 	}
@@ -431,6 +454,26 @@ func applyOverrides(cfg *Config, getenv func(string) string) error {
 	}
 	if cfg.Map.MaxZoom, err = intValue(getenv, "MAP_TILE_MAX_ZOOM", cfg.Map.MaxZoom); err != nil {
 		return err
+	}
+	if cfg.Geocoding.Timeout, err = durationValue(getenv, "GEOCODING_TIMEOUT", cfg.Geocoding.Timeout); err != nil {
+		return err
+	}
+	if cfg.Geocoding.MaxResponseBytes, err = int64Value(getenv, "GEOCODING_MAX_RESPONSE_BYTES", cfg.Geocoding.MaxResponseBytes); err != nil {
+		return err
+	}
+	if cfg.Geocoding.MinInterval, err = durationValue(getenv, "GEOCODING_MIN_INTERVAL", cfg.Geocoding.MinInterval); err != nil {
+		return err
+	}
+	if cfg.Geocoding.CacheTTL, err = durationValue(getenv, "GEOCODING_CACHE_TTL", cfg.Geocoding.CacheTTL); err != nil {
+		return err
+	}
+	for name, target := range map[string]*int{
+		"GEOCODING_MAX_RESULTS": &cfg.Geocoding.MaxResults, "GEOCODING_RATE_LIMIT_PER_MINUTE": &cfg.Geocoding.RateLimit,
+		"GEOCODING_CACHE_ENTRIES": &cfg.Geocoding.CacheEntries,
+	} {
+		if *target, err = intValue(getenv, name, *target); err != nil {
+			return err
+		}
 	}
 	if cfg.HTTP.MaxHeaderBytes, err = intValue(getenv, "HTTP_MAX_HEADER_BYTES", cfg.HTTP.MaxHeaderBytes); err != nil {
 		return err
@@ -563,7 +606,7 @@ func applyOverrides(cfg *Config, getenv func(string) string) error {
 			return err
 		}
 	}
-	for name, target := range map[string]*bool{"MAIL_ENABLED": &cfg.Mail.Enabled, "SMS_ENABLED": &cfg.SMS.Enabled, "VOICE_ENABLED": &cfg.Voice.Enabled, "CALENDAR_ENABLED": &cfg.CalendarFeed.Enabled, "METRICS_ENABLED": &cfg.Metrics.Enabled, "MAINTENANCE_MODE": &cfg.MaintenanceMode} {
+	for name, target := range map[string]*bool{"MAIL_ENABLED": &cfg.Mail.Enabled, "SMS_ENABLED": &cfg.SMS.Enabled, "VOICE_ENABLED": &cfg.Voice.Enabled, "CALENDAR_ENABLED": &cfg.CalendarFeed.Enabled, "GEOCODING_ENABLED": &cfg.Geocoding.Enabled, "METRICS_ENABLED": &cfg.Metrics.Enabled, "MAINTENANCE_MODE": &cfg.MaintenanceMode} {
 		if value := strings.TrimSpace(getenv(name)); value != "" {
 			*target, err = strconv.ParseBool(value)
 			if err != nil {
@@ -624,6 +667,9 @@ func (cfg Config) Validate() error {
 	for _, host := range cfg.HTTP.AllowedHosts {
 		if !validAllowedHost(host) {
 			return errors.New("config: invalid allowed host")
+		}
+		if cfg.Environment == EnvironmentProduction && strings.TrimSpace(host) == "*" {
+			return errors.New("config: production allowed hosts must not contain wildcard")
 		}
 	}
 	for _, cidr := range cfg.HTTP.TrustedProxyCIDRs {
@@ -708,6 +754,9 @@ func (cfg Config) Validate() error {
 		return errors.New("config: planning router must be haversine or osrm")
 	}
 	if err := validateMapConfig(cfg.Map); err != nil {
+		return err
+	}
+	if err := validateGeocodingConfig(cfg.Geocoding); err != nil {
 		return err
 	}
 	if cfg.Planning.Router == "osrm" {
@@ -832,6 +881,31 @@ func validateMapConfig(cfg Map) error {
 	return nil
 }
 
+func validateGeocodingConfig(cfg Geocoding) error {
+	if cfg.Timeout < time.Second || cfg.Timeout > 30*time.Second || cfg.MaxResponseBytes < 16<<10 || cfg.MaxResponseBytes > 2<<20 ||
+		cfg.MaxResults < 1 || cfg.MaxResults > 10 || cfg.RateLimit < 1 || cfg.RateLimit > 120 || cfg.MinInterval < 100*time.Millisecond || cfg.MinInterval > time.Minute ||
+		cfg.CacheTTL < time.Minute || cfg.CacheTTL > 30*24*time.Hour || cfg.CacheEntries < 1 || cfg.CacheEntries > 4096 || len(cfg.CountryCodes) == 0 || len(cfg.CountryCodes) > 8 {
+		return errors.New("config: invalid geocoding settings")
+	}
+	for _, code := range cfg.CountryCodes {
+		if len(code) != 2 || code[0] < 'a' || code[0] > 'z' || code[1] < 'a' || code[1] > 'z' {
+			return errors.New("config: geocoding country codes must be lowercase ISO alpha-2")
+		}
+	}
+	searchURL := strings.TrimSpace(cfg.SearchURL)
+	if !cfg.Enabled && searchURL == "" {
+		return nil
+	}
+	parsed, err := url.Parse(searchURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || isLoopbackHost(parsed.Hostname()) {
+		return errors.New("config: geocoding requires a static non-loopback HTTPS search URL")
+	}
+	if !cfg.Enabled {
+		return errors.New("config: geocoding URL requires geocoding to be enabled")
+	}
+	return nil
+}
+
 func isLoopbackHost(host string) bool {
 	host = strings.TrimSpace(strings.Trim(host, "[]"))
 	if strings.EqualFold(host, "localhost") {
@@ -843,7 +917,10 @@ func isLoopbackHost(host string) bool {
 
 func validAllowedHost(host string) bool {
 	host = strings.TrimSpace(strings.ToLower(host))
-	if host == "" || host == "*" || strings.ContainsAny(host, "/\\?#@\r\n\t ") {
+	if host == "*" {
+		return true
+	}
+	if host == "" || strings.ContainsAny(host, "/\\?#@\r\n\t ") {
 		return false
 	}
 	if parsed := net.ParseIP(strings.Trim(host, "[]")); parsed != nil {
@@ -868,6 +945,9 @@ func validCookieName(value string) bool {
 func hostAllowed(host string, allowed []string) bool {
 	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
 	for _, candidate := range allowed {
+		if strings.TrimSpace(candidate) == "*" {
+			return true
+		}
 		if host == strings.Trim(strings.ToLower(strings.TrimSpace(candidate)), "[]") {
 			return true
 		}
@@ -995,6 +1075,7 @@ func (cfg Config) Diagnostic() map[string]any {
 		"sendberry_api_key": configured(cfg.SMS.SendberryKey), "sendberry_access_name": configured(cfg.SMS.SendberryName), "sendberry_access_password": configured(cfg.SMS.SendberryPassword),
 		"voice_enabled": cfg.Voice.Enabled, "voice_provider_key": configured(cfg.Voice.OpenAIAPIKey), "calendar_enabled": cfg.CalendarFeed.Enabled,
 		"routing_provider": cfg.Planning.Router, "map_tile_url": configured(cfg.Map.TileURL), "map_tile_token": configured(cfg.Map.TileToken),
+		"geocoding_enabled": cfg.Geocoding.Enabled, "geocoding_search_url": configured(cfg.Geocoding.SearchURL),
 		"confirmation_key_count": len(cfg.Confirmation.TokenKeys), "maintenance_mode": cfg.MaintenanceMode,
 	}
 }

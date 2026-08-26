@@ -50,7 +50,7 @@ func (store *NotificationWorkerStore) LoadDelivery(ctx context.Context, notifica
 		Channel: row.Channel, Recipient: row.RecipientSnapshot, TokenKeyID: row.TokenKeyID, TokenVersion: row.TokenVersion,
 		ConfirmationStatus: row.ConfirmationRequestStatus, Lifecycle: row.LifecycleStatus,
 		StartsAt: row.StartsAt.Time.UTC(), EndsAt: row.EndsAt.Time.UTC(), ExpiresAt: row.ExpiresAt.Time.UTC(),
-		JobType: row.JobType, VolumeM3: row.JVolumeM3, CustomerName: row.CustomerName,
+		JobType: row.JobType, VolumeM3: row.VolumeM3, CustomerName: row.CustomerName,
 	}, nil
 }
 

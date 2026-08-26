@@ -102,6 +102,20 @@ templ jobLocationEditor(page PageData, prefix string, values IntakeValues, custo
 		@mapAssetData(page)
 		<div class="section-heading"><div><p class="eyebrow">Einsatzort</p><h3 id={ prefix + "-pile-map-heading" }>Hackschnitzelhaufen markieren</h3></div><span class="status-badge" data-location-badge>{ locationBadge(values) }</span></div>
 		<p>Der Haufenstandort ist vom Kundenstandort getrennt. Erst „Standort übernehmen“ schreibt die gewählte Position in das Formular.</p>
+		<div class="location-search" data-location-search>
+			<label for={ prefix + "-pile-address-search" }>Adresse oder Ort suchen</label>
+			<div class="location-search__bar">
+				<input id={ prefix + "-pile-address-search" } type="search" maxlength="200" autocomplete="off" placeholder="z. B. Waldstraße 9, Unterneukirchen" data-location-search-input disabled?={ !page.GeocodingEnabled }/>
+				<button class="button button--quiet" type="button" data-location-search-submit disabled?={ !page.GeocodingEnabled }>Karte ausrichten</button>
+			</div>
+			if page.GeocodingEnabled {
+				<p class="form-hint">Die eingegebene Adresse wird zur Suche an den konfigurierten Kartendienst übertragen und nicht von HackWerk gespeichert.</p>
+			} else {
+				<p class="form-hint">Die externe Adresssuche ist für diese Installation nicht konfiguriert. Karte und Koordinaten bleiben vollständig nutzbar.</p>
+			}
+			<p class="form-hint location-search__status" data-location-search-status aria-live="polite"></p>
+			<ul class="location-search__results" data-location-search-results aria-label="Gefundene Adressen" hidden></ul>
+		</div>
 		<div id={ prefix + "-pile-map" } class="job-location-map" data-map-canvas role="application" aria-labelledby={ prefix + "-pile-map-heading" } tabindex="0"><div class="map-fallback" data-map-fallback>Die Straßenkarte wird geladen. Koordinaten können jederzeit direkt eingegeben werden.</div></div>
 		<div class="coordinate-grid">
 			<label for={ prefix + "-pile-latitude" }>Breitengrad<input id={ prefix + "-pile-latitude" } data-location-latitude inputmode="decimal" value={ values.PileLatitude } aria-invalid={ formFieldInvalid(fieldErrors, "pile_latitude") } aria-describedby={ formFieldDescription(fieldErrors, "pile_latitude") }/></label>
@@ -540,12 +554,16 @@ templ CustomerDetail(data CustomerDetailData) {
 								</summary>
 								<div class="compact-job-row__body">
 									<div class="action-row"><a class="button button--quiet" href={ "/jobs/" + job.ID + "/duplicate" }>Als neuen Entwurf duplizieren</a><form method="post" action={ "/recent/jobs/" + job.ID }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Als zuletzt geöffnet merken</button></form></div>
-									if job.ArchivedAt == nil && (job.WorkflowStatus == "waitlist" || job.WorkflowStatus == "planning") {
-										<form method="post" action={ "/jobs/" + job.ID } class="form-grid compact-form" data-transport-form data-job-duration-summary data-track-change data-record-id={ job.ID }>
+									if job.ArchivedAt == nil && jobWorkflowEditable(job.WorkflowStatus) {
+										<form method="post" action={ "/jobs/" + job.ID } class="form-grid compact-form" data-transport-form data-track-change data-record-id={ job.ID }>
+											if job.WorkflowStatus == "scheduled" {
+												<div class="form-hint span-2"><strong>Termin bleibt unverändert:</strong> Sie bearbeiten hier die Auftragsdetails. Terminzeit, Fahrer und Ressourcen werden ausschließlich im Kalender durch einen Administrator geändert. Wenn Typ oder Menge geändert werden, wird eine frühere Kundenbestätigung ungültig; ein Administrator muss sie danach bewusst neu versenden.</div>
+											}
+											<p class="form-hint span-2" data-job-duration-summary>Gesamtdauer wird aus Hack- und Transportdauer berechnet.</p>
 											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="customer_id" value={ data.Detail.Customer.ID }/><input type="hidden" name="version" value={ fmt.Sprint(job.Version) }/><input type="hidden" name="transport_mode" value="none" data-transport-default disabled/><label>Typ<select name="job_type" data-job-type><option value="chipping_only" selected?={ job.JobType == customers.JobTypeChippingOnly }>Nur Hackmaschine</option><option value="chipping_with_transport" selected?={ job.JobType == customers.JobTypeChippingWithTransport }>Mit Transport</option></select></label><label>Menge in m³<input name="volume_m3" value={ job.VolumeM3 } required/></label><label>Hackdauer<input name="hack_duration" value={ durationInput(job.EstimatedHackMinutes) } required/></label><label data-transport-field>Transportdauer<input name="transport_duration" value={ optionalDurationInput(job.EstimatedTransportMinutes) } data-transport-control/></label><label data-transport-field>Fahrten<input name="transport_trips" type="number" min="0" max="1000" value={ fmt.Sprint(job.TransportTripCount) } data-transport-control/></label><label data-transport-field>Transportmodus<select name="transport_mode" data-transport-control data-transport-mode><option value="none" selected?={ job.TransportMode == customers.TransportNone }>Kein Transport</option><option value="undecided" selected?={ job.TransportMode == customers.TransportUndecided }>Noch offen</option><option value="internal" selected?={ job.TransportMode == customers.TransportInternal }>Intern</option><option value="external" selected?={ job.TransportMode == customers.TransportExternal }>Extern</option></select></label><label class="check-label" data-external-confirmation><input name="external_confirmed" type="checkbox" value="true" checked?={ job.ExternalTransportConfirmed }/> externer Transport bestätigt</label><label>Frühestes Datum<input name="preferred_start" type="date" value={ job.PreferredStartDate }/></label><label>Spätestes Datum<input name="preferred_end" type="date" value={ job.PreferredEndDate }/></label><label>Dringlichkeit<select name="urgency"><option value="low" selected?={ job.Urgency == customers.UrgencyLow }>Niedrig</option><option value="normal" selected?={ job.Urgency == customers.UrgencyNormal }>Normal</option><option value="high" selected?={ job.Urgency == customers.UrgencyHigh }>Hoch</option><option value="urgent" selected?={ job.Urgency == customers.UrgencyUrgent }>Dringend</option></select></label><label>Quelle<select name="source"><option value="phone" selected?={ job.Source == customers.SourcePhone }>Telefon</option><option value="email" selected?={ job.Source == customers.SourceEmail }>E-Mail</option><option value="in_person" selected?={ job.Source == customers.SourceInPerson }>Persönlich</option><option value="other" selected?={ job.Source == customers.SourceOther }>Sonstige</option></select></label><label>Region<input name="region" value={ job.Region }/></label><label class="span-2">Wunsch<textarea name="preference_text">{ job.PreferenceText }</textarea></label>@jobLocationEditor(data.Shell.Page, "edit-"+job.ID, jobLocationValues(job), coordinateValue(data.Detail.Customer.Latitude), coordinateValue(data.Detail.Customer.Longitude), nil)
 											<div class="form-actions" data-sticky-actions><button class="button" type="submit">Auftrag speichern</button></div>
 										</form>
-										if data.Shell.Actor.Role == auth.RoleAdmin {
+										if data.Shell.Actor.Role == auth.RoleAdmin && (job.WorkflowStatus == "waitlist" || job.WorkflowStatus == "planning") {
 											<form method="post" action={ "/jobs/" + job.ID + "/archive" } class="compact-danger"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="customer_id" value={ data.Detail.Customer.ID }/><input type="hidden" name="version" value={ fmt.Sprint(job.Version) }/><button class="button button--danger" type="submit">Auftrag archivieren</button></form>
 										}
 									} else {
@@ -593,10 +611,14 @@ func customerDate(value string) string {
 	return parsed.Format("02.01.2006")
 }
 func jobActionLabel(workflow string, archived bool) string {
-	if !archived && (workflow == "waitlist" || workflow == "planning") {
+	if !archived && jobWorkflowEditable(workflow) {
 		return "Öffnen & bearbeiten"
 	}
 	return "Details öffnen"
+}
+
+func jobWorkflowEditable(workflow string) bool {
+	return workflow == "waitlist" || workflow == "planning" || workflow == "scheduled"
 }
 func customerAppointmentStatus(value customers.AppointmentHistory) string {
 	switch value.Lifecycle {

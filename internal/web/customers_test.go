@@ -29,9 +29,11 @@ type customerHTTPStore struct {
 
 	created customers.CreatedIntake
 	input   customers.IntakeInput
+	jobEdit customers.UpdateJobInput
 
 	createCalls          int
 	updateCustomerCalls  int
+	updateJobCalls       int
 	archiveCustomerCalls int
 	archiveJobCalls      int
 	priorityCalls        int
@@ -56,7 +58,9 @@ func (store *customerHTTPStore) CreateJob(context.Context, auth.Actor, customers
 	return store.created, nil
 }
 
-func (store *customerHTTPStore) UpdateJob(context.Context, auth.Actor, customers.UpdateJobInput) error {
+func (store *customerHTTPStore) UpdateJob(_ context.Context, _ auth.Actor, input customers.UpdateJobInput) error {
+	store.updateJobCalls++
+	store.jobEdit = input
 	return nil
 }
 
@@ -421,7 +425,7 @@ func TestCustomerHTTPDriverWaitlistIsNotCachedAndHidesAdminPlanningControls(t *t
 	}
 }
 
-func TestCustomerHTTPDetailMakesScheduledJobsReadOnly(t *testing.T) {
+func TestCustomerHTTPDetailMakesScheduledJobsEditableWithoutChangingAppointment(t *testing.T) {
 	store := &customerHTTPStore{detail: customers.CustomerDetail{
 		Customer: customers.Customer{ID: testCustomerID, FirstName: "Maria", LastName: "Maier", CountryCode: "AT", NotificationPreference: customers.NotifyNone, Version: 1},
 		Jobs:     []customers.Job{{ID: testJobID, JobNumber: "HW-2026-0042", JobType: customers.JobTypeChippingOnly, VolumeM3: "80.00", EstimatedHackMinutes: 180, TransportMode: customers.TransportNone, Urgency: customers.UrgencyNormal, Source: customers.SourcePhone, WorkflowStatus: "scheduled", Version: 2}},
@@ -431,11 +435,41 @@ func TestCustomerHTTPDetailMakesScheduledJobsReadOnly(t *testing.T) {
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	body := response.Body.String()
-	if response.Code != http.StatusOK || !strings.Contains(body, "schreibgeschützt") || !strings.Contains(body, "Details öffnen") {
-		t.Fatalf("scheduled job is not clearly read-only: %d %s", response.Code, body)
+	if response.Code != http.StatusOK || !strings.Contains(body, "Termin bleibt unverändert") || !strings.Contains(body, "Öffnen &amp; bearbeiten") {
+		t.Fatalf("scheduled job is not clearly editable: %d %s", response.Code, body)
 	}
-	if strings.Contains(body, `action="/jobs/`+testJobID+`"`) || strings.Contains(body, `action="/jobs/`+testJobID+`/archive"`) {
-		t.Fatalf("scheduled job exposes edit/archive form: %s", body)
+	if !strings.Contains(body, `action="/jobs/`+testJobID+`"`) || strings.Contains(body, `action="/jobs/`+testJobID+`/archive"`) || !strings.Contains(body, `data-job-location-editor`) {
+		t.Fatalf("scheduled job must expose all edit fields including location, but no archive action: %s", body)
+	}
+}
+
+func TestCustomerHTTPUpdatesScheduledJobIncludingPileLocation(t *testing.T) {
+	store := &customerHTTPStore{}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	form := validCustomerHTTPForm(csrfToken)
+	form.Set("customer_id", testCustomerID)
+	form.Set("version", "7")
+	form.Set("job_type", "chipping_with_transport")
+	form.Set("transport_mode", "external")
+	form.Set("transport_duration", "1:15")
+	form.Set("transport_trips", "3")
+	form.Set("external_confirmed", "true")
+	form.Set("pile_latitude", "46.712345")
+	form.Set("pile_longitude", "15.567890")
+	form.Set("pile_location_source", "map_pin")
+	request := authenticatedCustomerRequest(t, http.MethodPost, "/jobs/"+testJobID, form, sessionToken, csrfToken)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/customers/"+testCustomerID {
+		t.Fatalf("status/location = %d/%q, body = %s", response.Code, response.Header().Get("Location"), response.Body.String())
+	}
+	if store.updateJobCalls != 1 || store.jobEdit.ExpectedVersion != 7 || store.jobEdit.Job.JobType != customers.JobTypeChippingWithTransport ||
+		store.jobEdit.Job.EstimatedTransportMinutes != 75 || store.jobEdit.Job.TransportTripCount != 3 || !store.jobEdit.Job.ExternalTransportConfirmed ||
+		store.jobEdit.Job.PileLatitude == nil || *store.jobEdit.Job.PileLatitude != 46.712345 || store.jobEdit.Job.PileLongitude == nil || *store.jobEdit.Job.PileLongitude != 15.56789 ||
+		store.jobEdit.Job.PileLocationSource != customers.PileSourceMapPin {
+		t.Fatalf("scheduled job update = calls %d, input %#v", store.updateJobCalls, store.jobEdit)
 	}
 }
 

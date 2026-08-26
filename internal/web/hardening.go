@@ -15,6 +15,7 @@ type secureRequestKey struct{}
 
 type networkBoundary struct {
 	allowedHosts map[string]struct{}
+	allowAnyHost bool
 	trusted      []*net.IPNet
 }
 
@@ -29,7 +30,12 @@ func newNetworkBoundary(cfg config.Config) (*networkBoundary, error) {
 	}
 	boundary := &networkBoundary{allowedHosts: make(map[string]struct{}, len(allowedHosts))}
 	for _, host := range allowedHosts {
-		boundary.allowedHosts[strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")] = struct{}{}
+		normalized := strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
+		if normalized == "*" {
+			boundary.allowAnyHost = true
+			continue
+		}
+		boundary.allowedHosts[normalized] = struct{}{}
 	}
 	for _, value := range cfg.HTTP.TrustedProxyCIDRs {
 		_, cidr, err := net.ParseCIDR(value)
@@ -48,7 +54,7 @@ func (boundary *networkBoundary) Middleware(next http.Handler) http.Handler {
 			host = parsed
 		}
 		host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
-		if _, ok := boundary.allowedHosts[host]; !ok {
+		if _, ok := boundary.allowedHosts[host]; !boundary.allowAnyHost && !ok {
 			http.Error(response, "Ungültiger Host.", http.StatusBadRequest)
 			return
 		}
