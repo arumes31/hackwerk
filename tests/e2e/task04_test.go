@@ -637,7 +637,7 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
-	if err := runBrowserStep(browserContext, "driver submits job note",
+	if err := runBrowserStepWithTimeout(browserContext, "driver submits job note", 30*time.Second,
 		chromedp.Evaluate(`document.documentElement.dataset.e2eNavigationMarker='pending'`, nil),
 		chromedp.Click("form[action='/jobs/"+jobID+"/notes'] button[type='submit']", chromedp.ByQuery),
 		chromedp.WaitNotPresent("html[data-e2e-navigation-marker='pending']", chromedp.ByQuery),
