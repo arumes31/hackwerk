@@ -91,6 +91,7 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 		chromedp.SetValue("#username", "admin-task04", chromedp.ByQuery), chromedp.SetValue("#password", adminPassword, chromedp.ByQuery),
 		chromedp.Click("form[action='/login'] button[type='submit']", chromedp.ByQuery),
 		chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery),
+		chromedp.EmulateViewport(1280, 720),
 		chromedp.Navigate(server.URL+"/dashboard?date=2026-08-25"), chromedp.WaitVisible(".dashboard-appointment", chromedp.ByQuery),
 		chromedp.Text("main", &adminText, chromedp.ByQuery),
 	); err != nil {
@@ -154,6 +155,43 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 		adminMenuAudit.IconCount != 1 || adminMenuAudit.Width < 44 || adminMenuAudit.Height < 44 {
 		t.Fatalf("admin menu icon audit = %+v", adminMenuAudit)
 	}
+	metricAudit := func(width, height int64) struct {
+		BodyOverflow, RailOverflow bool
+		Count, Rows, SmallTargets  int
+		MaxCardHeight              float64
+	} {
+		t.Helper()
+		var audit struct {
+			BodyOverflow, RailOverflow bool
+			Count, Rows, SmallTargets  int
+			MaxCardHeight              float64
+		}
+		if err := chromedp.Run(browserContext,
+			chromedp.EmulateViewport(width, height),
+			chromedp.Evaluate(`(() => {
+				const rail=document.querySelector('.dashboard-metrics');
+				const cards=[...rail.querySelectorAll('.metric-card')];
+				const rects=cards.map(card=>card.getBoundingClientRect());
+				return {BodyOverflow:document.documentElement.scrollWidth>window.innerWidth,
+					RailOverflow:rail.scrollWidth>rail.clientWidth+1,Count:cards.length,
+					Rows:new Set(rects.map(rect=>Math.round(rect.top))).size,
+					SmallTargets:rects.filter(rect=>rect.height<44).length,
+					MaxCardHeight:Math.max(...rects.map(rect=>rect.height))};
+			})()`, &audit),
+		); err != nil {
+			t.Fatal(browserDiagnostics(browserContext, err))
+		}
+		return audit
+	}
+	for _, viewport := range []struct {
+		name          string
+		width, height int64
+	}{{"720p", 1280, 720}, {"1080p", 1920, 1080}} {
+		audit := metricAudit(viewport.width, viewport.height)
+		if audit.BodyOverflow || audit.RailOverflow || audit.Count != 7 || audit.Rows != 1 || audit.SmallTargets != 0 || audit.MaxCardHeight > 64 {
+			t.Fatalf("%s dashboard metric audit = %+v", viewport.name, audit)
+		}
+	}
 
 	var tabletAudit struct {
 		Overflow, PrimaryVisible, BottomHidden bool
@@ -203,6 +241,11 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 	if mobileAudit.Overflow || mobileAudit.MenuOpen || !mobileAudit.FocusReturned || mobileAudit.H1Count != 1 || mobileAudit.SmallTargets != 0 ||
 		mobileAudit.MissingNames != 0 || mobileAudit.UnlabelledFields != 0 || mobileAudit.MissingLandmarks {
 		t.Fatalf("mobile accessibility audit = %+v", mobileAudit)
+	}
+	mobileMetrics := metricAudit(360, 800)
+	if mobileMetrics.BodyOverflow || !mobileMetrics.RailOverflow || mobileMetrics.Count != 7 || mobileMetrics.Rows != 1 ||
+		mobileMetrics.SmallTargets != 0 || mobileMetrics.MaxCardHeight > 64 {
+		t.Fatalf("mobile dashboard metric audit = %+v", mobileMetrics)
 	}
 
 	var driverText string
