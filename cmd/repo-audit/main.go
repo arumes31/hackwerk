@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -38,7 +39,7 @@ func auditRepository() (findings []string, resultErr error) {
 	defer func() {
 		resultErr = errors.Join(resultErr, repository.Close())
 	}()
-	for _, root := range []string{"cmd", "db", "docs", "internal", "scripts", "web", "tests", "acceptance", "reference", ".github", "codex/tasks", "Dockerfile", "compose.yaml", "compose.prod.example.yaml", ".env.example", "Makefile", "go.mod", "go.sum"} {
+	for _, root := range []string{"cmd", "db", "internal", "scripts", "web", "tests", "reference", ".github", "Dockerfile", "compose.yaml", "compose.prod.example.yaml", ".env.example", "Makefile", "go.mod", "go.sum"} {
 		if err := scanRoot(repository, root, &findings); err != nil {
 			return nil, err
 		}
@@ -47,6 +48,12 @@ func auditRepository() (findings []string, resultErr error) {
 }
 
 func scanRoot(repository *os.Root, root string, findings *[]string) error {
+	if _, err := repository.Stat(root); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr

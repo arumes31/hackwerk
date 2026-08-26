@@ -619,13 +619,17 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 
 	var jobLink string
 	var customerNoteText, customerNoteFooter string
-	if err := runBrowserStep(browserContext, "driver opens job and adds note",
+	if err := runBrowserStep(browserContext, "driver opens assigned job",
 		chromedp.Focus(appointmentRootSelector, chromedp.ByQuery),
 		chromedp.KeyEvent("\r"),
 		chromedp.WaitVisible("[data-appointment-job-link]", chromedp.ByQuery),
 		chromedp.AttributeValue("[data-appointment-job-link]", "href", &jobLink, nil, chromedp.ByQuery),
 		chromedp.Click("[data-appointment-job-link]", chromedp.ByQuery),
 		chromedp.WaitVisible("#job-"+jobID+" > summary", chromedp.ByQuery),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if err := runBrowserStep(browserContext, "driver adds job note",
 		chromedp.Evaluate(fmt.Sprintf(`document.querySelector(%q).open=true`, "#job-"+jobID), nil),
 		chromedp.WaitVisible("#notes-"+jobID+" summary", chromedp.ByQuery),
 		chromedp.Evaluate(fmt.Sprintf(`document.querySelector(%q).open=true`, "#notes-"+jobID), nil),
@@ -638,6 +642,10 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		chromedp.WaitVisible("#notes-"+jobID+" blockquote", chromedp.ByQuery),
 		chromedp.Text("#notes-"+jobID+" blockquote p", &customerNoteText, chromedp.ByQuery),
 		chromedp.Text("#notes-"+jobID+" blockquote footer", &customerNoteFooter, chromedp.ByQuery),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if err := runBrowserStep(browserContext, "driver returns to calendar",
 		chromedp.Navigate(server.URL+"/calendar?date=2026-08-25"),
 		chromedp.WaitVisible(appointmentEventSelector, chromedp.ByQuery),
 	); err != nil {
