@@ -362,6 +362,10 @@ type fakeStore struct {
 	completeCalled    bool
 }
 
+func (fake *fakeStore) Plan(context.Context, auth.Actor, PlanInput, string) (Appointment, error) {
+	return fake.current, nil
+}
+
 func (fake *fakeStore) CreateDraft(context.Context, auth.Actor, CreateDraftInput) (Appointment, error) {
 	return fake.current, nil
 }

@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"example.invalid/hackplan/internal/outbound"
 )
 
 type DisabledTranscriber struct{}
@@ -38,7 +40,7 @@ func NewOpenAITranscriber(apiKey, model string, timeout time.Duration, maxRespon
 	if strings.TrimSpace(apiKey) == "" || strings.TrimSpace(model) == "" || timeout <= 0 || maxResponse < 1024 || maxResponse > 4<<20 {
 		return nil, errors.New("voice: invalid OpenAI transcriber configuration")
 	}
-	return &OpenAITranscriber{apiKey: apiKey, model: model, endpoint: "https://api.openai.com/v1/audio/transcriptions", client: &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, maxResponse: maxResponse}, nil
+	return &OpenAITranscriber{apiKey: apiKey, model: model, endpoint: "https://api.openai.com/v1/audio/transcriptions", client: &http.Client{Transport: outbound.Transport(), Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, maxResponse: maxResponse}, nil
 }
 
 func (provider *OpenAITranscriber) Transcribe(ctx context.Context, audio Audio, language string, _ Metadata) (result Transcript, resultErr error) {

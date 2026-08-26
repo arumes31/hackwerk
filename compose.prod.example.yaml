@@ -24,7 +24,6 @@ x-runtime-environment: &runtime-environment
   PLANNING_ROUTER: ${PLANNING_ROUTER:-haversine}
   PLANNING_ROUTING_URL: ${PLANNING_ROUTING_URL:-}
   MAP_TILE_URL: ${MAP_TILE_URL:?MAP_TILE_URL setzen}
-  MAP_TILE_TOKEN: ${MAP_TILE_TOKEN:-}
   MAP_TILE_ATTRIBUTION: ${MAP_TILE_ATTRIBUTION:?MAP_TILE_ATTRIBUTION setzen}
   WORKER_HEARTBEAT_STALE_AFTER: ${WORKER_HEARTBEAT_STALE_AFTER:-2m}
 
@@ -39,7 +38,7 @@ x-runtime-security: &runtime-security
 
 services:
   postgres:
-    image: postgres:18.6-alpine
+    image: postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
     environment:
       POSTGRES_DB: hackwerk
       POSTGRES_USER: hackwerk_bootstrap
@@ -86,10 +85,11 @@ services:
     command: ["serve"]
     environment:
       <<: *runtime-environment
-      VOICE_OPENAI_API_KEY: ${VOICE_OPENAI_API_KEY:-}
+      VOICE_OPENAI_API_KEY_FILE: /run/secrets/voice_openai_api_key
+      MAP_TILE_TOKEN_FILE: /run/secrets/map_tile_token
       METRICS_ENABLED: "true"
       METRICS_LISTEN_ADDR: 172.33.0.10:19090
-    secrets: [database_url, confirmation_token_keys]
+    secrets: [database_url, confirmation_token_keys, voice_openai_api_key, map_tile_token]
     depends_on:
       postgres: {condition: service_healthy}
     ports: ["127.0.0.1:18533:18533"]
@@ -120,23 +120,30 @@ services:
       MAIL_SMTP_HOST: ${MAIL_SMTP_HOST:-}
       MAIL_SMTP_PORT: ${MAIL_SMTP_PORT:-587}
       MAIL_SMTP_TLS: ${MAIL_SMTP_TLS:-starttls}
-      MAIL_SMTP_USERNAME: ${MAIL_SMTP_USERNAME:-}
-      MAIL_SMTP_PASSWORD: ${MAIL_SMTP_PASSWORD:-}
+      MAIL_SMTP_USERNAME_FILE: /run/secrets/mail_smtp_username
+      MAIL_SMTP_PASSWORD_FILE: /run/secrets/mail_smtp_password
       MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
       MAIL_FROM_NAME: ${MAIL_FROM_NAME:-HackWerk}
       SMS_PROVIDER: ${SMS_PROVIDER:-sendberry}
+      SMS_WEBHOOK_URL: ${SMS_WEBHOOK_URL:-}
+      SMS_WEBHOOK_HMAC_SECRET_FILE: /run/secrets/sms_webhook_hmac_secret
       SENDBERRY_API_URL: ${SENDBERRY_API_URL:-}
-      SENDBERRY_API_KEY: ${SENDBERRY_API_KEY:-}
-      SENDBERRY_API_KEY_FILE: ${SENDBERRY_API_KEY_FILE:-}
-      SENDBERRY_ACCESS_NAME: ${SENDBERRY_ACCESS_NAME:-}
-      SENDBERRY_ACCESS_NAME_FILE: ${SENDBERRY_ACCESS_NAME_FILE:-}
-      SENDBERRY_ACCESS_PASSWORD: ${SENDBERRY_ACCESS_PASSWORD:-}
-      SENDBERRY_ACCESS_PASSWORD_FILE: ${SENDBERRY_ACCESS_PASSWORD_FILE:-}
+      SENDBERRY_API_KEY_FILE: /run/secrets/sendberry_api_key
+      SENDBERRY_ACCESS_NAME_FILE: /run/secrets/sendberry_access_name
+      SENDBERRY_ACCESS_PASSWORD_FILE: /run/secrets/sendberry_access_password
       SMS_SENDER: ${SMS_SENDER:-}
       SMS_TIMEOUT: ${SMS_TIMEOUT:-8s}
       SMS_MAX_ATTEMPTS: ${SMS_MAX_ATTEMPTS:-6}
       METRICS_ENABLED: "false"
-    secrets: [database_url, confirmation_token_keys]
+    secrets:
+      - database_url
+      - confirmation_token_keys
+      - mail_smtp_username
+      - mail_smtp_password
+      - sendberry_api_key
+      - sendberry_access_name
+      - sendberry_access_password
+      - sms_webhook_hmac_secret
     depends_on:
       postgres: {condition: service_healthy}
     networks: [backend, egress]
@@ -146,9 +153,15 @@ services:
       resources:
         limits: {cpus: "1.00", memory: 384M, pids: 128}
         reservations: {memory: 96M}
+    healthcheck:
+      test: ["CMD", "/hackwerk", "healthcheck", "worker"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 15s
 
   backup:
-    image: postgres:18.6-alpine
+    image: postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
     entrypoint: ["/bin/sh", "/opt/hackwerk/backup-postgres.sh"]
     environment:
       DATABASE_URL_FILE: /run/secrets/backup_database_url
@@ -188,3 +201,11 @@ secrets:
   postgres_bootstrap_password: {file: ./secrets/postgres_bootstrap_password}
   postgres_migration_password: {file: ./secrets/postgres_migration_password}
   postgres_runtime_password: {file: ./secrets/postgres_runtime_password}
+  mail_smtp_username: {file: ./secrets/mail_smtp_username}
+  mail_smtp_password: {file: ./secrets/mail_smtp_password}
+  sendberry_api_key: {file: ./secrets/sendberry_api_key}
+  sendberry_access_name: {file: ./secrets/sendberry_access_name}
+  sendberry_access_password: {file: ./secrets/sendberry_access_password}
+  voice_openai_api_key: {file: ./secrets/voice_openai_api_key}
+  map_tile_token: {file: ./secrets/map_tile_token}
+  sms_webhook_hmac_secret: {file: ./secrets/sms_webhook_hmac_secret}

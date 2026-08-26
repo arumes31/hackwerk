@@ -177,13 +177,45 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		t.Fatalf("UTC-device Vienna default = %q, want %q", defaultPlanningStart, wantDefaultStart)
 	}
 	var submittedForm string
-	if err := runBrowserStep(browserContext, "submit mobile proposal form",
+	if err := runBrowserStep(browserContext, "fill mobile proposal form",
 		chromedp.SetValue("[data-planning-start]", "2026-08-25T08:00", chromedp.ByQuery),
 		chromedp.SetValue("[data-planning-duration]", "180", chromedp.ByQuery),
 		chromedp.Click("input[name='driver_id'][value='"+driverID+"']", chromedp.ByQuery),
 		chromedp.SetValue("select[name='primary_driver_id']", driverID, chromedp.ByQuery),
 		chromedp.SetValue("select[name='chipper_resource_id']", chipperID, chromedp.ByQuery),
 		chromedp.Evaluate(`JSON.stringify([...new FormData(document.querySelector('[data-planning-form]')).entries()])`, &submittedForm),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	var planningConflictFocus, planningConflictLink, planningConflictAssociation bool
+	if err := runBrowserStep(browserContext, "planning conflict focuses linked error summary",
+		chromedp.Evaluate(`window.__planningFetch=window.fetch;window.fetch=(input,...args)=>String(input).includes('/api/v1/calendar/plan')?Promise.resolve(new Response(JSON.stringify({error:{code:'reservation_conflict',message:'Dieser Slot ist bereits belegt.'}}),{status:409,headers:{'Content-Type':'application/json'}})):window.__planningFetch(input,...args)`, nil),
+		chromedp.Click("[data-planning-form] button[type='submit']", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('[data-planning-error]').textContent.includes('bereits belegt')`, nil),
+		chromedp.Evaluate(`document.activeElement === document.querySelector('[data-planning-error]')`, &planningConflictFocus),
+		chromedp.Evaluate(`document.querySelector('[data-planning-error] a')?.getAttribute('href') === '#planning-start'`, &planningConflictLink),
+		chromedp.Evaluate(`document.querySelector('#planning-start').getAttribute('aria-errormessage') === 'planning-error' && document.querySelector('#planning-start').getAttribute('aria-invalid') === 'true'`, &planningConflictAssociation),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if !planningConflictFocus || !planningConflictLink || !planningConflictAssociation {
+		t.Fatalf("planning conflict focus/link/association = %v/%v/%v", planningConflictFocus, planningConflictLink, planningConflictAssociation)
+	}
+	var planningServerFocus, planningServerFieldAssociation bool
+	if err := runBrowserStep(browserContext, "planning server error refocuses summary",
+		chromedp.Evaluate(`window.fetch=(input,...args)=>String(input).includes('/api/v1/calendar/plan')?Promise.resolve(new Response(JSON.stringify({error:{code:'internal_error',message:'Planung vorübergehend nicht verfügbar.'}}),{status:503,headers:{'Content-Type':'application/json'}})):window.__planningFetch(input,...args)`, nil),
+		chromedp.Click("[data-planning-form] button[type='submit']", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('[data-planning-error]').textContent.includes('vorübergehend')`, nil),
+		chromedp.Evaluate(`document.activeElement === document.querySelector('[data-planning-error]')`, &planningServerFocus),
+		chromedp.Evaluate(`Boolean(document.querySelector('[aria-errormessage="planning-error"]'))`, &planningServerFieldAssociation),
+		chromedp.Evaluate(`window.fetch=window.__planningFetch;delete window.__planningFetch`, nil),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if !planningServerFocus || planningServerFieldAssociation {
+		t.Fatalf("planning server error focus/field association = %v/%v", planningServerFocus, planningServerFieldAssociation)
+	}
+	if err := runBrowserStep(browserContext, "submit mobile proposal form",
 		chromedp.Click("[data-planning-form] button[type='submit']", chromedp.ByQuery),
 		chromedp.Poll(`!document.querySelector('[data-planning-dialog]').open || !document.querySelector('[data-planning-error]').hidden`, nil),
 	); err != nil {

@@ -1,0 +1,125 @@
+// Package outbound provides the shared network boundary for external HTTP providers.
+package outbound
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/netip"
+	"time"
+)
+
+// ErrRestrictedAddress reports that a provider resolved to an address which
+// must not be reachable from application-controlled outbound requests.
+var ErrRestrictedAddress = errors.New("outbound: restricted destination address")
+
+type resolver interface {
+	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
+}
+
+type dialContextFunc func(context.Context, string, string) (net.Conn, error)
+
+// Transport returns a clone of the standard HTTP transport with connection-time
+// DNS validation. Proxies are intentionally disabled because they could resolve
+// the unchecked provider hostname outside this trust boundary.
+func Transport() *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	dialer := &net.Dialer{}
+	transport.DialContext = restrictedDialContext(net.DefaultResolver, dialer.DialContext)
+	return transport
+}
+
+// DialContext returns a connection-time DNS validating dialer for non-HTTP
+// protocols such as SMTP.
+func DialContext(timeout time.Duration) func(context.Context, string, string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: timeout}
+	return restrictedDialContext(net.DefaultResolver, dialer.DialContext)
+}
+
+func restrictedDialContext(nameResolver resolver, dial dialContextFunc) dialContextFunc {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, fmt.Errorf("outbound: invalid destination: %w", err)
+		}
+		if host == "" || port == "" {
+			return nil, errors.New("outbound: invalid destination")
+		}
+		addresses, err := resolve(ctx, nameResolver, host)
+		if err != nil {
+			return nil, err
+		}
+		for _, candidate := range addresses {
+			if restricted(candidate) {
+				return nil, fmt.Errorf("%w: %s", ErrRestrictedAddress, host)
+			}
+		}
+
+		var dialErr error
+		for _, candidate := range addresses {
+			connection, err := dial(ctx, network, net.JoinHostPort(candidate.String(), port))
+			if err == nil {
+				return connection, nil
+			}
+			dialErr = errors.Join(dialErr, err)
+		}
+		return nil, fmt.Errorf("outbound: connecting provider: %w", dialErr)
+	}
+}
+
+func resolve(ctx context.Context, nameResolver resolver, host string) ([]netip.Addr, error) {
+	if address, err := netip.ParseAddr(host); err == nil {
+		return []netip.Addr{address.Unmap()}, nil
+	}
+	addresses, err := nameResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return nil, fmt.Errorf("outbound: resolving provider: %w", err)
+	}
+	if len(addresses) == 0 {
+		return nil, errors.New("outbound: provider resolved without addresses")
+	}
+	for index := range addresses {
+		addresses[index] = addresses[index].Unmap()
+	}
+	return addresses, nil
+}
+
+func restricted(address netip.Addr) bool {
+	return !address.IsValid() || !address.IsGlobalUnicast() || address.IsPrivate() ||
+		address.IsLoopback() || address.IsUnspecified() || address.IsLinkLocalUnicast() ||
+		address.IsLinkLocalMulticast() || address.IsMulticast() || specialUse(address)
+}
+
+func specialUse(address netip.Addr) bool {
+	for _, prefix := range restrictedPrefixes {
+		if prefix.Contains(address) {
+			return true
+		}
+	}
+	return false
+}
+
+var restrictedPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("233.252.0.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("100:0:0:1::/64"),
+	netip.MustParsePrefix("2001::/23"),
+	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("3fff::/20"),
+	netip.MustParsePrefix("5f00::/16"),
+}

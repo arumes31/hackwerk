@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -153,6 +154,168 @@ func TestAppointmentDetailReturnsContactOnlyOnAuthenticatedDetailRoute(t *testin
 	}
 }
 
+func TestCalendarPlanningFallbackUsesRealLinkAndAdminOnlyForm(t *testing.T) {
+	store := &appointmentHTTPStore{planningOptions: appointmentPlanningOptionsFixture()}
+	router, sessionToken, csrfToken := appointmentTestRouter(t, auth.RoleAdmin, store)
+
+	calendarResponse := httptest.NewRecorder()
+	router.ServeHTTP(calendarResponse, authenticatedCustomerRequest(t, http.MethodGet, "/calendar", nil, sessionToken, csrfToken))
+	if calendarResponse.Code != http.StatusOK ||
+		!strings.Contains(calendarResponse.Body.String(), `href="/calendar/plan?job_id=`+testJobID+`"`) ||
+		!strings.Contains(calendarResponse.Body.String(), `data-duration="240"`) {
+		t.Fatalf("calendar fallback link = %d %q", calendarResponse.Code, calendarResponse.Body.String())
+	}
+
+	formResponse := httptest.NewRecorder()
+	router.ServeHTTP(formResponse, authenticatedCustomerRequest(t, http.MethodGet, "/calendar/plan?job_id="+testJobID, nil, sessionToken, csrfToken))
+	body := formResponse.Body.String()
+	for _, expected := range []string{
+		`action="/calendar/plan"`, `name="csrf_token" value="` + csrfToken + `"`,
+		`name="job_id" value="` + testJobID + `"`, `id="planning-start"`,
+		`name="duration_minutes" value="240"`,
+		"Der Termin wird nicht fixiert", "Vollständig ohne Drag-and-drop bedienbar.",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("planning fallback missing %q in %q", expected, body)
+		}
+	}
+	if formResponse.Code != http.StatusOK || formResponse.Header().Get("Cache-Control") != "no-store" || store.createCalls != 0 {
+		t.Fatalf("planning fallback status/cache/create = %d/%q/%d", formResponse.Code, formResponse.Header().Get("Cache-Control"), store.createCalls)
+	}
+
+	driverStore := &appointmentHTTPStore{planningOptions: appointmentPlanningOptionsFixture()}
+	driverRouter, driverSession, driverCSRF := appointmentTestRouter(t, auth.RoleDriver, driverStore)
+	driverResponse := httptest.NewRecorder()
+	driverRouter.ServeHTTP(driverResponse, authenticatedCustomerRequest(t, http.MethodGet, "/calendar/plan?job_id="+testJobID, nil, driverSession, driverCSRF))
+	if driverResponse.Code != http.StatusForbidden || driverStore.createCalls != 0 {
+		t.Fatalf("driver fallback status/create = %d/%d", driverResponse.Code, driverStore.createCalls)
+	}
+}
+
+func TestCalendarPlanningFallbackRequiresCSRFAndCreatesOnlyProposal(t *testing.T) {
+	store := &appointmentHTTPStore{planningOptions: appointmentPlanningOptionsFixture()}
+	router, sessionToken, csrfToken := appointmentTestRouter(t, auth.RoleAdmin, store)
+	form := validAppointmentPlanningForm(csrfToken)
+
+	withoutCSRF := form
+	withoutCSRF.Del("csrf_token")
+	forbiddenResponse := httptest.NewRecorder()
+	router.ServeHTTP(forbiddenResponse, authenticatedCustomerRequest(t, http.MethodPost, "/calendar/plan", withoutCSRF, sessionToken, csrfToken))
+	if forbiddenResponse.Code != http.StatusForbidden || store.createCalls != 0 {
+		t.Fatalf("missing CSRF status/create = %d/%d", forbiddenResponse.Code, store.createCalls)
+	}
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/calendar/plan", validAppointmentPlanningForm(csrfToken), sessionToken, csrfToken))
+	location := response.Header().Get("Location")
+	if response.Code != http.StatusSeeOther || !strings.Contains(location, "planned=proposal") || !strings.Contains(location, "appointment=") {
+		t.Fatalf("fallback proposal response = %d location %q body %q", response.Code, location, response.Body.String())
+	}
+	if store.createCalls != 1 || store.assignCalls != 1 || store.proposeCalls != 1 || store.fixCalls != 0 || store.current.Lifecycle != appointment.LifecycleProposal {
+		t.Fatalf("fallback calls/lifecycle = create %d assign %d propose %d fix %d lifecycle %q", store.createCalls, store.assignCalls, store.proposeCalls, store.fixCalls, store.current.Lifecycle)
+	}
+}
+
+func TestCalendarPlanningFallbackHandlesTransportModes(t *testing.T) {
+	t.Run("internal requires vehicle", func(t *testing.T) {
+		store := &appointmentHTTPStore{planningOptions: appointmentPlanningOptionsFixture()}
+		router, sessionToken, csrfToken := appointmentTestRouter(t, auth.RoleAdmin, store)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodGet, "/calendar/plan?job_id="+testJobID, nil, sessionToken, csrfToken))
+		body := response.Body.String()
+		if response.Code != http.StatusOK || !strings.Contains(body, "Transportmittel (erforderlich)") || !strings.Contains(body, `name="transport_resource_id" required`) {
+			t.Fatalf("internal transport form=%d %q", response.Code, body)
+		}
+	})
+
+	t.Run("confirmed external needs no vehicle", func(t *testing.T) {
+		options := appointmentPlanningOptionsFixture()
+		options.Waitlist[0].TransportMode = "external"
+		options.Waitlist[0].ExternalTransportConfirmed = true
+		store := &appointmentHTTPStore{planningOptions: options}
+		router, sessionToken, csrfToken := appointmentTestRouter(t, auth.RoleAdmin, store)
+		form := validAppointmentPlanningForm(csrfToken)
+		form.Del("transport_resource_id")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/calendar/plan", form, sessionToken, csrfToken))
+		if response.Code != http.StatusSeeOther || store.current.Lifecycle != appointment.LifecycleProposal {
+			t.Fatalf("external transport response=%d lifecycle=%q body=%q", response.Code, store.current.Lifecycle, response.Body.String())
+		}
+	})
+
+	t.Run("undecided is rejected without partial draft", func(t *testing.T) {
+		options := appointmentPlanningOptionsFixture()
+		options.Waitlist[0].TransportMode = "undecided"
+		store := &appointmentHTTPStore{planningOptions: options}
+		router, sessionToken, csrfToken := appointmentTestRouter(t, auth.RoleAdmin, store)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/calendar/plan", validAppointmentPlanningForm(csrfToken), sessionToken, csrfToken))
+		body := response.Body.String()
+		if response.Code != http.StatusUnprocessableEntity || !strings.Contains(body, `href="#planning-transport-resource"`) || store.createCalls != 0 || store.current.ID != "" {
+			t.Fatalf("undecided response=%d create=%d body=%q", response.Code, store.createCalls, body)
+		}
+	})
+}
+
+func TestCalendarPlanningFallbackLinksValidationToActualField(t *testing.T) {
+	for _, test := range []struct {
+		name, field, value, target string
+	}{
+		{name: "duration shorter than job", field: "duration_minutes", value: "180", target: "planning-duration"},
+		{name: "primary not selected", field: "primary_driver_id", value: "70000000-0000-0000-0000-000000000099", target: "planning-primary-driver"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &appointmentHTTPStore{planningOptions: appointmentPlanningOptionsFixture()}
+			router, sessionToken, csrfToken := appointmentTestRouter(t, auth.RoleAdmin, store)
+			form := validAppointmentPlanningForm(csrfToken)
+			form.Set(test.field, test.value)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/calendar/plan", form, sessionToken, csrfToken))
+			if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), `href="#`+test.target+`"`) || store.createCalls != 0 {
+				t.Fatalf("validation response=%d create=%d body=%q", response.Code, store.createCalls, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestCalendarPlanningFallbackKeepsValuesAndLinksConflictError(t *testing.T) {
+	store := &appointmentHTTPStore{planningOptions: appointmentPlanningOptionsFixture(), proposeErr: appointment.ErrConflict}
+	router, sessionToken, csrfToken := appointmentTestRouter(t, auth.RoleAdmin, store)
+	form := validAppointmentPlanningForm(csrfToken)
+	form.Set("override_reason", "Disposition geprüft")
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/calendar/plan", form, sessionToken, csrfToken))
+	body := response.Body.String()
+	for _, expected := range []string{
+		`id="planning-error"`, `tabindex="-1"`, `autofocus`, `href="#planning-start"`,
+		`value="2026-09-01T08:00"`, `value="240"`, `value="` + operationDriverID + `" selected`,
+		`aria-invalid="true"`, `aria-errormessage="planning-error"`, "Disposition geprüft",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("conflict form missing %q in %q", expected, body)
+		}
+	}
+	if response.Code != http.StatusConflict || store.createCalls != 1 || store.assignCalls != 1 || store.proposeCalls != 1 || store.cancelCalls != 0 || store.fixCalls != 0 || store.current.ID != "" {
+		t.Fatalf("conflict status/calls = %d create %d assign %d propose %d cancel %d fix %d", response.Code, store.createCalls, store.assignCalls, store.proposeCalls, store.cancelCalls, store.fixCalls)
+	}
+}
+
+func TestCalendarPlanningFallbackDoesNotBlameAFieldForServerFailure(t *testing.T) {
+	store := &appointmentHTTPStore{planningOptions: appointmentPlanningOptionsFixture(), proposeErr: errors.New("database unavailable")}
+	router, sessionToken, csrfToken := appointmentTestRouter(t, auth.RoleAdmin, store)
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/calendar/plan", validAppointmentPlanningForm(csrfToken), sessionToken, csrfToken))
+	body := response.Body.String()
+	if response.Code != http.StatusInternalServerError || !strings.Contains(body, `id="planning-error"`) {
+		t.Fatalf("server failure response = %d %q", response.Code, body)
+	}
+	if strings.Contains(body, `href="#planning-start"`) || strings.Contains(body, `aria-invalid="true"`) || strings.Contains(body, `aria-errormessage="planning-error"`) {
+		t.Fatalf("server failure incorrectly associates a valid field: %q", body)
+	}
+}
+
 func TestCalendarTemplateShowsReadOnlyNoticeOnlyToDriver(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -180,6 +343,28 @@ func TestCalendarTemplateShowsReadOnlyNoticeOnlyToDriver(t *testing.T) {
 				t.Fatalf("read-only notice present = %v, want %v", hasNotice, test.wantNotice)
 			}
 		})
+	}
+}
+
+func appointmentPlanningOptionsFixture() appointment.PlanningOptions {
+	return appointment.PlanningOptions{
+		Drivers: []appointment.PlanningDriver{{ID: operationDriverID, Name: "Anna Fahrerin"}},
+		Resources: []appointment.PlanningResource{
+			{ID: testAppointmentResourceID, Name: "Hacker 1", Type: resource.TypeChipper, IsExclusive: true},
+			{ID: "70000000-0000-0000-0000-000000000002", Name: "Transporter 1", Type: resource.TypeTransportVehicle, IsExclusive: true},
+		},
+		Waitlist: []appointment.WaitlistItem{{
+			WaitlistID: "80000000-0000-0000-0000-000000000001", JobID: testJobID, JobNumber: "HW-2026-0001",
+			JobType: "chipping_with_transport", TransportMode: "internal", VolumeM3: "80.00", CustomerName: "Franz Huber", Locality: "Grieskirchen", EstimatedHackMinutes: 180, EstimatedTransportMinutes: 60,
+		}},
+	}
+}
+
+func validAppointmentPlanningForm(csrfToken string) url.Values {
+	return url.Values{
+		"csrf_token": {csrfToken}, "job_id": {testJobID}, "starts_at": {"2026-09-01T08:00"}, "duration_minutes": {"240"},
+		"driver_id": {operationDriverID}, "primary_driver_id": {operationDriverID}, "chipper_resource_id": {testAppointmentResourceID},
+		"transport_resource_id": {"70000000-0000-0000-0000-000000000002"},
 	}
 }
 
@@ -223,23 +408,109 @@ type appointmentHTTPStore struct {
 	current         appointment.Appointment
 	detail          appointment.Detail
 	events          []appointment.CalendarEvent
+	planningOptions appointment.PlanningOptions
+	createErr       error
+	assignErr       error
+	proposeErr      error
+	createCalls     int
+	assignCalls     int
+	proposeCalls    int
+	fixCalls        int
+	cancelCalls     int
 	rescheduleCalls int
 	reopenCalls     int
 	lastMove        appointment.MoveInput
 	lastReopen      appointment.ReopenInput
 }
 
-func (store *appointmentHTTPStore) CreateDraft(context.Context, auth.Actor, appointment.CreateDraftInput) (appointment.Appointment, error) {
-	return store.current, nil
+func (store *appointmentHTTPStore) Plan(ctx context.Context, actor auth.Actor, input appointment.PlanInput, overrideReason string) (appointment.Appointment, error) {
+	before := store.current
+	created, err := store.CreateDraft(ctx, actor, input.CreateDraftInput)
+	if err != nil {
+		return appointment.Appointment{}, err
+	}
+	assigned, err := store.Assign(ctx, actor, appointment.AssignInput{
+		MutateInput: appointment.MutateInput{ID: created.ID, ExpectedVersion: created.Version, RequestID: input.RequestID},
+		Assignments: input.Assignments,
+	})
+	if err != nil {
+		store.current = before
+		return appointment.Appointment{}, err
+	}
+	proposed, err := store.Propose(ctx, actor, appointment.MutateInput{ID: assigned.ID, ExpectedVersion: assigned.Version, RequestID: input.RequestID}, overrideReason)
+	if err != nil {
+		store.current = before
+		return appointment.Appointment{}, err
+	}
+	return proposed, nil
+}
+
+func (store *appointmentHTTPStore) CreateDraft(_ context.Context, _ auth.Actor, input appointment.CreateDraftInput) (appointment.Appointment, error) {
+	store.createCalls++
+	if store.createErr != nil {
+		return appointment.Appointment{}, store.createErr
+	}
+	value := store.current
+	value.ID = testAppointmentID
+	value.JobID = input.JobID
+	value.StartsAt = input.Time.StartsAt
+	value.EndsAt = input.Time.EndsAt
+	value.Lifecycle = appointment.LifecycleDraft
+	value.Version = 1
+	for _, item := range store.planningOptions.Waitlist {
+		if item.JobID != input.JobID {
+			continue
+		}
+		value.JobNumber = item.JobNumber
+		value.JobType = item.JobType
+		value.TransportMode = item.TransportMode
+		value.ExternalTransportConfirmed = item.ExternalTransportConfirmed
+		value.EstimatedHackMinutes = item.EstimatedHackMinutes
+		value.EstimatedTransportMinutes = item.EstimatedTransportMinutes
+		break
+	}
+	store.current = value
+	return value, nil
 }
 func (store *appointmentHTTPStore) Get(context.Context, string) (appointment.Appointment, error) {
 	return store.current, nil
 }
-func (store *appointmentHTTPStore) Assign(context.Context, auth.Actor, appointment.AssignInput) (appointment.Appointment, error) {
-	return store.current, nil
+func (store *appointmentHTTPStore) Assign(_ context.Context, _ auth.Actor, input appointment.AssignInput) (appointment.Appointment, error) {
+	store.assignCalls++
+	if store.assignErr != nil {
+		return appointment.Appointment{}, store.assignErr
+	}
+	value := store.current
+	value.Drivers = make([]appointment.DriverAssignment, 0, len(input.Assignments.DriverIDs))
+	for _, id := range input.Assignments.DriverIDs {
+		for _, option := range store.planningOptions.Drivers {
+			if option.ID == id {
+				value.Drivers = append(value.Drivers, appointment.DriverAssignment{ID: id, Name: option.Name, Primary: id == input.Assignments.PrimaryDriverID})
+			}
+		}
+	}
+	value.Resources = make([]appointment.AssignedResource, 0, len(input.Assignments.Resources))
+	for _, assigned := range input.Assignments.Resources {
+		for _, option := range store.planningOptions.Resources {
+			if option.ID == assigned.ID {
+				value.Resources = append(value.Resources, appointment.AssignedResource{ID: option.ID, Name: option.Name, Type: option.Type, Purpose: assigned.Purpose, Exclusive: option.IsExclusive})
+			}
+		}
+	}
+	value.Version++
+	store.current = value
+	return value, nil
 }
 func (store *appointmentHTTPStore) Propose(context.Context, auth.Actor, appointment.MutateInput, string) (appointment.Appointment, error) {
-	return store.current, nil
+	store.proposeCalls++
+	if store.proposeErr != nil {
+		return appointment.Appointment{}, store.proposeErr
+	}
+	value := store.current
+	value.Lifecycle = appointment.LifecycleProposal
+	value.Version++
+	store.current = value
+	return value, nil
 }
 func (store *appointmentHTTPStore) Reschedule(_ context.Context, _ auth.Actor, input appointment.MoveInput, _ string) (appointment.Appointment, error) {
 	store.rescheduleCalls++
@@ -247,10 +518,16 @@ func (store *appointmentHTTPStore) Reschedule(_ context.Context, _ auth.Actor, i
 	return store.current, nil
 }
 func (store *appointmentHTTPStore) Fix(context.Context, auth.Actor, appointment.FixInput) (appointment.Appointment, error) {
+	store.fixCalls++
 	return store.current, nil
 }
 func (store *appointmentHTTPStore) Cancel(context.Context, auth.Actor, appointment.CancelInput) (appointment.Appointment, error) {
-	return store.current, nil
+	store.cancelCalls++
+	value := store.current
+	value.Lifecycle = appointment.LifecycleCancelled
+	value.Version++
+	store.current = value
+	return value, nil
 }
 func (store *appointmentHTTPStore) Reopen(_ context.Context, _ auth.Actor, input appointment.ReopenInput) (appointment.Appointment, error) {
 	store.reopenCalls++
@@ -270,7 +547,7 @@ func (store *appointmentHTTPStore) ListCalendar(context.Context, time.Time, time
 	return store.events, nil
 }
 func (store *appointmentHTTPStore) PlanningOptions(context.Context) (appointment.PlanningOptions, error) {
-	return appointment.PlanningOptions{}, nil
+	return store.planningOptions, nil
 }
 func (store *appointmentHTTPStore) ListConflicts(context.Context, time.Time, time.Time, []string, []string, string) ([]appointment.Conflict, error) {
 	return nil, nil

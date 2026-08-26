@@ -4,7 +4,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"example.invalid/hackplan/internal/appointment"
@@ -22,10 +24,11 @@ func registerAppointmentRoutes(router chi.Router, dependencies Dependencies, pag
 	csrfCookie := dependencies.Config.Auth.CSRFCookieName
 	logger := dependencies.Logger
 	router.Get("/calendar", calendarPage(service, page, csrfCookie, logger))
-	router.Post("/calendar/plan", planFromWaitlist(service, logger, false))
+	router.Get("/calendar/plan", calendarPlanPage(service, page, csrfCookie, logger))
+	router.Post("/calendar/plan", planFromWaitlist(service, page, csrfCookie, logger, false))
 	router.Get("/api/v1/calendar", calendarEvents(service, logger))
 	router.Get("/api/v1/calendar/conflicts", appointmentConflicts(service, logger))
-	router.Post("/api/v1/calendar/plan", planFromWaitlist(service, logger, true))
+	router.Post("/api/v1/calendar/plan", planFromWaitlist(service, page, csrfCookie, logger, true))
 	router.Route("/api/v1/appointments/{appointmentID}", func(appointmentRouter chi.Router) {
 		appointmentRouter.Get("/", appointmentDetail(service, dependencies.Notifications, dependencies.Config.Mail.Enabled, dependencies.Config.SMS.Enabled, logger))
 		appointmentRouter.Post("/assign", assignAppointment(service, logger))
@@ -201,8 +204,62 @@ func calendarPage(service *appointment.Service, page templates.PageData, csrfCoo
 		}
 		render(response, request, templates.Calendar(templates.CalendarData{
 			Shell: shell(request, page, csrfCookie), Options: options, Events: events, Timezone: "Europe/Vienna",
+			Notice: calendarNotice(request.URL.Query().Get("planned")),
 		}), http.StatusOK, logger)
 	}
+}
+
+func calendarNotice(value string) string {
+	if value == "proposal" {
+		return "Terminvorschlag gespeichert. Der Termin ist noch nicht fixiert und es wurde keine Nachricht versendet."
+	}
+	return ""
+}
+
+func calendarPlanPage(service *appointment.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Cache-Control", "no-store")
+		session, _ := sessionFromContext(request.Context())
+		jobID := strings.TrimSpace(request.URL.Query().Get("job_id"))
+		options, job, err := calendarPlanningOptions(request, service, session.Actor, jobID)
+		if err != nil {
+			calendarPlanPageError(response, request, page, logger, err)
+			return
+		}
+		location, err := time.LoadLocation("Europe/Vienna")
+		if err != nil {
+			calendarPlanPageError(response, request, page, logger, err)
+			return
+		}
+		now := time.Now().In(location)
+		start := time.Date(now.Year(), now.Month(), now.Day()+1, 8, 0, 0, 0, location)
+		data := templates.CalendarPlanData{
+			Shell: shell(request, page, csrfCookie), Options: options, Job: job,
+			Values: templates.PlanningFormValues{
+				CSRFToken: shell(request, page, csrfCookie).CSRFToken,
+				JobID:     job.JobID, StartsAt: start.Format("2006-01-02T15:04"),
+				DurationMinutes: strconv.FormatInt(int64(job.EstimatedHackMinutes+job.EstimatedTransportMinutes), 10),
+				TransportMode:   job.TransportMode, ExternalTransportConfirmed: job.ExternalTransportConfirmed,
+			},
+		}
+		render(response, request, templates.CalendarPlan(data), http.StatusOK, logger)
+	}
+}
+
+func calendarPlanningOptions(request *http.Request, service *appointment.Service, actor auth.Actor, jobID string) (appointment.PlanningOptions, appointment.WaitlistItem, error) {
+	if jobID == "" {
+		return appointment.PlanningOptions{}, appointment.WaitlistItem{}, appointment.ErrNotFound
+	}
+	options, err := service.PlanningOptions(request.Context(), actor)
+	if err != nil {
+		return appointment.PlanningOptions{}, appointment.WaitlistItem{}, err
+	}
+	for _, item := range options.Waitlist {
+		if item.JobID == jobID {
+			return options, item, nil
+		}
+	}
+	return appointment.PlanningOptions{}, appointment.WaitlistItem{}, appointment.ErrNotFound
 }
 
 func calendarEvents(service *appointment.Service, logger *slog.Logger) http.HandlerFunc {
@@ -271,46 +328,111 @@ func appointmentColor(lifecycle appointment.Lifecycle, confirmation appointment.
 	return "#28659b"
 }
 
-func planFromWaitlist(service *appointment.Service, logger *slog.Logger, jsonResponse bool) http.HandlerFunc {
+func planFromWaitlist(service *appointment.Service, page templates.PageData, csrfCookie string, logger *slog.Logger, jsonResponse bool) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
 		start, duration, err := planningTime(request)
 		var planned appointment.Appointment
 		if err == nil {
-			planned, err = service.CreateDraftFromWaitlist(request.Context(), session.Actor, appointment.CreateDraftInput{
-				JobID: request.Form.Get("job_id"), RequestID: middleware.GetReqID(request.Context()),
-				Time: appointment.TimeInput{StartsAt: start, EndsAt: start.Add(duration)},
+			assignments := planningAssignments(request)
+			assignments.OverrideReason = request.Form.Get("override_reason")
+			planned, err = service.PlanFromWaitlist(request.Context(), session.Actor, appointment.PlanInput{
+				CreateDraftInput: appointment.CreateDraftInput{
+					JobID: request.Form.Get("job_id"), RequestID: middleware.GetReqID(request.Context()),
+					Time: appointment.TimeInput{StartsAt: start, EndsAt: start.Add(duration)},
+				},
+				Assignments: assignments,
 			})
-		}
-		if err == nil {
-			planned, err = service.AssignDriversAndResources(request.Context(), session.Actor, appointment.AssignInput{
-				MutateInput: appointment.MutateInput{ID: planned.ID, ExpectedVersion: planned.Version, RequestID: middleware.GetReqID(request.Context())},
-				Assignments: planningAssignments(request),
-			})
-		}
-		if err == nil {
-			planned, err = service.ProposeAppointment(request.Context(), session.Actor, appointment.MutateInput{
-				ID: planned.ID, ExpectedVersion: planned.Version, RequestID: middleware.GetReqID(request.Context()),
-			}, request.Form.Get("override_reason"))
 		}
 		if err != nil {
-			if planned.ID != "" && planned.Lifecycle.Editable() {
-				if _, cleanupErr := service.CancelAppointment(request.Context(), session.Actor, appointment.CancelInput{
-					MutateInput: appointment.MutateInput{ID: planned.ID, ExpectedVersion: planned.Version, RequestID: middleware.GetReqID(request.Context())},
-					Reason:      "Einplanung verworfen",
-				}); cleanupErr != nil {
-					logger.WarnContext(request.Context(), "discarding failed planning draft failed", slog.String("error_code", "planning_cleanup_failed"))
-				}
+			if jsonResponse {
+				appointmentAPIError(response, request, logger, err, "appointment_plan_rejected")
+			} else {
+				renderCalendarPlanError(response, request, service, page, csrfCookie, logger, err)
 			}
-			appointmentAPIError(response, request, logger, err, "appointment_plan_rejected")
 			return
 		}
 		if jsonResponse {
 			writeJSON(response, http.StatusCreated, map[string]any{"id": planned.ID, "version": planned.Version, "lifecycle": planned.Lifecycle})
 			return
 		}
-		http.Redirect(response, request, "/calendar", http.StatusSeeOther)
+		location, locationErr := time.LoadLocation("Europe/Vienna")
+		if locationErr != nil {
+			calendarPlanPageError(response, request, page, logger, locationErr)
+			return
+		}
+		query := url.Values{
+			"appointment": {planned.ID},
+			"date":        {planned.StartsAt.In(location).Format(time.DateOnly)},
+			"planned":     {"proposal"},
+		}
+		http.Redirect(response, request, "/calendar?"+query.Encode(), http.StatusSeeOther)
 	}
+}
+
+func renderCalendarPlanError(response http.ResponseWriter, request *http.Request, service *appointment.Service, page templates.PageData, csrfCookie string, logger *slog.Logger, planErr error) {
+	response.Header().Set("Cache-Control", "no-store")
+	session, _ := sessionFromContext(request.Context())
+	jobID := strings.TrimSpace(request.Form.Get("job_id"))
+	options, job, err := calendarPlanningOptions(request, service, session.Actor, jobID)
+	if err != nil {
+		calendarPlanPageError(response, request, page, logger, planErr)
+		return
+	}
+	presentation := appointmentErrorPresentation(planErr)
+	logger.WarnContext(request.Context(), "appointment request rejected", slog.String("error_code", "appointment_plan_rejected"), slog.String("category", presentation.Code))
+	shellData := shell(request, page, csrfCookie)
+	data := templates.CalendarPlanData{
+		Shell: shellData, Options: options, Job: job,
+		Values: templates.PlanningFormValues{
+			CSRFToken: shellData.CSRFToken,
+			JobID:     jobID, StartsAt: request.Form.Get("starts_at"), DurationMinutes: request.Form.Get("duration_minutes"),
+			DriverIDs: append([]string(nil), request.Form["driver_id"]...), PrimaryDriverID: request.Form.Get("primary_driver_id"),
+			ChipperResourceID: request.Form.Get("chipper_resource_id"), TransportResourceID: request.Form.Get("transport_resource_id"),
+			TrailerResourceID: request.Form.Get("trailer_resource_id"), OverrideReason: request.Form.Get("override_reason"),
+			TransportMode: job.TransportMode, ExternalTransportConfirmed: job.ExternalTransportConfirmed,
+		},
+		Error: templates.PlanningFormError{Message: presentation.Message, FieldID: planningErrorField(request, job, planErr)},
+	}
+	render(response, request, templates.CalendarPlan(data), presentation.Status, logger)
+}
+
+func planningErrorField(request *http.Request, job appointment.WaitlistItem, err error) string {
+	location, locationErr := time.LoadLocation("Europe/Vienna")
+	if locationErr != nil {
+		return ""
+	}
+	if _, parseErr := driver.ParseLocalDateTime(request.Form.Get("starts_at"), location); parseErr != nil {
+		return "planning-start"
+	}
+	minutes, parseErr := strconv.ParseInt(request.Form.Get("duration_minutes"), 10, 32)
+	if parseErr != nil || minutes < 15 || minutes > int64(appointment.MaxDuration/time.Minute) || minutes < int64(job.EstimatedHackMinutes+job.EstimatedTransportMinutes) {
+		return "planning-duration"
+	}
+	primary := request.Form.Get("primary_driver_id")
+	primarySelected := false
+	for _, driverID := range request.Form["driver_id"] {
+		if driverID == primary {
+			primarySelected = true
+			break
+		}
+	}
+	if len(request.Form["driver_id"]) == 0 || primary == "" || !primarySelected {
+		return "planning-primary-driver"
+	}
+	if request.Form.Get("chipper_resource_id") == "" {
+		return "planning-chipper-resource"
+	}
+	if errors.Is(err, appointment.ErrValidation) {
+		return "planning-transport-resource"
+	}
+	if errors.Is(err, appointment.ErrConflict) {
+		return "planning-start"
+	}
+	if errors.Is(err, appointment.ErrAvailability) {
+		return "planning-primary-driver"
+	}
+	return ""
 }
 
 func assignAppointment(service *appointment.Service, logger *slog.Logger) http.HandlerFunc {
@@ -525,31 +647,49 @@ func appointmentMutationResult(response http.ResponseWriter, request *http.Reque
 	writeJSON(response, http.StatusOK, map[string]any{"id": value.ID, "version": value.Version, "lifecycle": value.Lifecycle, "confirmation": value.Confirmation})
 }
 
-func appointmentAPIError(response http.ResponseWriter, request *http.Request, logger *slog.Logger, err error, code string) {
-	status := http.StatusUnprocessableEntity
-	errorCode := "validation_failed"
-	message := "Die Eingaben sind fachlich nicht gültig."
+type appointmentErrorView struct {
+	Status  int
+	Code    string
+	Message string
+}
+
+func appointmentErrorPresentation(err error) appointmentErrorView {
+	result := appointmentErrorView{
+		Status: http.StatusUnprocessableEntity, Code: "validation_failed",
+		Message: "Die Eingaben sind fachlich nicht gültig.",
+	}
 	switch {
 	case errors.Is(err, auth.ErrForbidden):
-		status, errorCode, message = http.StatusForbidden, "forbidden", "Für diese Planungsaktion fehlt die Berechtigung."
+		result = appointmentErrorView{Status: http.StatusForbidden, Code: "forbidden", Message: "Für diese Planungsaktion fehlt die Berechtigung."}
 	case errors.Is(err, appointment.ErrNotFound):
-		status, errorCode, message = http.StatusNotFound, "not_found", "Termin oder Auftrag wurde nicht gefunden."
+		result = appointmentErrorView{Status: http.StatusNotFound, Code: "not_found", Message: "Termin oder Auftrag wurde nicht gefunden."}
 	case errors.Is(err, appointment.ErrConflict):
-		status, errorCode, message = http.StatusConflict, "reservation_conflict", "Der Stand ist veraltet oder der Slot ist bereits belegt. Bitte Kalender neu laden."
+		result = appointmentErrorView{Status: http.StatusConflict, Code: "reservation_conflict", Message: "Der Stand ist veraltet oder der Slot ist bereits belegt. Bitte Kalender neu laden."}
 	case errors.Is(err, appointment.ErrAvailability):
-		errorCode, message = "driver_unavailable", "Mindestens ein Fahrer ist nicht verfügbar. Wählen Sie einen anderen Slot oder begründen Sie den Admin-Override."
+		result.Code, result.Message = "driver_unavailable", "Mindestens ein Fahrer ist nicht verfügbar. Wählen Sie einen anderen Slot oder begründen Sie den Admin-Override."
 	case errors.Is(err, appointment.ErrNotification):
-		errorCode, message = "notification_channel_missing", "Für diesen Kunden ist kein erreichbarer Benachrichtigungskanal vorhanden. Nur mit begründeter Ausnahme ohne Nachricht fixieren."
+		result.Code, result.Message = "notification_channel_missing", "Für diesen Kunden ist kein erreichbarer Benachrichtigungskanal vorhanden. Nur mit begründeter Ausnahme ohne Nachricht fixieren."
 	case errors.Is(err, appointment.ErrTransition):
-		errorCode, message = "invalid_transition", "Dieser Statuswechsel ist nicht erlaubt."
+		result.Code, result.Message = "invalid_transition", "Dieser Statuswechsel ist nicht erlaubt."
 	case errors.Is(err, driver.ErrLocalTime):
-		errorCode, message = "invalid_local_time", "Diese Ortszeit existiert wegen der Zeitumstellung nicht oder ist mehrdeutig."
+		result.Code, result.Message = "invalid_local_time", "Diese Ortszeit existiert wegen der Zeitumstellung nicht oder ist mehrdeutig."
 	case errors.Is(err, appointment.ErrValidation), errors.Is(err, resource.ErrValidation):
 	default:
-		status, errorCode, message = http.StatusInternalServerError, "internal_error", "Die Planung kann derzeit nicht gespeichert werden."
+		result = appointmentErrorView{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Die Planung kann derzeit nicht gespeichert werden."}
 	}
-	logger.WarnContext(request.Context(), "appointment request rejected", slog.String("error_code", code), slog.String("category", errorCode))
-	writeJSON(response, status, map[string]any{"error": map[string]string{"code": errorCode, "message": message, "request_id": middleware.GetReqID(request.Context())}})
+	return result
+}
+
+func appointmentAPIError(response http.ResponseWriter, request *http.Request, logger *slog.Logger, err error, code string) {
+	presentation := appointmentErrorPresentation(err)
+	logger.WarnContext(request.Context(), "appointment request rejected", slog.String("error_code", code), slog.String("category", presentation.Code))
+	writeJSON(response, presentation.Status, map[string]any{"error": map[string]string{"code": presentation.Code, "message": presentation.Message, "request_id": middleware.GetReqID(request.Context())}})
+}
+
+func calendarPlanPageError(response http.ResponseWriter, request *http.Request, page templates.PageData, logger *slog.Logger, err error) {
+	presentation := appointmentErrorPresentation(err)
+	logger.WarnContext(request.Context(), "calendar planning page rejected", slog.String("error_code", presentation.Code))
+	render(response, request, templates.Error(page, presentation.Status, "Einplanung nicht verfügbar", presentation.Message), presentation.Status, logger)
 }
 
 func appointmentPageError(response http.ResponseWriter, request *http.Request, page templates.PageData, logger *slog.Logger, err error) {

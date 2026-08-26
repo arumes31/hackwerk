@@ -15,7 +15,12 @@ WHERE key='application_schema_version';
 INSERT INTO worker_heartbeats (worker_id, started_at, heartbeat_at, status)
 VALUES (sqlc.arg(worker_id), sqlc.arg(started_at)::timestamptz, sqlc.arg(heartbeat_at)::timestamptz, sqlc.arg(status))
 ON CONFLICT (worker_id) DO UPDATE
-SET heartbeat_at=EXCLUDED.heartbeat_at, status=EXCLUDED.status;
+SET started_at=EXCLUDED.started_at, heartbeat_at=EXCLUDED.heartbeat_at, status=EXCLUDED.status;
+
+-- name: WorkerHeartbeatByID :one
+SELECT heartbeat_at
+FROM worker_heartbeats
+WHERE worker_id=sqlc.arg(worker_id) AND status='running';
 
 -- name: LatestWorkerHeartbeat :one
 SELECT COALESCE(max(heartbeat_at), '-infinity'::timestamptz)::timestamptz

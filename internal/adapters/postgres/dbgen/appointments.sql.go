@@ -780,7 +780,8 @@ func (q *Queries) ListCalendarAppointments(ctx context.Context, arg ListCalendar
 
 const listWaitlistForPlanning = `-- name: ListWaitlistForPlanning :many
 SELECT w.id::text AS waitlist_id, j.id::text AS job_id, j.job_number,
-       j.job_type, j.volume_m3::text, j.estimated_hack_minutes,
+       j.job_type, j.transport_mode, j.external_transport_confirmed,
+       j.volume_m3::text, j.estimated_hack_minutes, j.estimated_transport_minutes,
        concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, ''))::text AS customer_name,
        c.locality
 FROM waitlist_entries w
@@ -791,14 +792,17 @@ ORDER BY w.manual_priority DESC, w.entered_at, w.id
 `
 
 type ListWaitlistForPlanningRow struct {
-	WaitlistID           string
-	JobID                string
-	JobNumber            string
-	JobType              string
-	JVolumeM3            string
-	EstimatedHackMinutes int32
-	CustomerName         string
-	Locality             string
+	WaitlistID                 string
+	JobID                      string
+	JobNumber                  string
+	JobType                    string
+	TransportMode              string
+	ExternalTransportConfirmed bool
+	JVolumeM3                  string
+	EstimatedHackMinutes       int32
+	EstimatedTransportMinutes  int32
+	CustomerName               string
+	Locality                   string
 }
 
 func (q *Queries) ListWaitlistForPlanning(ctx context.Context) ([]ListWaitlistForPlanningRow, error) {
@@ -815,8 +819,11 @@ func (q *Queries) ListWaitlistForPlanning(ctx context.Context) ([]ListWaitlistFo
 			&i.JobID,
 			&i.JobNumber,
 			&i.JobType,
+			&i.TransportMode,
+			&i.ExternalTransportConfirmed,
 			&i.JVolumeM3,
 			&i.EstimatedHackMinutes,
+			&i.EstimatedTransportMinutes,
 			&i.CustomerName,
 			&i.Locality,
 		); err != nil {

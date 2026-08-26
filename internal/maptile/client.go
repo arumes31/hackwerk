@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"example.invalid/hackplan/internal/outbound"
 )
 
 var (
@@ -47,6 +49,7 @@ func New(cfg Config) (*Client, error) {
 		return nil, errors.New("maptile: invalid configuration")
 	}
 	client := &http.Client{
+		Transport:     outbound.Transport(),
 		Timeout:       cfg.Timeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}

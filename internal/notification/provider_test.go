@@ -1,11 +1,13 @@
 package notification
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -40,6 +42,27 @@ func TestSMSWebhookSignsStaticRequestAndUsesIdempotencyKey(t *testing.T) {
 	_, _ = io.WriteString(mac, observedTimestamp+"."+observedBody)
 	if observedSignature != "sha256="+hex.EncodeToString(mac.Sum(nil)) || strings.Contains(observedBody, server.URL) {
 		t.Fatalf("SMS signature/static target mismatch: %q body=%q", observedSignature, observedBody)
+	}
+}
+
+func TestSMTPImplicitTLSHandshakeIsBoundedByConnectTimeout(t *testing.T) {
+	provider, err := NewSMTPProvider(SMTPConfig{
+		Host: "smtp.example", Port: 465, TLSMode: "implicit", FromAddress: "mail@example.test",
+		ConnectTimeout: 25 * time.Millisecond, CommandTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = server.Close() })
+	provider.dial = func(context.Context, string, string) (net.Conn, error) { return client, nil }
+	started := time.Now()
+	_, err = provider.Send(t.Context(), Message{
+		NotificationID: "notification", Channel: ChannelEmail, Recipient: "kunde@example.test",
+		Subject: "Termin", Text: "Text", HTML: "<p>Text</p>",
+	})
+	if !errors.Is(err, ErrTemporary) || time.Since(started) > 500*time.Millisecond {
+		t.Fatalf("stalled implicit TLS handshake error/duration = %v/%s", err, time.Since(started))
 	}
 }
 

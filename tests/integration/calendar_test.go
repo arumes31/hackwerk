@@ -99,6 +99,68 @@ func TestCalendarReservationsAndAtomicFix(t *testing.T) {
 	}
 }
 
+func TestPlanFromWaitlistCommitsProposalAtomicallyAndRollsBackLateConflict(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	start := time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC)
+	plan := func(jobID, driverID, requestID string) (appointment.Appointment, error) {
+		return fixture.service.PlanFromWaitlist(fixture.ctx, fixture.admin, appointment.PlanInput{
+			CreateDraftInput: appointment.CreateDraftInput{
+				JobID: jobID, RequestID: requestID,
+				Time: appointment.TimeInput{StartsAt: start, EndsAt: start.Add(90 * time.Minute)},
+			},
+			Assignments: appointment.AssignmentInput{
+				DriverIDs: []string{driverID}, PrimaryDriverID: driverID,
+				Resources: []appointment.ResourceAssignment{{ID: fixture.chipper1, Purpose: appointment.PurposeChipping}},
+			},
+		})
+	}
+
+	jobID := fixture.job(t, "HW-2026-ATOMIC-PLAN")
+	proposed, err := plan(jobID, fixture.driver1, "atomic-plan-success")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lifecycle, workflow string
+	var drivers, resources, audits, outbox int
+	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT a.lifecycle_status, j.workflow_status,
+		(SELECT count(*) FROM appointment_drivers WHERE appointment_id=a.id),
+		(SELECT count(*) FROM appointment_resources WHERE appointment_id=a.id),
+		(SELECT count(*) FROM audit_events WHERE object_id=a.id::text),
+		(SELECT count(*) FROM outbox_events WHERE aggregate_id=a.id)
+		FROM appointments a JOIN jobs j ON j.id=a.job_id WHERE a.id=$1`, proposed.ID).
+		Scan(&lifecycle, &workflow, &drivers, &resources, &audits, &outbox); err != nil {
+		t.Fatal(err)
+	}
+	if lifecycle != "proposal" || workflow != "planning" || drivers != 1 || resources != 1 || audits != 3 || outbox != 0 {
+		t.Fatalf("atomic plan state=%s/%s drivers=%d resources=%d audits=%d outbox=%d", lifecycle, workflow, drivers, resources, audits, outbox)
+	}
+
+	failedJobID := fixture.job(t, "HW-2026-ATOMIC-ROLLBACK")
+	var auditBefore int
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM audit_events").Scan(&auditBefore); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := plan(failedJobID, fixture.driver2, "atomic-plan-conflict"); !errors.Is(err, appointment.ErrConflict) {
+		t.Fatalf("conflicting atomic plan error=%v want conflict", err)
+	}
+	var appointmentCount, auditAfter, activeWaitlist int
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT workflow_status FROM jobs WHERE id=$1", failedJobID).Scan(&workflow); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM appointments WHERE job_id=$1", failedJobID).Scan(&appointmentCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM waitlist_entries WHERE job_id=$1 AND removed_at IS NULL", failedJobID).Scan(&activeWaitlist); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM audit_events").Scan(&auditAfter); err != nil {
+		t.Fatal(err)
+	}
+	if workflow != "waitlist" || appointmentCount != 0 || activeWaitlist != 1 || auditAfter != auditBefore {
+		t.Fatalf("rollback state workflow=%s appointments=%d waitlist=%d audits=%d/%d", workflow, appointmentCount, activeWaitlist, auditAfter, auditBefore)
+	}
+}
+
 func TestScheduledJobEditPreservesAndRevalidatesFixedAppointment(t *testing.T) {
 	fixture := newCalendarFixture(t)
 	start := time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC)

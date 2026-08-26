@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"example.invalid/hackplan/internal/outbound"
 )
 
 type SMTPConfig struct {
@@ -26,7 +28,10 @@ type SMTPConfig struct {
 	ConnectTimeout, CommandTimeout    time.Duration
 }
 
-type SMTPProvider struct{ cfg SMTPConfig }
+type SMTPProvider struct {
+	cfg  SMTPConfig
+	dial func(context.Context, string, string) (net.Conn, error)
+}
 
 func NewSMTPProvider(cfg SMTPConfig) (*SMTPProvider, error) {
 	if cfg.Host == "" || cfg.Port < 1 || cfg.Port > 65535 || (cfg.TLSMode != "starttls" && cfg.TLSMode != "implicit") || cfg.ConnectTimeout <= 0 || cfg.CommandTimeout <= 0 {
@@ -40,7 +45,7 @@ func NewSMTPProvider(cfg SMTPConfig) (*SMTPProvider, error) {
 			return nil, errors.New("notification: invalid SMTP reply-to")
 		}
 	}
-	return &SMTPProvider{cfg: cfg}, nil
+	return &SMTPProvider{cfg: cfg, dial: outbound.DialContext(cfg.ConnectTimeout)}, nil
 }
 
 func (provider *SMTPProvider) Send(ctx context.Context, message Message) (string, error) {
@@ -56,16 +61,26 @@ func (provider *SMTPProvider) Send(ctx context.Context, message Message) (string
 		return "", fmt.Errorf("%w: message encoding", ErrPermanent)
 	}
 	address := net.JoinHostPort(provider.cfg.Host, strconv.Itoa(provider.cfg.Port))
-	dialer := &net.Dialer{Timeout: provider.cfg.ConnectTimeout}
 	tlsConfig := &tls.Config{ServerName: provider.cfg.Host, MinVersion: tls.VersionTLS12}
-	var connection net.Conn
-	if provider.cfg.TLSMode == "implicit" {
-		connection, err = (&tls.Dialer{NetDialer: dialer, Config: tlsConfig}).DialContext(ctx, "tcp", address)
-	} else {
-		connection, err = dialer.DialContext(ctx, "tcp", address)
-	}
+	connection, err := provider.dial(ctx, "tcp", address)
 	if err != nil {
 		return "", fmt.Errorf("%w: SMTP connection", ErrTemporary)
+	}
+	if provider.cfg.TLSMode == "implicit" {
+		handshakeDeadline := time.Now().Add(provider.cfg.ConnectTimeout)
+		if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(handshakeDeadline) {
+			handshakeDeadline = contextDeadline
+		}
+		if err := connection.SetDeadline(handshakeDeadline); err != nil {
+			_ = connection.Close()
+			return "", fmt.Errorf("%w: SMTP TLS deadline", ErrTemporary)
+		}
+		tlsConnection := tls.Client(connection, tlsConfig)
+		if err := tlsConnection.HandshakeContext(ctx); err != nil {
+			_ = connection.Close()
+			return "", fmt.Errorf("%w: SMTP TLS handshake", ErrTemporary)
+		}
+		connection = tlsConnection
 	}
 	defer func() { _ = connection.Close() }()
 	deadline := time.Now().Add(provider.cfg.CommandTimeout)

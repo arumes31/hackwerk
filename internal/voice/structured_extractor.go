@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"example.invalid/hackplan/internal/outbound"
 )
 
 type StructuredProvider interface {
@@ -52,7 +54,7 @@ func NewOpenAIStructuredProvider(apiKey, model string, timeout time.Duration, ma
 	if strings.TrimSpace(apiKey) == "" || strings.TrimSpace(model) == "" || timeout <= 0 || maxResponse < 1024 || maxResponse > 4<<20 {
 		return nil, errors.New("voice: invalid structured extractor configuration")
 	}
-	return &OpenAIStructuredProvider{apiKey: apiKey, model: model, endpoint: "https://api.openai.com/v1/responses", client: &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, maxResponse: maxResponse}, nil
+	return &OpenAIStructuredProvider{apiKey: apiKey, model: model, endpoint: "https://api.openai.com/v1/responses", client: &http.Client{Transport: outbound.Transport(), Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, maxResponse: maxResponse}, nil
 }
 
 func (provider *OpenAIStructuredProvider) Version() string { return "openai-" + provider.model }

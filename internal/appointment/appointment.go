@@ -131,7 +131,9 @@ type PlanningResource struct {
 type WaitlistItem struct {
 	WaitlistID, JobID, JobNumber, JobType, VolumeM3 string
 	CustomerName, Locality                          string
-	EstimatedHackMinutes                            int32
+	EstimatedHackMinutes, EstimatedTransportMinutes int32
+	TransportMode                                   string
+	ExternalTransportConfirmed                      bool
 }
 
 type PlanningOptions struct {
@@ -164,6 +166,13 @@ type SwapInput struct {
 type CreateDraftInput struct {
 	JobID, RequestID string
 	Time             TimeInput
+}
+
+// PlanInput is the complete, still-unfixed planning mutation. Stores must
+// persist draft creation, assignments, and proposal transition atomically.
+type PlanInput struct {
+	CreateDraftInput
+	Assignments AssignmentInput
 }
 
 type MutateInput struct {
@@ -212,6 +221,7 @@ type FixInput struct {
 }
 
 type Store interface {
+	Plan(context.Context, auth.Actor, PlanInput, string) (Appointment, error)
 	CreateDraft(context.Context, auth.Actor, CreateDraftInput) (Appointment, error)
 	Get(context.Context, string) (Appointment, error)
 	Assign(context.Context, auth.Actor, AssignInput) (Appointment, error)
@@ -352,6 +362,62 @@ func (s *Service) CreateDraftFromWaitlist(ctx context.Context, actor auth.Actor,
 	return s.store.CreateDraft(ctx, actor, input)
 }
 
+// PlanFromWaitlist validates the full proposal before asking the store to
+// commit the complete plan as one transaction. No draft is exposed if any
+// phase fails or the request is cancelled.
+func (s *Service) PlanFromWaitlist(ctx context.Context, actor auth.Actor, input PlanInput) (Appointment, error) {
+	if err := actor.Require(auth.PermissionAppointmentPlan); err != nil {
+		return Appointment{}, err
+	}
+	input.JobID = strings.TrimSpace(input.JobID)
+	normalizeAssignments(&input.Assignments)
+	if input.JobID == "" || validateTime(input.Time) != nil {
+		return Appointment{}, ErrValidation
+	}
+	if err := input.Assignments.Validate(); err != nil {
+		return Appointment{}, err
+	}
+	options, err := s.store.PlanningOptions(ctx)
+	if err != nil {
+		return Appointment{}, err
+	}
+	var item WaitlistItem
+	found := false
+	for _, candidate := range options.Waitlist {
+		if candidate.JobID == input.JobID {
+			item, found = candidate, true
+			break
+		}
+	}
+	if !found {
+		return Appointment{}, ErrNotFound
+	}
+	prospective := Appointment{
+		JobID: item.JobID, JobNumber: item.JobNumber, JobType: item.JobType,
+		TransportMode: item.TransportMode, ExternalTransportConfirmed: item.ExternalTransportConfirmed,
+		EstimatedHackMinutes: item.EstimatedHackMinutes, EstimatedTransportMinutes: item.EstimatedTransportMinutes,
+		StartsAt: input.Time.StartsAt, EndsAt: input.Time.EndsAt,
+		BufferBeforeMinutes: input.Time.BufferBeforeMinutes, BufferAfterMinutes: input.Time.BufferAfterMinutes,
+	}
+	prospective, err = assignmentSnapshot(prospective, input.Assignments, options)
+	if err != nil {
+		return Appointment{}, err
+	}
+	if err := validateAppointmentAssignments(prospective); err != nil {
+		return Appointment{}, err
+	}
+	required := time.Duration(prospective.EstimatedHackMinutes+prospective.EstimatedTransportMinutes) * time.Minute
+	if input.Time.EndsAt.Sub(input.Time.StartsAt) < required {
+		return Appointment{}, ErrValidation
+	}
+	from, to := reservationRange(prospective, prospective.StartsAt, prospective.EndsAt)
+	override, err := s.checkAvailability(ctx, actor, prospective.Drivers, from, to, input.Assignments.OverrideReason)
+	if err != nil {
+		return Appointment{}, err
+	}
+	return s.store.Plan(ctx, actor, input, override)
+}
+
 func (s *Service) AssignDriversAndResources(ctx context.Context, actor auth.Actor, input AssignInput) (Appointment, error) {
 	if err := actor.Require(auth.PermissionAppointmentPlan); err != nil {
 		return Appointment{}, err
@@ -476,6 +542,10 @@ func (s *Service) assignmentSnapshot(ctx context.Context, current Appointment, i
 	if err != nil {
 		return Appointment{}, err
 	}
+	return assignmentSnapshot(current, input, options)
+}
+
+func assignmentSnapshot(current Appointment, input AssignmentInput, options PlanningOptions) (Appointment, error) {
 	driverNames := make(map[string]string, len(options.Drivers))
 	for _, item := range options.Drivers {
 		driverNames[item.ID] = item.Name
@@ -638,7 +708,7 @@ func (s *Service) AppointmentDetail(ctx context.Context, actor auth.Actor, id st
 }
 
 func (s *Service) PlanningOptions(ctx context.Context, actor auth.Actor) (PlanningOptions, error) {
-	if err := actor.Require(auth.PermissionCalendarViewAll); err != nil {
+	if err := actor.Require(auth.PermissionAppointmentPlan); err != nil {
 		return PlanningOptions{}, err
 	}
 	return s.store.PlanningOptions(ctx)

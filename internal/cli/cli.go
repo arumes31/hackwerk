@@ -54,6 +54,14 @@ func Run(ctx context.Context, arguments []string, streams IO) int {
 		writeHelp(streams.Output)
 		return ExitSuccess
 	}
+	if len(arguments) == 2 {
+		// #nosec G602 -- the slice length is checked immediately above.
+		if isHelp(arguments[1]) {
+			if writeCommandHelp(streams.Output, arguments[0]) {
+				return ExitSuccess
+			}
+		}
+	}
 	if arguments[0] == "version" {
 		if len(arguments) != 1 {
 			_, _ = fmt.Fprintln(streams.Error, "Verwendung: hackwerk version")
@@ -62,13 +70,13 @@ func Run(ctx context.Context, arguments []string, streams IO) int {
 		writeVersion(streams.Output)
 		return ExitSuccess
 	}
-	if len(arguments) == 2 {
-		// #nosec G602 -- the slice length is checked immediately above.
-		if isHelp(arguments[1]) {
-			if writeCommandHelp(streams.Output, arguments[0]) {
-				return ExitSuccess
-			}
+	if arguments[0] == "schema-version" {
+		if len(arguments) != 1 {
+			_, _ = fmt.Fprintln(streams.Error, "Verwendung: hackwerk schema-version")
+			return ExitUsage
 		}
+		_, _ = fmt.Fprintln(streams.Output, config.CurrentSchemaVersion)
+		return ExitSuccess
 	}
 	if !knownConfiguredCommand(arguments[0]) {
 		_, _ = fmt.Fprintf(streams.Error, "Unbekannter Befehl %q.\n", arguments[0])
@@ -102,11 +110,18 @@ func Run(ctx context.Context, arguments []string, streams IO) int {
 	case "admin":
 		return runAdmin(ctx, arguments[1:], cfg, streams, logger)
 	case "healthcheck":
-		if len(arguments) != 1 {
-			return usage(streams.Error, "Verwendung: hackwerk healthcheck")
+		if len(arguments) > 2 {
+			return usage(streams.Error, "Verwendung: hackwerk healthcheck [worker]")
+		}
+		if len(arguments) == 2 {
+			// #nosec G602 -- the slice length is checked immediately above.
+			if arguments[1] != "worker" {
+				return usage(streams.Error, "Verwendung: hackwerk healthcheck [worker]")
+			}
+			return runProcess(streams.Error, logger, func() error { return app.WorkerHealthcheck(ctx, cfg) })
 		}
 		return runProcess(streams.Error, logger, func() error {
-			return web.Healthcheck(ctx, strings.TrimRight(cfg.BaseURL, "/"), 5*time.Second)
+			return web.Healthcheck(ctx, cfg.ListenAddr, strings.TrimRight(cfg.BaseURL, "/"), 5*time.Second)
 		})
 	case "config-check":
 		if len(arguments) != 1 {
@@ -137,13 +152,14 @@ func isHelp(argument string) bool {
 
 func writeCommandHelp(output io.Writer, command string) bool {
 	help := map[string]string{
-		"serve":        "Verwendung: hackwerk serve\nStartet den HTTP-Webdienst.",
-		"worker":       "Verwendung: hackwerk worker\nStartet Hintergrundprozesse.",
-		"migrate":      "Verwendung: hackwerk migrate up|down|status\nVerwaltet das Datenbankschema.",
-		"seed-dev":     "Verwendung: hackwerk seed-dev\nErzeugt ausschließlich lokale Entwicklungsdaten.",
-		"admin":        adminHelp,
-		"healthcheck":  "Verwendung: hackwerk healthcheck\nPrüft die Readiness des Webdienstes.",
-		"config-check": "Verwendung: hackwerk config-check\nValidiert die Startkonfiguration und zeigt nur redigierte Diagnosedaten.",
+		"serve":          "Verwendung: hackwerk serve\nStartet den HTTP-Webdienst.",
+		"worker":         "Verwendung: hackwerk worker\nStartet Hintergrundprozesse.",
+		"migrate":        "Verwendung: hackwerk migrate up|down|status\nVerwaltet das Datenbankschema.",
+		"seed-dev":       "Verwendung: hackwerk seed-dev\nErzeugt ausschließlich lokale Entwicklungsdaten.",
+		"admin":          adminHelp,
+		"healthcheck":    "Verwendung: hackwerk healthcheck [worker]\nPrüft lokal die Web-Readiness oder direkt Datenbank, Schema und Worker-Heartbeat.",
+		"config-check":   "Verwendung: hackwerk config-check\nValidiert die Startkonfiguration und zeigt nur redigierte Diagnosedaten.",
+		"schema-version": "Verwendung: hackwerk schema-version\nGibt die vom Binary erwartete Schemaversion aus.",
 	}
 	message, ok := help[command]
 	if ok {
@@ -842,7 +858,8 @@ Verwendung:
   hackwerk migrate up|down|status
   hackwerk seed-dev              Entwicklungsschema und Demodaten vorbereiten
   hackwerk admin --help          Benutzer-CLI
-  hackwerk healthcheck           Readiness des Webdienstes prüfen
+  hackwerk healthcheck [worker]  Web- oder Worker-Readiness prüfen
   hackwerk config-check          Konfiguration redigiert diagnostizieren
+  hackwerk schema-version        Erwartete Schemaversion ausgeben
   hackwerk version               Buildversion anzeigen`)
 }

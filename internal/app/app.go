@@ -3,11 +3,11 @@ package app
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"example.invalid/hackplan/internal/adapters/postgres"
@@ -185,7 +185,7 @@ func Worker(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err := operations.Ready(ctx, cfg.Database.ExpectedSchema); err != nil {
 		return err
 	}
-	workerID, err := newWorkerID()
+	workerID, err := workerIdentity(cfg.Worker.InstanceID, os.Hostname)
 	if err != nil {
 		return err
 	}
@@ -290,10 +290,58 @@ func Worker(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 }
 
-func newWorkerID() (string, error) {
-	var value [12]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		return "", errors.New("app: generating worker identity")
+// WorkerHealthcheck verifies the worker's database/schema contract and the
+// shared heartbeat without depending on the web container or reverse proxy.
+func WorkerHealthcheck(ctx context.Context, cfg config.Config) error {
+	checkCtx, cancel := context.WithTimeout(ctx, cfg.Database.ReadinessTimeout)
+	defer cancel()
+	databaseConfig := cfg.Database
+	databaseConfig.MinConnections = 0
+	databaseConfig.MaxConnections = 1
+	pool, err := postgres.Open(checkCtx, databaseConfig)
+	if err != nil {
+		return err
 	}
-	return "worker-" + hex.EncodeToString(value[:]), nil
+	defer pool.Close()
+	operations := postgres.NewOperationsStore(pool, cfg.Metrics.WorkerStaleAfter)
+	workerID, err := workerIdentity(cfg.Worker.InstanceID, os.Hostname)
+	if err != nil {
+		return err
+	}
+	return checkWorkerHealth(checkCtx, operations, cfg.Database.ExpectedSchema, workerID, cfg.Metrics.WorkerStaleAfter)
+}
+
+type workerHealthStore interface {
+	Ready(context.Context, int64) error
+	WorkerHealthyByID(context.Context, string, time.Duration) (time.Time, bool, error)
+}
+
+func checkWorkerHealth(ctx context.Context, operations workerHealthStore, expectedSchema int64, workerID string, staleAfter time.Duration) error {
+	if err := operations.Ready(ctx, expectedSchema); err != nil {
+		return err
+	}
+	_, healthy, err := operations.WorkerHealthyByID(ctx, workerID, staleAfter)
+	if err != nil {
+		return err
+	}
+	if !healthy {
+		return errors.New("app: worker heartbeat is stale")
+	}
+	return nil
+}
+
+func workerIdentity(configured string, hostname func() (string, error)) (string, error) {
+	value := strings.TrimSpace(configured)
+	if value == "" {
+		var err error
+		value, err = hostname()
+		value = strings.TrimSpace(value)
+		if err != nil || value == "" {
+			return "", errors.New("app: resolving worker identity")
+		}
+	}
+	if len(value) > 128 || strings.ContainsAny(value, "\r\n\t") {
+		return "", errors.New("app: invalid worker identity")
+	}
+	return value, nil
 }

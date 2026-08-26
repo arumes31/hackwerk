@@ -98,6 +98,7 @@ type Confirmation struct {
 }
 
 type Worker struct {
+	InstanceID   string
 	PollInterval time.Duration
 	Lease        time.Duration
 	BatchSize    int
@@ -255,10 +256,12 @@ func LoadForCommand(command string) (Config, error) {
 		validation.SMS.Enabled = false
 	case "worker":
 		validation.Voice.Enabled = false
+		validation.Map = Map{TileURL: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", Attribution: "unused", Timeout: time.Second, MaxResponseBytes: 16 << 10, MaxZoom: 1}
 	case "migrate", "seed-dev", "admin", "healthcheck":
 		validation.Mail.Enabled = false
 		validation.SMS.Enabled = false
 		validation.Voice.Enabled = false
+		validation.Map = Map{TileURL: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", Attribution: "unused", Timeout: time.Second, MaxResponseBytes: 16 << 10, MaxZoom: 1}
 	}
 	if err := validation.Validate(); err != nil {
 		return Config{}, err
@@ -367,7 +370,7 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 			LoginLimitPerMinute: 10,
 		},
 		Confirmation: Confirmation{TokenTTL: 14 * 24 * time.Hour, CurrentKeyID: valueOrDefault(getenv("CONFIRMATION_TOKEN_KEY_ID"), "development-v1"), TokenKeys: keys, RateLimit: 30},
-		Worker:       Worker{PollInterval: time.Second, Lease: 30 * time.Second, BatchSize: 20},
+		Worker:       Worker{InstanceID: strings.TrimSpace(getenv("WORKER_INSTANCE_ID")), PollInterval: time.Second, Lease: 30 * time.Second, BatchSize: 20},
 		Mail: Mail{
 			Host: valueOrDefault(getenv("MAIL_SMTP_HOST"), "smtp.example.invalid"), Port: 587, TLSMode: valueOrDefault(getenv("MAIL_SMTP_TLS"), "starttls"),
 			Username: mailUsername, Password: mailPassword, FromAddress: valueOrDefault(getenv("MAIL_FROM_ADDRESS"), "hackwerk@example.invalid"),
@@ -705,7 +708,8 @@ func (cfg Config) Validate() error {
 	if !ok || decodeErr != nil || len(decodedKey) < 32 {
 		return errors.New("config: current confirmation token key is missing or too short")
 	}
-	if cfg.Worker.PollInterval < 100*time.Millisecond || cfg.Worker.Lease < time.Second || cfg.Worker.BatchSize < 1 || cfg.Worker.BatchSize > 500 {
+	if cfg.Worker.PollInterval < 100*time.Millisecond || cfg.Worker.Lease < time.Second || cfg.Worker.BatchSize < 1 || cfg.Worker.BatchSize > 500 ||
+		len(cfg.Worker.InstanceID) > 128 || strings.ContainsAny(cfg.Worker.InstanceID, "\r\n\t") {
 		return errors.New("config: invalid worker settings")
 	}
 	if cfg.Mail.MaxAttempts < 1 || cfg.Mail.MaxAttempts > 50 || cfg.Mail.Port < 1 || cfg.Mail.Port > 65535 ||

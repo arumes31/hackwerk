@@ -37,8 +37,8 @@ MAIL_SMTP_TLS=starttls
 MAIL_FROM_ADDRESS=hackwerk@example.invalid
 MAIL_FROM_NAME=HackWerk
 MAIL_MAX_ATTEMPTS=6
-# MAIL_SMTP_USERNAME_FILE=/run/secrets/smtp_username
-# MAIL_SMTP_PASSWORD_FILE=/run/secrets/smtp_password
+# MAIL_SMTP_USERNAME_FILE=/run/secrets/mail_smtp_username
+# MAIL_SMTP_PASSWORD_FILE=/run/secrets/mail_smtp_password
 
 SMS_PROVIDER=sendberry
 SMS_ENABLED=false
@@ -125,6 +125,9 @@ METRICS_ENABLED=true
 METRICS_LISTEN_ADDR=127.0.0.1:19090
 METRICS_COLLECTION_TIMEOUT=2s
 WORKER_HEARTBEAT_STALE_AFTER=2m
+# Optional; defaults to the stable container/host name. Set a unique value for
+# each worker process when multiple workers share one host.
+WORKER_INSTANCE_ID=
 
 CONFIRMATION_TOKEN_TTL=336h
 CONFIRMATION_TOKEN_KEY_ID=production-v1

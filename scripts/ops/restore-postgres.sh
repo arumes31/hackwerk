@@ -3,6 +3,15 @@ set -eu
 
 : "${RESTORE_DATABASE_URL_FILE:?RESTORE_DATABASE_URL_FILE ist erforderlich}"
 : "${1:?Pfad zum Dump ist erforderlich}"
+schema_binary=${HACKWERK_BINARY:-hackwerk}
+if ! command -v "$schema_binary" >/dev/null 2>&1; then
+  echo "HackWerk-Binary für die kanonische Schemaversion fehlt" >&2
+  exit 2
+fi
+expected_schema_version=$("$schema_binary" schema-version)
+case "$expected_schema_version" in
+  *[!0-9]*|'') echo "HackWerk-Binary lieferte keine gültige Schemaversion" >&2; exit 2;;
+esac
 dump=$1
 [ -f "$dump" ] || { echo "Dump existiert nicht" >&2; exit 2; }
 [ -f "$dump.sha256" ] || { echo "Prüfsummendatei fehlt" >&2; exit 2; }
@@ -47,5 +56,5 @@ fi
 
 application=$(psql --dbname="$database_url" --tuples-only --no-align --command="SELECT value FROM schema_metadata WHERE key='application'")
 schema_version=$(psql --dbname="$database_url" --tuples-only --no-align --command="SELECT value FROM schema_metadata WHERE key='application_schema_version'")
-[ "$application" = hackplan ] && [ "$schema_version" = 10 ] || { echo "Restore-Schemaprüfung fehlgeschlagen" >&2; exit 1; }
+[ "$application" = hackplan ] && [ "$schema_version" = "$expected_schema_version" ] || { echo "Restore-Schemaprüfung fehlgeschlagen" >&2; exit 1; }
 printf 'Restore erfolgreich; Schema %s.\n' "$schema_version"

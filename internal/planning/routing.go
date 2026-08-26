@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"example.invalid/hackplan/internal/outbound"
 )
 
 type HaversineRouter struct {
@@ -136,7 +138,7 @@ func NewOSRMRouter(cfg OSRMConfig) (*OSRMRouter, error) {
 	if cfg.MaxResponseBytes < 1024 {
 		cfg.MaxResponseBytes = 1 << 20
 	}
-	client := &http.Client{Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("planning: routing redirect rejected") }}
+	client := &http.Client{Transport: outbound.Transport(), Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("planning: routing redirect rejected") }}
 	return &OSRMRouter{base: parsed, client: client, max: cfg.MaxResponseBytes, backoff: cfg.Backoff, now: time.Now}, nil
 }
 func (r *OSRMRouter) Matrix(ctx context.Context, points []Point) (result Matrix, resultErr error) {

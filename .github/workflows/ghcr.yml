@@ -34,6 +34,7 @@ jobs:
         run: |
           {
             echo "version=$(sh scripts/version.sh)"
+            echo "release=$(sh scripts/version.sh)"
             echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           } >> "$GITHUB_OUTPUT"
       - name: Set up Buildx
@@ -48,6 +49,7 @@ jobs:
           tags: hackwerk-ci:${{ github.sha }}
           build-args: |
             VERSION=${{ steps.build.outputs.version }}
+            RELEASE_VERSION=${{ steps.build.outputs.release }}
             COMMIT=${{ github.sha }}
             BUILD_TIME=${{ steps.build.outputs.created }}
             SOURCE_URL=https://github.com/${{ github.repository }}
@@ -83,9 +85,15 @@ jobs:
         id: build
         shell: bash
         run: |
+          build_version="$(sh scripts/version.sh)"
+          release_version="$build_version"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            release_version="${GITHUB_REF_NAME#v}"
+          fi
           {
             echo "image=${REGISTRY}/${GITHUB_REPOSITORY,,}"
-            echo "version=$(sh scripts/version.sh)"
+            echo "version=$build_version"
+            echo "release=$release_version"
             echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           } >> "$GITHUB_OUTPUT"
       - name: Log in to GHCR
@@ -101,7 +109,8 @@ jobs:
           images: ${{ steps.build.outputs.image }}
           labels: |
             org.opencontainers.image.title=HackWerk
-            org.opencontainers.image.version=${{ steps.build.outputs.version }}
+            org.opencontainers.image.version=${{ steps.build.outputs.release }}
+            at.hackwerk.build.version=${{ steps.build.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.created=${{ steps.build.outputs.created }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
@@ -125,6 +134,7 @@ jobs:
           labels: ${{ steps.metadata.outputs.labels }}
           build-args: |
             VERSION=${{ steps.build.outputs.version }}
+            RELEASE_VERSION=${{ steps.build.outputs.release }}
             COMMIT=${{ github.sha }}
             BUILD_TIME=${{ steps.build.outputs.created }}
             SOURCE_URL=https://github.com/${{ github.repository }}

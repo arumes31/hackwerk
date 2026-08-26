@@ -8,9 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 
 	"example.invalid/hackplan/internal/appointment"
@@ -307,13 +310,23 @@ func MetricsServer(cfg config.Config, handler http.Handler) *http.Server {
 	}
 }
 
-// Healthcheck requests a health endpoint and accepts only a 200 response.
-func Healthcheck(ctx context.Context, baseURL string, timeout time.Duration) (checkErr error) {
+// Healthcheck requests readiness directly from the local listener while using
+// the public host for the application's unchanged host allowlist.
+func Healthcheck(ctx context.Context, listenAddr, baseURL string, timeout time.Duration) (checkErr error) {
+	endpoint, err := localHealthEndpoint(listenAddr)
+	if err != nil {
+		return err
+	}
+	publicURL, err := url.Parse(baseURL)
+	if err != nil || publicURL.Hostname() == "" || publicURL.User != nil {
+		return errors.New("healthcheck: invalid public base URL")
+	}
 	client := &http.Client{Timeout: timeout}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/health/ready", nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return fmt.Errorf("healthcheck: creating request: %w", err)
 	}
+	request.Host = publicURL.Host
 	response, err := client.Do(request)
 	if err != nil {
 		return fmt.Errorf("healthcheck: requesting readiness: %w", err)
@@ -325,4 +338,21 @@ func Healthcheck(ctx context.Context, baseURL string, timeout time.Duration) (ch
 		return fmt.Errorf("healthcheck: readiness returned status %s", strconv.Itoa(response.StatusCode))
 	}
 	return nil
+}
+
+func localHealthEndpoint(listenAddr string) (string, error) {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(listenAddr))
+	if err != nil || port == "" {
+		return "", errors.New("healthcheck: invalid listen address")
+	}
+	dialHost := strings.Trim(strings.TrimSpace(host), "[]")
+	switch {
+	case dialHost == "", dialHost == "0.0.0.0", strings.EqualFold(dialHost, "localhost"):
+		dialHost = "127.0.0.1"
+	case dialHost == "::":
+		dialHost = "::1"
+	case net.ParseIP(dialHost) == nil:
+		return "", errors.New("healthcheck: listen host must be an IP address")
+	}
+	return (&url.URL{Scheme: "http", Host: net.JoinHostPort(dialHost, port), Path: "/health/ready"}).String(), nil
 }

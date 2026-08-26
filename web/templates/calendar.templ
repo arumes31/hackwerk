@@ -5,6 +5,8 @@ import (
 	"example.invalid/hackplan/internal/auth"
 	"example.invalid/hackplan/internal/resource"
 	"fmt"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -14,6 +16,35 @@ type CalendarData struct {
 	Options  appointment.PlanningOptions
 	Events   []appointment.CalendarEvent
 	Timezone string
+	Notice   string
+}
+
+type PlanningFormValues struct {
+	CSRFToken                  string
+	JobID                      string
+	StartsAt                   string
+	DurationMinutes            string
+	DriverIDs                  []string
+	PrimaryDriverID            string
+	ChipperResourceID          string
+	TransportResourceID        string
+	TrailerResourceID          string
+	OverrideReason             string
+	TransportMode              string
+	ExternalTransportConfirmed bool
+}
+
+type PlanningFormError struct {
+	Message string
+	FieldID string
+}
+
+type CalendarPlanData struct {
+	Shell   ShellData
+	Options appointment.PlanningOptions
+	Job     appointment.WaitlistItem
+	Values  PlanningFormValues
+	Error   PlanningFormError
 }
 
 templ Calendar(data CalendarData) {
@@ -33,6 +64,9 @@ templ Calendar(data CalendarData) {
 						<span class="status-badge">{ data.Timezone }</span>
 					</div>
 				</div>
+				if data.Notice != "" {
+					<div class="calendar-message" role="status">{ data.Notice }</div>
+				}
 				<div class="calendar-layout">
 					if data.Shell.Actor.Role == auth.RoleAdmin {
 						<aside class="calendar-waitlist" aria-labelledby="calendar-waitlist-title">
@@ -40,9 +74,9 @@ templ Calendar(data CalendarData) {
 							<p>Ziehen oder „Einplanen“ wählen. Beides erzeugt nur einen Vorschlag.</p>
 							<div data-calendar-waitlist>
 								for _, item := range data.Options.Waitlist {
-									<article class="calendar-waitlist-item" draggable="true" data-calendar-job={ item.JobID } data-job-id={ item.JobID } data-duration={ fmt.Sprint(item.EstimatedHackMinutes) } data-title={ item.CustomerName + " · " + item.JobNumber }>
+									<article class="calendar-waitlist-item" draggable="true" data-calendar-job={ item.JobID } data-job-id={ item.JobID } data-duration={ fmt.Sprint(item.EstimatedHackMinutes + item.EstimatedTransportMinutes) } data-title={ item.CustomerName + " · " + item.JobNumber } data-transport-mode={ item.TransportMode } data-external-confirmed={ fmt.Sprint(item.ExternalTransportConfirmed) }>
 										<strong>{ item.CustomerName }</strong><span>{ item.JobNumber } · { item.VolumeM3 } m³</span><small>{ item.Locality } · { calendarJobTypeLabel(item.JobType) }</small>
-										<button class="button button--quiet" type="button" data-plan-job={ item.JobID } data-duration={ fmt.Sprint(item.EstimatedHackMinutes) } data-title={ item.CustomerName + " · " + item.JobNumber }>Einplanen</button>
+										<a class="button button--quiet" href={ "/calendar/plan?job_id=" + url.QueryEscape(item.JobID) } data-plan-job={ item.JobID } data-duration={ fmt.Sprint(item.EstimatedHackMinutes + item.EstimatedTransportMinutes) } data-title={ item.CustomerName + " · " + item.JobNumber } data-transport-mode={ item.TransportMode } data-external-confirmed={ fmt.Sprint(item.ExternalTransportConfirmed) }>Einplanen</a>
 									</article>
 								}
 								if len(data.Options.Waitlist) == 0 {
@@ -94,71 +128,144 @@ templ Calendar(data CalendarData) {
 
 templ planningDialog(data CalendarData) {
 	<dialog class="planning-dialog" data-planning-dialog aria-labelledby="planning-dialog-title">
-		<form method="post" action="/calendar/plan" class="form-stack" data-planning-form>
+		<form method="post" action="/calendar/plan" class="form-stack" data-planning-form aria-describedby="planning-safety-note">
 			<div class="dialog-heading"><div><p class="eyebrow">Unverbindlicher Vorschlag</p><h2 id="planning-dialog-title" data-planning-title>Auftrag einplanen</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Dialog schließen">×</button></div>
-			<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="job_id" data-planning-job/>
-			<div class="form-grid"><label>Beginn (Europe/Vienna)<input type="datetime-local" name="starts_at" data-planning-start required/></label><label>Dauer in Minuten<input type="number" name="duration_minutes" min="15" max="10080" step="15" data-planning-duration required/></label></div>
-			<fieldset>
-				<legend>Fahrer</legend>
-				<div class="choice-grid">
-					for _, item := range data.Options.Drivers {
-						<label class="check-label"><input type="checkbox" name="driver_id" value={ item.ID }/> { item.Name }</label>
-					}
-				</div>
-				<label>
-					Primärfahrer
-					<select name="primary_driver_id" required>
-						<option value="">Bitte wählen</option>
-						for _, item := range data.Options.Drivers {
-							<option value={ item.ID }>{ item.Name }</option>
-						}
-					</select>
-				</label>
-			</fieldset>
-			<fieldset>
-				<legend>Ressourcen</legend>
-				<div class="form-grid">
-					<label>
-						Hackmaschine
-						<select name="chipper_resource_id" required>
-							<option value="">Bitte wählen</option>
-							for _, item := range data.Options.Resources {
-								if item.Type == resource.TypeChipper {
-									<option value={ item.ID }>{ item.Name }</option>
-								}
-							}
-						</select>
-					</label>
-					<label>
-						Transportmittel (falls intern)
-						<select name="transport_resource_id">
-							<option value="">Keines</option>
-							for _, item := range data.Options.Resources {
-								if item.Type == resource.TypeTransportVehicle {
-									<option value={ item.ID }>{ item.Name }</option>
-								}
-							}
-						</select>
-					</label>
-					<label>
-						Anhänger (optional)
-						<select name="trailer_resource_id">
-							<option value="">Keiner</option>
-							for _, item := range data.Options.Resources {
-								if item.Type == resource.TypeTrailer {
-									<option value={ item.ID }>{ item.Name }</option>
-								}
-							}
-						</select>
-					</label>
-				</div>
-			</fieldset>
-			<label>Begründung für Verfügbarkeits-Override (nur falls nötig)<textarea name="override_reason" maxlength="1000"></textarea></label>
-			<div class="form-alert" role="alert" hidden data-planning-error></div>
+			@planningFormFields(data.Options, PlanningFormValues{CSRFToken: data.Shell.CSRFToken}, PlanningFormError{}, false)
 			<div class="form-actions"><button class="button" type="submit">Vorschlag speichern</button><button class="button button--quiet" type="button" data-dialog-close>Abbrechen</button></div>
-			<p class="form-hint">Dieser Schritt fixiert keinen Termin und versendet keine Nachricht.</p>
+			<p id="planning-safety-note" class="form-hint">Dieser Schritt fixiert keinen Termin und versendet keine Nachricht.</p>
 		</form>
 	</dialog>
+}
+
+templ CalendarPlan(data CalendarPlanData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data.Shell.Page, "Auftrag einplanen – "+data.Shell.Page.AppName)
+		<body>
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page">
+				<div class="page-heading">
+					<div><p class="eyebrow">Unverbindlicher Vorschlag</p><h1>Auftrag einplanen</h1><p>Vollständig ohne Drag-and-drop bedienbar.</p></div>
+					<a class="button button--quiet" href="/calendar">Zurück zum Kalender</a>
+				</div>
+				<section class="form-card" aria-labelledby="calendar-plan-job-title">
+					<h2 id="calendar-plan-job-title">{ data.Job.CustomerName } · { data.Job.JobNumber }</h2>
+					<p>{ data.Job.VolumeM3 } m³ · { data.Job.Locality } · { calendarJobTypeLabel(data.Job.JobType) }</p>
+					<form method="post" action="/calendar/plan" class="form-stack" aria-describedby="planning-safety-note">
+						@planningFormFields(data.Options, data.Values, data.Error, true)
+						<div class="form-actions"><button class="button" type="submit">Vorschlag speichern</button><a class="button button--quiet" href="/calendar">Abbrechen</a></div>
+						<p id="planning-safety-note" class="form-hint">Der Termin wird nicht fixiert und es wird keine Nachricht versendet. Es entsteht ausschließlich ein Vorschlag.</p>
+					</form>
+				</section>
+			</main>
+			@appFooter(data.Shell.Page)
+		</body>
+	</html>
+}
+
+templ planningFormFields(options appointment.PlanningOptions, values PlanningFormValues, formError PlanningFormError, autofocusError bool) {
+	<input type="hidden" name="csrf_token" value={ values.CSRFToken }/>
+	<input type="hidden" name="job_id" value={ values.JobID } data-planning-job/>
+	if formError.Message != "" {
+		<div id="planning-error" class="form-alert" role="alert" tabindex="-1" autofocus?={ autofocusError } data-planning-error>
+			<strong>Vorschlag konnte nicht gespeichert werden.</strong>
+			<p>{ formError.Message }</p>
+			if formError.FieldID != "" {
+				<a href={ "#" + formError.FieldID }>Eingabe prüfen</a>
+			}
+		</div>
+	} else {
+		<div id="planning-error" class="form-alert" role="alert" tabindex="-1" hidden data-planning-error></div>
+	}
+	<div class="form-grid">
+		<label for="planning-start">Beginn (Europe/Vienna)<input id="planning-start" type="datetime-local" name="starts_at" value={ values.StartsAt } data-planning-start required aria-invalid={ planningFieldInvalid(formError, "planning-start") } aria-errormessage={ planningFieldErrorID(formError, "planning-start") }/></label>
+		<label for="planning-duration">Dauer in Minuten<input id="planning-duration" type="number" name="duration_minutes" value={ values.DurationMinutes } min="15" max="10080" step="15" data-planning-duration required aria-invalid={ planningFieldInvalid(formError, "planning-duration") } aria-errormessage={ planningFieldErrorID(formError, "planning-duration") }/></label>
+	</div>
+	<fieldset>
+		<legend>Fahrer</legend>
+		<div class="choice-grid">
+			for _, item := range options.Drivers {
+				<label class="check-label" for={ "planning-driver-" + item.ID }><input id={ "planning-driver-" + item.ID } type="checkbox" name="driver_id" value={ item.ID } checked?={ slices.Contains(values.DriverIDs, item.ID) }/> { item.Name }</label>
+			}
+		</div>
+		<label for="planning-primary-driver">
+			Primärfahrer
+			<select id="planning-primary-driver" name="primary_driver_id" required aria-invalid={ planningFieldInvalid(formError, "planning-primary-driver") } aria-errormessage={ planningFieldErrorID(formError, "planning-primary-driver") }>
+				<option value="">Bitte wählen</option>
+				for _, item := range options.Drivers {
+					<option value={ item.ID } selected?={ values.PrimaryDriverID == item.ID }>{ item.Name }</option>
+				}
+			</select>
+		</label>
+	</fieldset>
+	<fieldset>
+		<legend>Ressourcen</legend>
+		<div class="form-grid">
+			<label for="planning-chipper-resource">
+				Hackmaschine
+				<select id="planning-chipper-resource" name="chipper_resource_id" required aria-invalid={ planningFieldInvalid(formError, "planning-chipper-resource") } aria-errormessage={ planningFieldErrorID(formError, "planning-chipper-resource") }>
+					<option value="">Bitte wählen</option>
+					for _, item := range options.Resources {
+						if item.Type == resource.TypeChipper {
+							<option value={ item.ID } selected?={ values.ChipperResourceID == item.ID }>{ item.Name }</option>
+						}
+					}
+				</select>
+			</label>
+			<label for="planning-transport-resource">
+				if values.TransportMode == "internal" {
+					Transportmittel (erforderlich)
+				} else {
+					Transportmittel (nur bei internem Transport)
+				}
+				<select id="planning-transport-resource" name="transport_resource_id" required?={ values.TransportMode == "internal" } aria-invalid={ planningFieldInvalid(formError, "planning-transport-resource") } aria-errormessage={ planningFieldErrorID(formError, "planning-transport-resource") } data-planning-transport-resource>
+					<option value="">Keines</option>
+					for _, item := range options.Resources {
+						if item.Type == resource.TypeTransportVehicle {
+							<option value={ item.ID } selected?={ values.TransportResourceID == item.ID }>{ item.Name }</option>
+						}
+					}
+				</select>
+				<small data-planning-transport-note>
+					if values.TransportMode == "internal" {
+						Interner Transport: Fahrzeug auswählen.
+					} else if values.TransportMode == "external" && values.ExternalTransportConfirmed {
+						Externer Transport ist im Auftrag bestätigt; kein internes Fahrzeug nötig.
+					} else if values.TransportMode == "external" {
+						Externer Transport muss zuerst im Auftrag bestätigt werden.
+					} else if values.TransportMode == "undecided" {
+						Transportmodus muss zuerst im Auftrag festgelegt werden.
+					}
+				</small>
+			</label>
+			<label for="planning-trailer-resource">
+				Anhänger (optional)
+				<select id="planning-trailer-resource" name="trailer_resource_id">
+					<option value="">Keiner</option>
+					for _, item := range options.Resources {
+						if item.Type == resource.TypeTrailer {
+							<option value={ item.ID } selected?={ values.TrailerResourceID == item.ID }>{ item.Name }</option>
+						}
+					}
+				</select>
+			</label>
+		</div>
+	</fieldset>
+	<label for="planning-override-reason">Begründung für Verfügbarkeits-Override (nur falls nötig)<textarea id="planning-override-reason" name="override_reason" maxlength="1000">{ values.OverrideReason }</textarea></label>
+}
+
+func planningFieldInvalid(formError PlanningFormError, fieldID string) string {
+	if formError.FieldID == fieldID {
+		return "true"
+	}
+	return "false"
+}
+
+func planningFieldErrorID(formError PlanningFormError, fieldID string) string {
+	if formError.FieldID == fieldID {
+		return "planning-error"
+	}
+	return ""
 }
 
 templ appointmentDialog(csrf string, admin bool) {

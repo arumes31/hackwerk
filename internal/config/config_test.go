@@ -203,6 +203,19 @@ func TestLoadForCommandKeepsProviderSecretsOutOfWebProcess(t *testing.T) {
 	}
 }
 
+func TestLoadForCommandDoesNotRequireWebMapSecretInWorker(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("MAP_TILE_URL", "https://tiles.example/{z}/{x}/{y}.png?key={token}")
+	t.Setenv("MAP_TILE_TOKEN", "")
+	t.Setenv("MAP_TILE_TOKEN_FILE", "")
+	if _, err := LoadForCommand("worker"); err != nil {
+		t.Fatalf("worker config unexpectedly requires web map secret: %v", err)
+	}
+	if _, err := LoadForCommand("serve"); err == nil {
+		t.Fatal("serve config accepted tokenized map URL without its secret")
+	}
+}
+
 func TestProductionRequiresTrustedProxyAndRejectsWildcardHost(t *testing.T) {
 	base := map[string]string{
 		"APP_ENV": "production", "APP_BASE_URL": "https://hackwerk.example", "APP_ALLOWED_HOSTS": "hackwerk.example",

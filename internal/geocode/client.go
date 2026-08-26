@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"example.invalid/hackplan/internal/outbound"
 )
 
 const (
@@ -91,7 +93,7 @@ func New(cfg Config) (*Client, error) {
 		baseURL: parsed, countryCodes: strings.Join(cfg.CountryCodes, ","), maxResponseSize: cfg.MaxResponseSize,
 		maxResults: cfg.MaxResults, minInterval: cfg.MinInterval, cacheTTL: cfg.CacheTTL, cacheEntries: cfg.CacheEntries,
 		userAgent:  strings.TrimSpace(cfg.UserAgent),
-		httpClient: &http.Client{Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		httpClient: &http.Client{Transport: outbound.Transport(), Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		cache:      make(map[string]cacheEntry), now: time.Now,
 	}, nil
 }

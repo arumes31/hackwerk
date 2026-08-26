@@ -231,6 +231,7 @@ type Querier interface {
 	UpsertWorkerHeartbeat(ctx context.Context, arg UpsertWorkerHeartbeatParams) error
 	VoiceMetricCounts(ctx context.Context) ([]VoiceMetricCountsRow, error)
 	WaitlistFilterFavoriteExists(ctx context.Context, arg WaitlistFilterFavoriteExistsParams) (bool, error)
+	WorkerHeartbeatByID(ctx context.Context, workerID string) (pgtype.Timestamptz, error)
 }
 
 var _ Querier = (*Queries)(nil)

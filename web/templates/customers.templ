@@ -745,7 +745,7 @@ templ Waitlist(data WaitlistData) {
 										<td data-label="Aktionen">
 											<div class="table-row-actions">
 												if data.Shell.Actor.Role == auth.RoleAdmin {
-													<a class="button" href={ "/calendar?job=" + item.JobID }>Einplanen</a>
+													<a class="button" href={ "/calendar/plan?job_id=" + url.QueryEscape(item.JobID) }>Einplanen</a>
 												} else {
 													<a class="button button--quiet" href={ "/customers/" + item.CustomerID + "#job-" + item.JobID }>Bearbeiten</a>
 												}

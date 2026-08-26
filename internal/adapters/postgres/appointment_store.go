@@ -209,6 +209,115 @@ func (s *AppointmentStore) CreateDraft(ctx context.Context, actor auth.Actor, in
 	return s.Get(ctx, id)
 }
 
+func (s *AppointmentStore) Plan(ctx context.Context, actor auth.Actor, input appointment.PlanInput, overrideReason string) (appointment.Appointment, error) {
+	jobID, err := uuid(input.JobID)
+	if err != nil {
+		return appointment.Appointment{}, appointment.ErrNotFound
+	}
+	var id string
+	err = withQueries(ctx, s.pool, func(queries *dbgen.Queries) error {
+		if lockErr := queries.LockSchedulingMutation(ctx); lockErr != nil {
+			return lockErr
+		}
+		job, getErr := queries.GetPlanningJob(ctx, jobID)
+		if errors.Is(getErr, pgx.ErrNoRows) {
+			return appointment.ErrNotFound
+		}
+		if getErr != nil {
+			return getErr
+		}
+		if job.ArchivedAt.Valid || job.WaitlistID == "" || job.WorkflowStatus != "waitlist" {
+			return appointment.ErrTransition
+		}
+		created, insertErr := queries.InsertAppointmentDraft(ctx, dbgen.InsertAppointmentDraftParams{
+			JobID: jobID, StartsAt: timestamp(input.Time.StartsAt), EndsAt: timestamp(input.Time.EndsAt),
+			BufferBeforeMinutes: input.Time.BufferBeforeMinutes, BufferAfterMinutes: input.Time.BufferAfterMinutes,
+		})
+		if insertErr != nil {
+			return mapAppointmentError(insertErr)
+		}
+		id = created.ID
+		appointmentID, parseErr := uuid(id)
+		if parseErr != nil {
+			return parseErr
+		}
+		if err := queries.SetJobWorkflow(ctx, dbgen.SetJobWorkflowParams{WorkflowStatus: "planning", JobID: jobID}); err != nil {
+			return err
+		}
+		if err := insertAudit(ctx, queries, actor, "appointment.draft_created", "appointment", id, input.RequestID,
+			[]string{"job_id", "time_range", "buffer"}); err != nil {
+			return err
+		}
+		for _, driverID := range input.Assignments.DriverIDs {
+			parsed, parseErr := uuid(driverID)
+			if parseErr != nil {
+				return appointment.ErrValidation
+			}
+			rows, insertErr := queries.InsertAppointmentDriver(ctx, dbgen.InsertAppointmentDriverParams{
+				DriverID: parsed, IsPrimary: driverID == input.Assignments.PrimaryDriverID, AppointmentID: appointmentID,
+			})
+			if insertErr != nil {
+				return mapAppointmentError(insertErr)
+			}
+			if rows != 1 {
+				return appointment.ErrValidation
+			}
+		}
+		for _, assigned := range input.Assignments.Resources {
+			resourceID, parseErr := uuid(assigned.ID)
+			if parseErr != nil {
+				return appointment.ErrValidation
+			}
+			rows, insertErr := queries.InsertAppointmentResource(ctx, dbgen.InsertAppointmentResourceParams{
+				Purpose: string(assigned.Purpose), ResourceID: resourceID, AppointmentID: appointmentID,
+			})
+			if insertErr != nil {
+				return mapAppointmentError(insertErr)
+			}
+			if rows != 1 {
+				return appointment.ErrValidation
+			}
+		}
+		current, getErr := queries.GetAppointmentForUpdate(ctx, appointmentID)
+		if getErr != nil {
+			return getErr
+		}
+		if err := ensureAssignmentsReady(ctx, queries, appointmentID, current, input.Time.StartsAt, input.Time.EndsAt, overrideReason); err != nil {
+			return err
+		}
+		rows, bumpErr := queries.BumpAppointmentVersion(ctx, dbgen.BumpAppointmentVersionParams{ID: appointmentID, ExpectedVersion: created.Version})
+		if bumpErr != nil {
+			return mapAppointmentError(bumpErr)
+		}
+		if rows != 1 {
+			return appointment.ErrConflict
+		}
+		if err := queries.SetAppointmentOverrideReason(ctx, dbgen.SetAppointmentOverrideReasonParams{Reason: overrideReason, ID: appointmentID}); err != nil {
+			return err
+		}
+		if err := insertAudit(ctx, queries, actor, "appointment.assignments_changed", "appointment", id, input.RequestID,
+			[]string{"drivers", "resources", "availability_override"}); err != nil {
+			return err
+		}
+		rows, proposalErr := queries.SetAppointmentProposal(ctx, dbgen.SetAppointmentProposalParams{ID: appointmentID, ExpectedVersion: created.Version + 1})
+		if proposalErr != nil {
+			return mapAppointmentError(proposalErr)
+		}
+		if rows != 1 {
+			return appointment.ErrConflict
+		}
+		if err := refreshReservations(ctx, queries, appointmentID); err != nil {
+			return err
+		}
+		return insertAudit(ctx, queries, actor, "appointment.proposed", "appointment", id, input.RequestID,
+			[]string{"lifecycle_status", "reservations", "availability_override"})
+	})
+	if err != nil {
+		return appointment.Appointment{}, err
+	}
+	return s.Get(ctx, id)
+}
+
 func (s *AppointmentStore) Get(ctx context.Context, id string) (appointment.Appointment, error) {
 	appointmentID, err := uuid(id)
 	if err != nil {
@@ -716,7 +825,8 @@ func (s *AppointmentStore) PlanningOptions(ctx context.Context) (appointment.Pla
 	for _, row := range waitlistRows {
 		result.Waitlist = append(result.Waitlist, appointment.WaitlistItem{
 			WaitlistID: row.WaitlistID, JobID: row.JobID, JobNumber: row.JobNumber, JobType: row.JobType,
-			VolumeM3: row.JVolumeM3, EstimatedHackMinutes: row.EstimatedHackMinutes,
+			TransportMode: row.TransportMode, ExternalTransportConfirmed: row.ExternalTransportConfirmed,
+			VolumeM3: row.JVolumeM3, EstimatedHackMinutes: row.EstimatedHackMinutes, EstimatedTransportMinutes: row.EstimatedTransportMinutes,
 			CustomerName: row.CustomerName, Locality: row.Locality,
 		})
 	}

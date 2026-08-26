@@ -3,10 +3,12 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 
+	"example.invalid/hackplan/internal/config"
 	"example.invalid/hackplan/internal/customers"
 	"example.invalid/hackplan/internal/driver"
 	"example.invalid/hackplan/internal/resource"
@@ -44,6 +46,7 @@ func TestRunHelpAndVersion(t *testing.T) {
 		{name: "serve help", arguments: []string{"serve", "--help"}, expectedCode: ExitSuccess, expectedText: "HTTP-Webdienst"},
 		{name: "migrate help", arguments: []string{"migrate", "--help"}, expectedCode: ExitSuccess, expectedText: "Datenbankschema"},
 		{name: "healthcheck help", arguments: []string{"healthcheck", "--help"}, expectedCode: ExitSuccess, expectedText: "Readiness"},
+		{name: "schema version help", arguments: []string{"schema-version", "--help"}, expectedCode: ExitSuccess, expectedText: "Schemaversion"},
 	}
 
 	for _, tt := range tests {
@@ -60,6 +63,23 @@ func TestRunHelpAndVersion(t *testing.T) {
 				t.Fatalf("output = %q, want containing %q", combined, tt.expectedText)
 			}
 		})
+	}
+}
+
+func TestSchemaVersionUsesBinaryContractWithoutConfiguration(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("DATABASE_URL", "")
+	var output bytes.Buffer
+	var errorOutput bytes.Buffer
+
+	code := Run(t.Context(), []string{"schema-version"}, IO{Output: &output, Error: &errorOutput})
+
+	if code != ExitSuccess {
+		t.Fatalf("Run() = %d, error = %q", code, errorOutput.String())
+	}
+	want := fmt.Sprintf("%d\n", config.CurrentSchemaVersion)
+	if output.String() != want {
+		t.Fatalf("schema-version output = %q, want %q", output.String(), want)
 	}
 }
 

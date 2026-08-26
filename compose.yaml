@@ -2,7 +2,7 @@ name: hackwerk
 
 services:
   postgres:
-    image: postgres:18.6-alpine
+    image: postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: hackplan_bootstrap
@@ -21,9 +21,10 @@ services:
     build: &hackwerk-build
       context: .
       args:
-        VERSION: dev
-        COMMIT: local
-        BUILD_TIME: local
+        VERSION: ${HACKWERK_VERSION:-dev}
+        RELEASE_VERSION: ${HACKWERK_RELEASE_VERSION:-dev}
+        COMMIT: ${HACKWERK_COMMIT:-local}
+        BUILD_TIME: ${HACKWERK_BUILD_TIME:-local}
     command: ["migrate", "up"]
     environment:
       APP_ENV: development
@@ -181,6 +182,12 @@ services:
       - no-new-privileges:true
     cap_drop: [ALL]
     networks: [backend, egress]
+    healthcheck:
+      test: ["CMD", "/hackwerk", "healthcheck", "worker"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 15s
     restart: unless-stopped
 
 volumes:

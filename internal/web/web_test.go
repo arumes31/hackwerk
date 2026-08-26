@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +50,39 @@ func TestHealthEndpoints(t *testing.T) {
 				t.Fatalf("body = %q, want containing %q", response.Body.String(), tt.expectedBody)
 			}
 		})
+	}
+}
+
+func TestHealthcheckUsesLocalListenerAndPublicHostHeader(t *testing.T) {
+	t.Parallel()
+	hosts := make(chan string, 1)
+	router := testRouter(t, pinger{})
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		hosts <- request.Host
+		router.ServeHTTP(response, request)
+	}))
+	defer server.Close()
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Healthcheck(t.Context(), serverURL.Host, "https://example.com", time.Second); err != nil {
+		t.Fatalf("Healthcheck() error = %v", err)
+	}
+	if got := <-hosts; got != "example.com" {
+		t.Fatalf("healthcheck Host = %q, want %q", got, "example.com")
+	}
+}
+
+func TestLocalHealthEndpointNormalizesUnspecifiedListener(t *testing.T) {
+	t.Parallel()
+	endpoint, err := localHealthEndpoint(":18533")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if endpoint != "http://127.0.0.1:18533/health/ready" {
+		t.Fatalf("localHealthEndpoint() = %q", endpoint)
 	}
 }
 

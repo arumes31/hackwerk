@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"example.invalid/hackplan/internal/outbound"
 )
 
 type SMSWebhookConfig struct {
@@ -37,7 +39,7 @@ func NewSMSWebhookProvider(cfg SMSWebhookConfig, now func() time.Time) (*SMSWebh
 	if now == nil {
 		now = time.Now
 	}
-	return &SMSWebhookProvider{cfg: cfg, now: now, client: &http.Client{Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &SMSWebhookProvider{cfg: cfg, now: now, client: &http.Client{Transport: outbound.Transport(), Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 func loopbackHost(host string) bool {

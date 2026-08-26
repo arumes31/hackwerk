@@ -1,4 +1,10 @@
+ifeq ($(OS),Windows_NT)
+SHELL := C:/Progra~1/Git/bin/sh.exe
+else
 SHELL := /bin/sh
+endif
+.ONESHELL:
+.SHELLFLAGS := -eu -c
 .DEFAULT_GOAL := help
 
 VERSION ?= $(shell sh scripts/version.sh 2>/dev/null || printf 0.1.0)
@@ -8,14 +14,16 @@ BUILD_TIME ?= $(shell powershell -NoProfile -Command "[DateTime]::UtcNow.ToStrin
 else
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 endif
-LDFLAGS := -s -w -X example.invalid/hackplan/internal/buildinfo.Version=$(VERSION) -X example.invalid/hackplan/internal/buildinfo.Commit=$(COMMIT) -X example.invalid/hackplan/internal/buildinfo.BuildTime=$(BUILD_TIME)
+LDFLAGS := -s -w -X example.invalid/hackplan/internal/buildinfo.Version=$(VERSION) -X example.invalid/hackplan/internal/buildinfo.Release=$(VERSION) -X example.invalid/hackplan/internal/buildinfo.Commit=$(COMMIT) -X example.invalid/hackplan/internal/buildinfo.BuildTime=$(BUILD_TIME)
 
 ifeq ($(OS),Windows_NT)
-DOCKER_RUN_PREFIX := set MSYS_NO_PATHCONV=1&&
-ENSURE_DIST := if not exist dist mkdir dist
+DOCKER_RUN_PREFIX := MSYS_NO_PATHCONV=1
+ENSURE_DIST := mkdir -p dist
+BINARY := bin/hackwerk.exe
 else
 DOCKER_RUN_PREFIX := MSYS_NO_PATHCONV=1
 ENSURE_DIST := mkdir -p dist
+BINARY := bin/hackwerk
 endif
 
 .PHONY: help version assets assets-check workflow-lint dev up down logs clean generate generate-check format format-check lint test test-integration test-migrations test-e2e test-race build build-image image-archive check scan scan-code scan-license scan-image sbom backup-restore-smoke container-smoke release-check
@@ -40,7 +48,7 @@ workflow-lint:
 dev: up
 
 up:
-	docker compose up -d --build
+	HACKWERK_VERSION=$(VERSION) HACKWERK_RELEASE_VERSION=$(VERSION) HACKWERK_COMMIT=$(COMMIT) HACKWERK_BUILD_TIME=$(BUILD_TIME) docker compose up -d --build
 
 down:
 	docker compose down
@@ -88,7 +96,7 @@ test-race:
 
 build:
 	mkdir -p bin
-	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/hackwerk ./cmd/hackwerk
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/hackwerk
 
 check: generate-check format-check workflow-lint lint test test-integration build
 
@@ -105,13 +113,13 @@ image-archive: build-image
 	docker save --output dist/hackwerk-scan.tar hackwerk-scan:local
 
 scan-image: image-archive
-	$(DOCKER_RUN_PREFIX) docker run --rm -v "$(CURDIR)/dist:/work:ro" -v "$(CURDIR)/dist:/out" ghcr.io/aquasecurity/trivy:0.74.0 image --input /work/hackwerk-scan.tar --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --format json --output /out/trivy-report.json
+	$(DOCKER_RUN_PREFIX) docker run --rm -v "$(CURDIR)/dist:/work:ro" -v "$(CURDIR)/dist:/out" ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 image --input /work/hackwerk-scan.tar --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --format json --output /out/trivy-report.json
 
 sbom: image-archive
-	$(DOCKER_RUN_PREFIX) docker run --rm -v "$(CURDIR)/dist:/work:ro" -v "$(CURDIR)/dist:/out" anchore/syft:v1.51.0 docker-archive:/work/hackwerk-scan.tar -o cyclonedx-json=/out/hackwerk.cdx.json -o spdx-json=/out/hackwerk.spdx.json
+	$(DOCKER_RUN_PREFIX) docker run --rm -v "$(CURDIR)/dist:/work:ro" -v "$(CURDIR)/dist:/out" anchore/syft:v1.51.0@sha256:678bfa565b60f747aac0f8e964fe5588a24445b8d0a480e91f6efd70020dfbb0 docker-archive:/work/hackwerk-scan.tar -o cyclonedx-json=/out/hackwerk.cdx.json -o spdx-json=/out/hackwerk.spdx.json
 
 build-image:
-	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(BUILD_TIME) -t hackwerk-scan:local .
+	docker build --build-arg VERSION=$(VERSION) --build-arg RELEASE_VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(BUILD_TIME) -t hackwerk-scan:local .
 
 scan: scan-code scan-image sbom
 

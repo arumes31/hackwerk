@@ -476,7 +476,52 @@ async function showConflictAlternatives(appointmentID, startsAt, endsAt) {
   target.append(block);
 }
 
-function openPlanning(jobID, title, duration, start) {
+function clearPlanningError(form) {
+  const error = form?.querySelector("[data-planning-error]");
+  if (!error) return;
+  error.hidden = true;
+  error.replaceChildren();
+  form.querySelectorAll('[aria-errormessage="planning-error"]').forEach((field) => {
+    field.removeAttribute("aria-invalid");
+    field.removeAttribute("aria-errormessage");
+  });
+}
+
+function planningErrorTarget(form, failure) {
+  const selector = ({
+    driver_unavailable: "#planning-primary-driver",
+    reservation_conflict: "#planning-start",
+    version_conflict: "#planning-start",
+    invalid_local_time: "#planning-start",
+  })[failure?.code];
+  return (selector ? form.querySelector(selector) : null)
+    || form.querySelector(":invalid");
+}
+
+function showPlanningError(form, failure) {
+  const summary = form?.querySelector("[data-planning-error]");
+  if (!summary) return;
+  clearPlanningError(form);
+  const heading = document.createElement("strong");
+  heading.textContent = "Vorschlag konnte nicht gespeichert werden.";
+  const message = document.createElement("p");
+  message.textContent = failure?.message || "Die Planung konnte nicht gespeichert werden.";
+  summary.append(heading, message);
+  const field = planningErrorTarget(form, failure);
+  if (field?.id) {
+    field.setAttribute("aria-invalid", "true");
+    field.setAttribute("aria-errormessage", "planning-error");
+    const link = document.createElement("a");
+    link.href = `#${field.id}`;
+    link.textContent = "Zugehörige Eingabe prüfen";
+    link.addEventListener("click", () => field.focus());
+    summary.append(link);
+  }
+  summary.hidden = false;
+  summary.focus();
+}
+
+function openPlanning(jobID, title, duration, start, transportMode, externalConfirmed) {
   const dialog = document.querySelector("[data-planning-dialog]");
   if (!dialog) return;
   const form = dialog.querySelector("[data-planning-form]");
@@ -484,17 +529,32 @@ function openPlanning(jobID, title, duration, start) {
   form.querySelector("[data-planning-job]").value = jobID;
   form.querySelector("[data-planning-title]").textContent = title || "Auftrag einplanen";
   form.querySelector("[data-planning-duration]").value = duration || "180";
-  form.querySelector("[data-planning-start]").value = start
+	form.querySelector("[data-planning-start]").value = start
     ? localInputValue(start)
-    : `${viennaDateWithOffset(new Date(), 1)}T08:00`;
-  const error = form.querySelector("[data-planning-error]");
-  error.hidden = true;
-  error.textContent = "";
+		: `${viennaDateWithOffset(new Date(), 1)}T08:00`;
+	const transport = form.querySelector("[data-planning-transport-resource]");
+	const transportNote = form.querySelector("[data-planning-transport-note]");
+	if (transport) transport.required = transportMode === "internal";
+	if (transportNote) {
+		transportNote.textContent = transportMode === "internal"
+			? "Interner Transport: Fahrzeug auswählen."
+			: transportMode === "external" && externalConfirmed === "true"
+				? "Externer Transport ist im Auftrag bestätigt; kein internes Fahrzeug nötig."
+				: transportMode === "external"
+					? "Externer Transport muss zuerst im Auftrag bestätigt werden."
+					: transportMode === "undecided"
+						? "Transportmodus muss zuerst im Auftrag festgelegt werden."
+						: "";
+	}
+  clearPlanningError(form);
   dialog.showModal();
 }
 
 document.querySelectorAll("[data-plan-job]").forEach((button) => {
-  button.addEventListener("click", () => openPlanning(button.dataset.planJob, button.dataset.title, button.dataset.duration));
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+		openPlanning(button.dataset.planJob, button.dataset.title, button.dataset.duration, undefined, button.dataset.transportMode, button.dataset.externalConfirmed);
+  });
 });
 
 const requestedPlanningJob = new URLSearchParams(window.location.search).get("job");
@@ -512,9 +572,8 @@ if (planningForm) {
     if (!window.fetch) return;
     event.preventDefault();
     const submit = planningForm.querySelector("button[type='submit']");
-    const error = planningForm.querySelector("[data-planning-error]");
     submit.disabled = true;
-    error.hidden = true;
+    clearPlanningError(planningForm);
     try {
       await calendarRequest("/api/v1/calendar/plan", new FormData(planningForm), planningForm.elements.csrf_token.value);
       const jobID = planningForm.elements.job_id.value;
@@ -523,8 +582,7 @@ if (planningForm) {
       window.hackWerkCalendar?.refetchEvents();
       announceCalendar("Terminvorschlag gespeichert. Der Termin ist noch nicht fixiert.");
     } catch (failure) {
-      error.textContent = failure.message;
-      error.hidden = false;
+      showPlanningError(planningForm, failure);
     } finally {
       submit.disabled = false;
     }
@@ -1016,7 +1074,7 @@ if (calendarElement && window.FullCalendar) {
     },
     drop(info) {
       if (!editable) return;
-      openPlanning(info.draggedEl.dataset.calendarJob, info.draggedEl.dataset.title, info.draggedEl.dataset.duration, info.date);
+      openPlanning(info.draggedEl.dataset.calendarJob, info.draggedEl.dataset.title, info.draggedEl.dataset.duration, info.date, info.draggedEl.dataset.transportMode, info.draggedEl.dataset.externalConfirmed);
     },
     datesSet(info) {
       const dateInput = document.querySelector("[data-calendar-date]");
