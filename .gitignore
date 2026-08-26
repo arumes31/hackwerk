@@ -8,6 +8,7 @@
 /CHANGELOG.md
 /.agents/
 /codex/
+/acceptance/
 /bin/
 /*.exe
 /coverage/
