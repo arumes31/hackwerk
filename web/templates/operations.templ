@@ -10,11 +10,11 @@ import (
 )
 
 type DriversData struct {
-	Shell   ShellData
-	Drivers []driver.Profile
-	Users   []auth.UserSummary
+	Shell    ShellData
+	Drivers  []driver.Profile
+	Users    []auth.UserSummary
 	Overview map[string][]driver.Interval
-	Error   string
+	Error    string
 }
 
 type ResourcesData struct {
@@ -38,32 +38,52 @@ templ Drivers(data DriversData) {
 		@documentHead(data.Shell.Page, "Fahrer – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page">
-				<div class="page-heading"><div><p class="eyebrow">Administration</p><h1>Fahrerprofile</h1><p>Fahrer bleiben eigenständige Fachobjekte. Ein aktiver Fahrer-Login kann optional genau einem Profil zugeordnet werden.</p></div><span class="status-badge">{ fmt.Sprint(len(data.Drivers)) } Profile</span></div>
+			<main id="hauptinhalt" class="page compact-page" data-operation-page>
+				<div class="page-heading"><div><p class="eyebrow">Administration</p><h1>Fahrerprofile</h1><p>Kontaktdaten, Login, Rechte und Verfügbarkeit kompakt verwalten.</p></div><span class="status-badge">{ fmt.Sprint(len(data.Drivers)) } Profile</span></div>
 				if data.Error != "" {
 					<div class="form-alert" role="alert">{ data.Error }</div>
 				}
-				<section class="admin-layout">
-					<div class="card-list">
-						for _, item := range data.Drivers {
-							<article class="record-card operation-card">
-								<div class="operation-card__main"><p class="eyebrow">{ activeLabel(item.IsActive) }</p><h2>{ item.DisplayName }</h2><p>{ driverLoginLabel(item.Username) } · { completionLabel(item.CanCompleteJobs) }</p>
-									<div class="driver-overview" aria-label="Verfügbarkeit der nächsten sieben Tage">
-										for _, interval := range data.Overview[item.ID] {
+				<details class="compact-create-panel">
+					<summary>+ Fahrerprofil anlegen</summary>
+					<form method="post" action="/admin/drivers" class="form-grid compact-form">
+						<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@profileFields(data.Users, "", "", "", "", false, "", "new")
+						<button class="button" type="submit">Profil anlegen</button>
+					</form>
+				</details>
+				<section class="compact-list driver-compact-list" aria-label="Fahrerprofile">
+					<div class="compact-list__head" aria-hidden="true"><span>Fahrer</span><span>Login</span><span>Kontakt</span><span>Recht</span><span>Verfügbarkeit</span><span>Aktion</span></div>
+					for _, item := range data.Drivers {
+						<details class="compact-row driver-compact-row">
+							<summary>
+								<span class="compact-row__primary"><strong>{ item.DisplayName }</strong><small>{ activeLabel(item.IsActive) }</small></span>
+								<span data-label="Login">{ driverLoginLabel(item.Username) }</span>
+								<span data-label="Kontakt"><span>{ fallback(item.Phone) }</span><small>{ fallback(item.Email) }</small></span>
+								<span data-label="Recht">{ completionLabel(item.CanCompleteJobs) }</span>
+								<span data-label="Verfügbarkeit">{ fmt.Sprint(len(data.Overview[item.ID])) } Zeitfenster</span>
+								<span class="compact-row__action">Öffnen</span>
+							</summary>
+							<div class="compact-row__details">
+								<div class="driver-overview" aria-label="Verfügbarkeit der nächsten sieben Tage">
+									for index, interval := range data.Overview[item.ID] {
+										if index < 4 {
 											<p><span aria-hidden="true">{ statusIcon(interval.Status) }</span> <strong>{ intervalStatusLabel(interval.Status) }</strong> · { intervalTime(interval) }</p>
 										}
-										if len(data.Overview[item.ID]) == 0 {
-											<p>Keine darstellbare Vorschau.</p>
-										}
-									</div>
-									<a class="button button--quiet" href={ "/admin/drivers/" + item.ID + "/availability" }>Verfügbarkeit bearbeiten</a></div>
+									}
+									if len(data.Overview[item.ID]) == 0 {
+										<p>Keine darstellbare Vorschau.</p>
+									}
+									<a class="button button--quiet" href={ "/admin/drivers/" + item.ID + "/availability" }>Verfügbarkeit bearbeiten</a>
+								</div>
 								if item.IsActive {
-									<details class="edit-card operation-card__edit"><summary>Profil bearbeiten</summary><form method="post" action={ "/admin/drivers/" + item.ID } class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.Version) }/>@profileFields(data.Users, item.UserID, item.DisplayName, item.Phone, item.Email, item.CanCompleteJobs, item.InternalNote, item.ID)<button class="button" type="submit">Profil speichern</button></form><form method="post" action={ "/admin/drivers/" + item.ID + "/deactivate" } class="action-row"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.Version) }/><button class="button button--danger" type="submit">Profil deaktivieren</button></form></details>
+									<form method="post" action={ "/admin/drivers/" + item.ID } class="form-grid compact-form">
+										<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.Version) }/>@profileFields(data.Users, item.UserID, item.DisplayName, item.Phone, item.Email, item.CanCompleteJobs, item.InternalNote, item.ID)
+										<button class="button" type="submit">Profil speichern</button>
+									</form>
+									<form method="post" action={ "/admin/drivers/" + item.ID + "/deactivate" } class="compact-danger"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.Version) }/><button class="button button--danger" type="submit" data-confirm-message="Fahrerprofil wirklich deaktivieren? Es steht danach nicht mehr für neue Planungen zur Verfügung.">Profil deaktivieren</button></form>
 								}
-							</article>
-						}
-					</div>
-					<aside class="form-card"><h2>Fahrerprofil anlegen</h2><form method="post" action="/admin/drivers" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@profileFields(data.Users, "", "", "", "", false, "", "new")<button class="button" type="submit">Profil anlegen</button></form></aside>
+							</div>
+						</details>
+					}
 				</section>
 			</main>@appFooter(data.Shell.Page)
 		</body>
@@ -72,7 +92,9 @@ templ Drivers(data DriversData) {
 
 templ profileFields(users []auth.UserSummary, userID string, displayName string, phone string, email string, complete bool, note string, suffix string) {
 	<label for={ "driver-name-" + suffix }>Anzeigename</label><input id={ "driver-name-" + suffix } name="display_name" value={ displayName } maxlength="200" required/>
-	<label for={ "driver-user-" + suffix }>Loginzuordnung (optional)</label><select id={ "driver-user-" + suffix } name="user_id" aria-describedby={ "driver-user-help-" + suffix }><option value="" selected?={ userID == "" }>Kein Login</option>
+	<label for={ "driver-user-" + suffix }>Loginzuordnung (optional)</label>
+	<select id={ "driver-user-" + suffix } name="user_id" aria-describedby={ "driver-user-help-" + suffix }>
+		<option value="" selected?={ userID == "" }>Kein Login</option>
 		for _, user := range users {
 			if user.Role == auth.RoleDriver && user.Active {
 				<option value={ user.ID } selected?={ userID == user.ID } disabled?={ user.DriverID != "" && user.DriverID != suffix }>{ user.DisplayName } ({ user.Username }){ assignedUserLabel(user.DriverID, suffix) }</option>
@@ -91,19 +113,33 @@ templ Resources(data ResourcesData) {
 		@documentHead(data.Shell.Page, "Ressourcen – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page">
+			<main id="hauptinhalt" class="page" data-operation-page>
 				<div class="page-heading"><div><p class="eyebrow">Administration</p><h1>Ressourcen</h1><p>Maschinen, Fahrzeuge und Anhänger werden als einzelne, planbare Datensätze geführt.</p></div><span class="status-badge">{ fmt.Sprint(len(data.Resources)) } Ressourcen</span></div>
 				<section class="admin-layout">
 					<div class="card-list">
 						for _, item := range data.Resources {
-							<article class="record-card operation-card"><div class="operation-card__main"><p class="eyebrow">{ resourceTypeLabel(item.Type) } · { activeLabel(item.IsActive) }</p><h2>{ item.Name }</h2><p>{ exclusivityLabel(item.IsExclusive) } · { capacityLabel(item.Capacity) }</p></div>
+							<article class="record-card operation-card">
+								<div class="operation-card__main"><p class="eyebrow">{ resourceTypeLabel(item.Type) } · { activeLabel(item.IsActive) }</p><h2>{ item.Name }</h2><p>{ exclusivityLabel(item.IsExclusive) } · { capacityLabel(item.Capacity) }</p></div>
 								if item.IsActive {
-									<details class="edit-card operation-card__edit"><summary>Ressource bearbeiten</summary><form method="post" action={ "/admin/resources/" + item.ID } class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.Version) }/>@resourceFields(item, item.ID)<button class="button" type="submit">Ressource speichern</button></form><form method="post" action={ "/admin/resources/" + item.ID + "/deactivate" } class="action-row"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.Version) }/><button class="button button--danger" type="submit">Deaktivieren</button></form></details>
+									<details class="edit-card operation-card__edit">
+										<summary>Ressource bearbeiten</summary>
+										<form method="post" action={ "/admin/resources/" + item.ID } class="form-stack">
+											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.Version) }/>@resourceFields(item, item.ID)
+											<button class="button" type="submit">Ressource speichern</button>
+										</form>
+										<form method="post" action={ "/admin/resources/" + item.ID + "/deactivate" } class="action-row"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.Version) }/><button class="button button--danger" type="submit" data-confirm-message="Ressource wirklich deaktivieren? Sie steht danach nicht mehr für neue Planungen zur Verfügung.">Deaktivieren</button></form>
+									</details>
 								}
 							</article>
 						}
 					</div>
-					<aside class="form-card"><h2>Ressource anlegen</h2><form method="post" action="/admin/resources" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@resourceFields(resource.Resource{Type: resource.TypeChipper, IsExclusive: true}, "new")<button class="button" type="submit">Ressource anlegen</button></form></aside>
+					<aside class="form-card">
+						<h2>Ressource anlegen</h2>
+						<form method="post" action="/admin/resources" class="form-stack">
+							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@resourceFields(resource.Resource{Type: resource.TypeChipper, IsExclusive: true}, "new")
+							<button class="button" type="submit">Ressource anlegen</button>
+						</form>
+					</aside>
 				</section>
 			</main>@appFooter(data.Shell.Page)
 		</body>
@@ -124,41 +160,120 @@ templ Availability(data AvailabilityData) {
 		@documentHead(data.Shell.Page, "Verfügbarkeit – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page">
-				<div class="page-heading"><div><p class="eyebrow">{ availabilityEyebrow(data.Admin) }</p><h1>Verfügbarkeit von { data.Data.Profile.DisplayName }</h1><p>Regelmäßige Zeiten gelten in Europe/Vienna. Ausnahmen übersteuern Regeln; ohne Regel gilt „nicht verfügbar“.</p></div><span class="status-badge">{ activeLabel(data.Data.Profile.IsActive) }</span></div>
+			<main id="hauptinhalt" class="page compact-page" data-operation-page>
+				<div class="page-heading">
+					<div><p class="eyebrow">{ availabilityEyebrow(data.Admin) }</p><h1>Verfügbarkeit von { data.Data.Profile.DisplayName }</h1><p>Wochenzeiten und Ausnahmen; Europe/Vienna.</p></div>
+					<div class="action-row">
+						if data.Admin {
+							<a class="button button--quiet" href="/admin/drivers">Zur Fahrerübersicht</a>
+						}
+						<span class="status-badge">{ activeLabel(data.Data.Profile.IsActive) }</span>
+					</div>
+				</div>
 				if data.Error != "" {
 					<div class="form-alert" role="alert">{ data.Error }</div>
 				}
-				<section class="availability-preview" aria-labelledby="preview-heading"><h2 id="preview-heading">Vorschau der nächsten 14 Tage</h2><div class="interval-list">
-					for _, interval := range data.Intervals {
-						<article class={ "interval interval--" + string(interval.Status) }><span aria-hidden="true">{ statusIcon(interval.Status) }</span><div><strong>{ intervalStatusLabel(interval.Status) }</strong><p>{ intervalTime(interval) } · { interval.Reason }</p></div></article>
-					}
-				</div></section>
-				<div class="operations-grid">
-					<section><h2>Wochenregeln</h2><div class="card-list">
-						for _, rule := range data.Data.Rules {
-							<details class="edit-card"><summary>{ weekdayLabel(rule.Weekday) }, { driver.FormatLocalTime(rule.StartMinute) }–{ driver.FormatLocalTime(rule.EndMinute) } · { ruleStatusLabel(rule.Status) }</summary><form method="post" action={ data.BasePath + "/rules/" + rule.ID } class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(rule.Version) }/>@ruleFields(rule)<button class="button" type="submit">Regel speichern</button></form><form method="post" action={ data.BasePath + "/rules/" + rule.ID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(rule.Version) }/><button class="button button--danger" type="submit">Regel löschen</button></form></details>
-						}
-						if len(data.Data.Rules) == 0 {
-							<div class="empty-state"><p>Noch keine Wochenregel. Der Fahrer gilt derzeit als nicht verfügbar.</p></div>
-						}
-					</div><aside class="form-card operation-create"><h3>Wochenregel anlegen</h3><form method="post" action={ data.BasePath + "/rules" } class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@ruleFields(driver.Rule{Weekday: 1, StartMinute: 480, EndMinute: 1020, ValidFrom: time.Now().Format(time.DateOnly), Status: driver.RuleAvailable})<button class="button" type="submit">Regel anlegen</button></form></aside></section>
-					<section><h2>Ausnahmen</h2><div class="card-list">
-						for _, exception := range data.Data.Exceptions {
-							<details class="edit-card"><summary>{ exceptionTypeLabel(exception.Type) } · { exceptionRange(exception) }</summary>
-								if exception.IsAllDay {
-									<form method="post" action={ data.BasePath + "/exceptions/" + exception.ID } class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(exception.Version) }/>@allDayExceptionFields(exception)<button class="button" type="submit">Ausnahme speichern</button></form>
-								} else {
-									<form method="post" action={ data.BasePath + "/exceptions/" + exception.ID } class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(exception.Version) }/>@partialExceptionFields(exception)<button class="button" type="submit">Ausnahme speichern</button></form>
-								}
-								<form method="post" action={ data.BasePath + "/exceptions/" + exception.ID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(exception.Version) }/><button class="button button--danger" type="submit">Ausnahme löschen</button></form>
-							</details>
-						}
-						if len(data.Data.Exceptions) == 0 {
-							<div class="empty-state"><p>Noch keine Ausnahmen.</p></div>
+				<details class="availability-preview compact-filter-panel">
+					<summary id="preview-heading">Vorschau der nächsten 14 Tage ({ fmt.Sprint(len(data.Intervals)) } Zeitfenster)</summary>
+					<div class="interval-list">
+						for _, interval := range data.Intervals {
+							<article class={ "interval interval--" + string(interval.Status) }><span aria-hidden="true">{ statusIcon(interval.Status) }</span><div><strong>{ intervalStatusLabel(interval.Status) }</strong><p>{ intervalTime(interval) } · { interval.Reason }</p></div></article>
 						}
 					</div>
-					<div class="exception-create"><aside class="form-card"><h3>Ganztägige Ausnahme</h3><form method="post" action={ data.BasePath + "/exceptions" } class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@allDayExceptionFields(driver.Exception{Type: driver.ExceptionVacation, LocalDate: time.Now().Format(time.DateOnly)})<button class="button" type="submit">Ganztägig anlegen</button></form></aside><aside class="form-card"><h3>Zeitweise Ausnahme</h3><form method="post" action={ data.BasePath + "/exceptions" } class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@partialExceptionFields(driver.Exception{Type: driver.ExceptionUnavailable})<button class="button" type="submit">Zeitweise anlegen</button></form></aside></div></section>
+				</details>
+				<div class="operations-grid">
+					<section>
+						<h2>Wochenregeln</h2>
+						<div class="card-list">
+							for _, rule := range data.Data.Rules {
+								<details class="edit-card" data-availability-rule data-weekday={ fmt.Sprint(rule.Weekday) } data-local-start={ driver.FormatLocalTime(rule.StartMinute) } data-local-end={ driver.FormatLocalTime(rule.EndMinute) } data-valid-from={ rule.ValidFrom } data-valid-until={ rule.ValidUntil }>
+									<summary>{ weekdayLabel(rule.Weekday) }, { driver.FormatLocalTime(rule.StartMinute) }–{ driver.FormatLocalTime(rule.EndMinute) } · { ruleStatusLabel(rule.Status) }</summary>
+									<form method="post" action={ data.BasePath + "/rules/" + rule.ID } class="form-stack">
+										<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(rule.Version) }/>@ruleFields(rule)
+										<button class="button" type="submit">Regel speichern</button>
+									</form>
+									<form method="post" action={ data.BasePath + "/rules/" + rule.ID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(rule.Version) }/><button class="button button--danger" type="submit" data-confirm-message="Diese Wochenregel wirklich löschen?">Regel löschen</button></form>
+									<form method="post" action={ data.BasePath + "/rules/" + rule.ID + "/duplicate" } class="action-row">
+										<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
+										<label>
+											Für Tag
+											<select name="weekday">
+												for value := 1; value <= 7; value++ {
+													<option value={ fmt.Sprint(value) } selected?={ value == duplicateWeekday(rule.Weekday) }>{ weekdayLabel(value) }</option>
+												}
+											</select>
+										</label>
+										<button class="button button--quiet" type="submit">Regel duplizieren</button>
+									</form>
+								</details>
+							}
+							if len(data.Data.Rules) == 0 {
+								<div class="empty-state"><p>Noch keine Wochenregel. Der Fahrer gilt derzeit als nicht verfügbar.</p></div>
+							}
+						</div>
+						<details class="compact-create-panel operation-create">
+							<summary>+ Wochenregel anlegen</summary>
+							<form method="post" action={ data.BasePath + "/rules" } class="form-stack" data-availability-rule-form>
+								<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@ruleFields(driver.Rule{Weekday: 1, StartMinute: 480, EndMinute: 1020, ValidFrom: time.Now().In(viennaLocation()).Format(time.DateOnly), Status: driver.RuleAvailable})
+								<div class="action-row" data-availability-presets><button type="button" class="button button--quiet" data-availability-preset="morning">Vormittag</button><button type="button" class="button button--quiet" data-availability-preset="afternoon">Nachmittag</button><button type="button" class="button button--quiet" data-availability-preset="day">Ganztag</button></div>
+								<p class="form-hint" data-availability-overlap-hint>HackWerk prüft Überschneidungen vor dem Speichern erneut. Überlappende Regeln werden abgewiesen.</p>
+								<button class="button" type="submit">Regel anlegen</button>
+							</form>
+						</details>
+						for weekday := 1; weekday <= 7; weekday++ {
+							if rules := rulesForWeekday(data.Data.Rules, weekday); len(rules) > 0 {
+								<form method="post" action={ data.BasePath + "/rules/clear-day" } class="action-row" data-clear-availability-day>
+									<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="weekday" value={ fmt.Sprint(weekday) }/>
+									for _, rule := range rules {
+										<input type="hidden" name="rule_id" value={ rule.ID }/><input type="hidden" name="rule_version" value={ fmt.Sprint(rule.Version) }/>
+									}
+									<button class="button button--danger" type="submit" data-confirm-message={ weekdayLabel(weekday) + " wirklich vollständig leeren?" }>{ weekdayLabel(weekday) } vollständig leeren</button>
+								</form>
+							}
+						}
+					</section>
+					<section>
+						<h2>Ausnahmen</h2>
+						<div class="card-list">
+							for _, exception := range data.Data.Exceptions {
+								<details class="edit-card">
+									<summary>{ exceptionTypeLabel(exception.Type) } · { exceptionRange(exception) }</summary>
+									if exception.IsAllDay {
+										<form method="post" action={ data.BasePath + "/exceptions/" + exception.ID } class="form-stack">
+											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(exception.Version) }/>@allDayExceptionFields(exception)
+											<button class="button" type="submit">Ausnahme speichern</button>
+										</form>
+									} else {
+										<form method="post" action={ data.BasePath + "/exceptions/" + exception.ID } class="form-stack">
+											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(exception.Version) }/>@partialExceptionFields(exception)
+											<button class="button" type="submit">Ausnahme speichern</button>
+										</form>
+									}
+									<form method="post" action={ data.BasePath + "/exceptions/" + exception.ID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(exception.Version) }/><button class="button button--danger" type="submit" data-confirm-message="Diese Ausnahme wirklich löschen?">Ausnahme löschen</button></form>
+								</details>
+							}
+							if len(data.Data.Exceptions) == 0 {
+								<div class="empty-state"><p>Noch keine Ausnahmen.</p></div>
+							}
+						</div>
+						<div class="exception-create">
+							<details class="compact-create-panel"><summary>+ Urlaub-Preset</summary><form method="post" action={ data.BasePath + "/exceptions/vacation-preset" } class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label>Erster Urlaubstag<input type="date" name="local_date" value={ time.Now().In(viennaLocation()).Format(time.DateOnly) } required/></label><label class="check-label"><input type="checkbox" name="workweek" value="true"/> fünf Arbeitstage (Mo–Fr, Wochenenden überspringen)</label><label>Interne Bemerkung<textarea name="internal_note" maxlength="1000"></textarea></label><button class="button" type="submit">Urlaub anlegen</button></form></details>
+							<details class="compact-create-panel">
+								<summary>+ Ganztägige Ausnahme</summary>
+								<form method="post" action={ data.BasePath + "/exceptions" } class="form-stack">
+									<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@allDayExceptionFields(driver.Exception{Type: driver.ExceptionVacation, LocalDate: time.Now().In(viennaLocation()).Format(time.DateOnly)})
+									<button class="button" type="submit">Ganztägig anlegen</button>
+								</form>
+							</details>
+							<details class="compact-create-panel">
+								<summary>+ Zeitweise Ausnahme</summary>
+								<form method="post" action={ data.BasePath + "/exceptions" } class="form-stack">
+									<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@partialExceptionFields(driver.Exception{Type: driver.ExceptionUnavailable})
+									<button class="button" type="submit">Zeitweise anlegen</button>
+								</form>
+							</details>
+						</div>
+					</section>
 				</div>
 			</main>@appFooter(data.Shell.Page)
 		</body>
@@ -166,11 +281,16 @@ templ Availability(data AvailabilityData) {
 }
 
 templ ruleFields(rule driver.Rule) {
-	<div class="form-grid"><label>Wochentag<select name="weekday">
-		for value := 1; value <= 7; value++ {
-			<option value={ fmt.Sprint(value) } selected?={ rule.Weekday == value }>{ weekdayLabel(value) }</option>
-		}
-	</select></label><label>Status<select name="status"><option value="available" selected?={ rule.Status == driver.RuleAvailable }>Verfügbar</option><option value="limited" selected?={ rule.Status == driver.RuleLimited }>Eingeschränkt</option></select></label><label>Von<input name="local_start" type="time" value={ driver.FormatLocalTime(rule.StartMinute) } required/></label><label>Bis<input name="local_end" type="time" value={ driver.FormatLocalTime(rule.EndMinute) } required/></label><label>Gültig ab<input name="valid_from" type="date" value={ rule.ValidFrom } required/></label><label>Gültig bis (optional)<input name="valid_until" type="date" value={ rule.ValidUntil }/></label></div><label>Interne Bemerkung<textarea name="internal_note" maxlength="1000">{ rule.InternalNote }</textarea></label>
+	<div class="form-grid">
+		<label>
+			Wochentag
+			<select name="weekday">
+				for value := 1; value <= 7; value++ {
+					<option value={ fmt.Sprint(value) } selected?={ rule.Weekday == value }>{ weekdayLabel(value) }</option>
+				}
+			</select>
+		</label><label>Status<select name="status"><option value="available" selected?={ rule.Status == driver.RuleAvailable }>Verfügbar</option><option value="limited" selected?={ rule.Status == driver.RuleLimited }>Eingeschränkt</option></select></label><label>Von<input name="start_time" type="time" value={ driver.FormatLocalTime(rule.StartMinute) } required/></label><label>Bis<input name="end_time" type="time" value={ driver.FormatLocalTime(rule.EndMinute) } required/></label><label>Gültig ab<input name="valid_from" type="date" value={ rule.ValidFrom } required/></label><label>Gültig bis (optional)<input name="valid_until" type="date" value={ rule.ValidUntil }/></label>
+	</div><label>Interne Bemerkung<textarea name="internal_note" maxlength="1000">{ rule.InternalNote }</textarea></label>
 }
 
 templ exceptionTypeSelect(value driver.ExceptionType) {
@@ -178,27 +298,165 @@ templ exceptionTypeSelect(value driver.ExceptionType) {
 }
 
 templ allDayExceptionFields(value driver.Exception) {
-	<input type="hidden" name="all_day" value="true"/>@exceptionTypeSelect(value.Type)<label>Lokales Datum<input name="local_date" type="date" value={ value.LocalDate } required/></label><label>Interne Bemerkung<textarea name="internal_note" maxlength="1000">{ value.InternalNote }</textarea></label>
+	<input type="hidden" name="all_day" value="true"/>@exceptionTypeSelect(value.Type)
+	<label>Lokales Datum<input name="local_date" type="date" value={ value.LocalDate } required/></label><label>Interne Bemerkung<textarea name="internal_note" maxlength="1000">{ value.InternalNote }</textarea></label>
 }
 
 templ partialExceptionFields(value driver.Exception) {
-	@exceptionTypeSelect(value.Type)<div class="form-grid"><label>Beginn<input name="starts_at" type="datetime-local" value={ localDateTime(value.StartsAt) } required/></label><label>Ende<input name="ends_at" type="datetime-local" value={ localDateTime(value.EndsAt) } required/></label></div><small>Mehrdeutige oder nicht existente Zeiten bei der Zeitumstellung werden sicher abgewiesen.</small><label>Interne Bemerkung<textarea name="internal_note" maxlength="1000">{ value.InternalNote }</textarea></label>
+	@exceptionTypeSelect(value.Type)
+	<div class="form-grid"><label>Beginn<input name="starts_at" type="datetime-local" value={ localDateTime(value.StartsAt) } required/></label><label>Ende<input name="ends_at" type="datetime-local" value={ localDateTime(value.EndsAt) } required/></label></div><small>Mehrdeutige oder nicht existente Zeiten bei der Zeitumstellung werden sicher abgewiesen.</small><label>Interne Bemerkung<textarea name="internal_note" maxlength="1000">{ value.InternalNote }</textarea></label>
 }
 
-func driverLoginLabel(username string) string { if username == "" { return "ohne Login" }; return "Login: " + username }
-func assignedUserLabel(driverID string, currentID string) string { if driverID != "" && driverID != currentID { return " – bereits zugeordnet" }; return "" }
-func completionLabel(value bool) string { if value { return "darf Aufträge abschließen" }; return "kein Abschlussrecht" }
-func exclusivityLabel(value bool) string { if value { return "Exklusiv" }; return "Parallel nutzbar" }
-func resourceTypeLabel(value resource.Type) string { switch value { case resource.TypeChipper: return "Hackmaschine"; case resource.TypeTransportVehicle: return "Transportfahrzeug"; case resource.TypeTrailer: return "Anhänger"; default: return "Sonstige Ressource" } }
-func floatPointer(value *float64) string { if value == nil { return "" }; return strconv.FormatFloat(*value, 'f', -1, 64) }
-func intPointer(value *int32) string { if value == nil { return "" }; return strconv.FormatInt(int64(*value), 10) }
-func capacityLabel(value resource.Capacity) string { result := "keine Kapazität hinterlegt"; if value.VolumeM3 != nil { result = floatPointer(value.VolumeM3) + " m³" }; if value.PayloadKG != nil { if result != "keine Kapazität hinterlegt" { result += " · " } else { result = "" }; result += intPointer(value.PayloadKG) + " kg" }; if value.Seats != nil { if result != "keine Kapazität hinterlegt" && result != "" { result += " · " } else if result == "keine Kapazität hinterlegt" { result = "" }; result += intPointer(value.Seats) + " Sitzplätze" }; return result }
-func availabilityEyebrow(admin bool) string { if admin { return "Fahrerplanung" }; return "Meine Zeiten" }
-func weekdayLabel(value int) string { return [...]string{"", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"}[value] }
-func ruleStatusLabel(value driver.RuleStatus) string { if value == driver.RuleLimited { return "Eingeschränkt" }; return "Verfügbar" }
-func intervalStatusLabel(value driver.Status) string { switch value { case driver.StatusAvailable: return "Verfügbar"; case driver.StatusLimited: return "Eingeschränkt"; default: return "Nicht verfügbar" } }
-func statusIcon(value driver.Status) string { switch value { case driver.StatusAvailable: return "✓"; case driver.StatusLimited: return "◐"; default: return "×" } }
-func intervalTime(value driver.Interval) string { location, _ := time.LoadLocation("Europe/Vienna"); return value.StartsAt.In(location).Format("Mo, 02.01. 15:04") + "–" + value.EndsAt.In(location).Format("Mo, 02.01. 15:04") }
-func exceptionTypeLabel(value driver.ExceptionType) string { switch value { case driver.ExceptionVacation: return "Urlaub"; case driver.ExceptionSick: return "Krank"; case driver.ExceptionUnavailable: return "Nicht verfügbar"; case driver.ExceptionAvailableOverride: return "Zusätzlich verfügbar"; default: return "Sonstige Abwesenheit" } }
-func exceptionRange(value driver.Exception) string { if value.IsAllDay { return value.LocalDate + " (ganztägig)" }; return localDateTime(value.StartsAt) + " bis " + localDateTime(value.EndsAt) }
-func localDateTime(value time.Time) string { if value.IsZero() { return "" }; location, _ := time.LoadLocation("Europe/Vienna"); return value.In(location).Format("2006-01-02T15:04") }
+func driverLoginLabel(username string) string {
+	if username == "" {
+		return "ohne Login"
+	}
+	return "Login: " + username
+}
+func assignedUserLabel(driverID string, currentID string) string {
+	if driverID != "" && driverID != currentID {
+		return " – bereits zugeordnet"
+	}
+	return ""
+}
+func completionLabel(value bool) string {
+	if value {
+		return "darf Aufträge abschließen"
+	}
+	return "kein Abschlussrecht"
+}
+func exclusivityLabel(value bool) string {
+	if value {
+		return "Exklusiv"
+	}
+	return "Parallel nutzbar"
+}
+func resourceTypeLabel(value resource.Type) string {
+	switch value {
+	case resource.TypeChipper:
+		return "Hackmaschine"
+	case resource.TypeTransportVehicle:
+		return "Transportfahrzeug"
+	case resource.TypeTrailer:
+		return "Anhänger"
+	default:
+		return "Sonstige Ressource"
+	}
+}
+func floatPointer(value *float64) string {
+	if value == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*value, 'f', -1, 64)
+}
+func intPointer(value *int32) string {
+	if value == nil {
+		return ""
+	}
+	return strconv.FormatInt(int64(*value), 10)
+}
+func capacityLabel(value resource.Capacity) string {
+	result := "keine Kapazität hinterlegt"
+	if value.VolumeM3 != nil {
+		result = floatPointer(value.VolumeM3) + " m³"
+	}
+	if value.PayloadKG != nil {
+		if result != "keine Kapazität hinterlegt" {
+			result += " · "
+		} else {
+			result = ""
+		}
+		result += intPointer(value.PayloadKG) + " kg"
+	}
+	if value.Seats != nil {
+		if result != "keine Kapazität hinterlegt" && result != "" {
+			result += " · "
+		} else if result == "keine Kapazität hinterlegt" {
+			result = ""
+		}
+		result += intPointer(value.Seats) + " Sitzplätze"
+	}
+	return result
+}
+func availabilityEyebrow(admin bool) string {
+	if admin {
+		return "Fahrerplanung"
+	}
+	return "Meine Zeiten"
+}
+func weekdayLabel(value int) string {
+	return [...]string{"", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"}[value]
+}
+func ruleStatusLabel(value driver.RuleStatus) string {
+	if value == driver.RuleLimited {
+		return "Eingeschränkt"
+	}
+	return "Verfügbar"
+}
+func intervalStatusLabel(value driver.Status) string {
+	switch value {
+	case driver.StatusAvailable:
+		return "Verfügbar"
+	case driver.StatusLimited:
+		return "Eingeschränkt"
+	default:
+		return "Nicht verfügbar"
+	}
+}
+func statusIcon(value driver.Status) string {
+	switch value {
+	case driver.StatusAvailable:
+		return "✓"
+	case driver.StatusLimited:
+		return "◐"
+	default:
+		return "×"
+	}
+}
+func intervalTime(value driver.Interval) string {
+	location, _ := time.LoadLocation("Europe/Vienna")
+	return value.StartsAt.In(location).Format("Mo, 02.01. 15:04") + "–" + value.EndsAt.In(location).Format("Mo, 02.01. 15:04")
+}
+func exceptionTypeLabel(value driver.ExceptionType) string {
+	switch value {
+	case driver.ExceptionVacation:
+		return "Urlaub"
+	case driver.ExceptionSick:
+		return "Krank"
+	case driver.ExceptionUnavailable:
+		return "Nicht verfügbar"
+	case driver.ExceptionAvailableOverride:
+		return "Zusätzlich verfügbar"
+	default:
+		return "Sonstige Abwesenheit"
+	}
+}
+func exceptionRange(value driver.Exception) string {
+	if value.IsAllDay {
+		return value.LocalDate + " (ganztägig)"
+	}
+	return localDateTime(value.StartsAt) + " bis " + localDateTime(value.EndsAt)
+}
+func localDateTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	location, _ := time.LoadLocation("Europe/Vienna")
+	return value.In(location).Format("2006-01-02T15:04")
+}
+
+func duplicateWeekday(value int) int {
+	if value >= 7 {
+		return 1
+	}
+	return value + 1
+}
+func rulesForWeekday(values []driver.Rule, weekday int) []driver.Rule {
+	result := make([]driver.Rule, 0)
+	for _, value := range values {
+		if value.Weekday == weekday {
+			result = append(result, value)
+		}
+	}
+	return result
+}

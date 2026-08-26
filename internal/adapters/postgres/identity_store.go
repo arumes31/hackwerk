@@ -196,6 +196,36 @@ func (store *IdentityStore) CreateUser(ctx context.Context, actor auth.Actor, in
 	return userID, resultErr
 }
 
+// UpdateUserDetails updates account metadata only and audits field names without contact values.
+func (store *IdentityStore) UpdateUserDetails(ctx context.Context, actor auth.Actor, input auth.UpdateUserDetailsInput) error {
+	return store.transaction(ctx, pgx.TxOptions{}, func(queries *dbgen.Queries, _ pgx.Tx) error {
+		userID, err := uuid(input.UserID)
+		if err != nil {
+			return auth.ErrNotFound
+		}
+		affected, err := queries.UpdateUserDetails(ctx, dbgen.UpdateUserDetailsParams{
+			Username: input.Username, DisplayName: input.DisplayName, Email: input.Email,
+			ID: userID, ExpectedVersion: input.ExpectedVersion,
+		})
+		if err != nil {
+			return mapConflict(err)
+		}
+		if affected != 1 {
+			return auth.ErrConflict
+		}
+		return insertAudit(
+			ctx,
+			queries,
+			actor,
+			"user.details_updated",
+			"user",
+			input.UserID,
+			input.RequestID,
+			[]string{"username", "display_name", "email"},
+		)
+	})
+}
+
 // UpdateUserAccess protects the last admin under a serializable transaction and revokes disabled sessions.
 func (store *IdentityStore) UpdateUserAccess(ctx context.Context, actor auth.Actor, input auth.UpdateAccessInput) error {
 	return store.transaction(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable}, func(queries *dbgen.Queries, tx pgx.Tx) error {

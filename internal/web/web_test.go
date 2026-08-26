@@ -13,6 +13,7 @@ import (
 
 	"example.invalid/hackplan/internal/buildinfo"
 	"example.invalid/hackplan/internal/config"
+	"example.invalid/hackplan/web/assets"
 )
 
 type pinger struct{ err error }
@@ -78,7 +79,16 @@ func TestEmbeddedAssets(t *testing.T) {
 		bodyPart    string
 	}{
 		{path: "/assets/app.css", contentType: "text/css", bodyPart: ":root"},
+		{path: "/assets/login.css", contentType: "text/css", bodyPart: ".login-body"},
+		{path: "/assets/login-original.css", contentType: "text/css", bodyPart: ".scene"},
+		{path: "/assets/login-background.js", contentType: "javascript", bodyPart: "runSim"},
+		{path: "/assets/login-background-loader.js", contentType: "javascript", bodyPart: "desktopScene"},
 		{path: "/assets/app.js", contentType: "javascript", bodyPart: "document.documentElement"},
+		{path: "/assets/maplibre-gl-csp.js", contentType: "javascript", bodyPart: "MapLibre GL JS"},
+		{path: "/assets/maplibre-gl-csp-worker.js", contentType: "javascript", bodyPart: "MapLibre GL JS"},
+		{path: "/assets/maplibre-gl.css", contentType: "text/css", bodyPart: ".maplibregl-map"},
+		{path: "/assets/manifest.json", contentType: "application/json", bodyPart: `"short_name": "HackWerk"`},
+		{path: "/assets/hackwerk-icon.svg", contentType: "image/svg+xml", bodyPart: "HackWerk"},
 	}
 
 	for _, tt := range tests {
@@ -96,6 +106,44 @@ func TestEmbeddedAssets(t *testing.T) {
 				t.Fatalf("asset body does not contain %q", tt.bodyPart)
 			}
 		})
+	}
+}
+
+func TestVersionedAssetsAreImmutableAndConditionallyCached(t *testing.T) {
+	t.Parallel()
+
+	paths, err := assets.LoadPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := testRouter(t, pinger{})
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, paths.CSS, nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if response.Header().Get("Cache-Control") != immutableAssetCacheControl {
+		t.Fatalf("Cache-Control = %q", response.Header().Get("Cache-Control"))
+	}
+	etag := response.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("versioned asset has no ETag")
+	}
+
+	conditional := httptest.NewRequestWithContext(context.Background(), http.MethodGet, paths.CSS, nil)
+	conditional.Header.Set("If-None-Match", etag)
+	notModified := httptest.NewRecorder()
+	router.ServeHTTP(notModified, conditional)
+	if notModified.Code != http.StatusNotModified {
+		t.Fatalf("conditional status = %d, want %d", notModified.Code, http.StatusNotModified)
+	}
+
+	unversioned := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/assets/app.css", nil)
+	revalidated := httptest.NewRecorder()
+	router.ServeHTTP(revalidated, unversioned)
+	if strings.Contains(revalidated.Header().Get("Cache-Control"), "immutable") {
+		t.Fatalf("unversioned Cache-Control = %q", revalidated.Header().Get("Cache-Control"))
 	}
 }
 
@@ -136,7 +184,11 @@ func testConfig() config.Config {
 			WriteTimeout:      time.Second,
 			IdleTimeout:       time.Second,
 			MaxHeaderBytes:    1 << 20,
+			MaxBodyBytes:      16 << 20,
+			AllowedHosts:      []string{"example.com"},
+			InternalRateLimit: 600,
 		},
-		Database: config.Database{ReadinessTimeout: time.Second},
+		Database: config.Database{ReadinessTimeout: time.Second, ExpectedSchema: config.CurrentSchemaVersion},
+		Metrics:  config.Metrics{WorkerStaleAfter: time.Minute},
 	}
 }

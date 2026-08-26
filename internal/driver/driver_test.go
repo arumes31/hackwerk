@@ -9,7 +9,14 @@ import (
 	"example.invalid/hackplan/internal/auth"
 )
 
-type storeStub struct{ availability Availability }
+type storeStub struct {
+	availability      Availability
+	createdRule       RuleInput
+	createdRuleDriver string
+	clearedWeekday    int
+	clearedRefs       []RuleRef
+	createdExceptions []ExceptionInput
+}
 
 func (s *storeStub) ListProfiles(context.Context) ([]Profile, error) { return nil, nil }
 func (s *storeStub) CreateProfile(context.Context, auth.Actor, ProfileInput, string) (string, error) {
@@ -27,7 +34,9 @@ func (s *storeStub) Availability(context.Context, string, time.Time, time.Time, 
 func (s *storeStub) Schedule(context.Context, string) (Availability, error) {
 	return s.availability, nil
 }
-func (s *storeStub) CreateRule(context.Context, auth.Actor, string, RuleInput, string) (string, error) {
+
+func (s *storeStub) CreateRule(_ context.Context, _ auth.Actor, driverID string, input RuleInput, _ string) (string, error) {
+	s.createdRuleDriver, s.createdRule = driverID, input
 	return "rule-id", nil
 }
 func (s *storeStub) UpdateRule(context.Context, auth.Actor, string, string, int32, RuleInput, string) error {
@@ -36,8 +45,16 @@ func (s *storeStub) UpdateRule(context.Context, auth.Actor, string, string, int3
 func (s *storeStub) DeleteRule(context.Context, auth.Actor, string, string, int32, string) error {
 	return nil
 }
+func (s *storeStub) ClearRulesForDay(_ context.Context, _ auth.Actor, _ string, weekday int, refs []RuleRef, _ string) error {
+	s.clearedWeekday, s.clearedRefs = weekday, append([]RuleRef(nil), refs...)
+	return nil
+}
 func (s *storeStub) CreateException(context.Context, auth.Actor, string, ExceptionInput, string) (string, error) {
 	return "exception-id", nil
+}
+func (s *storeStub) CreateExceptions(_ context.Context, _ auth.Actor, _ string, inputs []ExceptionInput, _ string) error {
+	s.createdExceptions = append([]ExceptionInput(nil), inputs...)
+	return nil
 }
 func (s *storeStub) UpdateException(context.Context, auth.Actor, string, string, int32, ExceptionInput, string) error {
 	return nil
@@ -170,13 +187,71 @@ func TestDriverCannotTargetOtherAvailability(t *testing.T) {
 	}
 }
 
+func TestDuplicateRuleCopiesRuleToSelectedWeekday(t *testing.T) {
+	t.Parallel()
+	store := &storeStub{availability: Availability{Rules: []Rule{{
+		ID: "rule-a", DriverID: "driver-id", Weekday: 1, StartMinute: 8 * 60, EndMinute: 17 * 60,
+		ValidFrom: "2026-01-01", Status: RuleLimited, InternalNote: "Werkstatt",
+	}}}}
+	service := newDriverTestService(t, store)
+
+	id, err := service.DuplicateRule(t.Context(), adminActor(), "driver-id", "rule-a", 3, "request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "rule-id" || store.createdRuleDriver != "driver-id" || store.createdRule.Weekday != 3 || store.createdRule.LocalStart != "08:00" || store.createdRule.LocalEnd != "17:00" || store.createdRule.Status != RuleLimited {
+		t.Fatalf("duplicated rule = %q/%q/%#v", id, store.createdRuleDriver, store.createdRule)
+	}
+}
+
+func TestClearRulesForDayValidatesSnapshot(t *testing.T) {
+	t.Parallel()
+	store := &storeStub{}
+	service := newDriverTestService(t, store)
+	refs := []RuleRef{{ID: "rule-a", Version: 2}, {ID: "rule-b", Version: 4}}
+
+	if err := service.ClearRulesForDay(t.Context(), adminActor(), "driver-id", 2, refs, "request"); err != nil {
+		t.Fatal(err)
+	}
+	if store.clearedWeekday != 2 || len(store.clearedRefs) != 2 {
+		t.Fatalf("clear snapshot = %d/%#v", store.clearedWeekday, store.clearedRefs)
+	}
+	if err := service.ClearRulesForDay(t.Context(), adminActor(), "driver-id", 2, []RuleRef{{ID: "same", Version: 1}, {ID: "same", Version: 1}}, "request"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("duplicate snapshot error = %v", err)
+	}
+}
+
+func TestCreateVacationPresetBuildsFiveViennaWorkdays(t *testing.T) {
+	t.Parallel()
+	store := &storeStub{}
+	service := newDriverTestService(t, store)
+
+	if err := service.CreateVacationPreset(t.Context(), adminActor(), "driver-id", "2026-09-04", true, "Urlaub", "request"); err != nil {
+		t.Fatal(err)
+	}
+	wantDates := []string{"2026-09-04", "2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10"}
+	if len(store.createdExceptions) != len(wantDates) {
+		t.Fatalf("vacation preset = %#v", store.createdExceptions)
+	}
+	for index, input := range store.createdExceptions {
+		if input.Type != ExceptionVacation || !input.IsAllDay || input.LocalDate != wantDates[index] || input.InternalNote != "Urlaub" {
+			t.Fatalf("vacation[%d] = %#v", index, input)
+		}
+	}
+}
+
 func testService(t *testing.T, availability Availability) *Service {
+	t.Helper()
+	return newDriverTestService(t, &storeStub{availability: availability})
+}
+
+func newDriverTestService(t *testing.T, store *storeStub) *Service {
 	t.Helper()
 	location, err := time.LoadLocation("Europe/Vienna")
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := New(&storeStub{availability: availability}, location)
+	service, err := New(store, location)
 	if err != nil {
 		t.Fatal(err)
 	}

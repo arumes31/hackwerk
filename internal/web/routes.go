@@ -1,0 +1,291 @@
+package web
+
+import (
+	"errors"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"example.invalid/hackplan/internal/auth"
+	"example.invalid/hackplan/internal/planning"
+	"example.invalid/hackplan/web/templates"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+)
+
+func registerRouteRoutes(router chi.Router, dependencies Dependencies, page templates.PageData) {
+	service := dependencies.Routes
+	csrfCookie := dependencies.Config.Auth.CSRFCookieName
+	router.With(requirePermission(auth.PermissionRoutePlan, page, dependencies.Logger)).Get("/planning/routes", routePlannerPage(service, dependencies, page, csrfCookie))
+	router.With(requirePermission(auth.PermissionRoutePlan, page, dependencies.Logger)).Post("/planning/routes", planRoute(service, dependencies, page, csrfCookie))
+	router.With(requirePermission(auth.PermissionRouteAssign, page, dependencies.Logger)).Post("/planning/routes/{routeID}/assign", assignRoute(service, dependencies.Logger))
+	router.With(requirePermission(auth.PermissionRoutePlan, page, dependencies.Logger)).Post("/planning/routes/{routeID}/move-stop", moveDraftStop(service, dependencies.Logger))
+	router.With(requirePermission(auth.PermissionRouteViewOwn, page, dependencies.Logger)).Get("/my-route", ownRoutePage(service, dependencies, page, csrfCookie))
+	router.With(requirePermission(auth.PermissionRouteReorderOwn, page, dependencies.Logger)).Post("/my-route/{routeID}/reorder", reorderOwnRoute(service, dependencies.Logger))
+}
+
+func routePlannerPage(service *planning.RouteService, dependencies Dependencies, page templates.PageData, csrfCookie string) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		data, err := adminRouteViewData(request, service, dependencies, page, csrfCookie)
+		if err != nil {
+			status, message := routeError(err)
+			data.Error = message
+			render(response, request, templates.Routes(data), status, dependencies.Logger)
+			return
+		}
+		data.Error = strings.TrimSpace(request.URL.Query().Get("error"))
+		render(response, request, templates.Routes(data), http.StatusOK, dependencies.Logger)
+	}
+}
+
+func adminRouteViewData(request *http.Request, service *planning.RouteService, dependencies Dependencies, page templates.PageData, csrfCookie string) (templates.RoutePageData, error) {
+	session, _ := sessionFromContext(request.Context())
+	data := templates.RoutePageData{
+		Shell: shell(request, page, csrfCookie), Departure: defaultRouteDeparture(dependencies.Config.Planning.BusinessOpen),
+		DepotLat: strconv.FormatFloat(dependencies.Config.Planning.DepotLatitude, 'f', 6, 64),
+		DepotLon: strconv.FormatFloat(dependencies.Config.Planning.DepotLongitude, 'f', 6, 64),
+	}
+	data.SelectedJobIDs = append([]string(nil), request.URL.Query()["job_id"]...)
+	data.SelectedDay = strings.TrimSpace(request.URL.Query().Get("date"))
+	if data.SelectedDay == "" {
+		data.SelectedDay = strings.Split(data.Departure, "T")[0]
+	}
+	var err error
+	data.Candidates, err = service.Candidates(request.Context(), session.Actor)
+	if err != nil {
+		return data, err
+	}
+	data.MissingLocations, err = service.MissingLocations(request.Context(), session.Actor)
+	if err != nil {
+		return data, err
+	}
+	data.Options, err = service.Options(request.Context(), session.Actor)
+	if err != nil {
+		return data, err
+	}
+	data.ParallelRoutes, err = service.DraftsForDate(request.Context(), session.Actor, data.SelectedDay)
+	if err != nil {
+		return data, err
+	}
+	if routeID := strings.TrimSpace(request.URL.Query().Get("route_id")); routeID != "" {
+		route, routeErr := service.Route(request.Context(), session.Actor, routeID)
+		if routeErr != nil {
+			return data, routeErr
+		}
+		data.Route = &route
+		applyRouteComparisonQuery(&route, request.URL.Query())
+	}
+	return data, nil
+}
+
+func moveDraftStop(service *planning.RouteService, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		sourceVersion, sourceErr := parseVersion(request.Form.Get("source_version"))
+		targetVersion, targetErr := parseVersion(request.Form.Get("target_version"))
+		var err error
+		if sourceErr != nil || targetErr != nil {
+			err = planning.ErrValidation
+		} else {
+			_, err = service.MoveDraftStop(request.Context(), session.Actor, planning.MoveDraftStopInput{
+				SourceRouteID: chi.URLParam(request, "routeID"), TargetRouteID: request.Form.Get("target_route_id"),
+				StopID: request.Form.Get("stop_id"), SourceVersion: sourceVersion, TargetVersion: targetVersion,
+				RequestID: middleware.GetReqID(request.Context()),
+			})
+		}
+		day := strings.TrimSpace(request.Form.Get("date"))
+		values := url.Values{"date": []string{day}}
+		if err != nil {
+			_, message := routeError(err)
+			values.Set("error", message)
+			logger.InfoContext(request.Context(), "draft route stop move rejected", slog.String("error_code", planningErrorCode(err)))
+		}
+		http.Redirect(response, request, "/planning/routes?"+values.Encode(), http.StatusSeeOther)
+	}
+}
+
+func planRoute(service *planning.RouteService, dependencies Dependencies, page templates.PageData, csrfCookie string) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		departureValue := strings.TrimSpace(request.Form.Get("departure"))
+		if departureValue == "" {
+			departureValue = strings.TrimSpace(request.Form.Get("departure_date")) + "T" + strings.TrimSpace(request.Form.Get("departure_time"))
+		}
+		departure, departureErr := time.ParseInLocation("2006-01-02T15:04", departureValue, routeLocation())
+		start, startErr := routePoint(request.Form.Get("start_latitude"), request.Form.Get("start_longitude"))
+		end, endErr := routePoint(request.Form.Get("end_latitude"), request.Form.Get("end_longitude"))
+		if departureErr != nil || startErr != nil || endErr != nil {
+			renderRoutePlanError(response, request, service, dependencies, page, csrfCookie, planning.ErrValidation)
+			return
+		}
+		route, err := service.Plan(request.Context(), session.Actor, planning.PlanRouteInput{
+			Departure: departure, DriverID: request.Form.Get("driver_id"), ChipperResourceID: request.Form.Get("chipper_resource_id"),
+			TransportResourceID: request.Form.Get("transport_resource_id"), Start: start, End: end,
+			JobIDs: request.Form["job_id"], FixedJobIDs: request.Form["fixed_job_id"],
+			Optimize: request.Form.Get("optimize") == "true", EndAtLastStop: request.Form.Get("end_at_last_stop") == "true",
+			RequestID: middleware.GetReqID(request.Context()),
+		})
+		if err != nil {
+			renderRoutePlanError(response, request, service, dependencies, page, csrfCookie, err)
+			return
+		}
+		values := url.Values{"route_id": []string{route.ID}}
+		if route.Comparison.ManualDuration > 0 {
+			values.Set("manual_distance", strconv.Itoa(route.Comparison.ManualDistanceMeters))
+			values.Set("optimized_distance", strconv.Itoa(route.Comparison.OptimizedDistanceMeters))
+			values.Set("manual_duration", strconv.FormatInt(int64(route.Comparison.ManualDuration/time.Second), 10))
+			values.Set("optimized_duration", strconv.FormatInt(int64(route.Comparison.OptimizedDuration/time.Second), 10))
+		}
+		http.Redirect(response, request, "/planning/routes?"+values.Encode(), http.StatusSeeOther)
+	}
+}
+
+func renderRoutePlanError(response http.ResponseWriter, request *http.Request, service *planning.RouteService, dependencies Dependencies, page templates.PageData, csrfCookie string, err error) {
+	data, viewErr := adminRouteViewData(request, service, dependencies, page, csrfCookie)
+	if viewErr != nil {
+		dependencies.Logger.WarnContext(request.Context(), "route planning context unavailable", slog.String("error_code", planningErrorCode(viewErr)))
+	}
+	status, message := routeError(err)
+	data.Error = message
+	if value := strings.TrimSpace(request.Form.Get("departure")); value != "" {
+		data.Departure = value
+	} else if date, clock := strings.TrimSpace(request.Form.Get("departure_date")), strings.TrimSpace(request.Form.Get("departure_time")); date != "" && clock != "" {
+		data.Departure = date + "T" + clock
+	}
+	render(response, request, templates.Routes(data), status, dependencies.Logger)
+}
+
+func assignRoute(service *planning.RouteService, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		version, err := parseVersion(request.Form.Get("version"))
+		if err == nil {
+			_, err = service.Assign(request.Context(), session.Actor, planning.AssignRouteInput{ID: chi.URLParam(request, "routeID"), ExpectedVersion: version, RequestID: middleware.GetReqID(request.Context())})
+		}
+		if err != nil {
+			status, message := routeError(err)
+			if status >= 500 {
+				logger.ErrorContext(request.Context(), "route assignment failed", slog.String("error_code", planningErrorCode(err)))
+			}
+			http.Redirect(response, request, "/planning/routes?route_id="+url.QueryEscape(chi.URLParam(request, "routeID"))+"&error="+url.QueryEscape(message), http.StatusSeeOther)
+			return
+		}
+		http.Redirect(response, request, "/planning/routes?route_id="+url.QueryEscape(chi.URLParam(request, "routeID")), http.StatusSeeOther)
+	}
+}
+
+func ownRoutePage(service *planning.RouteService, dependencies Dependencies, page templates.PageData, csrfCookie string) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		day := strings.TrimSpace(request.URL.Query().Get("date"))
+		if day == "" {
+			day = time.Now().In(routeLocation()).Format(time.DateOnly)
+		}
+		data := templates.RoutePageData{Shell: shell(request, page, csrfCookie), Own: true, SelectedDay: day, RetrievedAt: time.Now().UTC()}
+		route, err := service.OwnRouteForDate(request.Context(), session.Actor, day)
+		if err == nil {
+			data.Route = &route
+		} else if !errors.Is(err, planning.ErrNotFound) {
+			status, message := routeError(err)
+			data.Error = message
+			render(response, request, templates.Routes(data), status, dependencies.Logger)
+			return
+		}
+		data.Error = strings.TrimSpace(request.URL.Query().Get("error"))
+		render(response, request, templates.Routes(data), http.StatusOK, dependencies.Logger)
+	}
+}
+
+func applyRouteComparisonQuery(route *planning.RouteDraft, values url.Values) {
+	manualDistance, errA := strconv.Atoi(values.Get("manual_distance"))
+	optimizedDistance, errB := strconv.Atoi(values.Get("optimized_distance"))
+	manualDuration, errC := strconv.ParseInt(values.Get("manual_duration"), 10, 64)
+	optimizedDuration, errD := strconv.ParseInt(values.Get("optimized_duration"), 10, 64)
+	const (
+		maxComparisonDistance = 10_000_000
+		maxComparisonSeconds  = int64((7 * 24 * time.Hour) / time.Second)
+	)
+	if errA != nil || errB != nil || errC != nil || errD != nil ||
+		manualDistance < 0 || manualDistance > maxComparisonDistance ||
+		optimizedDistance < 0 || optimizedDistance > maxComparisonDistance ||
+		manualDuration <= 0 || manualDuration > maxComparisonSeconds ||
+		optimizedDuration <= 0 || optimizedDuration > maxComparisonSeconds {
+		return
+	}
+	route.Comparison = planning.RouteComparison{
+		ManualDistanceMeters: manualDistance, OptimizedDistanceMeters: optimizedDistance,
+		ManualDuration: time.Duration(manualDuration) * time.Second, OptimizedDuration: time.Duration(optimizedDuration) * time.Second,
+	}
+}
+
+func reorderOwnRoute(service *planning.RouteService, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		version, err := parseVersion(request.Form.Get("version"))
+		var route planning.RouteDraft
+		if err == nil {
+			route, err = service.ReorderOwn(request.Context(), session.Actor, planning.ReorderOwnRouteInput{
+				ID: chi.URLParam(request, "routeID"), ExpectedVersion: version, StopIDs: request.Form["stop_id"], RequestID: middleware.GetReqID(request.Context()),
+			})
+		}
+		if err != nil {
+			_, message := routeError(err)
+			logger.InfoContext(request.Context(), "own route reorder rejected", slog.String("error_code", planningErrorCode(err)))
+			http.Redirect(response, request, "/my-route?error="+url.QueryEscape(message), http.StatusSeeOther)
+			return
+		}
+		day := route.Departure.In(routeLocation()).Format(time.DateOnly)
+		http.Redirect(response, request, "/my-route?date="+url.QueryEscape(day), http.StatusSeeOther)
+	}
+}
+
+func routePoint(latitude, longitude string) (planning.Point, error) {
+	lat, latErr := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(latitude), ",", "."), 64)
+	lon, lonErr := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(longitude), ",", "."), 64)
+	point := planning.Point{Latitude: lat, Longitude: lon}
+	if latErr != nil || lonErr != nil || !point.Valid() {
+		return planning.Point{}, planning.ErrValidation
+	}
+	return point, nil
+}
+
+func defaultRouteDeparture(open string) string {
+	now := time.Now().In(routeLocation())
+	hourMinute, err := time.Parse("15:04", open)
+	if err != nil {
+		hourMinute = time.Date(0, 1, 1, 7, 0, 0, 0, time.UTC)
+	}
+	value := time.Date(now.Year(), now.Month(), now.Day(), hourMinute.Hour(), hourMinute.Minute(), 0, 0, routeLocation())
+	if !value.After(now) {
+		value = value.AddDate(0, 0, 1)
+	}
+	return value.Format("2006-01-02T15:04")
+}
+
+func routeLocation() *time.Location {
+	location, err := time.LoadLocation("Europe/Vienna")
+	if err != nil {
+		return time.FixedZone("Europe/Vienna", 60*60)
+	}
+	return location
+}
+
+func routeError(err error) (int, string) {
+	switch {
+	case errors.Is(err, auth.ErrForbidden):
+		return http.StatusForbidden, "Für diese Route fehlt die Berechtigung."
+	case errors.Is(err, planning.ErrConflict):
+		return http.StatusConflict, "Auftrag, Route oder Belegung hat sich geändert. Bitte Route neu laden und erneut prüfen."
+	case errors.Is(err, planning.ErrNoCapacity):
+		return http.StatusUnprocessableEntity, "Fahrer oder Ressourcen sind für mindestens einen Stopp nicht verfügbar."
+	case errors.Is(err, planning.ErrValidation):
+		return http.StatusUnprocessableEntity, "Bitte Aufträge, Fahrer, Ressource und Abfahrtszeit vollständig prüfen."
+	case errors.Is(err, planning.ErrNotFound):
+		return http.StatusNotFound, "Die Route wurde nicht gefunden."
+	default:
+		return http.StatusInternalServerError, "Die Route konnte derzeit nicht verarbeitet werden."
+	}
+}

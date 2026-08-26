@@ -15,6 +15,8 @@ type fakeStore struct {
 	rotated          NewSession
 	session          Session
 	touched          bool
+	updatedDetails   UpdateUserDetailsInput
+	updateDetailsErr error
 }
 
 func (store *fakeStore) FindUserByUsername(context.Context, string) (User, error) {
@@ -43,6 +45,10 @@ func (store *fakeStore) RecordLoginFailure(context.Context, []byte) error {
 func (store *fakeStore) ListUsers(context.Context) ([]UserSummary, error) { return nil, nil }
 func (store *fakeStore) CreateUser(context.Context, Actor, CreateUserInput, string) (string, error) {
 	return "user", nil
+}
+func (store *fakeStore) UpdateUserDetails(_ context.Context, _ Actor, input UpdateUserDetailsInput) error {
+	store.updatedDetails = input
+	return store.updateDetailsErr
 }
 func (store *fakeStore) UpdateUserAccess(context.Context, Actor, UpdateAccessInput) error { return nil }
 func (store *fakeStore) ResetPassword(context.Context, Actor, ResetPasswordInput, string) error {
@@ -120,5 +126,63 @@ func TestAuthenticateExpiryAndCSRF(t *testing.T) {
 	_, err = service.Authenticate(context.Background(), "session-token")
 	if !errors.Is(err, ErrInvalidSession) {
 		t.Fatalf("expired Authenticate() error = %v", err)
+	}
+}
+
+func TestUpdateUserDetailsValidatesAndNormalizes(t *testing.T) {
+	t.Parallel()
+	store := &fakeStore{}
+	service, _ := testService(t, store, time.Now())
+	admin := Actor{UserID: "admin", Role: RoleAdmin}
+
+	err := service.UpdateUserDetails(t.Context(), admin, UpdateUserDetailsInput{
+		UserID: "user", Username: "  neue-anmeldung  ", DisplayName: "  Neuer Name  ",
+		Email: "  neu@example.test  ", ExpectedVersion: 3, RequestID: "request",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.updatedDetails.Username != "neue-anmeldung" || store.updatedDetails.DisplayName != "Neuer Name" ||
+		store.updatedDetails.Email != "neu@example.test" || store.updatedDetails.ExpectedVersion != 3 {
+		t.Fatalf("UpdateUserDetails() input = %#v", store.updatedDetails)
+	}
+}
+
+func TestUpdateUserDetailsRejectsForbiddenAndInvalidInput(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		actor    Actor
+		input    UpdateUserDetailsInput
+		expected error
+	}{
+		{
+			name: "driver forbidden", actor: Actor{UserID: "driver", Role: RoleDriver},
+			input:    UpdateUserDetailsInput{UserID: "user", Username: "name", DisplayName: "Name", ExpectedVersion: 1},
+			expected: ErrForbidden,
+		},
+		{
+			name: "invalid email", actor: Actor{UserID: "admin", Role: RoleAdmin},
+			input:    UpdateUserDetailsInput{UserID: "user", Username: "name", DisplayName: "Name", Email: "Name <mail@example.test>", ExpectedVersion: 1},
+			expected: ErrInvalidInput,
+		},
+		{
+			name: "stale version", actor: Actor{UserID: "admin", Role: RoleAdmin},
+			input:    UpdateUserDetailsInput{UserID: "user", Username: "name", DisplayName: "Name", ExpectedVersion: 0},
+			expected: ErrInvalidInput,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeStore{}
+			service, _ := testService(t, store, time.Now())
+			err := service.UpdateUserDetails(t.Context(), test.actor, test.input)
+			if !errors.Is(err, test.expected) {
+				t.Fatalf("UpdateUserDetails() error = %v, want %v", err, test.expected)
+			}
+			if store.updatedDetails.UserID != "" {
+				t.Fatalf("invalid update reached store: %#v", store.updatedDetails)
+			}
+		})
 	}
 }

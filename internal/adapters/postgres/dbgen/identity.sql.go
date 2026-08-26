@@ -453,3 +453,33 @@ func (q *Queries) UpdateUserAccess(ctx context.Context, arg UpdateUserAccessPara
 	}
 	return result.RowsAffected(), nil
 }
+
+const updateUserDetails = `-- name: UpdateUserDetails :execrows
+UPDATE users
+SET username = $1, display_name = $2,
+    email = NULLIF($3::text, '')::citext,
+    version = version + 1, updated_at = now()
+WHERE id = $4::uuid AND version = $5
+`
+
+type UpdateUserDetailsParams struct {
+	Username        string
+	DisplayName     string
+	Email           string
+	ID              pgtype.UUID
+	ExpectedVersion int32
+}
+
+func (q *Queries) UpdateUserDetails(ctx context.Context, arg UpdateUserDetailsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateUserDetails,
+		arg.Username,
+		arg.DisplayName,
+		arg.Email,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

@@ -3,6 +3,8 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -10,7 +12,11 @@ import (
 
 	"example.invalid/hackplan/internal/adapters/postgres"
 	"example.invalid/hackplan/internal/buildinfo"
+	"example.invalid/hackplan/internal/calendarfeed"
 	"example.invalid/hackplan/internal/config"
+	"example.invalid/hackplan/internal/maptile"
+	"example.invalid/hackplan/internal/notification"
+	"example.invalid/hackplan/internal/observability"
 	"example.invalid/hackplan/internal/web"
 )
 
@@ -21,6 +27,15 @@ func Serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return err
 	}
 	defer pool.Close()
+	operations := postgres.NewOperationsStore(pool, cfg.Metrics.WorkerStaleAfter)
+	if err := operations.Ready(ctx, cfg.Database.ExpectedSchema); err != nil {
+		return err
+	}
+	build := buildinfo.Current()
+	metrics := observability.New(operations, cfg.Metrics.CollectionTimeout, build.Version, build.Commit, map[string]bool{
+		"email": cfg.Mail.Enabled, "sms": cfg.SMS.Enabled, "voice": cfg.Voice.Enabled,
+		"routing_external": cfg.Planning.Router == "osrm", "ics": cfg.CalendarFeed.Enabled,
+	})
 	identity, err := IdentityService(cfg, pool)
 	if err != nil {
 		return err
@@ -37,32 +52,95 @@ func Serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	appointmentService, err := AppointmentService(pool, driverService)
+	appointmentService, err := AppointmentService(cfg, pool, driverService)
+	if err != nil {
+		return err
+	}
+	tokens, err := notification.NewKeyRing(cfg.Confirmation.TokenKeys, cfg.Confirmation.CurrentKeyID)
+	if err != nil {
+		return err
+	}
+	notificationStore := postgres.NewNotificationStore(pool, postgres.WithNotificationPlanning(
+		tokens, cfg.Confirmation.TokenTTL, cfg.Mail.MaxAttempts, cfg.SMS.MaxAttempts, cfg.Mail.Enabled, cfg.SMS.Enabled,
+	))
+	confirmationService, err := notification.NewConfirmationService(notificationStore, tokens, time.Now)
+	if err != nil {
+		return err
+	}
+	notificationAdmin, err := notification.NewAdminService(notificationStore, time.Now)
+	if err != nil {
+		return err
+	}
+	dashboardService, err := DashboardService(cfg, pool)
+	if err != nil {
+		return err
+	}
+	var calendarFeedService *calendarfeed.Service
+	if cfg.CalendarFeed.Enabled {
+		calendarFeedService, err = CalendarFeedService(cfg, pool)
+		if err != nil {
+			return err
+		}
+	}
+	planningService, err := PlanningService(cfg, pool, driverService, metrics)
+	if err != nil {
+		return err
+	}
+	routeService, err := RoutePlanningService(cfg, pool)
+	if err != nil {
+		return err
+	}
+	voiceService, err := VoiceService(cfg, pool, metrics)
+	if err != nil {
+		return err
+	}
+	mapTiles, err := maptile.New(maptile.Config{
+		URLTemplate: cfg.Map.TileURL, Token: cfg.Map.TileToken, Timeout: cfg.Map.Timeout,
+		MaxResponseBytes: cfg.Map.MaxResponseBytes, MaxZoom: cfg.Map.MaxZoom,
+		UserAgent: "HackWerk/" + build.Version + " (map tile proxy)",
+	})
 	if err != nil {
 		return err
 	}
 
 	router, err := web.NewRouter(web.Dependencies{
-		Config:       cfg,
-		Logger:       logger,
-		Database:     pool,
-		Build:        buildinfo.Current(),
-		Identity:     identity,
-		Customers:    customerService,
-		Drivers:      driverService,
-		Resources:    resourceService,
-		Appointments: appointmentService,
+		Config:        cfg,
+		Logger:        logger,
+		Database:      operations,
+		Build:         build,
+		Identity:      identity,
+		Customers:     customerService,
+		Drivers:       driverService,
+		Resources:     resourceService,
+		Appointments:  appointmentService,
+		Confirmations: confirmationService,
+		Notifications: notificationAdmin,
+		Dashboard:     dashboardService,
+		CalendarFeeds: calendarFeedService,
+		Planning:      planningService,
+		Routes:        routeService,
+		Voice:         voiceService,
+		Metrics:       metrics,
+		MapTiles:      mapTiles,
 	})
 	if err != nil {
 		return err
 	}
 	server := web.Server(cfg, router)
 
-	serverErrors := make(chan error, 1)
+	serverErrors := make(chan error, 2)
 	go func() {
 		logger.InfoContext(ctx, "http server starting", slog.String("address", cfg.ListenAddr))
 		serverErrors <- server.ListenAndServe()
 	}()
+	var metricsServer *http.Server
+	if cfg.Metrics.Enabled {
+		metricsServer = web.MetricsServer(cfg, metrics.Handler())
+		go func() {
+			logger.InfoContext(ctx, "metrics server starting", slog.String("address", cfg.Metrics.ListenAddr))
+			serverErrors <- metricsServer.ListenAndServe()
+		}()
+	}
 
 	select {
 	case serverErr := <-serverErrors:
@@ -74,37 +152,134 @@ func Serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		shutdownContext, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
 		logger.Info("http server stopping")
-		if err := server.Shutdown(shutdownContext); err != nil {
-			return err
+		shutdownErr := server.Shutdown(shutdownContext)
+		if metricsServer != nil {
+			shutdownErr = errors.Join(shutdownErr, metricsServer.Shutdown(shutdownContext))
 		}
-		return nil
+		return shutdownErr
 	}
 }
 
-// Worker runs the Task-00 database heartbeat and waits for cancellation.
-// Later tasks attach bounded outbox and cleanup processors to this lifecycle.
+// Worker delivers bounded batches from the transactional notification outbox.
 func Worker(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	pool, err := postgres.Open(ctx, cfg.Database)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
+	operations := postgres.NewOperationsStore(pool, cfg.Metrics.WorkerStaleAfter)
+	if err := operations.Ready(ctx, cfg.Database.ExpectedSchema); err != nil {
+		return err
+	}
+	workerID, err := newWorkerID()
+	if err != nil {
+		return err
+	}
+	startedAt := time.Now().UTC()
+	if err := operations.Heartbeat(ctx, workerID, startedAt, startedAt, "running"); err != nil {
+		return err
+	}
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = operations.Heartbeat(stopCtx, workerID, startedAt, time.Now().UTC(), "stopping")
+	}()
 
-	logger.InfoContext(ctx, "worker started")
-	ticker := time.NewTicker(15 * time.Second)
+	providers := make(map[notification.Channel]notification.Provider, 2)
+	if cfg.Mail.Enabled {
+		provider, providerErr := notification.NewSMTPProvider(notification.SMTPConfig{
+			Host: cfg.Mail.Host, Port: cfg.Mail.Port, TLSMode: cfg.Mail.TLSMode,
+			Username: cfg.Mail.Username, Password: cfg.Mail.Password,
+			FromAddress: cfg.Mail.FromAddress, FromName: cfg.Mail.FromName, ReplyTo: cfg.Mail.ReplyTo,
+			ConnectTimeout: cfg.Mail.ConnectTimeout, CommandTimeout: cfg.Mail.CommandTimeout,
+		})
+		if providerErr != nil {
+			return providerErr
+		}
+		providers[notification.ChannelEmail] = provider
+	}
+	if cfg.SMS.Enabled {
+		var provider notification.Provider
+		var providerErr error
+		switch cfg.SMS.Provider {
+		case "sendberry":
+			provider, providerErr = notification.NewSendberryProvider(notification.SendberryConfig{
+				URL: cfg.SMS.SendberryURL, APIKey: cfg.SMS.SendberryKey, AccessName: cfg.SMS.SendberryName,
+				AccessPassword: cfg.SMS.SendberryPassword, Sender: cfg.SMS.Sender, Timeout: cfg.SMS.Timeout,
+			})
+		case "webhook":
+			provider, providerErr = notification.NewSMSWebhookProvider(notification.SMSWebhookConfig{
+				URL: cfg.SMS.WebhookURL, Secret: cfg.SMS.HMACSecret, Sender: cfg.SMS.Sender, Timeout: cfg.SMS.Timeout,
+			}, time.Now)
+		default:
+			providerErr = errors.New("app: unsupported SMS provider")
+		}
+		if providerErr != nil {
+			return providerErr
+		}
+		providers[notification.ChannelSMS] = provider
+	}
+	tokens, err := notification.NewKeyRing(cfg.Confirmation.TokenKeys, cfg.Confirmation.CurrentKeyID)
+	if err != nil {
+		return err
+	}
+	location, err := time.LoadLocation(cfg.Timezone)
+	if err != nil {
+		return err
+	}
+	// #nosec G115 -- config validation bounds the worker batch size to 1..500.
+	batchSize := int32(cfg.Worker.BatchSize)
+	processor, err := notification.NewProcessor(
+		postgres.NewNotificationWorkerStore(pool), providers, tokens, location,
+		notification.ProcessorConfig{
+			BaseURL: cfg.BaseURL, BusinessName: cfg.Business.Name, BusinessAddress: cfg.Business.Address,
+			BusinessPhone: cfg.Business.Phone, Lease: cfg.Worker.Lease, BatchSize: batchSize,
+		}, time.Now, logger,
+	)
+	if err != nil {
+		return err
+	}
+
+	logger.InfoContext(ctx, "worker started", slog.Int("batch_size", cfg.Worker.BatchSize))
+	ticker := time.NewTicker(cfg.Worker.PollInterval)
 	defer ticker.Stop()
+	voiceStore := postgres.NewVoiceStore(pool)
+	nextVoiceCleanup := time.Time{}
+	heartbeatInterval := min(cfg.Metrics.WorkerStaleAfter/3, 30*time.Second)
+	if heartbeatInterval < 5*time.Second {
+		heartbeatInterval = 5 * time.Second
+	}
+	nextHeartbeat := startedAt.Add(heartbeatInterval)
 
 	for {
+		if _, processErr := processor.RunOnce(ctx); processErr != nil && ctx.Err() == nil {
+			logger.WarnContext(ctx, "notification batch failed", slog.String("error_code", "notification_batch_failed"))
+		}
+		if now := time.Now(); !now.Before(nextVoiceCleanup) {
+			if _, cleanupErr := voiceStore.Cleanup(ctx); cleanupErr != nil && ctx.Err() == nil {
+				logger.WarnContext(ctx, "voice draft cleanup failed", slog.String("error_code", "voice_cleanup_failed"))
+			}
+			nextVoiceCleanup = now.Add(time.Hour)
+		}
+		if now := time.Now().UTC(); !now.Before(nextHeartbeat) {
+			if heartbeatErr := operations.Heartbeat(ctx, workerID, startedAt, now, "running"); heartbeatErr != nil && ctx.Err() == nil {
+				logger.WarnContext(ctx, "worker heartbeat failed", slog.String("error_code", "worker_heartbeat_failed"))
+			}
+			nextHeartbeat = now.Add(heartbeatInterval)
+		}
 		select {
 		case <-ctx.Done():
 			logger.Info("worker stopped")
 			return nil
 		case <-ticker.C:
-			if pingErr := postgres.Ping(ctx, pool, cfg.Database.ReadinessTimeout); pingErr != nil {
-				logger.WarnContext(ctx, "worker database unavailable", slog.String("error_code", "database_unavailable"))
-				continue
-			}
-			logger.DebugContext(ctx, "worker heartbeat")
 		}
 	}
+}
+
+func newWorkerID() (string, error) {
+	var value [12]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", errors.New("app: generating worker identity")
+	}
+	return "worker-" + hex.EncodeToString(value[:]), nil
 }

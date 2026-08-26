@@ -25,6 +25,7 @@ const (
 type customerHTTPStore struct {
 	detail   customers.CustomerDetail
 	waitlist customers.Page[customers.WaitlistItem]
+	list     customers.Page[customers.CustomerSummary]
 
 	created customers.CreatedIntake
 	input   customers.IntakeInput
@@ -35,6 +36,8 @@ type customerHTTPStore struct {
 	archiveJobCalls      int
 	priorityCalls        int
 	removeCalls          int
+	listCalls            int
+	listSearch           string
 
 	updateCustomerErr error
 }
@@ -62,12 +65,30 @@ func (store *customerHTTPStore) ArchiveJob(context.Context, auth.Actor, string, 
 	return nil
 }
 
-func (store *customerHTTPStore) ListCustomers(context.Context, string, int, int) (customers.Page[customers.CustomerSummary], error) {
-	return customers.Page[customers.CustomerSummary]{Page: 1, PageSize: 25}, nil
+func (store *customerHTTPStore) ListCustomers(_ context.Context, filter customers.CustomerListFilter) (customers.Page[customers.CustomerSummary], error) {
+	store.listCalls++
+	store.listSearch = filter.Search
+	if store.list.Page == 0 {
+		store.list.Page = 1
+		store.list.PageSize = 25
+	}
+	return store.list, nil
 }
 
 func (store *customerHTTPStore) CustomerDetail(context.Context, string) (customers.CustomerDetail, error) {
 	return store.detail, nil
+}
+func (store *customerHTTPStore) DuplicateJobDraft(context.Context, string) (customers.JobDraft, error) {
+	return customers.JobDraft{}, nil
+}
+func (store *customerHTTPStore) RecordRecentCustomer(context.Context, string, string) error {
+	return nil
+}
+func (store *customerHTTPStore) RecordRecentJob(context.Context, string, string) (string, error) {
+	return testCustomerID, nil
+}
+func (store *customerHTTPStore) ListRecent(context.Context, string, int) ([]customers.RecentRecord, error) {
+	return nil, nil
 }
 
 func (store *customerHTTPStore) UpdateCustomer(context.Context, auth.Actor, customers.UpdateCustomerInput) error {
@@ -83,6 +104,15 @@ func (store *customerHTTPStore) ArchiveCustomer(context.Context, auth.Actor, str
 func (store *customerHTTPStore) ListWaitlist(context.Context, customers.WaitlistFilter) (customers.Page[customers.WaitlistItem], error) {
 	return store.waitlist, nil
 }
+func (store *customerHTTPStore) ListWaitlistFilterFavorites(context.Context, string) ([]customers.WaitlistFilterFavorite, error) {
+	return nil, nil
+}
+func (store *customerHTTPStore) SaveWaitlistFilterFavorite(context.Context, string, string, customers.WaitlistFilter) error {
+	return nil
+}
+func (store *customerHTTPStore) DeleteWaitlistFilterFavorite(context.Context, string, string) error {
+	return nil
+}
 
 func (store *customerHTTPStore) UpdateWaitlistPriority(context.Context, auth.Actor, string, int32, int32, string) error {
 	store.priorityCalls++
@@ -94,7 +124,7 @@ func (store *customerHTTPStore) RemoveWaitlist(context.Context, auth.Actor, stri
 	return nil
 }
 
-func (store *customerHTTPStore) AddNote(context.Context, auth.Actor, string, string, string, string) (string, error) {
+func (store *customerHTTPStore) AddNote(context.Context, auth.Actor, string, string, string, string, string) (string, error) {
 	return "note-id", nil
 }
 
@@ -125,6 +155,75 @@ func TestCustomerHTTPDriverIntakeUsesCSRFAndPRG(t *testing.T) {
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden || store.createCalls != 1 {
 		t.Fatalf("missing CSRF status = %d, create calls = %d", response.Code, store.createCalls)
+	}
+}
+
+func TestCustomerHTTPNewJobOffersExistingCustomerWithoutLeakingSearchInURL(t *testing.T) {
+	store := &customerHTTPStore{list: customers.Page[customers.CustomerSummary]{
+		Items: []customers.CustomerSummary{{
+			ID: testCustomerID, FirstName: "Maria", LastName: "Maier",
+			Locality: "Linz", Region: "Oberösterreich", JobCount: 2,
+		}},
+		Page: 1, PageSize: 25, Total: 1, TotalPages: 1,
+	}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+
+	request := authenticatedCustomerRequest(t, http.MethodGet, "/customers/new", nil, sessionToken, csrfToken)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	body := response.Body.String()
+	if response.Code != http.StatusOK {
+		t.Fatalf("new job status = %d, body = %q", response.Code, body)
+	}
+	for _, expected := range []string{
+		`action="/customers/new/search"`, `data-existing-customer-job`,
+		`href="/customers/` + testCustomerID + `/jobs/new"`, `data-new-customer-panel`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("new job customer picker is missing %q: %s", expected, body)
+		}
+	}
+	if strings.Contains(body, `data-new-customer-panel open`) {
+		t.Fatalf("new-customer form is open by default: %s", body)
+	}
+
+	searchValue := "+43 660 123 45 67"
+	form := url.Values{"csrf_token": {csrfToken}, "q": {searchValue}}
+	request = authenticatedCustomerRequest(t, http.MethodPost, "/customers/new/search", form, sessionToken, csrfToken)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || store.listSearch != searchValue {
+		t.Fatalf("customer picker search status/search = %d/%q", response.Code, store.listSearch)
+	}
+	if request.URL.RawQuery != "" || strings.Contains(response.Body.String(), "?q=") {
+		t.Fatalf("customer picker leaked search into URL: request=%q", request.URL.String())
+	}
+}
+
+func TestCustomerHTTPInvalidIntakeAssociatesAndRetainsFieldErrors(t *testing.T) {
+	store := &customerHTTPStore{}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	form := validCustomerHTTPForm(csrfToken)
+	form.Set("first_name", "")
+	form.Set("last_name", "")
+	form.Set("volume_m3", "0")
+	form.Set("hack_duration", "ungueltig")
+
+	request := authenticatedCustomerRequest(t, http.MethodPost, "/customers", form, sessionToken, csrfToken)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnprocessableEntity || store.createCalls != 0 {
+		t.Fatalf("invalid intake status = %d, create calls = %d", response.Code, store.createCalls)
+	}
+	body := response.Body.String()
+	for _, expected := range []string{
+		`data-error-summary`, `href="#first_name"`, `id="volume_m3"`,
+		`aria-invalid="true"`, `aria-describedby="volume_m3-error"`, `value="ungueltig"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("invalid intake response is missing %q: %s", expected, body)
+		}
 	}
 }
 
@@ -182,6 +281,84 @@ func TestCustomerHTTPTemplatesEscapeAllFreeText(t *testing.T) {
 	}
 }
 
+func TestCustomerHTTPDetailProvidesSafeContactActions(t *testing.T) {
+	store := &customerHTTPStore{detail: customers.CustomerDetail{
+		Customer: customers.Customer{
+			ID: testCustomerID, FirstName: "Maria", LastName: "Maier", PhoneRaw: "+43 660 123 45 67",
+			Email: "maria.maier@example.test", CountryCode: "AT", NotificationPreference: customers.NotifyBoth,
+			GeocodingStatus: "resolved", Version: 1,
+		},
+		MapsURL: "https://www.google.com/maps/search/?api=1&query=Unterneukirchen",
+	}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	request := authenticatedCustomerRequest(t, http.MethodGet, "/customers/"+testCustomerID, nil, sessionToken, csrfToken)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	body := response.Body.String()
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", response.Code, body)
+	}
+	for _, link := range []string{`href="tel:+436601234567"`, `href="mailto:maria.maier@example.test"`} {
+		if !strings.Contains(body, link) {
+			t.Fatalf("customer detail is missing safe contact link %q: %s", link, body)
+		}
+	}
+}
+
+func TestCustomerHTTPDetailUsesOneIndependentMapEditorPerEditableJob(t *testing.T) {
+	latitude, longitude := 48.20849, 16.37208
+	jobIDs := []string{
+		"20000000-0000-0000-0000-000000000001",
+		"20000000-0000-0000-0000-000000000002",
+	}
+	jobs := make([]customers.Job, 0, len(jobIDs))
+	for _, jobID := range jobIDs {
+		jobs = append(jobs, customers.Job{
+			ID: jobID, JobNumber: "HA-2026-0001",
+			JobType: customers.JobTypeChippingOnly, VolumeM3: "80.00",
+			EstimatedHackMinutes: 180, TransportMode: customers.TransportNone,
+			Urgency: customers.UrgencyNormal, Source: customers.SourcePhone,
+			WorkflowStatus: "waitlist", Version: 1,
+			PileLatitude: &latitude, PileLongitude: &longitude,
+		})
+	}
+	store := &customerHTTPStore{detail: customers.CustomerDetail{
+		Customer: customers.Customer{
+			ID: testCustomerID, FirstName: "Maria", LastName: "Maier",
+			CountryCode: "AT", NotificationPreference: customers.NotifyNone,
+			GeocodingStatus: "resolved", Version: 1,
+		},
+		Jobs: jobs,
+	}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	request := authenticatedCustomerRequest(t, http.MethodGet, "/customers/"+testCustomerID, nil, sessionToken, csrfToken)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	body := response.Body.String()
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", response.Code, body)
+	}
+	if count := strings.Count(body, "data-job-location-editor"); count != len(jobIDs) {
+		t.Fatalf("map editor count = %d, want %d", count, len(jobIDs))
+	}
+	if count := strings.Count(body, "data-map-preview"); count != 0 {
+		t.Fatalf("editable jobs render %d redundant map previews, want none", count)
+	}
+	for _, jobID := range jobIDs {
+		for _, id := range []string{
+			"edit-" + jobID + "-pile-map",
+			"edit-" + jobID + "-pile-map-heading",
+			"edit-" + jobID + "-pile-latitude",
+		} {
+			if count := strings.Count(body, `id="`+id+`"`); count != 1 {
+				t.Fatalf("id %q occurs %d times, want once", id, count)
+			}
+		}
+	}
+}
+
 func TestCustomerHTTPDriverCannotCallAdminMutations(t *testing.T) {
 	store := &customerHTTPStore{}
 	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
@@ -230,8 +407,30 @@ func TestCustomerHTTPDriverWaitlistIsNotCachedAndHidesAdminPlanningControls(t *t
 	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("waitlist status = %d, cache-control = %q", response.Code, response.Header().Get("Cache-Control"))
 	}
-	if strings.Contains(response.Body.String(), "Einplanen (bald)") || strings.Contains(response.Body.String(), "data-drag-source") {
+	body := response.Body.String()
+	if !strings.Contains(body, `class="compact-table responsive-table waitlist-table"`) || !strings.Contains(body, `Auftrag bearbeiten`) {
+		t.Fatalf("driver waitlist misses compact table or existing-job action: %s", body)
+	}
+	if strings.Contains(body, ">Einplanen<") || strings.Contains(body, "data-drag-source") || strings.Contains(body, "/priority") || strings.Contains(body, "/remove") {
 		t.Fatalf("driver waitlist contains admin-only planning controls: %s", response.Body.String())
+	}
+}
+
+func TestCustomerHTTPDetailMakesScheduledJobsReadOnly(t *testing.T) {
+	store := &customerHTTPStore{detail: customers.CustomerDetail{
+		Customer: customers.Customer{ID: testCustomerID, FirstName: "Maria", LastName: "Maier", CountryCode: "AT", NotificationPreference: customers.NotifyNone, Version: 1},
+		Jobs:     []customers.Job{{ID: testJobID, JobNumber: "HW-2026-0042", JobType: customers.JobTypeChippingOnly, VolumeM3: "80.00", EstimatedHackMinutes: 180, TransportMode: customers.TransportNone, Urgency: customers.UrgencyNormal, Source: customers.SourcePhone, WorkflowStatus: "scheduled", Version: 2}},
+	}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleAdmin, store)
+	request := authenticatedCustomerRequest(t, http.MethodGet, "/customers/"+testCustomerID, nil, sessionToken, csrfToken)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, "schreibgeschützt") || !strings.Contains(body, "Details öffnen") {
+		t.Fatalf("scheduled job is not clearly read-only: %d %s", response.Code, body)
+	}
+	if strings.Contains(body, `action="/jobs/`+testJobID+`"`) || strings.Contains(body, `action="/jobs/`+testJobID+`/archive"`) {
+		t.Fatalf("scheduled job exposes edit/archive form: %s", body)
 	}
 }
 
@@ -239,6 +438,7 @@ func customerTestRouter(t *testing.T, role auth.Role, customerStore *customerHTT
 	t.Helper()
 	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
 	sessionToken := "test-session-token"
+	// #nosec G101 -- deterministic non-secret test fixture token.
 	csrfToken := "test-csrf-token"
 	identityStore := &identityTestStore{
 		user: auth.User{ID: "40000000-0000-0000-0000-000000000001", Username: "intern", DisplayName: "Interner Benutzer", Role: role, Active: true, Version: 1},
@@ -280,7 +480,9 @@ func authenticatedCustomerRequest(t *testing.T, method string, path string, form
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		request.Header.Set("Origin", "https://example.test")
 	}
+	// #nosec G124 -- request-only test fixtures; no cookies are emitted to a browser.
 	request.AddCookie(&http.Cookie{Name: "hackplan_session", Value: sessionToken})
+	// #nosec G124 -- request-only test fixtures; no cookies are emitted to a browser.
 	request.AddCookie(&http.Cookie{Name: "hackplan_csrf", Value: csrfToken})
 	return request
 }

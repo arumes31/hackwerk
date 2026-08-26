@@ -1,0 +1,489 @@
+package templates
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"example.invalid/hackplan/internal/planning"
+)
+
+type RoutePageData struct {
+	Shell            ShellData
+	Candidates       []planning.RouteCandidate
+	MissingLocations []planning.RouteMissingLocation
+	Options          planning.RouteOptions
+	Route            *planning.RouteDraft
+	Error            string
+	Departure        string
+	DepotLat         string
+	DepotLon         string
+	Own              bool
+	SelectedDay      string
+	RetrievedAt      time.Time
+	SelectedJobIDs   []string
+	ParallelRoutes   []planning.RouteDraft
+}
+
+templ Routes(data RoutePageData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data.Shell.Page, routePageTitle(data))
+		<body>
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page route-page">
+				<div class="page-heading">
+					<div>
+						<p class="eyebrow">{ routeEyebrow(data) }</p>
+						<h1>{ routeHeading(data) }</h1>
+						<p>{ routeLead(data) }</p>
+					</div>
+					if !data.Own {
+						<a class="button button--quiet" href="/planning">Einzelvorschläge</a>
+					}
+				</div>
+				if data.Error != "" {
+					<div class="form-alert" role="alert">{ data.Error }</div>
+				}
+				if data.Own {
+					@ownRoute(data)
+				} else {
+					@adminRoutePlanner(data)
+				}
+			</main>
+			@appFooter(data.Shell.Page)
+		</body>
+	</html>
+}
+
+templ adminRoutePlanner(data RoutePageData) {
+	<section class="route-workspace" data-route-context data-route-admin="true">
+		<form method="post" action="/planning/routes" class="route-builder form-card">
+			<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
+			<input type="hidden" name="start_latitude" value={ data.DepotLat }/>
+			<input type="hidden" name="start_longitude" value={ data.DepotLon }/>
+			<input type="hidden" name="end_latitude" value={ data.DepotLat }/>
+			<input type="hidden" name="end_longitude" value={ data.DepotLon }/>
+			<div class="section-heading"><div><p class="eyebrow">Schritt 1</p><h2>Aufträge verbinden</h2></div><span class="status-badge" data-route-marker-count data-total={ fmt.Sprint(len(data.Candidates)) }>{ fmt.Sprint(len(data.Candidates)) } Standorte</span></div>
+			<p>Alle offenen Aufträge mit gespeichertem Haufenstandort erscheinen auf der Karte. Bereits eingeplante Aufträge bleiben sichtbar, können aber nicht erneut ausgewählt werden.</p>
+			<div class="route-candidate-list">
+				for _, candidate := range data.Candidates {
+					<div class="route-candidate" data-route-candidate data-job-id={ candidate.JobID } data-latitude={ routeCoordinate(candidate.Location.Latitude) } data-longitude={ routeCoordinate(candidate.Location.Longitude) } data-label={ candidate.JobNumber } data-customer={ candidate.CustomerName } data-volume={ candidate.VolumeM3 } data-region={ candidate.Region } data-unavailable-reason={ candidate.UnavailableReason } tabindex="0">
+						<input type="checkbox" name="job_id" value={ candidate.JobID } aria-label={ candidate.JobNumber + " für die Route auswählen" } checked?={ candidate.UnavailableReason == "" && (routeContainsJob(data.Route, candidate.JobID) || slices.Contains(data.SelectedJobIDs, candidate.JobID)) } disabled?={ candidate.UnavailableReason != "" }/>
+						<span><strong>{ candidate.JobNumber } · { candidate.CustomerName }</strong><small>{ candidate.VolumeM3 } m³ · { candidate.Region }{ routeCandidateStatus(candidate) }</small></span>
+						<span class="route-order-actions"><button type="button" class="button button--quiet" data-route-candidate-move="up" aria-label={ candidate.JobNumber + " nach oben" }>↑</button><button type="button" class="button button--quiet" data-route-candidate-move="down" aria-label={ candidate.JobNumber + " nach unten" }>↓</button><label><input type="checkbox" name="fixed_job_id" value={ candidate.JobID } disabled?={ candidate.UnavailableReason != "" } data-route-pin/> Position halten</label></span>
+					</div>
+				}
+				if len(data.Candidates) == 0 {
+					<div class="empty-state"><h3>Keine routierbaren Aufträge</h3><p>Offene Aufträge erscheinen hier, sobald ein Haufenstandort gesetzt wurde.</p></div>
+				}
+			</div>
+			if len(data.MissingLocations) > 0 {
+				<details class="compact-filter-panel" data-route-missing-locations>
+					<summary>{ fmt.Sprint(len(data.MissingLocations)) } Aufträge ohne Haufenstandort</summary>
+					<ul>
+						for _, item := range data.MissingLocations {
+							<li><a href={ "/customers?job=" + url.QueryEscape(item.JobNumber) }>{ item.JobNumber } · { item.CustomerName }</a> <small>{ item.Region }</small></li>
+						}
+					</ul>
+				</details>
+			}
+			<div class="form-grid">
+				<label>
+					Fahrer
+					<select name="driver_id" required>
+						<option value="">Bitte wählen</option>@routeDriverOptions(data.Options.Drivers)
+					</select>
+				</label>
+				<label>
+					Hackmaschine
+					<select name="chipper_resource_id" required>
+						<option value="">Bitte wählen</option>@routeResourceOptions(data.Options.Resources, "chipper")
+					</select>
+				</label>
+				<label>
+					Transportmittel (optional)
+					<select name="transport_resource_id">
+						<option value="">Keines / extern</option>@routeResourceOptions(data.Options.Resources, "transport_vehicle")
+					</select>
+				</label>
+				<label>Abfahrtsdatum<input name="departure_date" type="date" value={ routeDepartureDate(data.Departure) } data-route-day-filter required/></label>
+				<label>Abfahrtszeit<input name="departure_time" type="time" value={ routeDepartureTime(data.Departure) } required/></label>
+			</div>
+			<label class="check-label"><input type="checkbox" name="optimize" value="true" checked/> Reihenfolge nach Fahrzeit optimieren</label>
+			<label class="check-label"><input type="checkbox" name="end_at_last_stop" value="true"/> Route endet beim letzten Stopp (keine Rückfahrt zum Depot)</label>
+			<div class="action-row" data-route-date-presets><button type="button" class="button button--quiet" data-route-date-preset="today">Heute</button><button type="button" class="button button--quiet" data-route-date-preset="tomorrow">Morgen</button><button type="button" class="button button--quiet" data-route-date-preset="business-day">Nächster Werktag</button></div>
+			<p class="form-hint">Depot: { data.DepotLat }, { data.DepotLon }. Die Berechnung erzeugt noch keine Termine.</p>
+			<button class="button" type="submit" disabled?={ routeSelectableCandidateCount(data.Candidates) == 0 }>Route berechnen</button>
+		</form>
+		<div class="route-map-panel">
+			@mapAssetData(data.Shell.Page)
+			<div class="section-heading"><div><p class="eyebrow">Kartenansicht</p><h2>{ routeMapHeading(data.Route) }</h2></div><span class="status-badge">{ fmt.Sprint(len(data.Candidates)) } Standorte</span></div>
+			<div class="route-map-legend" aria-label="Kartenlegende"><span><i class="route-map-legend__depot" aria-hidden="true">H</i>Depot</span><span><i class="route-map-legend__candidate" aria-hidden="true"></i>Offener Auftrag</span><span><i class="route-map-legend__selected" aria-hidden="true">✓</i>Ausgewählt</span><span><i class="route-map-legend__unavailable" aria-hidden="true">–</i>Bereits eingeplant</span></div>
+			<div class="route-map-toolbar" data-route-map-toolbar aria-label="Kartenwerkzeuge"><button type="button" class="button button--quiet" data-route-map-depot>Depot</button><button type="button" class="button button--quiet" data-route-map-fit>Alle Punkte</button><button type="button" class="button button--quiet" data-route-map-labels aria-pressed="true">Beschriftungen</button><button type="button" class="button button--quiet" data-route-map-retry>Karte erneut laden</button><span class="status-badge" data-route-map-count></span></div>
+			<div class="route-map" role="region" aria-label="Interaktive Karte der offenen Aufträge" data-route-map data-depot-latitude={ data.DepotLat } data-depot-longitude={ data.DepotLon } data-route-geometry={ routeGeometry(data.Route) } data-route-arrows="true"><div class="map-fallback" data-map-fallback>Die Straßenkarte wird geladen. Die Auftragsliste bleibt nutzbar.</div></div>
+			if data.Route != nil {
+				@routeSummary(*data.Route, false, data.Shell.CSRFToken, time.Time{})
+			}
+		</div>
+	</section>
+	@parallelRouteBoard(data)
+}
+
+templ parallelRouteBoard(data RoutePageData) {
+	<section class="parallel-routes module-card" aria-labelledby="parallel-routes-title">
+		<div class="section-heading"><div><p class="eyebrow">Parallele Tagesplanung</p><h2 id="parallel-routes-title">Routen am { planningDateOnly(data.SelectedDay) }</h2></div><span class="status-badge">{ fmt.Sprint(len(data.ParallelRoutes)) } Entwürfe</span></div>
+		<form method="get" action="/planning/routes" class="filter-grid route-day-filter"><label>Planungstag<input type="date" name="date" value={ data.SelectedDay }/></label><button class="button button--quiet" type="submit">Tag anzeigen</button></form>
+		if len(data.ParallelRoutes) < 2 {
+			<p class="form-hint">Sobald mindestens zwei Routenentwürfe an diesem Tag vorhanden sind, können Stopps zwischen Fahrer-/Maschinenrouten verschoben werden.</p>
+		}
+		<div class="parallel-route-grid">
+			for _, route := range data.ParallelRoutes {
+				<article class="parallel-route-card">
+					<div class="section-heading"><div><h3>{ route.DriverName }</h3><p>{ route.ChipperName } · { planningClock(route.Departure) } Uhr</p></div><span class="status-badge">v{ strconv.Itoa(int(route.Version)) }</span></div>
+					<ol class="parallel-stop-list">
+						for _, stop := range route.Stops {
+							<li>
+								<span><strong>{ strconv.Itoa(stop.Position) }. { stop.JobNumber }</strong><small>{ stop.CustomerName } · { stop.VolumeM3 } m³</small></span>
+								if len(data.ParallelRoutes) > 1 {
+									<form method="post" action={ "/planning/routes/" + route.ID + "/move-stop" } class="parallel-move-form">
+										<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="source_version" value={ strconv.Itoa(int(route.Version)) }/><input type="hidden" name="stop_id" value={ stop.ID }/><input type="hidden" name="date" value={ data.SelectedDay }/>
+										<label class="visually-hidden" for={ "target-" + stop.ID }>Zielroute</label>
+										<select id={ "target-" + stop.ID } name="target_route_id" data-route-target required>
+											<option value="">Verschieben nach …</option>
+											for _, target := range data.ParallelRoutes {
+												if target.ID != route.ID {
+													<option value={ target.ID } data-version={ strconv.Itoa(int(target.Version)) }>{ target.DriverName } · { target.ChipperName }</option>
+												}
+											}
+										</select><input type="hidden" name="target_version" value="" data-target-version/><button class="button button--quiet" type="submit">Verschieben</button>
+									</form>
+								}
+							</li>
+						}
+					</ol>
+					<a class="button button--quiet" href={ "/planning/routes?date=" + url.QueryEscape(data.SelectedDay) + "&route_id=" + url.QueryEscape(route.ID) }>Route öffnen</a>
+				</article>
+			}
+		</div>
+		<p class="form-hint">Das Verschieben aktualisiert beide Entwürfe atomisch. Es erzeugt und fixiert keinen Termin.</p>
+	</section>
+}
+
+templ ownRoute(data RoutePageData) {
+	<form method="get" action="/my-route" class="filter-grid route-day-filter"><label>Arbeitstag<input type="date" name="date" value={ data.SelectedDay } data-route-day-filter/></label><button class="button button--quiet" type="submit">Route anzeigen</button><button class="button button--quiet" type="button" data-route-date-preset="today">Heute</button><button class="button button--quiet" type="button" data-route-date-preset="tomorrow">Morgen</button><button class="button button--quiet" type="button" data-route-date-preset="business-day">Nächster Werktag</button></form>
+	if data.Route == nil {
+		<div class="empty-state"><h2>Keine zugewiesene Route</h2><p>Für diesen Tag wurde Ihnen noch keine Route zugewiesen. Der gemeinsame Kalender bleibt vollständig sichtbar.</p><a class="button button--quiet" href="/calendar">Kalender öffnen</a></div>
+	} else {
+		<div class="action-row"><p class="form-hint">Zuletzt erfolgreich abgerufen: { planningLocalDateTime(data.RetrievedAt) }</p><button class="button button--quiet" type="button" data-wake-lock aria-pressed="false">Bildschirm wach halten</button></div>
+		if next := data.Route.NextStop(data.RetrievedAt); next != nil {
+			<article class="route-stop-card route-next-stop" data-route-next-stop>
+				<p class="eyebrow">Nächster Stopp</p>
+				<h2>{ next.CustomerName }</h2>
+				<p>{ next.JobNumber } · { next.VolumeM3 } m³ · { routeJobType(next.JobType) } · { routeDuration(next.WorkDuration) }</p>
+				<div class="action-row">
+					if routePhoneURL(next.CustomerPhone) != "" {
+						<a class="button button--quiet" href={ routePhoneURL(next.CustomerPhone) } data-route-call>Kunde anrufen</a>
+					}
+					<a class="button" href={ routeMapsURL(next.Location) } target="_blank" rel="noopener noreferrer" data-route-navigation>Navigation starten</a>
+				</div>
+			</article>
+		}
+		<section class="route-workspace route-workspace--driver" data-route-context data-route-own="true">
+			<div class="route-map-panel">
+				@mapAssetData(data.Shell.Page)
+				<div class="section-heading"><div><p class="eyebrow">Ihre Fahrt</p><h2>{ planningDate(data.Route.Departure) }</h2></div><span class="status-badge">Zugewiesen</span></div>
+				<div class="route-map" role="region" aria-label="Interaktive Karte der eigenen Route" data-route-map data-depot-latitude={ routeCoordinate(data.Route.Start.Latitude) } data-depot-longitude={ routeCoordinate(data.Route.Start.Longitude) } data-route-geometry={ routeGeometry(data.Route) }><div class="map-fallback" data-map-fallback>Die Straßenkarte wird geladen. Die Stoppliste bleibt nutzbar.</div></div>
+			</div>
+			@routeSummary(*data.Route, true, data.Shell.CSRFToken, data.RetrievedAt)
+		</section>
+	}
+}
+
+templ routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, now time.Time) {
+	<section class="route-summary">
+		<div class="section-heading"><div><p class="eyebrow">{ route.DriverName }</p><h2>{ fmt.Sprint(len(route.Stops)) } Stopps</h2></div><span class="status-badge">{ routeSource(route.Directions) }</span></div>
+		<dl class="suggestion-facts"><div><dt>Abfahrt</dt><dd>{ planningClock(route.Departure) } Uhr</dd></div><div><dt>Strecke</dt><dd>{ routeDistance(route.Directions.DistanceMeters) }</dd></div><div><dt>Fahrzeit</dt><dd>{ routeDuration(route.Directions.Duration) }</dd></div><div><dt>Arbeitszeit</dt><dd>{ routeDuration(routeWorkDuration(route)) }</dd></div><div><dt>Gesamtzeit</dt><dd>{ routeDuration(route.EstimatedEndAt.Sub(route.Departure)) }</dd></div><div><dt>Voraussichtliches Ende</dt><dd>{ planningClock(route.EstimatedEndAt) } Uhr</dd></div><div><dt>Hackmaschine</dt><dd>{ route.ChipperName }</dd></div><div><dt>Transport</dt><dd>{ routeOptional(route.TransportName) }</dd></div></dl>
+		if route.Comparison.ManualDuration > 0 {
+			<p class="route-comparison" data-route-comparison>Optimierung: { routeDistance(routeComparisonDistanceSaving(route.Comparison)) } und { routeDuration(routeComparisonDurationSaving(route.Comparison)) } gegenüber der manuellen Reihenfolge gespart.</p>
+		}
+		<div class="action-row"><a class="button button--quiet" href={ routeWaypointURL(route) } target="_blank" rel="noopener noreferrer">Gesamtroute in Google Maps</a><button class="button button--quiet" type="button" data-print>Routenblatt drucken</button></div>
+		if route.Directions.Estimated {
+			<div class="planning-warning" role="note"><strong>Geschätzte Strecke</strong><p>Der Routingdienst war nicht verfügbar. Linie, Kilometer und Fahrzeit basieren auf Luftlinie mit Straßenfaktor.</p></div>
+		}
+		<form method="post" action={ routeFormAction(route, reorder) } data-route-order data-sticky-actions>
+			<input type="hidden" name="csrf_token" value={ csrfToken }/>
+			<input type="hidden" name="version" value={ strconv.Itoa(int(route.Version)) }/>
+			<ol class="route-stop-list">
+				for _, stop := range route.Stops {
+					<li class="route-stop-card" data-route-order-item data-route-stop data-route-next?={ routeStopIsNext(route, stop, now) } data-job-id={ stop.JobID } data-latitude={ routeCoordinate(stop.Location.Latitude) } data-longitude={ routeCoordinate(stop.Location.Longitude) } data-position={ strconv.Itoa(stop.Position) } data-label={ stop.JobNumber } data-customer={ stop.CustomerName } data-volume={ stop.VolumeM3 } data-region={ stop.Region }>
+						<input type="hidden" name="stop_id" value={ stop.ID }/>
+						<div><span class="route-stop-number" data-route-position>{ strconv.Itoa(stop.Position) }</span><strong>{ stop.JobNumber } · { stop.CustomerName }</strong><small>{ stop.VolumeM3 } m³ · { stop.Region }</small></div>
+						<div class="route-stop-times"><span>Abschnitt: { routeDistance(stop.LegDistanceMeters) } · { routeDuration(stop.LegDuration) }</span><span>Ankunft ca. { planningClock(stop.EstimatedArrivalAt) }</span><span>{ routeJobType(stop.JobType) } · Arbeit { routeDuration(stop.WorkDuration) }</span><span>Termin { planningClock(stop.StartsAt) }–{ planningClock(stop.EndsAt) }</span></div>
+						<a href={ routeMapsURL(stop.Location) } target="_blank" rel="noopener noreferrer" data-route-navigation>Google Maps</a>
+						if routePhoneURL(stop.CustomerPhone) != "" {
+							<a href={ routePhoneURL(stop.CustomerPhone) } data-route-call>Anrufen</a>
+						}
+						if reorder {
+							<div class="route-order-actions"><button class="button button--quiet" type="button" data-route-move="up" aria-label={ stop.JobNumber + " nach oben verschieben" }>↑</button><button class="button button--quiet" type="button" data-route-move="down" aria-label={ stop.JobNumber + " nach unten verschieben" }>↓</button></div>
+						}
+					</li>
+				}
+			</ol>
+			if leg, ok := routeReturnLeg(route); ok {
+				<p class="form-hint">Rückfahrt zum Depot: { routeDistance(leg.DistanceMeters) } · { routeDuration(leg.Duration) }</p>
+			}
+			<div class="visually-hidden" aria-live="polite" data-route-order-status></div>
+			if reorder {
+				<div class="planning-warning" role="note"><strong>Nur Fahrreihenfolge</strong><p>Aufträge, Zuordnung und Terminzeiten bleiben unverändert. Prüfen Sie nach dem Speichern, ob die neue Reihenfolge zu den festen Zeiten passt.</p></div>
+				<div class="form-actions"><button class="button" type="submit">Neue Fahrreihenfolge speichern</button></div>
+			} else if route.Status == planning.RouteStatusDraft {
+				<div class="form-actions"><button class="button" type="submit">Route als Terminvorschläge zuweisen</button></div>
+				<p class="form-hint">Es werden ausschließlich unverbindliche Vorschläge erzeugt. Kein Termin wird fixiert, keine Nachricht versendet.</p>
+			}
+		</form>
+	</section>
+}
+
+templ routeDriverOptions(options []planning.RouteDriverOption) {
+	for _, option := range options {
+		<option value={ option.ID }>{ option.Name }</option>
+	}
+}
+
+templ routeResourceOptions(options []planning.RouteResourceOption, resourceType string) {
+	for _, option := range options {
+		if option.Type == resourceType {
+			<option value={ option.ID }>{ option.Name }</option>
+		}
+	}
+}
+
+func routePageTitle(data RoutePageData) string {
+	if data.Own {
+		return "Meine Route – " + data.Shell.Page.AppName
+	}
+	return "Routenplanung – " + data.Shell.Page.AppName
+}
+func routeEyebrow(data RoutePageData) string {
+	if data.Own {
+		return "Fahreransicht"
+	}
+	return "Disposition"
+}
+func routeHeading(data RoutePageData) string {
+	if data.Own {
+		return "Meine Route"
+	}
+	return "Auftragskarte & Route"
+}
+func routeLead(data RoutePageData) string {
+	if data.Own {
+		return "Sie können die Fahrreihenfolge Ihrer eigenen Route ändern. Terminzeiten und Zuweisungen bleiben dabei unverändert."
+	}
+	return "Verbinden Sie Haufenstandorte zu einer realistischen Fahrroute und weisen Sie diese anschließend als unverbindliche Terminvorschläge zu."
+}
+func routeMapHeading(route *planning.RouteDraft) string {
+	if route == nil {
+		return "Offene Aufträge"
+	}
+	return "Berechnete Route"
+}
+func routeFormAction(route planning.RouteDraft, reorder bool) string {
+	if reorder {
+		return "/my-route/" + route.ID + "/reorder"
+	}
+	return "/planning/routes/" + route.ID + "/assign"
+}
+func routeCoordinate(value float64) string {
+	return strconv.FormatFloat(value, 'f', 6, 64)
+}
+func planningClock(value time.Time) string {
+	if value.IsZero() {
+		return "—"
+	}
+	return value.In(viennaLocation()).Format("15:04")
+}
+func planningDate(value time.Time) string {
+	local := value.In(viennaLocation())
+	weekdays := [...]string{"Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"}
+	return weekdays[local.Weekday()] + ", " + local.Format("02.01.2006")
+}
+func planningDateOnly(value string) string {
+	parsed, err := time.Parse(time.DateOnly, value)
+	if err != nil {
+		return value
+	}
+	return parsed.Format("02.01.2006")
+}
+func routeDuration(value time.Duration) string {
+	if value <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%d Min.", int(value.Round(time.Minute)/time.Minute))
+}
+func routeDistance(value int) string {
+	if value <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.1f km", float64(value)/1000)
+}
+func routeOptional(value string) string {
+	if value == "" {
+		return "nicht zugewiesen"
+	}
+	return value
+}
+func routeSource(value planning.RouteDirections) string {
+	if value.Estimated || value.Source == "haversine" {
+		return "Schätzung"
+	}
+	return "Straßenrouting"
+}
+func routeGeometry(route *planning.RouteDraft) string {
+	if route == nil || len(route.Directions.Geometry) == 0 {
+		return ""
+	}
+	coordinates := make([][2]float64, 0, len(route.Directions.Geometry))
+	for _, point := range route.Directions.Geometry {
+		coordinates = append(coordinates, [2]float64{point.Longitude, point.Latitude})
+	}
+	payload, _ := json.Marshal(map[string]any{"type": "LineString", "coordinates": coordinates})
+	return string(payload)
+}
+
+func routeContainsJob(route *planning.RouteDraft, jobID string) bool {
+	if route == nil {
+		return false
+	}
+	for _, stop := range route.Stops {
+		if stop.JobID == jobID {
+			return true
+		}
+	}
+	return false
+}
+
+func routeSelectableCandidateCount(candidates []planning.RouteCandidate) int {
+	count := 0
+	for _, candidate := range candidates {
+		if candidate.UnavailableReason == "" {
+			count++
+		}
+	}
+	return count
+}
+
+func routeCandidateStatus(candidate planning.RouteCandidate) string {
+	if candidate.UnavailableReason == "" {
+		return ""
+	}
+	return " · " + candidate.UnavailableReason
+}
+func routeMapsURL(point planning.Point) string {
+	query := routeCoordinate(point.Latitude) + "," + routeCoordinate(point.Longitude)
+	return "https://www.google.com/maps/search/?api=1&query=" + url.QueryEscape(query)
+}
+
+func routeWaypointURL(route planning.RouteDraft) string {
+	values := url.Values{"api": {"1"}, "travelmode": {"driving"}, "origin": {routeCoordinate(route.Start.Latitude) + "," + routeCoordinate(route.Start.Longitude)}, "destination": {routeCoordinate(route.End.Latitude) + "," + routeCoordinate(route.End.Longitude)}}
+	waypoints := make([]string, 0, len(route.Stops))
+	for index, stop := range route.Stops {
+		if index == len(route.Stops)-1 && stop.Location == route.End {
+			continue
+		}
+		waypoints = append(waypoints, routeCoordinate(stop.Location.Latitude)+","+routeCoordinate(stop.Location.Longitude))
+	}
+	if len(waypoints) > 0 {
+		values.Set("waypoints", strings.Join(waypoints, "|"))
+	}
+	return "https://www.google.com/maps/dir/?" + values.Encode()
+}
+
+func routePhoneURL(value string) string {
+	value = strings.TrimSpace(value)
+	var clean strings.Builder
+	for index, char := range value {
+		if char >= '0' && char <= '9' || char == '+' && index == 0 {
+			clean.WriteRune(char)
+		}
+	}
+	if clean.Len() < 6 {
+		return ""
+	}
+	return "tel:" + clean.String()
+}
+
+func routeWorkDuration(route planning.RouteDraft) time.Duration {
+	var total time.Duration
+	for _, stop := range route.Stops {
+		total += stop.WorkDuration
+	}
+	return total
+}
+func routeComparisonDistanceSaving(value planning.RouteComparison) int {
+	if value.ManualDistanceMeters <= value.OptimizedDistanceMeters {
+		return 0
+	}
+	return value.ManualDistanceMeters - value.OptimizedDistanceMeters
+}
+func routeComparisonDurationSaving(value planning.RouteComparison) time.Duration {
+	if value.ManualDuration <= value.OptimizedDuration {
+		return 0
+	}
+	return value.ManualDuration - value.OptimizedDuration
+}
+func routeJobType(value string) string {
+	if value == "chipping_with_transport" {
+		return "Hacken mit Transport"
+	}
+	return "Nur Hacken"
+}
+func planningLocalDateTime(value time.Time) string {
+	if value.IsZero() {
+		return "—"
+	}
+	return value.In(viennaLocation()).Format("02.01.2006, 15:04 Uhr")
+}
+func routePresetDate(offset int) string {
+	return time.Now().In(viennaLocation()).AddDate(0, 0, offset).Format(time.DateOnly)
+}
+
+func routeDepartureDate(value string) string {
+	if len(value) >= len(time.DateOnly) {
+		return value[:len(time.DateOnly)]
+	}
+	return ""
+}
+
+func routeDepartureTime(value string) string {
+	if len(value) >= len("2006-01-02T15:04") {
+		return value[len("2006-01-02T"):len("2006-01-02T15:04")]
+	}
+	return ""
+}
+func nextWorkdayDate() string {
+	value := time.Now().In(viennaLocation()).AddDate(0, 0, 1)
+	for value.Weekday() == time.Saturday || value.Weekday() == time.Sunday {
+		value = value.AddDate(0, 0, 1)
+	}
+	return value.Format(time.DateOnly)
+}
+func routeStopIsNext(route planning.RouteDraft, stop planning.RouteStop, now time.Time) bool {
+	if now.IsZero() {
+		return false
+	}
+	next := route.NextStop(now)
+	return next != nil && next.ID == stop.ID
+}
+
+func routeReturnLeg(route planning.RouteDraft) (planning.RouteLeg, bool) {
+	if len(route.Stops) == 0 || route.End == route.Stops[len(route.Stops)-1].Location || len(route.Directions.Legs) <= len(route.Stops) {
+		return planning.RouteLeg{}, false
+	}
+	return route.Directions.Legs[len(route.Directions.Legs)-1], true
+}

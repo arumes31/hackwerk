@@ -5,12 +5,12 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"example.invalid/hackplan/internal/appointment"
 	"example.invalid/hackplan/internal/auth"
 	"example.invalid/hackplan/internal/driver"
+	"example.invalid/hackplan/internal/notification"
 	"example.invalid/hackplan/internal/resource"
 	"example.invalid/hackplan/web/templates"
 	"github.com/go-chi/chi/v5"
@@ -27,14 +27,153 @@ func registerAppointmentRoutes(router chi.Router, dependencies Dependencies, pag
 	router.Get("/api/v1/calendar/conflicts", appointmentConflicts(service, logger))
 	router.Post("/api/v1/calendar/plan", planFromWaitlist(service, logger, true))
 	router.Route("/api/v1/appointments/{appointmentID}", func(appointmentRouter chi.Router) {
+		appointmentRouter.Get("/", appointmentDetail(service, dependencies.Notifications, dependencies.Config.Mail.Enabled, dependencies.Config.SMS.Enabled, logger))
 		appointmentRouter.Post("/assign", assignAppointment(service, logger))
 		appointmentRouter.Post("/propose", proposeAppointment(service, logger))
 		appointmentRouter.Post("/move", moveAppointment(service, logger, false))
 		appointmentRouter.Post("/resize", moveAppointment(service, logger, true))
+		appointmentRouter.Get("/alternatives", appointmentAlternatives(service, logger))
+		appointmentRouter.Post("/swap", swapAppointments(service, logger))
 		appointmentRouter.Post("/fix", fixAppointment(service, logger))
 		appointmentRouter.Post("/cancel", cancelAppointment(service, logger))
+		appointmentRouter.Post("/reopen", reopenAppointment(service, logger))
 		appointmentRouter.Post("/complete", completeAppointment(service, logger))
+		if dependencies.Notifications != nil {
+			appointmentRouter.Post("/confirmation/reissue", reissueConfirmation(dependencies.Notifications, logger))
+			appointmentRouter.Post("/confirmation/reset", resetConfirmationResponse(dependencies.Notifications, logger))
+		}
 	})
+}
+
+func appointmentAlternatives(service *appointment.Service, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		startsAt, startErr := time.Parse(time.RFC3339, request.URL.Query().Get("starts_at"))
+		endsAt, endErr := time.Parse(time.RFC3339, request.URL.Query().Get("ends_at"))
+		if startErr != nil || endErr != nil {
+			appointmentAPIError(response, request, logger, appointment.ErrValidation, "appointment_alternatives_rejected")
+			return
+		}
+		result, err := service.ConflictAlternatives(request.Context(), session.Actor, chi.URLParam(request, "appointmentID"), startsAt.UTC(), endsAt.UTC())
+		if err != nil {
+			appointmentAPIError(response, request, logger, err, "appointment_alternatives_rejected")
+			return
+		}
+		writeJSON(response, http.StatusOK, result)
+	}
+}
+
+func swapAppointments(service *appointment.Service, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		firstVersion, firstErr := parseVersion(request.Form.Get("version"))
+		secondVersion, secondErr := parseVersion(request.Form.Get("other_version"))
+		if firstErr != nil || secondErr != nil {
+			appointmentAPIError(response, request, logger, appointment.ErrValidation, "appointment_swap_rejected")
+			return
+		}
+		values, err := service.SwapAppointments(request.Context(), session.Actor, appointment.SwapInput{FirstID: chi.URLParam(request, "appointmentID"), SecondID: request.Form.Get("other_appointment_id"), FirstVersion: firstVersion, SecondVersion: secondVersion, RequestID: middleware.GetReqID(request.Context())})
+		if err != nil {
+			appointmentAPIError(response, request, logger, err, "appointment_swap_rejected")
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"appointments": values})
+	}
+}
+
+func appointmentDetail(service *appointment.Service, notifications *notification.AdminService, mailEnabled, smsEnabled bool, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		value, err := service.AppointmentDetail(request.Context(), session.Actor, chi.URLParam(request, "appointmentID"))
+		if err != nil {
+			appointmentAPIError(response, request, logger, err, "appointment_detail_rejected")
+			return
+		}
+		channels := notificationChannels(value, mailEnabled, smsEnabled)
+		assessment := notification.AssessChannels(value.NotificationPreference, value.Email, value.Phone, mailEnabled, smsEnabled)
+		targets := make([]map[string]string, 0, len(assessment.Targets))
+		for _, target := range assessment.Targets {
+			targets = append(targets, map[string]string{"channel": target.Label, "recipient": target.Recipient})
+		}
+		statuses := []notification.Status{}
+		if notifications != nil {
+			statuses, err = notifications.AppointmentStatuses(request.Context(), session.Actor, value.ID)
+			if err != nil {
+				appointmentAPIError(response, request, logger, err, "notification_status_rejected")
+				return
+			}
+		}
+		writeJSON(response, http.StatusOK, map[string]any{
+			"id": value.ID, "job_id": value.JobID, "customer_id": value.CustomerID,
+			"title": value.CustomerName + " · " + value.JobNumber,
+			"start": value.StartsAt, "end": value.EndsAt, "lifecycle": value.Lifecycle, "status_label": templates.AppointmentStatusLabel(value.Lifecycle, value.Confirmation),
+			"locality": value.Locality, "volume_m3": value.VolumeM3, "drivers": value.Drivers, "resources": value.Resources,
+			"notes":    value.Notes,
+			"maps_url": value.MapsURL, "phone": value.Phone, "email": value.Email,
+			"notification_preference": value.NotificationPreference, "notification_channels": channels,
+			"notification_targets": targets, "notification_warning": assessment.Warning,
+			"notification_suggestion": assessment.Suggestion, "notification_requires_override": assessment.RequiresOverrideReason,
+			"notifications":              statuses,
+			"version":                    value.Version,
+			"can_complete":               value.CanComplete,
+			"complete_requires_override": value.CompleteRequiresOverride,
+			"can_fix":                    session.Actor.Role == auth.RoleAdmin && value.Lifecycle == appointment.LifecycleProposal,
+			"can_cancel":                 session.Actor.Role == auth.RoleAdmin && value.Lifecycle.Editable(),
+			"can_reopen":                 session.Actor.Role == auth.RoleAdmin && value.Lifecycle == appointment.LifecycleCancelled,
+			"can_reschedule":             session.Actor.Role == auth.RoleAdmin && value.Lifecycle.Editable(),
+			"can_swap":                   session.Actor.Role == auth.RoleAdmin && (value.Lifecycle == appointment.LifecycleDraft || value.Lifecycle == appointment.LifecycleProposal),
+			"can_reissue":                session.Actor.Role == auth.RoleAdmin && value.Lifecycle == appointment.LifecycleFixed,
+			"can_reset_confirmation":     session.Actor.Role == auth.RoleAdmin && value.Lifecycle == appointment.LifecycleFixed && value.Confirmation != appointment.ConfirmationPending && value.Confirmation != appointment.ConfirmationNotRequested,
+		})
+	}
+}
+
+func reissueConfirmation(service *notification.AdminService, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		version, err := parseVersion(request.Form.Get("version"))
+		if err == nil {
+			err = service.Reissue(request.Context(), session.Actor, chi.URLParam(request, "appointmentID"), version, request.Form.Get("reason"), middleware.GetReqID(request.Context()))
+		}
+		notificationAdminResult(response, request, logger, err)
+	}
+}
+
+func resetConfirmationResponse(service *notification.AdminService, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		version, err := parseVersion(request.Form.Get("version"))
+		if err == nil {
+			err = service.ResetResponse(request.Context(), session.Actor, chi.URLParam(request, "appointmentID"), version, request.Form.Get("reason"), middleware.GetReqID(request.Context()))
+		}
+		notificationAdminResult(response, request, logger, err)
+	}
+}
+
+func notificationAdminResult(response http.ResponseWriter, request *http.Request, logger *slog.Logger, err error) {
+	if err == nil {
+		writeJSON(response, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
+	status, code, message := http.StatusUnprocessableEntity, "notification_action_invalid", "Bitte geben Sie einen nachvollziehbaren Grund an."
+	if errors.Is(err, auth.ErrForbidden) {
+		status, code, message = http.StatusForbidden, "forbidden", "Für diese Aktion fehlt die Berechtigung."
+	} else if errors.Is(err, notification.ErrAdminActionUnavailable) {
+		status, code, message = http.StatusConflict, "notification_action_conflict", "Der Terminstand hat sich geändert oder die Aktion ist nicht mehr möglich."
+	}
+	logger.WarnContext(request.Context(), "notification admin action rejected", slog.String("error_code", code))
+	writeJSON(response, status, map[string]string{"code": code, "message": message})
+}
+
+func notificationChannels(value appointment.Detail, mailEnabled, smsEnabled bool) []string {
+	channels := make([]string, 0, 2)
+	if mailEnabled && (value.NotificationPreference == "email" || value.NotificationPreference == "both") && value.Email != "" {
+		channels = append(channels, "E-Mail")
+	}
+	if smsEnabled && (value.NotificationPreference == "sms" || value.NotificationPreference == "both") && value.Phone != "" {
+		channels = append(channels, "SMS")
+	}
+	return channels
 }
 
 func calendarPage(service *appointment.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
@@ -207,16 +346,16 @@ func moveAppointment(service *appointment.Service, logger *slog.Logger, resize b
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
 		version, err := parseVersion(request.Form.Get("version"))
-		start, startErr := time.Parse(time.RFC3339, request.Form.Get("starts_at"))
-		end, endErr := time.Parse(time.RFC3339, request.Form.Get("ends_at"))
-		if startErr != nil || endErr != nil {
-			err = appointment.ErrValidation
+		start, end, timeErr := appointmentMutationTime(request)
+		if timeErr != nil {
+			err = timeErr
 		}
 		var value appointment.Appointment
 		if err == nil {
 			input := appointment.MoveInput{
 				MutateInput: appointment.MutateInput{ID: chi.URLParam(request, "appointmentID"), ExpectedVersion: version, RequestID: middleware.GetReqID(request.Context())},
 				StartsAt:    start.UTC(), EndsAt: end.UTC(), OverrideReason: request.Form.Get("override_reason"),
+				WithoutNotificationReason: request.Form.Get("without_notification_reason"),
 			}
 			if resize {
 				value, err = service.ResizeAppointment(request.Context(), session.Actor, input)
@@ -228,14 +367,36 @@ func moveAppointment(service *appointment.Service, logger *slog.Logger, resize b
 	}
 }
 
+func appointmentMutationTime(request *http.Request) (time.Time, time.Time, error) {
+	if request.Form.Get("starts_at_local") != "" || request.Form.Get("duration_minutes") != "" {
+		location, err := time.LoadLocation("Europe/Vienna")
+		if err != nil {
+			return time.Time{}, time.Time{}, appointment.ErrValidation
+		}
+		start, err := driver.ParseLocalDateTime(request.Form.Get("starts_at_local"), location)
+		minutes, minutesErr := strconv.ParseInt(request.Form.Get("duration_minutes"), 10, 32)
+		if err != nil || minutesErr != nil || minutes < 15 || minutes > int64(appointment.MaxDuration/time.Minute) {
+			return time.Time{}, time.Time{}, appointment.ErrValidation
+		}
+		return start.UTC(), start.Add(time.Duration(minutes) * time.Minute).UTC(), nil
+	}
+	start, startErr := time.Parse(time.RFC3339, request.Form.Get("starts_at"))
+	end, endErr := time.Parse(time.RFC3339, request.Form.Get("ends_at"))
+	if startErr != nil || endErr != nil {
+		return time.Time{}, time.Time{}, appointment.ErrValidation
+	}
+	return start.UTC(), end.UTC(), nil
+}
+
 func fixAppointment(service *appointment.Service, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
 		version, err := parseVersion(request.Form.Get("version"))
 		var value appointment.Appointment
 		if err == nil {
-			value, err = service.FixAppointment(request.Context(), session.Actor, appointment.MutateInput{
-				ID: chi.URLParam(request, "appointmentID"), ExpectedVersion: version, RequestID: middleware.GetReqID(request.Context()),
+			value, err = service.FixAppointment(request.Context(), session.Actor, appointment.FixInput{
+				MutateInput:               appointment.MutateInput{ID: chi.URLParam(request, "appointmentID"), ExpectedVersion: version, RequestID: middleware.GetReqID(request.Context())},
+				WithoutNotificationReason: request.Form.Get("without_notification_reason"),
 			})
 		}
 		appointmentMutationResult(response, request, logger, value, err, "appointment_fix_rejected")
@@ -254,6 +415,26 @@ func cancelAppointment(service *appointment.Service, logger *slog.Logger) http.H
 			})
 		}
 		appointmentMutationResult(response, request, logger, value, err, "appointment_cancel_rejected")
+	}
+}
+
+func reopenAppointment(service *appointment.Service, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		version, err := parseVersion(request.Form.Get("version"))
+		var value appointment.Appointment
+		if err == nil {
+			value, err = service.ReopenAppointment(request.Context(), session.Actor, appointment.ReopenInput{
+				MutateInput: appointment.MutateInput{
+					ID:              chi.URLParam(request, "appointmentID"),
+					ExpectedVersion: version,
+					RequestID:       middleware.GetReqID(request.Context()),
+				},
+				Reason:         request.Form.Get("reason"),
+				OverrideReason: request.Form.Get("override_reason"),
+			})
+		}
+		appointmentMutationResult(response, request, logger, value, err, "appointment_reopen_rejected")
 	}
 }
 
@@ -357,17 +538,18 @@ func appointmentAPIError(response http.ResponseWriter, request *http.Request, lo
 		status, errorCode, message = http.StatusConflict, "reservation_conflict", "Der Stand ist veraltet oder der Slot ist bereits belegt. Bitte Kalender neu laden."
 	case errors.Is(err, appointment.ErrAvailability):
 		errorCode, message = "driver_unavailable", "Mindestens ein Fahrer ist nicht verfügbar. Wählen Sie einen anderen Slot oder begründen Sie den Admin-Override."
+	case errors.Is(err, appointment.ErrNotification):
+		errorCode, message = "notification_channel_missing", "Für diesen Kunden ist kein erreichbarer Benachrichtigungskanal vorhanden. Nur mit begründeter Ausnahme ohne Nachricht fixieren."
 	case errors.Is(err, appointment.ErrTransition):
 		errorCode, message = "invalid_transition", "Dieser Statuswechsel ist nicht erlaubt."
 	case errors.Is(err, driver.ErrLocalTime):
 		errorCode, message = "invalid_local_time", "Diese Ortszeit existiert wegen der Zeitumstellung nicht oder ist mehrdeutig."
 	case errors.Is(err, appointment.ErrValidation), errors.Is(err, resource.ErrValidation):
-		errorCode = "validation_failed"
 	default:
 		status, errorCode, message = http.StatusInternalServerError, "internal_error", "Die Planung kann derzeit nicht gespeichert werden."
 	}
 	logger.WarnContext(request.Context(), "appointment request rejected", slog.String("error_code", code), slog.String("category", errorCode))
-	writeJSON(response, status, map[string]any{"error": map[string]string{"code": errorCode, "message": message}})
+	writeJSON(response, status, map[string]any{"error": map[string]string{"code": errorCode, "message": message, "request_id": middleware.GetReqID(request.Context())}})
 }
 
 func appointmentPageError(response http.ResponseWriter, request *http.Request, page templates.PageData, logger *slog.Logger, err error) {
@@ -377,11 +559,4 @@ func appointmentPageError(response http.ResponseWriter, request *http.Request, p
 		status, message = http.StatusForbidden, "Für diese Ansicht fehlt die Berechtigung."
 	}
 	render(response, request, templates.Error(page, status, "Kalender nicht verfügbar", message), status, logger)
-}
-
-func splitCSV(value string) []string {
-	if strings.TrimSpace(value) == "" {
-		return nil
-	}
-	return strings.Split(value, ",")
 }

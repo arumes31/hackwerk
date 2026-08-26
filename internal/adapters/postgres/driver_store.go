@@ -87,6 +87,23 @@ func (s *DriverStore) DeactivateProfile(ctx context.Context, actor auth.Actor, i
 		return driver.ErrNotFound
 	}
 	return withQueries(ctx, s.pool, func(queries *dbgen.Queries) error {
+		current, getErr := queries.LockDriverProfile(ctx, driverID)
+		if errors.Is(getErr, pgx.ErrNoRows) {
+			return driver.ErrNotFound
+		}
+		if getErr != nil {
+			return getErr
+		}
+		if current.Version != version || !current.Active {
+			return driver.ErrConflict
+		}
+		reserved, reservedErr := queries.HasActiveDriverReservations(ctx, driverID)
+		if reservedErr != nil {
+			return reservedErr
+		}
+		if reserved {
+			return driver.ErrConflict
+		}
 		rows, updateErr := queries.DeactivateDriverProfile(ctx, dbgen.DeactivateDriverProfileParams{ID: driverID, ExpectedVersion: version})
 		if updateErr != nil {
 			return updateErr
@@ -178,6 +195,9 @@ func (s *DriverStore) CreateRule(ctx context.Context, actor auth.Actor, driverID
 	}
 	params.DriverID = parsedDriverID
 	resultErr = withQueries(ctx, s.pool, func(queries *dbgen.Queries) error {
+		if err := lockDriverAvailability(ctx, queries, parsedDriverID); err != nil {
+			return err
+		}
 		var insertErr error
 		id, insertErr = queries.InsertAvailabilityRule(ctx, params)
 		if insertErr != nil {
@@ -199,6 +219,9 @@ func (s *DriverStore) UpdateRule(ctx context.Context, actor auth.Actor, driverID
 		return driver.ErrNotFound
 	}
 	return withQueries(ctx, s.pool, func(queries *dbgen.Queries) error {
+		if err := lockDriverAvailability(ctx, queries, parsedDriverID); err != nil {
+			return err
+		}
 		rows, updateErr := queries.UpdateAvailabilityRule(ctx, dbgen.UpdateAvailabilityRuleParams{
 			IsoWeekday: insertParams.IsoWeekday, LocalStart: insertParams.LocalStart, LocalEnd: insertParams.LocalEnd,
 			ValidFrom: insertParams.ValidFrom, ValidUntil: insertParams.ValidUntil,
@@ -217,8 +240,59 @@ func (s *DriverStore) UpdateRule(ctx context.Context, actor auth.Actor, driverID
 }
 
 func (s *DriverStore) DeleteRule(ctx context.Context, actor auth.Actor, driverID string, id string, version int32, requestID string) error {
-	return s.deleteAvailability(ctx, actor, driverID, id, version, requestID, "availability_rule.deleted", func(queries *dbgen.Queries, targetID pgtype.UUID, targetDriverID pgtype.UUID) (int64, error) {
+	return s.deleteAvailability(ctx, actor, driverID, id, requestID, "availability_rule.deleted", func(queries *dbgen.Queries, targetID pgtype.UUID, targetDriverID pgtype.UUID) (int64, error) {
 		return queries.DeleteAvailabilityRule(ctx, dbgen.DeleteAvailabilityRuleParams{ID: targetID, DriverID: targetDriverID, ExpectedVersion: version})
+	})
+}
+
+func (s *DriverStore) ClearRulesForDay(ctx context.Context, actor auth.Actor, driverID string, weekday int, refs []driver.RuleRef, requestID string) error {
+	if weekday < 1 || weekday > 7 {
+		return driver.ErrValidation
+	}
+	parsedDriverID, err := uuid(driverID)
+	if err != nil {
+		return driver.ErrNotFound
+	}
+	expected := make(map[string]int32, len(refs))
+	for _, ref := range refs {
+		expected[ref.ID] = ref.Version
+	}
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		queries := dbgen.New(tx)
+		if err := lockDriverAvailability(ctx, queries, parsedDriverID); err != nil {
+			return err
+		}
+		// #nosec G115 -- weekday is explicitly bounded to 1..7 above.
+		isoWeekday := int16(weekday)
+		rows, err := queries.LockAvailabilityRulesForDay(ctx, dbgen.LockAvailabilityRulesForDayParams{
+			DriverID: parsedDriverID, IsoWeekday: isoWeekday,
+		})
+		if err != nil {
+			return err
+		}
+		actual := make(map[string]int32, len(expected))
+		for _, row := range rows {
+			actual[row.ID] = row.Version
+		}
+		if len(actual) != len(expected) {
+			return driver.ErrConflict
+		}
+		for id, version := range expected {
+			if actual[id] != version {
+				return driver.ErrConflict
+			}
+		}
+		count, err := queries.ClearAvailabilityRulesForDay(ctx, dbgen.ClearAvailabilityRulesForDayParams{
+			DriverID: parsedDriverID, IsoWeekday: isoWeekday,
+		})
+		if err != nil {
+			return mapDriverConflict(err)
+		}
+		if count != int64(len(expected)) {
+			return driver.ErrConflict
+		}
+		return insertAudit(ctx, queries, actor, "availability_rule.day_cleared", "driver", driverID, requestID,
+			[]string{"weekday", "rules"})
 	})
 }
 
@@ -229,6 +303,9 @@ func (s *DriverStore) CreateException(ctx context.Context, actor auth.Actor, dri
 	}
 	params := exceptionInsertParams(parsedDriverID, input)
 	resultErr = withQueries(ctx, s.pool, func(queries *dbgen.Queries) error {
+		if err := lockDriverAvailability(ctx, queries, parsedDriverID); err != nil {
+			return err
+		}
 		var insertErr error
 		id, insertErr = queries.InsertAvailabilityException(ctx, params)
 		if insertErr != nil {
@@ -238,6 +315,26 @@ func (s *DriverStore) CreateException(ctx context.Context, actor auth.Actor, dri
 			[]string{"driver_id", "exception_type", "time_range"})
 	})
 	return id, resultErr
+}
+
+func (s *DriverStore) CreateExceptions(ctx context.Context, actor auth.Actor, driverID string, inputs []driver.ExceptionInput, requestID string) error {
+	parsedDriverID, err := uuid(driverID)
+	if err != nil {
+		return driver.ErrNotFound
+	}
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		queries := dbgen.New(tx)
+		if err := lockDriverAvailability(ctx, queries, parsedDriverID); err != nil {
+			return err
+		}
+		for _, input := range inputs {
+			if _, err := queries.InsertAvailabilityException(ctx, exceptionInsertParams(parsedDriverID, input)); err != nil {
+				return mapDriverConflict(err)
+			}
+		}
+		return insertAudit(ctx, queries, actor, "availability_exception.preset_created", "driver", driverID, requestID,
+			[]string{"exception_type", "local_dates"})
+	})
 }
 
 func (s *DriverStore) UpdateException(ctx context.Context, actor auth.Actor, driverID string, id string, version int32, input driver.ExceptionInput, requestID string) error {
@@ -251,6 +348,9 @@ func (s *DriverStore) UpdateException(ctx context.Context, actor auth.Actor, dri
 	}
 	params := exceptionInsertParams(parsedDriverID, input)
 	return withQueries(ctx, s.pool, func(queries *dbgen.Queries) error {
+		if err := lockDriverAvailability(ctx, queries, parsedDriverID); err != nil {
+			return err
+		}
 		rows, updateErr := queries.UpdateAvailabilityException(ctx, dbgen.UpdateAvailabilityExceptionParams{
 			ExceptionType: params.ExceptionType, AllDay: params.AllDay, LocalDate: params.LocalDate,
 			StartsAt: params.StartsAt, EndsAt: params.EndsAt, InternalNote: params.InternalNote,
@@ -268,12 +368,12 @@ func (s *DriverStore) UpdateException(ctx context.Context, actor auth.Actor, dri
 }
 
 func (s *DriverStore) DeleteException(ctx context.Context, actor auth.Actor, driverID string, id string, version int32, requestID string) error {
-	return s.deleteAvailability(ctx, actor, driverID, id, version, requestID, "availability_exception.deleted", func(queries *dbgen.Queries, targetID pgtype.UUID, targetDriverID pgtype.UUID) (int64, error) {
+	return s.deleteAvailability(ctx, actor, driverID, id, requestID, "availability_exception.deleted", func(queries *dbgen.Queries, targetID pgtype.UUID, targetDriverID pgtype.UUID) (int64, error) {
 		return queries.DeleteAvailabilityException(ctx, dbgen.DeleteAvailabilityExceptionParams{ID: targetID, DriverID: targetDriverID, ExpectedVersion: version})
 	})
 }
 
-func (s *DriverStore) deleteAvailability(ctx context.Context, actor auth.Actor, driverID string, id string, version int32, requestID string, action string, operation func(*dbgen.Queries, pgtype.UUID, pgtype.UUID) (int64, error)) error {
+func (s *DriverStore) deleteAvailability(ctx context.Context, actor auth.Actor, driverID string, id string, requestID string, action string, operation func(*dbgen.Queries, pgtype.UUID, pgtype.UUID) (int64, error)) error {
 	parsedDriverID, err := uuid(driverID)
 	if err != nil {
 		return driver.ErrNotFound
@@ -283,6 +383,9 @@ func (s *DriverStore) deleteAvailability(ctx context.Context, actor auth.Actor, 
 		return driver.ErrNotFound
 	}
 	return withQueries(ctx, s.pool, func(queries *dbgen.Queries) error {
+		if err := lockDriverAvailability(ctx, queries, parsedDriverID); err != nil {
+			return err
+		}
 		rows, deleteErr := operation(queries, targetID, parsedDriverID)
 		if deleteErr != nil {
 			return deleteErr
@@ -292,6 +395,14 @@ func (s *DriverStore) deleteAvailability(ctx context.Context, actor auth.Actor, 
 		}
 		return insertAudit(ctx, queries, actor, action, "availability", id, requestID, []string{"deleted"})
 	})
+}
+
+func lockDriverAvailability(ctx context.Context, queries *dbgen.Queries, driverID pgtype.UUID) error {
+	_, err := queries.LockDriverForAvailability(ctx, driverID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return driver.ErrNotFound
+	}
+	return err
 }
 
 func (s *DriverStore) profile(ctx context.Context, id pgtype.UUID) (driver.Profile, error) {
@@ -311,6 +422,9 @@ func (s *DriverStore) profile(ctx context.Context, id pgtype.UUID) (driver.Profi
 }
 
 func ruleInsertParams(driverID string, input driver.RuleInput) (pgtype.UUID, dbgen.InsertAvailabilityRuleParams, error) {
+	if input.Weekday < 1 || input.Weekday > 7 {
+		return pgtype.UUID{}, dbgen.InsertAvailabilityRuleParams{}, driver.ErrValidation
+	}
 	parsedDriverID, err := uuid(driverID)
 	if err != nil {
 		return pgtype.UUID{}, dbgen.InsertAvailabilityRuleParams{}, err
@@ -327,8 +441,10 @@ func ruleInsertParams(driverID string, input driver.RuleInput) (pgtype.UUID, dbg
 	if err != nil {
 		return pgtype.UUID{}, dbgen.InsertAvailabilityRuleParams{}, err
 	}
+	// #nosec G115 -- input.Weekday is explicitly bounded to 1..7 above.
+	isoWeekday := int16(input.Weekday)
 	return parsedDriverID, dbgen.InsertAvailabilityRuleParams{
-		DriverID: parsedDriverID, IsoWeekday: int16(input.Weekday), LocalStart: start, LocalEnd: end,
+		DriverID: parsedDriverID, IsoWeekday: isoWeekday, LocalStart: start, LocalEnd: end,
 		ValidFrom: from, ValidUntil: input.ValidUntil, Status: string(input.Status), InternalNote: input.InternalNote,
 	}, nil
 }

@@ -1,28 +1,190 @@
+name: hackwerk-production
+
+x-runtime-environment: &runtime-environment
+  APP_ENV: production
+  APP_NAME: HackWerk
+  APP_BASE_URL: https://${APP_HOST:?APP_HOST setzen}
+  APP_LISTEN_ADDR: :18533
+  APP_ALLOWED_HOSTS: ${APP_HOST}
+  APP_TRUSTED_PROXY_CIDRS: ${APP_TRUSTED_PROXY_CIDRS:-172.30.0.0/24}
+  APP_LOG_FORMAT: json
+  APP_LOG_LEVEL: ${APP_LOG_LEVEL:-info}
+  SESSION_COOKIE_SECURE: "true"
+  DATABASE_URL_FILE: /run/secrets/database_url
+  CONFIRMATION_TOKEN_KEY_ID: ${CONFIRMATION_TOKEN_KEY_ID:?Token-Key-ID setzen}
+  CONFIRMATION_TOKEN_KEYS_FILE: /run/secrets/confirmation_token_keys
+  MAIL_ENABLED: ${MAIL_ENABLED:-false}
+  SMS_ENABLED: ${SMS_ENABLED:-false}
+  VOICE_ENABLED: ${VOICE_ENABLED:-false}
+  VOICE_TRANSCRIBER: ${VOICE_TRANSCRIBER:-disabled}
+  VOICE_EXTRACTOR: ${VOICE_EXTRACTOR:-rules}
+  VOICE_TEMP_DIR: /tmp/hackwerk-voice
+  CALENDAR_ENABLED: ${CALENDAR_ENABLED:-true}
+  CALENDAR_UID_DOMAIN: ${CALENDAR_UID_DOMAIN:-hackwerk.local}
+  PLANNING_ROUTER: ${PLANNING_ROUTER:-haversine}
+  PLANNING_ROUTING_URL: ${PLANNING_ROUTING_URL:-}
+  MAP_TILE_URL: ${MAP_TILE_URL:?MAP_TILE_URL setzen}
+  MAP_TILE_TOKEN: ${MAP_TILE_TOKEN:-}
+  MAP_TILE_ATTRIBUTION: ${MAP_TILE_ATTRIBUTION:?MAP_TILE_ATTRIBUTION setzen}
+  WORKER_HEARTBEAT_STALE_AFTER: ${WORKER_HEARTBEAT_STALE_AFTER:-2m}
+
+x-runtime-security: &runtime-security
+  read_only: true
+  user: "65532:65532"
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  ulimits:
+    nofile: {soft: 4096, hard: 4096}
+  restart: unless-stopped
+
 services:
-  app:
-    image: registry.example.invalid/hackwerk:1.0.0
-    environment: &production-environment
-      APP_ENV: production
-      APP_BASE_URL: https://hackwerk.example.invalid
-      DATABASE_URL_FILE: /run/secrets/database_url
-    secrets: [database_url]
-    read_only: true
-    tmpfs: [/tmp]
+  postgres:
+    image: postgres:18.6-alpine
+    environment:
+      POSTGRES_DB: hackwerk
+      POSTGRES_USER: hackwerk_bootstrap
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_bootstrap_password
+      HACKWERK_MIGRATION_PASSWORD_FILE: /run/secrets/postgres_migration_password
+      HACKWERK_RUNTIME_PASSWORD_FILE: /run/secrets/postgres_runtime_password
+    secrets: [postgres_bootstrap_password, postgres_migration_password, postgres_runtime_password]
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./scripts/postgres/init-prod.sh:/docker-entrypoint-initdb.d/20-hackwerk-roles.sh:ro
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hackwerk_bootstrap -d hackwerk"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    restart: always
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    pids_limit: 256
+    restart: unless-stopped
+
+  migrate:
+    image: ${HACKWERK_IMAGE:?HACKWERK_IMAGE setzen}
+    command: ["migrate", "up"]
+    environment:
+      <<: *runtime-environment
+      DATABASE_URL_FILE: /run/secrets/migration_database_url
+      MAIL_ENABLED: "false"
+      SMS_ENABLED: "false"
+      VOICE_ENABLED: "false"
+      METRICS_ENABLED: "false"
+    secrets: [migration_database_url, confirmation_token_keys]
+    networks: [backend]
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 64
+    restart: "no"
+    profiles: [deploy]
+
+  app:
+    image: ${HACKWERK_IMAGE:?HACKWERK_IMAGE setzen}
+    command: ["serve"]
+    environment:
+      <<: *runtime-environment
+      VOICE_OPENAI_API_KEY: ${VOICE_OPENAI_API_KEY:-}
+      METRICS_ENABLED: "true"
+      METRICS_LISTEN_ADDR: 172.33.0.10:19090
+    secrets: [database_url, confirmation_token_keys]
+    depends_on:
+      postgres: {condition: service_healthy}
+    ports: ["127.0.0.1:18533:18533"]
+    networks:
+      frontend: {ipv4_address: 172.30.0.10}
+      backend: {}
+      egress: {}
+      monitoring: {ipv4_address: 172.33.0.10}
+    tmpfs: ["/tmp:size=64m,mode=1777,noexec,nosuid,nodev"]
+    <<: *runtime-security
+    deploy:
+      resources:
+        limits: {cpus: "1.00", memory: 512M, pids: 128}
+        reservations: {memory: 128M}
+    healthcheck:
+      test: ["CMD", "/hackwerk", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   worker:
-    image: registry.example.invalid/hackwerk:1.0.0
+    image: ${HACKWERK_IMAGE:?HACKWERK_IMAGE setzen}
     command: ["worker"]
-    environment: *production-environment
-    secrets: [database_url]
+    environment:
+      <<: *runtime-environment
+      VOICE_ENABLED: "false"
+      MAIL_SMTP_HOST: ${MAIL_SMTP_HOST:-}
+      MAIL_SMTP_PORT: ${MAIL_SMTP_PORT:-587}
+      MAIL_SMTP_TLS: ${MAIL_SMTP_TLS:-starttls}
+      MAIL_SMTP_USERNAME: ${MAIL_SMTP_USERNAME:-}
+      MAIL_SMTP_PASSWORD: ${MAIL_SMTP_PASSWORD:-}
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-HackWerk}
+      SMS_PROVIDER: ${SMS_PROVIDER:-sendberry}
+      SENDBERRY_API_URL: ${SENDBERRY_API_URL:-}
+      SENDBERRY_API_KEY: ${SENDBERRY_API_KEY:-}
+      SENDBERRY_API_KEY_FILE: ${SENDBERRY_API_KEY_FILE:-}
+      SENDBERRY_ACCESS_NAME: ${SENDBERRY_ACCESS_NAME:-}
+      SENDBERRY_ACCESS_NAME_FILE: ${SENDBERRY_ACCESS_NAME_FILE:-}
+      SENDBERRY_ACCESS_PASSWORD: ${SENDBERRY_ACCESS_PASSWORD:-}
+      SENDBERRY_ACCESS_PASSWORD_FILE: ${SENDBERRY_ACCESS_PASSWORD_FILE:-}
+      SMS_SENDER: ${SMS_SENDER:-}
+      SMS_TIMEOUT: ${SMS_TIMEOUT:-8s}
+      SMS_MAX_ATTEMPTS: ${SMS_MAX_ATTEMPTS:-6}
+      METRICS_ENABLED: "false"
+    secrets: [database_url, confirmation_token_keys]
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [backend, egress]
+    tmpfs: ["/tmp:size=16m,mode=1777,noexec,nosuid,nodev"]
+    <<: *runtime-security
+    deploy:
+      resources:
+        limits: {cpus: "1.00", memory: 384M, pids: 128}
+        reservations: {memory: 96M}
+
+  backup:
+    image: postgres:18.6-alpine
+    entrypoint: ["/bin/sh", "/opt/hackwerk/backup-postgres.sh"]
+    environment:
+      DATABASE_URL_FILE: /run/secrets/backup_database_url
+      BACKUP_DIR: /backups
+    secrets: [backup_database_url]
+    volumes:
+      - backups:/backups
+      - ./scripts/ops:/opt/hackwerk:ro
+    networks: [backend]
     read_only: true
-    tmpfs: [/tmp]
+    tmpfs: ["/tmp:size=16m,mode=1777,noexec,nosuid,nodev"]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    restart: always
+    profiles: [ops]
+
+volumes:
+  postgres-data:
+  backups:
+
+networks:
+  frontend:
+    ipam:
+      config: [{subnet: 172.30.0.0/24}]
+  backend:
+    internal: true
+  egress:
+  monitoring:
+    internal: true
+    ipam:
+      config: [{subnet: 172.33.0.0/24}]
 
 secrets:
-  database_url:
-    file: ./secrets/database_url
+  database_url: {file: ./secrets/database_url}
+  migration_database_url: {file: ./secrets/migration_database_url}
+  backup_database_url: {file: ./secrets/backup_database_url}
+  confirmation_token_keys: {file: ./secrets/confirmation_token_keys}
+  postgres_bootstrap_password: {file: ./secrets/postgres_bootstrap_password}
+  postgres_migration_password: {file: ./secrets/postgres_migration_password}
+  postgres_runtime_password: {file: ./secrets/postgres_runtime_password}

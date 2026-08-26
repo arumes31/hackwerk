@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,12 +58,61 @@ func TestIdentityPersistenceAndLastAdmin(t *testing.T) {
 	if err := service.UpdateUserAccess(ctx, system, auth.UpdateAccessInput{UserID: adminID, Role: auth.RoleDriver, Active: true, ExpectedVersion: admin.Version}); !errors.Is(err, auth.ErrLastAdmin) {
 		t.Fatalf("last admin update error = %v", err)
 	}
-	if _, err := service.CreateUser(ctx, system, auth.CreateUserInput{Username: "driver", DisplayName: "Franz Fahrer", Role: auth.RoleDriver, Password: "Ein sicheres Fahrerpasswort 2026", CreateDriver: true}); err != nil {
+	driverUserID, err := service.CreateUser(ctx, system, auth.CreateUserInput{Username: "driver", DisplayName: "Franz Fahrer", Role: auth.RoleDriver, Password: "Ein sicheres Fahrerpasswort 2026", CreateDriver: true})
+	if err != nil {
 		t.Fatal(err)
 	}
 	users, err := service.ListUsers(ctx, system)
 	if err != nil || len(users) != 2 || users[1].DriverID == "" {
 		t.Fatalf("ListUsers() len = %d, err = %v", len(users), err)
+	}
+	driverUser, err := service.FindUserForAdministration(ctx, system, "driver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.UpdateUserDetails(ctx, system, auth.UpdateUserDetailsInput{
+		UserID: driverUserID, Username: "driver-neu", DisplayName: "Neuer Kontoname",
+		Email: "konto@example.test", ExpectedVersion: driverUser.Version, RequestID: "details-request",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := service.FindUserForAdministration(ctx, system, "DRIVER-NEU")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.DisplayName != "Neuer Kontoname" || updated.Email != "konto@example.test" || updated.Version != driverUser.Version+1 {
+		t.Fatalf("updated user = %#v", updated)
+	}
+	var driverDisplayName, driverEmail string
+	if err := pool.QueryRow(ctx, `SELECT display_name, COALESCE(email::text, '') FROM drivers WHERE user_id = $1`, driverUserID).Scan(&driverDisplayName, &driverEmail); err != nil {
+		t.Fatal(err)
+	}
+	if driverDisplayName != "Franz Fahrer" || driverEmail != "" {
+		t.Fatalf("driver profile changed with user details: display=%q email=%q", driverDisplayName, driverEmail)
+	}
+	if err := service.UpdateUserDetails(ctx, system, auth.UpdateUserDetailsInput{
+		UserID: driverUserID, Username: "nochmals", DisplayName: "Nochmals",
+		ExpectedVersion: driverUser.Version,
+	}); !errors.Is(err, auth.ErrConflict) {
+		t.Fatalf("stale details update error = %v", err)
+	}
+	if err := service.UpdateUserDetails(ctx, system, auth.UpdateUserDetailsInput{
+		UserID: driverUserID, Username: "ADMIN", DisplayName: "Dublette",
+		ExpectedVersion: updated.Version,
+	}); !errors.Is(err, auth.ErrConflict) {
+		t.Fatalf("duplicate username update error = %v", err)
+	}
+	var auditMetadata string
+	if err := pool.QueryRow(ctx, `SELECT metadata::text FROM audit_events WHERE action = 'user.details_updated' AND object_id = $1`, driverUserID).Scan(&auditMetadata); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"username", "display_name", "email"} {
+		if !strings.Contains(auditMetadata, field) {
+			t.Fatalf("audit metadata %q does not contain changed field %q", auditMetadata, field)
+		}
+	}
+	if strings.Contains(auditMetadata, "konto@example.test") || strings.Contains(auditMetadata, "Neuer Kontoname") {
+		t.Fatalf("audit metadata contains user values: %q", auditMetadata)
 	}
 }
 

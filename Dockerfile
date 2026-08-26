@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1.7
 ARG GO_VERSION=1.27.0
+ARG SOURCE_URL=https://example.invalid/hackwerk
 
 FROM golang:${GO_VERSION}-bookworm AS build
 WORKDIR /src
@@ -15,6 +16,16 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
     -o /out/hackwerk ./cmd/hackwerk
 
 FROM scratch AS runtime
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_TIME=unknown
+ARG SOURCE_URL
+LABEL org.opencontainers.image.title="HackWerk" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}" \
+      org.opencontainers.image.created="${BUILD_TIME}" \
+      org.opencontainers.image.source="${SOURCE_URL}" \
+      org.opencontainers.image.licenses="Proprietary"
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=build /out/hackwerk /hackwerk
@@ -22,3 +33,4 @@ USER 65532:65532
 EXPOSE 18533
 ENTRYPOINT ["/hackwerk"]
 CMD ["serve"]
+STOPSIGNAL SIGTERM

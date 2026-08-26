@@ -1,0 +1,18 @@
+:root,
+html {
+  color-scheme: only light;
+}
+
+select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid #9da79d;
+  border-radius: .45rem;
+  padding: .65rem 2.4rem .65rem .75rem;
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: #fff;
+  color: #18201a;
+  font: inherit;
+}

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -10,6 +11,22 @@ import (
 	"example.invalid/hackplan/internal/driver"
 	"example.invalid/hackplan/internal/resource"
 )
+
+func TestReadPasswordRejectsOversizedInput(t *testing.T) {
+	t.Parallel()
+
+	if _, err := readPassword(strings.NewReader(strings.Repeat("a", 4097)), ""); err == nil {
+		t.Fatal("readPassword() accepted oversized standard input")
+	}
+
+	passwordFile := t.TempDir() + "/password.txt"
+	if err := os.WriteFile(passwordFile, []byte(strings.Repeat("a", 4097)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readPassword(nil, passwordFile); err == nil {
+		t.Fatal("readPassword() accepted oversized password file")
+	}
+}
 
 func TestRunHelpAndVersion(t *testing.T) {
 	t.Parallel()
@@ -49,8 +66,8 @@ func TestRunHelpAndVersion(t *testing.T) {
 func TestCustomerSeedScenarios(t *testing.T) {
 	t.Parallel()
 	scenarios := customerSeedScenarios()
-	if len(scenarios) != 3 {
-		t.Fatalf("customerSeedScenarios() count = %d, want 3", len(scenarios))
+	if len(scenarios) != 7 {
+		t.Fatalf("customerSeedScenarios() count = %d, want 7", len(scenarios))
 	}
 	want := []struct {
 		lastName string
@@ -68,6 +85,14 @@ func TestCustomerSeedScenarios(t *testing.T) {
 			actual.Job.EstimatedHackMinutes != expected.minutes || actual.Job.JobType != expected.jobType {
 			t.Errorf("scenario %d = %#v, want %#v", index, actual, expected)
 		}
+	}
+	for _, scenario := range scenarios {
+		if scenario.Customer.NotificationPreference != customers.NotifyEmail || !strings.HasSuffix(scenario.Customer.Email, "@example.test") {
+			t.Fatalf("seed contact is not a synthetic e-mail channel: %#v", scenario.Customer)
+		}
+	}
+	if scenarios[0].Job.TransportMode != customers.TransportInternal || scenarios[0].Job.EstimatedTransportMinutes == 0 {
+		t.Fatalf("Huber transport scenario is incomplete: %#v", scenarios[0].Job)
 	}
 }
 
@@ -100,5 +125,25 @@ func TestRunAdminPlaceholder(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "stdin") {
 		t.Fatalf("output = %q", output.String())
+	}
+}
+
+func TestConfigCheckRedactsEnvironmentSecrets(t *testing.T) {
+	t.Setenv("APP_ENV", "test")
+	t.Setenv("SENDBERRY_API_KEY", "canary-secret-key-123456789")
+	t.Setenv("SENDBERRY_ACCESS_NAME", "canary-access-name")
+	t.Setenv("SENDBERRY_ACCESS_PASSWORD", "canary-access-password")
+	var output, errorOutput bytes.Buffer
+	code := Run(context.Background(), []string{"config-check"}, IO{Output: &output, Error: &errorOutput})
+	if code != ExitSuccess {
+		t.Fatalf("Run()=%d error=%s", code, errorOutput.String())
+	}
+	for _, forbidden := range []string{"canary-secret-key", "canary-access-name", "canary-access-password"} {
+		if strings.Contains(output.String(), forbidden) {
+			t.Fatalf("config-check leaked %q: %s", forbidden, output.String())
+		}
+	}
+	if !strings.Contains(output.String(), "set_redacted") {
+		t.Fatalf("config-check output=%s", output.String())
 	}
 }

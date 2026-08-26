@@ -94,6 +94,11 @@ type Rule struct {
 	Version      int32
 }
 
+type RuleRef struct {
+	ID      string
+	Version int32
+}
+
 type ExceptionInput struct {
 	Type         ExceptionType
 	IsAllDay     bool
@@ -141,7 +146,9 @@ type Store interface {
 	CreateRule(context.Context, auth.Actor, string, RuleInput, string) (string, error)
 	UpdateRule(context.Context, auth.Actor, string, string, int32, RuleInput, string) error
 	DeleteRule(context.Context, auth.Actor, string, string, int32, string) error
+	ClearRulesForDay(context.Context, auth.Actor, string, int, []RuleRef, string) error
 	CreateException(context.Context, auth.Actor, string, ExceptionInput, string) (string, error)
+	CreateExceptions(context.Context, auth.Actor, string, []ExceptionInput, string) error
 	UpdateException(context.Context, auth.Actor, string, string, int32, ExceptionInput, string) error
 	DeleteException(context.Context, auth.Actor, string, string, int32, string) error
 }
@@ -245,6 +252,50 @@ func (s *Service) DeleteRule(ctx context.Context, actor auth.Actor, driverID str
 	return s.store.DeleteRule(ctx, actor, driverID, id, version, requestID)
 }
 
+func (s *Service) DuplicateRule(ctx context.Context, actor auth.Actor, driverID, id string, targetWeekday int, requestID string) (string, error) {
+	if err := authorizeAvailability(actor, driverID); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(id) == "" || targetWeekday < 1 || targetWeekday > 7 {
+		return "", ErrValidation
+	}
+	data, err := s.store.Schedule(ctx, driverID)
+	if err != nil {
+		return "", err
+	}
+	for _, rule := range data.Rules {
+		if rule.ID != id {
+			continue
+		}
+		input := RuleInput{
+			Weekday: targetWeekday, LocalStart: FormatLocalTime(rule.StartMinute), LocalEnd: FormatLocalTime(rule.EndMinute),
+			ValidFrom: rule.ValidFrom, ValidUntil: rule.ValidUntil, Status: rule.Status, InternalNote: rule.InternalNote,
+		}
+		return s.store.CreateRule(ctx, actor, driverID, input, requestID)
+	}
+	return "", ErrNotFound
+}
+
+func (s *Service) ClearRulesForDay(ctx context.Context, actor auth.Actor, driverID string, weekday int, refs []RuleRef, requestID string) error {
+	if err := authorizeAvailability(actor, driverID); err != nil {
+		return err
+	}
+	if weekday < 1 || weekday > 7 || len(refs) == 0 {
+		return ErrValidation
+	}
+	seen := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		if strings.TrimSpace(ref.ID) == "" || ref.Version < 1 {
+			return ErrValidation
+		}
+		if _, duplicate := seen[ref.ID]; duplicate {
+			return ErrValidation
+		}
+		seen[ref.ID] = struct{}{}
+	}
+	return s.store.ClearRulesForDay(ctx, actor, driverID, weekday, refs, requestID)
+}
+
 func (s *Service) CreateException(ctx context.Context, actor auth.Actor, driverID string, input ExceptionInput, requestID string) (string, error) {
 	if err := authorizeAvailability(actor, driverID); err != nil {
 		return "", err
@@ -254,6 +305,28 @@ func (s *Service) CreateException(ctx context.Context, actor auth.Actor, driverI
 		return "", err
 	}
 	return s.store.CreateException(ctx, actor, driverID, input, requestID)
+}
+
+func (s *Service) CreateVacationPreset(ctx context.Context, actor auth.Actor, driverID, localDate string, workweek bool, internalNote, requestID string) error {
+	if err := authorizeAvailability(actor, driverID); err != nil {
+		return err
+	}
+	start, err := time.ParseInLocation(time.DateOnly, strings.TrimSpace(localDate), s.location)
+	if err != nil || len([]rune(internalNote)) > 1000 {
+		return ErrValidation
+	}
+	count := 1
+	if workweek {
+		count = 5
+	}
+	inputs := make([]ExceptionInput, 0, count)
+	for day := start; len(inputs) < count; day = day.AddDate(0, 0, 1) {
+		if workweek && (day.Weekday() == time.Saturday || day.Weekday() == time.Sunday) {
+			continue
+		}
+		inputs = append(inputs, ExceptionInput{Type: ExceptionVacation, IsAllDay: true, LocalDate: day.Format(time.DateOnly), InternalNote: strings.TrimSpace(internalNote)})
+	}
+	return s.store.CreateExceptions(ctx, actor, driverID, inputs, requestID)
 }
 
 func (s *Service) UpdateException(ctx context.Context, actor auth.Actor, driverID string, id string, version int32, input ExceptionInput, requestID string) error {
@@ -301,6 +374,27 @@ func (s *Service) IsAvailable(ctx context.Context, actor auth.Actor, driverID st
 	if err != nil {
 		return StatusUnavailable, nil, err
 	}
+	status, reasons := availabilityStatus(intervals)
+	return status, reasons, nil
+}
+
+// EvaluateAvailability resolves a transactionally loaded availability snapshot.
+// It is used at persistence boundaries that must revalidate a schedule while
+// holding the same driver locks as the appointment mutation.
+func EvaluateAvailability(data Availability, fromUTC, toUTC time.Time, location *time.Location) (Status, []string, error) {
+	if location == nil || location.String() != "Europe/Vienna" || validateRange(fromUTC, toUTC) != nil {
+		return StatusUnavailable, nil, ErrValidation
+	}
+	service := Service{location: location}
+	intervals, err := service.resolve(data, fromUTC, toUTC)
+	if err != nil {
+		return StatusUnavailable, nil, err
+	}
+	status, reasons := availabilityStatus(intervals)
+	return status, reasons, nil
+}
+
+func availabilityStatus(intervals []Interval) (Status, []string) {
 	status := StatusAvailable
 	reasons := make([]string, 0)
 	seen := make(map[string]bool)
@@ -315,7 +409,7 @@ func (s *Service) IsAvailable(ctx context.Context, actor auth.Actor, driverID st
 			seen[interval.Reason] = true
 		}
 	}
-	return status, reasons, nil
+	return status, reasons
 }
 
 func (i ProfileInput) Validate() error {

@@ -1,0 +1,63 @@
+package templates
+
+import (
+	"example.invalid/hackplan/internal/notification"
+	"time"
+)
+
+type ConfirmationData struct {
+	Page    PageData
+	Token   string
+	Value   notification.Confirmation
+	Invalid bool
+	Result  string
+}
+
+templ ConfirmationPage(data ConfirmationData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<meta name="robots" content="noindex,nofollow,noarchive"/>
+			<title>Terminantwort – { data.Page.AppName }</title>
+			<link rel="stylesheet" href={ data.Page.CSSPath }/>
+		</head>
+		<body>
+			<main class="page confirmation-page">
+				<section class="confirmation-card" aria-labelledby="confirmation-title">
+					<p class="eyebrow">{ data.Page.AppName }</p>
+					if data.Invalid {
+						<h1 id="confirmation-title">Link nicht verfügbar</h1>
+						<p>Dieser Bestätigungslink ist nicht mehr gültig. Bitte kontaktieren Sie den Betrieb, wenn Sie Ihren Termin abstimmen möchten.</p>
+					} else if data.Result != "" {
+						<h1 id="confirmation-title">Antwort gespeichert</h1>
+						<p>{ data.Result }</p>
+						<p>Danke. Der Betrieb sieht Ihre Rückmeldung unmittelbar in der Terminplanung.</p>
+					} else {
+						<h1 id="confirmation-title">Ihr Termin</h1>
+						<p>Guten Tag { data.Value.CustomerName },</p>
+						<dl class="appointment-detail-list">
+							<div><dt>Auftrag</dt><dd>{ data.Value.JobNumber }</dd></div>
+							<div><dt>Zeit</dt><dd>{ confirmationDateTime(data.Value.StartsAt) }–{ confirmationTime(data.Value.EndsAt) }</dd></div>
+							<div><dt>Ort</dt><dd>{ data.Value.Locality }</dd></div>
+							<div><dt>Menge</dt><dd>{ data.Value.VolumeM3 } m³</dd></div>
+						</dl>
+						<p>Bitte wählen Sie genau eine Rückmeldung. Sie können den Termin hier nicht verschieben oder stornieren.</p>
+						<form method="post" action={ "/termin/" + data.Token + "/antwort" } class="confirmation-actions">
+							<input type="hidden" name="form_nonce" value={ data.Value.FormNonce }/>
+							<button class="button" type="submit" name="action" value="confirmed">Termin bestätigen</button>
+							<button class="button button--danger" type="submit" name="action" value="declined">Termin ablehnen</button>
+							<button class="button button--quiet" type="submit" name="action" value="callback_requested">Rückruf wünschen</button>
+						</form>
+					}
+				</section>
+			</main>
+		</body>
+	</html>
+}
+
+func confirmationDateTime(value time.Time) string {
+	return value.In(viennaLocation()).Format("Mo, 02.01.2006 · 15:04")
+}
+func confirmationTime(value time.Time) string { return value.In(viennaLocation()).Format("15:04") }

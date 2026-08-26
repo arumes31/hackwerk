@@ -22,6 +22,98 @@ func (q *Queries) DatabaseTime(ctx context.Context) (pgtype.Timestamptz, error) 
 	return column_1, err
 }
 
+const latestAppliedMigration = `-- name: LatestAppliedMigration :one
+SELECT value::bigint
+FROM schema_metadata
+WHERE key='application_schema_version'
+`
+
+func (q *Queries) LatestAppliedMigration(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, latestAppliedMigration)
+	var value int64
+	err := row.Scan(&value)
+	return value, err
+}
+
+const latestWorkerHeartbeat = `-- name: LatestWorkerHeartbeat :one
+SELECT COALESCE(max(heartbeat_at), '-infinity'::timestamptz)::timestamptz
+FROM worker_heartbeats
+WHERE status='running'
+`
+
+func (q *Queries) LatestWorkerHeartbeat(ctx context.Context) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, latestWorkerHeartbeat)
+	var column_1 pgtype.Timestamptz
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const notificationMetricCounts = `-- name: NotificationMetricCounts :many
+SELECT channel, status, count(*)::bigint AS total
+FROM notifications
+GROUP BY channel, status
+ORDER BY channel, status
+`
+
+type NotificationMetricCountsRow struct {
+	Channel string
+	Status  string
+	Total   int64
+}
+
+func (q *Queries) NotificationMetricCounts(ctx context.Context) ([]NotificationMetricCountsRow, error) {
+	rows, err := q.db.Query(ctx, notificationMetricCounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NotificationMetricCountsRow{}
+	for rows.Next() {
+		var i NotificationMetricCountsRow
+		if err := rows.Scan(&i.Channel, &i.Status, &i.Total); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const operationalSnapshot = `-- name: OperationalSnapshot :one
+SELECT
+    (SELECT count(*) FROM outbox_events WHERE status IN ('queued','claimed','retry_wait'))::bigint AS outbox_pending,
+    (SELECT COALESCE(extract(epoch FROM (now() - min(created_at))), 0) FROM outbox_events WHERE status IN ('queued','claimed','retry_wait'))::float8 AS outbox_oldest_seconds,
+    (SELECT COALESCE(sum(attempt_count), 0) FROM outbox_events WHERE status IN ('queued','claimed','retry_wait','dead'))::bigint AS outbox_attempts,
+    (SELECT count(*) FROM sessions WHERE idle_expires_at > now() AND absolute_expires_at > now())::bigint AS active_sessions,
+    (SELECT count(*) FROM planning_runs WHERE created_at > now() - interval '5 minutes')::bigint AS planning_runs_recent,
+    (SELECT count(*) FROM planning_suggestions ps JOIN planning_runs pr ON pr.id=ps.run_id WHERE pr.created_at > now() - interval '5 minutes')::bigint AS planning_candidates_recent
+`
+
+type OperationalSnapshotRow struct {
+	OutboxPending            int64
+	OutboxOldestSeconds      float64
+	OutboxAttempts           int64
+	ActiveSessions           int64
+	PlanningRunsRecent       int64
+	PlanningCandidatesRecent int64
+}
+
+func (q *Queries) OperationalSnapshot(ctx context.Context) (OperationalSnapshotRow, error) {
+	row := q.db.QueryRow(ctx, operationalSnapshot)
+	var i OperationalSnapshotRow
+	err := row.Scan(
+		&i.OutboxPending,
+		&i.OutboxOldestSeconds,
+		&i.OutboxAttempts,
+		&i.ActiveSessions,
+		&i.PlanningRunsRecent,
+		&i.PlanningCandidatesRecent,
+	)
+	return i, err
+}
+
 const schemaApplication = `-- name: SchemaApplication :one
 SELECT value
 FROM schema_metadata
@@ -33,4 +125,60 @@ func (q *Queries) SchemaApplication(ctx context.Context) (string, error) {
 	var value string
 	err := row.Scan(&value)
 	return value, err
+}
+
+const upsertWorkerHeartbeat = `-- name: UpsertWorkerHeartbeat :exec
+INSERT INTO worker_heartbeats (worker_id, started_at, heartbeat_at, status)
+VALUES ($1, $2::timestamptz, $3::timestamptz, $4)
+ON CONFLICT (worker_id) DO UPDATE
+SET heartbeat_at=EXCLUDED.heartbeat_at, status=EXCLUDED.status
+`
+
+type UpsertWorkerHeartbeatParams struct {
+	WorkerID    string
+	StartedAt   pgtype.Timestamptz
+	HeartbeatAt pgtype.Timestamptz
+	Status      string
+}
+
+func (q *Queries) UpsertWorkerHeartbeat(ctx context.Context, arg UpsertWorkerHeartbeatParams) error {
+	_, err := q.db.Exec(ctx, upsertWorkerHeartbeat,
+		arg.WorkerID,
+		arg.StartedAt,
+		arg.HeartbeatAt,
+		arg.Status,
+	)
+	return err
+}
+
+const voiceMetricCounts = `-- name: VoiceMetricCounts :many
+SELECT status, count(*)::bigint AS total
+FROM voice_drafts
+GROUP BY status
+ORDER BY status
+`
+
+type VoiceMetricCountsRow struct {
+	Status string
+	Total  int64
+}
+
+func (q *Queries) VoiceMetricCounts(ctx context.Context) ([]VoiceMetricCountsRow, error) {
+	rows, err := q.db.Query(ctx, voiceMetricCounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []VoiceMetricCountsRow{}
+	for rows.Next() {
+		var i VoiceMetricCountsRow
+		if err := rows.Scan(&i.Status, &i.Total); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

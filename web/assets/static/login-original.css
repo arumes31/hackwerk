@@ -1,0 +1,155 @@
+:root {
+  --ink: #18201a;
+  --muted: #59635b;
+  --paper: #f3efe4;
+  --surface: #fffdf7;
+  --moss: #1e4a36;
+  --moss-light: #2c684d;
+  --ochre: #d8952f;
+  --rust: #9b4931;
+  --line: #c9c1ad;
+  --water: #429bbb;
+  --water-deep: #256e8d;
+  font-family: Aptos, "Segoe UI", Arial, sans-serif;
+  color-scheme: light;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:var(--paper);color:var(--ink)}
+
+.shell{position:relative;width:100vw;height:100vh;overflow:hidden}
+.scene{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;background:#9bb47b;z-index:1}
+#map{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+.shade{position:absolute;inset:0;z-index:8;pointer-events:none;background:radial-gradient(circle at 18% 18%, rgba(255,255,210,0.22) 0%, transparent 65%), linear-gradient(90deg,transparent 65%,rgb(20 31 22/.08) 82%,rgb(243 239 228/.5) 100%)}
+
+/* Floating Login Container Over Map Graphics */
+.login{position:absolute;top:0;right:0;bottom:0;z-index:20;width:min(100%,460px);display:flex;flex-direction:column;justify-content:center;align-items:center;padding:clamp(16px,3vw,36px);background:transparent;pointer-events:none}
+.brand{display:flex;align-items:center;justify-content:center;gap:10px;font:700 24px Georgia,serif;margin-bottom:18px}
+.brand-mark{display:grid;width:39px;height:39px;place-items:center;border-radius:50% 50% 48% 52%/38% 38% 62% 62%;color:white;background:var(--moss);transform:rotate(-7deg);box-shadow:0 4px 12px rgba(30,74,54,0.3)}
+.card{width:100%;padding:clamp(24px,3.5vw,36px);border:1px solid rgba(255,255,255,0.6);border-radius:20px;background:rgba(255,253,247,0.92);backdrop-filter:blur(16px);box-shadow:0 24px 60px rgb(22 32 25/.22);pointer-events:auto}
+h1{margin:0;font:600 clamp(32px,4vw,48px)/.96 Georgia,serif;letter-spacing:-.04em}
+.lede{margin:14px 0 20px;color:var(--muted);line-height:1.52;font-size:14px}
+form{display:grid;gap:10px}
+label{margin-top:4px;font-weight:750;font-size:13px}
+input{width:100%;min-height:46px;border:1.5px solid #a3b0a3;border-radius:10px;padding:10px 14px;background:white;color:var(--ink);font:inherit;transition:border-color .2s ease, box-shadow .2s ease}
+input:focus{outline:none;border-color:var(--ochre);box-shadow:0 0 0 4px rgb(216 149 47/.22)}
+button{min-height:46px;margin-top:14px;border:0;border-radius:10px;color:white;background:var(--moss);font:750 16px/1 inherit;cursor:pointer;transition:background .2s ease, transform .1s ease, box-shadow .2s ease;box-shadow:0 6px 16px rgba(30,74,54,0.28)}
+button:hover{background:var(--moss-light)}
+button:active{transform:scale(.98)}
+/* Organic Terrain & Fields */
+.terrain{fill:url(#bgGrad)}
+.field-plowed{fill:url(#plowedPattern);filter:drop-shadow(0 2px 4px rgba(0,0,0,0.05))}
+.field-crop{fill:url(#cropPattern);filter:drop-shadow(0 2px 4px rgba(0,0,0,0.05))}
+.field-canola{fill:url(#canolaPattern);filter:drop-shadow(0 2px 4px rgba(0,0,0,0.05))}
+.field-meadow{fill:#a3bf80;opacity:.9}
+.field-pasture{fill:#b5ca8d;opacity:.9}
+.hedge{fill:none;stroke:#597a41;stroke-width:3.5;stroke-dasharray:7 6;stroke-linecap:round;opacity:.8}
+.contour{fill:none;stroke:#7c9b60;stroke-width:1.4;opacity:.45;stroke-dasharray:120 4}
+.bush{fill:#5d8448;opacity:.85}
+.rock{fill:#9a958a;stroke:#7c776c;stroke-width:.8}
+
+/* Dynamic Water Network */
+.water-bed{fill:none;stroke:var(--water-deep);stroke-width:24;stroke-linecap:round;stroke-linejoin:round}
+.water-bank{fill:none;stroke:#c9b98d;stroke-width:19;stroke-linecap:round;stroke-linejoin:round;opacity:.6}
+.water-bg{fill:none;stroke:url(#waterGrad);stroke-width:15;stroke-linecap:round;stroke-linejoin:round}
+.water-flow{fill:none;stroke:#d8f1fa;stroke-width:3.4;stroke-linecap:round;stroke-dasharray:16 18;animation:riverFlow 5s linear infinite;opacity:.8}
+@keyframes riverFlow{to{stroke-dashoffset:-68}}
+.reed{stroke:#4d7a3c;stroke-width:1.6;stroke-linecap:round;fill:none}
+
+/* Forests & Vegetation */
+.forest{fill:url(#forestGrad);stroke:#2c4b24;stroke-width:2.5;stroke-linejoin:round;transition:fill .8s ease, stroke .8s ease;filter:drop-shadow(0 8px 12px rgba(18,32,15,0.3))}
+.forest.clearing{fill:#b0ab7a;stroke:#7e7b55}
+
+/* Realistic Architecture & Settlements */
+.village-zone{fill:#d9ccb4;stroke:#a8997f;stroke-width:2;filter:drop-shadow(0 6px 12px rgba(0,0,0,0.1))}
+.plaza{fill:#beaf97;stroke:#9e8e76;stroke-width:1.5}
+.house{fill:#f8f3ea;stroke:#8c7355;stroke-width:1.3;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.12))}
+.roof-clay{fill:#b34e36}
+.roof-slate{fill:#54626a}
+.roof-thatch{fill:#cbb26b}
+.church-body{fill:#eae3d2;stroke:#786145;stroke-width:1.8}
+.church-roof{fill:#9e3b26}
+.spire{fill:#476569}
+
+/* Industrial Headquarters & Depot Visuals */
+.yard-pad{fill:url(#gravelPattern);stroke:#7a7263;stroke-width:2;filter:drop-shadow(0 4px 8px rgba(0,0,0,0.15))}
+.asphalt-pad{fill:url(#asphaltPattern);stroke:#555d56;stroke-width:2;filter:drop-shadow(0 4px 10px rgba(0,0,0,0.2))}
+.parking-space{stroke:rgba(255,255,255,0.7);stroke-width:1.2;stroke-dasharray:6 4}
+.building{filter:drop-shadow(0 8px 15px rgba(0,0,0,0.22))}
+.roof-hq{fill:url(#roofHqGrad)}
+.roof-depot{fill:url(#roofDepotGrad)}
+.roof-machine{fill:url(#roofMachineGrad)}
+.glass-panel{fill:#82c2de;opacity:.75}
+.solar-array{fill:url(#solarPattern)}
+.parked-car{fill:#4a6274;stroke:#2d3e4b;stroke-width:1;rx:2}
+
+/* Animations & Dynamic FX */
+.smoke-puff{animation:smokeRise 2.8s ease-out infinite;opacity:0}
+@keyframes smokeRise{0%{transform:translate(0,0) scale(0.5);opacity:0.8}100%{transform:translate(-16px,-32px) scale(2.4);opacity:0}}
+
+.wind-blade{animation:spinBlade 4s linear infinite;transform-box:fill-box;transform-origin:center}
+@keyframes spinBlade{to{transform:rotate(360deg)}}
+
+/* Roads & Bridges */
+.road-shoulder{fill:none;stroke:#695a46;stroke-width:25;stroke-linecap:round;stroke-linejoin:round}
+.road-outline{fill:none;stroke:#7a6b56;stroke-width:19;stroke-linecap:round;stroke-linejoin:round}
+.road-fill{fill:none;stroke:#ded2b8;stroke-width:12;stroke-linecap:round;stroke-linejoin:round}
+.road-line{fill:none;stroke:#ffffff;stroke-width:1.2;stroke-dasharray:8 8;stroke-linecap:round;opacity:.7}
+.track-outline{fill:none;stroke:#82735a;stroke-width:11.5;stroke-linecap:round;stroke-linejoin:round}
+.track-fill{fill:none;stroke:#cfc1a3;stroke-width:7;stroke-linecap:round;stroke-linejoin:round}
+.junction-outline{fill:#7a6b56}
+.junction-fill{fill:#ded2b8}
+.track-junction-outline{fill:#82735a}
+.track-junction-fill{fill:#cfc1a3}
+.bridge-pier{fill:#4a3b2c;stroke:#2d2319;stroke-width:2}
+.bridge-structure{fill:#5e4835;stroke:#3b2d20;stroke-width:2}
+.bridge-rail{stroke:#a07b5a;stroke-width:2.8;stroke-linecap:round}
+
+/* Vehicle Lighting & Beacons */
+.headlight{fill:url(#headlightGrad);opacity:.55;pointer-events:none;mix-blend-mode:screen}
+.beacon-light{animation:beaconPulse 0.75s ease-in-out infinite alternate;transform-box:fill-box;transform-origin:center}
+@keyframes beaconPulse{0%{opacity:0.25;transform:scale(0.75)}100%{opacity:1;transform:scale(1.3)}}
+.vehicle.moving .wheel-spin{animation:wheelSpin .55s linear infinite;transform-box:fill-box;transform-origin:center}
+@keyframes wheelSpin{to{transform:rotate(360deg)}}
+.vehicle.moving .rig{animation:driveBob .5s ease-in-out infinite alternate}
+@keyframes driveBob{to{transform:translateY(-1px)}}
+.vehicle.working .rig{animation:shake .3s ease-in-out infinite alternate}
+@keyframes shake{to{transform:translateY(1.6px) rotate(.6deg)}}
+
+/* Interactive Forestry Objects */
+.tree-pos{transition:opacity .3s ease}
+.tree-art{transform-box:fill-box;transform-origin:50% 100%;transition:transform .55s cubic-bezier(.3,.75,.35,1),opacity .35s ease}
+.tree-art.wig{animation:wiggle .3s ease-in-out 2}
+@keyframes wiggle{0%,100%{transform:rotate(0deg)}50%{transform:rotate(-6deg)}}
+.tree-art.fall-l{transform:rotate(-80deg)}
+.tree-art.fall-r{transform:rotate(80deg)}
+.tree-pos.gone{opacity:0}
+.tree-art.sprout{animation:sprout .8s cubic-bezier(.2,.9,.3,1.25)}
+@keyframes sprout{from{transform:scale(.08)}to{transform:scale(1)}}
+
+.stump{opacity:0;transition:opacity .3s ease}.stump.show{opacity:1}
+.felled-log-pos{opacity:0;transition:opacity .4s ease}
+.felled-log-pos.show{opacity:1}
+
+.chip-pile-pos{opacity:0;transition:opacity .35s ease}
+.chip-pile-pos.show{opacity:1}
+.chip-pile-art{transform-box:fill-box;transform-origin:50% 100%;transform:scale(.2);transition:transform .45s cubic-bezier(.2,.9,.3,1.15)}
+
+/* Ambient Cloud & Birds Motion */
+.cloud-group{animation:cloudFloat linear infinite}
+@keyframes cloudFloat{0%{transform:translateX(-220px)}100%{transform:translateX(1420px)}}
+
+.bird-flock{animation:birdFly 26s linear infinite}
+@keyframes birdFly{0%{transform:translate(1260px, 110px) scale(0.7)}100%{transform:translate(-160px, 30px) scale(0.7)}}
+.bird{animation:birdFlap 0.55s ease-in-out infinite alternate}
+@keyframes birdFlap{0%{transform:scaleY(1)}100%{transform:scaleY(0.3)}}
+
+@media(max-width:768px){
+ .login{width:100%;padding:16px;justify-content:flex-end}
+ .card{max-width:100%;padding:20px}
+}
+@media(prefers-reduced-motion:reduce){
+ .vehicle.working .rig,.vehicle.moving .rig,.vehicle.moving .wheel-spin{animation:none!important}
+ .tree-art,.log-pile-art{transition:none!important}
+ .water-flow,.cloud-group,.bird-flock,.smoke-puff,.wind-blade,.beacon-light{animation:none}
+}

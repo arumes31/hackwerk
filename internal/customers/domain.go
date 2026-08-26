@@ -19,6 +19,7 @@ type TransportMode string
 type Urgency string
 type Source string
 type NotificationPreference string
+type PileLocationSource string
 
 const (
 	JobTypeChippingOnly          JobType                = "chipping_only"
@@ -40,6 +41,10 @@ const (
 	NotifySMS                    NotificationPreference = "sms"
 	NotifyBoth                   NotificationPreference = "both"
 	NotifyNone                   NotificationPreference = "none"
+	PileSourceMapPin             PileLocationSource     = "map_pin"
+	PileSourceCustomerAddress    PileLocationSource     = "customer_address"
+	PileSourceDeviceLocation     PileLocationSource     = "device_location"
+	PileSourceCoordinates        PileLocationSource     = "coordinates"
 )
 
 var ErrValidation = errors.New("customers: validation failed")
@@ -65,7 +70,14 @@ type JobInput struct {
 	Urgency                              Urgency
 	Region                               string
 	Source                               Source
+	PileLatitude, PileLongitude          *float64
+	PileLocationSource                   PileLocationSource
 }
+
+const (
+	MaxJobDurationMinutes = 7 * 24 * 60
+	MaxTransportTrips     = 1000
+)
 
 type IntakeInput struct {
 	Customer    CustomerInput
@@ -118,7 +130,7 @@ func (input JobInput) Validate() error {
 	if err != nil || volume <= 0 || volume > 99999999 || math.IsNaN(volume) || math.IsInf(volume, 0) {
 		return fmt.Errorf("%w: invalid volume", ErrValidation)
 	}
-	if input.EstimatedHackMinutes <= 0 || input.EstimatedHackMinutes > 7*24*60 {
+	if input.EstimatedHackMinutes <= 0 || input.EstimatedHackMinutes > MaxJobDurationMinutes {
 		return fmt.Errorf("%w: invalid hack duration", ErrValidation)
 	}
 	if !input.JobType.Valid() || !input.TransportMode.Valid() || !input.Urgency.Valid() || !input.Source.Valid() {
@@ -127,7 +139,9 @@ func (input JobInput) Validate() error {
 	if input.JobType == JobTypeChippingOnly && (input.EstimatedTransportMinutes != 0 || input.TransportTripCount != 0 || input.TransportMode != TransportNone || input.ExternalTransportConfirmed) {
 		return fmt.Errorf("%w: transport values on chipping-only job", ErrValidation)
 	}
-	if input.JobType == JobTypeChippingWithTransport && (input.EstimatedTransportMinutes < 0 || input.TransportTripCount < 0 || input.TransportMode == TransportNone) {
+	if input.JobType == JobTypeChippingWithTransport &&
+		(input.EstimatedTransportMinutes < 0 || input.EstimatedTransportMinutes > MaxJobDurationMinutes ||
+			input.TransportTripCount < 0 || input.TransportTripCount > MaxTransportTrips || input.TransportMode == TransportNone) {
 		return fmt.Errorf("%w: incomplete transport plan", ErrValidation)
 	}
 	if input.ExternalTransportConfirmed && (input.JobType != JobTypeChippingWithTransport || input.TransportMode != TransportExternal) {
@@ -135,6 +149,21 @@ func (input JobInput) Validate() error {
 	}
 	if len([]rune(input.PreferenceText)) > 1000 || len([]rune(input.Region)) > 120 {
 		return fmt.Errorf("%w: field is too long", ErrValidation)
+	}
+	if (input.PileLatitude == nil) != (input.PileLongitude == nil) {
+		return fmt.Errorf("%w: pile coordinates must be complete", ErrValidation)
+	}
+	if input.PileLatitude == nil {
+		if input.PileLocationSource != "" {
+			return fmt.Errorf("%w: pile location source without coordinates", ErrValidation)
+		}
+	} else {
+		latitude, longitude := *input.PileLatitude, *input.PileLongitude
+		coordinatesInvalid := latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180 ||
+			math.IsNaN(latitude) || math.IsNaN(longitude) || math.IsInf(latitude, 0) || math.IsInf(longitude, 0)
+		if coordinatesInvalid || !input.PileLocationSource.Valid() {
+			return fmt.Errorf("%w: invalid pile location", ErrValidation)
+		}
 	}
 	start, startErr := parseOptionalDate(input.PreferredStartDate)
 	end, endErr := parseOptionalDate(input.PreferredEndDate)
@@ -158,6 +187,17 @@ func (value Source) Valid() bool {
 }
 func (value NotificationPreference) Valid() bool {
 	return value == NotifyEmail || value == NotifySMS || value == NotifyBoth || value == NotifyNone
+}
+func (value PileLocationSource) Valid() bool {
+	return value == PileSourceMapPin || value == PileSourceCustomerAddress ||
+		value == PileSourceDeviceLocation || value == PileSourceCoordinates
+}
+
+func PointMapsURL(latitude, longitude *float64) string {
+	if latitude == nil || longitude == nil {
+		return ""
+	}
+	return MapsURL(CustomerInput{Latitude: latitude, Longitude: longitude})
 }
 
 func CanonicalVolume(value string) (string, error) {
@@ -232,17 +272,24 @@ func MapsURL(customer CustomerInput) string {
 			query = strings.Join(clean, ", ")
 		}
 	}
+	if strings.TrimSpace(query) == "" {
+		return ""
+	}
 	values := url.Values{"api": {"1"}, "query": {query}}
 	return "https://www.google.com/maps/search/?" + values.Encode()
 }
 
 type WaitlistFilter struct {
-	Query, JobType, Region, Urgency, PreferredMonth, Sort, Direction string
-	Page, PageSize                                                   int
+	Query, JobType, Region, Urgency, PreferredMonth, Workflow, Sort, Direction string
+	MissingLocation, DurationIssue                                             bool
+	Page, PageSize                                                             int
 }
 
 func (filter *WaitlistFilter) Normalize() {
-	allowedSort := map[string]bool{"entered": true, "preferred": true, "urgency": true, "volume": true, "region": true}
+	allowedSort := map[string]bool{
+		"entered": true, "preferred": true, "urgency": true, "volume": true,
+		"region": true, "customer": true, "workflow": true, "updated": true,
+	}
 	if !allowedSort[filter.Sort] {
 		filter.Sort = "entered"
 	}
@@ -268,6 +315,16 @@ func (filter *WaitlistFilter) Normalize() {
 			filter.PreferredMonth = ""
 		}
 	}
+	if filter.Workflow != "unplanned" && filter.Workflow != "proposal" && filter.Workflow != "scheduled" {
+		filter.Workflow = ""
+	}
+}
+
+// DurationNeedsReview centralizes the intentionally conservative duration
+// signal used by list filters. Values remain valid domain data; the flag only
+// asks a human to check unusually short or long estimates.
+func DurationNeedsReview(minutes int32) bool {
+	return minutes < 15 || minutes > 12*60
 }
 
 func parseOptionalDate(value string) (time.Time, error) {

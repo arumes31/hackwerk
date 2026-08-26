@@ -23,6 +23,7 @@ var (
 	ErrAvailability = errors.New("appointment: driver unavailable")
 	ErrConflict     = errors.New("appointment: reservation conflict")
 	ErrNotFound     = errors.New("appointment: not found")
+	ErrNotification = errors.New("appointment: no reachable notification channel")
 	ErrTransition   = errors.New("appointment: invalid transition")
 	ErrValidation   = errors.New("appointment: validation failed")
 )
@@ -89,7 +90,7 @@ type Appointment struct {
 	BufferBeforeMinutes, BufferAfterMinutes                   int32
 	AvailabilityOverrideReason                                string
 	ExternalTransportConfirmed                                bool
-	EstimatedHackMinutes                                      int32
+	EstimatedHackMinutes, EstimatedTransportMinutes           int32
 	Version                                                   int32
 	Drivers                                                   []DriverAssignment
 	Resources                                                 []AssignedResource
@@ -100,6 +101,20 @@ type CalendarEvent struct {
 	CustomerID, CustomerName, Locality, Street, PostalCode string
 	VolumeM3, Latitude, Longitude                          string
 	MapsURL                                                string
+}
+
+type Detail struct {
+	CalendarEvent
+	Phone, Email, NotificationPreference string
+	Notes                                []Note
+	CanComplete                          bool
+	CompleteRequiresOverride             bool
+}
+
+type Note struct {
+	AuthorName string
+	Body       string
+	CreatedAt  time.Time
 }
 
 type PlanningDriver struct {
@@ -127,8 +142,23 @@ type PlanningOptions struct {
 
 type Conflict struct {
 	Type, SubjectID, SubjectName, AppointmentID string
+	JobNumber, CustomerName                     string
 	StartsAt, EndsAt                            time.Time
 	Reason                                      string
+}
+
+type Alternative struct{ StartsAt, EndsAt time.Time }
+
+type ConflictResolution struct {
+	RequestedStartsAt, RequestedEndsAt time.Time
+	Conflicts                          []Conflict
+	Alternatives                       []Alternative
+}
+
+type SwapInput struct {
+	FirstID, SecondID           string
+	FirstVersion, SecondVersion int32
+	RequestID                   string
 }
 
 type CreateDraftInput struct {
@@ -143,9 +173,10 @@ type MutateInput struct {
 
 type MoveInput struct {
 	MutateInput
-	StartsAt       time.Time
-	EndsAt         time.Time
-	OverrideReason string
+	StartsAt                  time.Time
+	EndsAt                    time.Time
+	OverrideReason            string
+	WithoutNotificationReason string
 }
 
 type ResizeInput = MoveInput
@@ -160,9 +191,24 @@ type CancelInput struct {
 	Reason string
 }
 
+// ReopenInput moves a cancelled appointment back into planning. Reason records
+// why the historical cancellation is being reversed; OverrideReason is only
+// used when the assigned driver's current availability requires an explicit
+// administrator override.
+type ReopenInput struct {
+	MutateInput
+	Reason         string
+	OverrideReason string
+}
+
 type CompleteInput struct {
 	MutateInput
 	OverrideReason string
+}
+
+type FixInput struct {
+	MutateInput
+	WithoutNotificationReason string
 }
 
 type Store interface {
@@ -171,14 +217,109 @@ type Store interface {
 	Assign(context.Context, auth.Actor, AssignInput) (Appointment, error)
 	Propose(context.Context, auth.Actor, MutateInput, string) (Appointment, error)
 	Reschedule(context.Context, auth.Actor, MoveInput, string) (Appointment, error)
-	Fix(context.Context, auth.Actor, MutateInput) (Appointment, error)
+	Fix(context.Context, auth.Actor, FixInput) (Appointment, error)
 	Cancel(context.Context, auth.Actor, CancelInput) (Appointment, error)
+	Reopen(context.Context, auth.Actor, ReopenInput) (Appointment, error)
 	Complete(context.Context, auth.Actor, CompleteInput) (Appointment, error)
+	Detail(context.Context, string) (Detail, error)
 	ListCalendar(context.Context, time.Time, time.Time) ([]CalendarEvent, error)
 	PlanningOptions(context.Context) (PlanningOptions, error)
 	ListConflicts(context.Context, time.Time, time.Time, []string, []string, string) ([]Conflict, error)
 	DriverCanComplete(context.Context, string, string) (bool, error)
+	Swap(context.Context, auth.Actor, SwapInput) ([]Appointment, error)
 }
+
+func (s *Service) ConflictAlternatives(ctx context.Context, actor auth.Actor, appointmentID string, startsAt, endsAt time.Time) (ConflictResolution, error) {
+	if err := actor.Require(auth.PermissionAppointmentPlan); err != nil {
+		return ConflictResolution{}, err
+	}
+	if strings.TrimSpace(appointmentID) == "" || startsAt.Location() != time.UTC || endsAt.Location() != time.UTC || validateTime(TimeInput{StartsAt: startsAt, EndsAt: endsAt}) != nil {
+		return ConflictResolution{}, ErrValidation
+	}
+	current, err := s.store.Get(ctx, appointmentID)
+	if err != nil {
+		return ConflictResolution{}, err
+	}
+	driverIDs := make([]string, 0, len(current.Drivers))
+	for _, item := range current.Drivers {
+		driverIDs = append(driverIDs, item.ID)
+	}
+	resourceIDs := make([]string, 0, len(current.Resources))
+	for _, item := range current.Resources {
+		if item.Exclusive {
+			resourceIDs = append(resourceIDs, item.ID)
+		}
+	}
+	from, to := reservationRange(current, startsAt, endsAt)
+	conflicts, err := s.store.ListConflicts(ctx, from, to, driverIDs, resourceIDs, appointmentID)
+	if err != nil {
+		return ConflictResolution{}, err
+	}
+	result := ConflictResolution{RequestedStartsAt: startsAt, RequestedEndsAt: endsAt, Conflicts: conflicts}
+	duration := endsAt.Sub(startsAt)
+	location, locationErr := time.LoadLocation("Europe/Vienna")
+	if locationErr != nil {
+		return ConflictResolution{}, locationErr
+	}
+	for cursor, checked := startsAt.Add(15*time.Minute), 0; len(result.Alternatives) < 3 && checked < 14*24*4; cursor, checked = cursor.Add(15*time.Minute), checked+1 {
+		local := cursor.In(location)
+		endLocal := cursor.Add(duration).In(location)
+		if local.Weekday() == time.Saturday || local.Weekday() == time.Sunday || local.Hour() < 7 || endLocal.Day() != local.Day() || endLocal.Hour() > 17 || (endLocal.Hour() == 17 && endLocal.Minute() > 0) {
+			continue
+		}
+		candidateFrom, candidateTo := reservationRange(current, cursor, cursor.Add(duration))
+		available := true
+		for _, assigned := range current.Drivers {
+			if _, availabilityErr := s.checkAvailability(ctx, actor, []DriverAssignment{assigned}, candidateFrom, candidateTo, ""); availabilityErr != nil {
+				available = false
+				break
+			}
+		}
+		if !available {
+			continue
+		}
+		candidateConflicts, listErr := s.store.ListConflicts(ctx, candidateFrom, candidateTo, driverIDs, resourceIDs, appointmentID)
+		if listErr != nil {
+			return ConflictResolution{}, listErr
+		}
+		if len(candidateConflicts) == 0 {
+			result.Alternatives = append(result.Alternatives, Alternative{StartsAt: cursor, EndsAt: cursor.Add(duration)})
+		}
+	}
+	return result, nil
+}
+
+func (s *Service) SwapAppointments(ctx context.Context, actor auth.Actor, input SwapInput) ([]Appointment, error) {
+	if err := actor.Require(auth.PermissionAppointmentPlan); err != nil {
+		return nil, err
+	}
+	input.FirstID, input.SecondID = strings.TrimSpace(input.FirstID), strings.TrimSpace(input.SecondID)
+	if input.FirstID == "" || input.SecondID == "" || input.FirstID == input.SecondID || input.FirstVersion < 1 || input.SecondVersion < 1 {
+		return nil, ErrValidation
+	}
+	first, err := s.store.Get(ctx, input.FirstID)
+	if err != nil {
+		return nil, err
+	}
+	second, err := s.store.Get(ctx, input.SecondID)
+	if err != nil {
+		return nil, err
+	}
+	if first.Version != input.FirstVersion || second.Version != input.SecondVersion || !swapEligible(first.Lifecycle) || !swapEligible(second.Lifecycle) {
+		return nil, ErrConflict
+	}
+	firstFrom, firstTo := reservationRange(first, second.StartsAt, second.StartsAt.Add(first.EndsAt.Sub(first.StartsAt)))
+	secondFrom, secondTo := reservationRange(second, first.StartsAt, first.StartsAt.Add(second.EndsAt.Sub(second.StartsAt)))
+	if _, err := s.checkAvailability(ctx, actor, first.Drivers, firstFrom, firstTo, ""); err != nil {
+		return nil, err
+	}
+	if _, err := s.checkAvailability(ctx, actor, second.Drivers, secondFrom, secondTo, ""); err != nil {
+		return nil, err
+	}
+	return s.store.Swap(ctx, actor, input)
+}
+
+func swapEligible(value Lifecycle) bool { return value == LifecycleDraft || value == LifecycleProposal }
 
 type Availability interface {
 	IsAvailable(context.Context, auth.Actor, string, time.Time, time.Time) (driver.Status, []string, error)
@@ -236,7 +377,8 @@ func (s *Service) AssignDriversAndResources(ctx context.Context, actor auth.Acto
 	if err := validateAppointmentAssignments(candidate); err != nil {
 		return Appointment{}, err
 	}
-	if _, err := s.checkAvailability(ctx, actor, candidate.Drivers, current.StartsAt, current.EndsAt, input.Assignments.OverrideReason); err != nil {
+	availableFrom, availableTo := reservationRange(current, current.StartsAt, current.EndsAt)
+	if _, err := s.checkAvailability(ctx, actor, candidate.Drivers, availableFrom, availableTo, input.Assignments.OverrideReason); err != nil {
 		return Appointment{}, err
 	}
 	return s.store.Assign(ctx, actor, input)
@@ -259,7 +401,8 @@ func (s *Service) ProposeAppointment(ctx context.Context, actor auth.Actor, inpu
 	if err := validateAppointmentAssignments(current); err != nil {
 		return Appointment{}, err
 	}
-	overrideReason, err = s.checkAvailability(ctx, actor, current.Drivers, current.StartsAt, current.EndsAt, overrideReason)
+	availableFrom, availableTo := reservationRange(current, current.StartsAt, current.EndsAt)
+	overrideReason, err = s.checkAvailability(ctx, actor, current.Drivers, availableFrom, availableTo, overrideReason)
 	if err != nil {
 		return Appointment{}, err
 	}
@@ -281,6 +424,10 @@ func (s *Service) reschedule(ctx context.Context, actor auth.Actor, input MoveIn
 	if err := validateMutation(input.MutateInput); err != nil || validateTime(TimeInput{StartsAt: input.StartsAt, EndsAt: input.EndsAt}) != nil {
 		return Appointment{}, ErrValidation
 	}
+	input.WithoutNotificationReason = strings.TrimSpace(input.WithoutNotificationReason)
+	if len([]rune(input.WithoutNotificationReason)) > 1000 {
+		return Appointment{}, ErrValidation
+	}
 	current, err := s.store.Get(ctx, input.ID)
 	if err != nil {
 		return Appointment{}, err
@@ -288,19 +435,24 @@ func (s *Service) reschedule(ctx context.Context, actor auth.Actor, input MoveIn
 	if current.Version != input.ExpectedVersion || !current.Lifecycle.Editable() {
 		return Appointment{}, ErrConflict
 	}
-	override, err := s.checkAvailability(ctx, actor, current.Drivers, input.StartsAt, input.EndsAt, input.OverrideReason)
+	availableFrom, availableTo := reservationRange(current, input.StartsAt, input.EndsAt)
+	override, err := s.checkAvailability(ctx, actor, current.Drivers, availableFrom, availableTo, input.OverrideReason)
 	if err != nil {
 		return Appointment{}, err
 	}
 	return s.store.Reschedule(ctx, actor, input, override)
 }
 
-func (s *Service) FixAppointment(ctx context.Context, actor auth.Actor, input MutateInput) (Appointment, error) {
+func (s *Service) FixAppointment(ctx context.Context, actor auth.Actor, input FixInput) (Appointment, error) {
 	if err := actor.Require(auth.PermissionAppointmentFix); err != nil {
 		return Appointment{}, err
 	}
-	if err := validateMutation(input); err != nil {
+	if err := validateMutation(input.MutateInput); err != nil {
 		return Appointment{}, err
+	}
+	input.WithoutNotificationReason = strings.TrimSpace(input.WithoutNotificationReason)
+	if len([]rune(input.WithoutNotificationReason)) > 1000 {
+		return Appointment{}, ErrValidation
 	}
 	current, err := s.store.Get(ctx, input.ID)
 	if err != nil {
@@ -312,7 +464,8 @@ func (s *Service) FixAppointment(ctx context.Context, actor auth.Actor, input Mu
 	if err := validateAppointmentAssignments(current); err != nil {
 		return Appointment{}, err
 	}
-	if _, err := s.checkAvailability(ctx, actor, current.Drivers, current.StartsAt, current.EndsAt, current.AvailabilityOverrideReason); err != nil {
+	availableFrom, availableTo := reservationRange(current, current.StartsAt, current.EndsAt)
+	if _, err := s.checkAvailability(ctx, actor, current.Drivers, availableFrom, availableTo, current.AvailabilityOverrideReason); err != nil {
 		return Appointment{}, err
 	}
 	return s.store.Fix(ctx, actor, input)
@@ -373,6 +526,47 @@ func (s *Service) CancelAppointment(ctx context.Context, actor auth.Actor, input
 	return s.store.Cancel(ctx, actor, input)
 }
 
+func (s *Service) ReopenAppointment(ctx context.Context, actor auth.Actor, input ReopenInput) (Appointment, error) {
+	if err := actor.Require(auth.PermissionAppointmentCancel); err != nil {
+		return Appointment{}, err
+	}
+	if err := actor.Require(auth.PermissionAppointmentPlan); err != nil {
+		return Appointment{}, err
+	}
+	input.Reason = strings.TrimSpace(input.Reason)
+	input.OverrideReason = strings.TrimSpace(input.OverrideReason)
+	if err := validateMutation(input.MutateInput); err != nil || input.Reason == "" ||
+		len([]rune(input.Reason)) > 1000 || len([]rune(input.OverrideReason)) > 1000 {
+		return Appointment{}, ErrValidation
+	}
+	current, err := s.store.Get(ctx, input.ID)
+	if err != nil {
+		return Appointment{}, err
+	}
+	if current.Version != input.ExpectedVersion {
+		return Appointment{}, ErrConflict
+	}
+	if current.Lifecycle != LifecycleCancelled {
+		return Appointment{}, ErrTransition
+	}
+	if err := validateAppointmentAssignments(current); err != nil {
+		return Appointment{}, err
+	}
+	availableFrom, availableTo := reservationRange(current, current.StartsAt, current.EndsAt)
+	input.OverrideReason, err = s.checkAvailability(
+		ctx,
+		actor,
+		current.Drivers,
+		availableFrom,
+		availableTo,
+		input.OverrideReason,
+	)
+	if err != nil {
+		return Appointment{}, err
+	}
+	return s.store.Reopen(ctx, actor, input)
+}
+
 func (s *Service) CompleteAppointment(ctx context.Context, actor auth.Actor, input CompleteInput) (Appointment, error) {
 	if err := actor.Require(auth.PermissionAppointmentComplete); err != nil {
 		return Appointment{}, err
@@ -388,6 +582,9 @@ func (s *Service) CompleteAppointment(ctx context.Context, actor auth.Actor, inp
 		return Appointment{}, ErrTransition
 	}
 	input.OverrideReason = strings.TrimSpace(input.OverrideReason)
+	if len([]rune(input.OverrideReason)) > 1000 {
+		return Appointment{}, ErrValidation
+	}
 	if actor.Role == auth.RoleAdmin {
 		if s.now().Before(current.StartsAt) && input.OverrideReason == "" {
 			return Appointment{}, ErrValidation
@@ -415,6 +612,29 @@ func (s *Service) ListCalendarRange(ctx context.Context, actor auth.Actor, fromU
 		return nil, err
 	}
 	return s.store.ListCalendar(ctx, fromUTC, toUTC)
+}
+
+func (s *Service) AppointmentDetail(ctx context.Context, actor auth.Actor, id string) (Detail, error) {
+	if err := actor.Require(auth.PermissionCalendarViewAll); err != nil {
+		return Detail{}, err
+	}
+	if strings.TrimSpace(id) == "" {
+		return Detail{}, ErrNotFound
+	}
+	value, err := s.store.Detail(ctx, id)
+	if err != nil || value.Lifecycle != LifecycleFixed || !actor.Role.Allows(auth.PermissionAppointmentComplete) {
+		return value, err
+	}
+	if actor.Role == auth.RoleAdmin {
+		value.CanComplete = true
+		value.CompleteRequiresOverride = s.now().Before(value.StartsAt)
+		return value, nil
+	}
+	if actor.DriverID == "" || s.now().Before(value.StartsAt) {
+		return value, nil
+	}
+	value.CanComplete, err = s.store.DriverCanComplete(ctx, value.ID, actor.DriverID)
+	return value, err
 }
 
 func (s *Service) PlanningOptions(ctx context.Context, actor auth.Actor) (PlanningOptions, error) {
@@ -449,6 +669,11 @@ func (s *Service) checkAvailability(ctx context.Context, actor auth.Actor, assig
 		return "", ErrValidation
 	}
 	return reason, nil
+}
+
+func reservationRange(current Appointment, startsAt, endsAt time.Time) (time.Time, time.Time) {
+	return startsAt.Add(-time.Duration(current.BufferBeforeMinutes) * time.Minute),
+		endsAt.Add(time.Duration(current.BufferAfterMinutes) * time.Minute)
 }
 
 func validateAppointmentAssignments(value Appointment) error {

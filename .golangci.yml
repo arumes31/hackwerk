@@ -1,6 +1,9 @@
 version: "2"
 run:
   timeout: 5m
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
 linters:
   default: standard
   enable:
@@ -8,15 +11,26 @@ linters:
     - errcheck
     - errorlint
     - exhaustive
+    - gosec
     - govet
     - ineffassign
     - nilerr
     - noctx
+    - revive
     - staticcheck
     - unconvert
     - unused
   exclusions:
     generated: strict
+  settings:
+    revive:
+      enable-default-rules: true
+      rules:
+        # HackWerk is an application, not a public Go library. Requiring comments
+        # on every cross-package application DTO obscures the domain code; all
+        # other default revive checks remain release-blocking.
+        - name: exported
+          disabled: true
 formatters:
   enable:
     - gofmt

@@ -17,8 +17,38 @@ var (
 
 type CustomerSummary struct {
 	ID, FirstName, LastName, CompanyName, Locality, Region, PhoneRaw, Email string
-	Version                                                                 int32
-	JobCount                                                                int32
+	NotificationPreference                                                  NotificationPreference
+	Version, JobCount, ActiveJobCount, HistoricalJobCount                   int32
+	Archived                                                                bool
+	LastUsedAt, UpdatedAt                                                   time.Time
+	MapsURL                                                                 string
+	AddressComplete, HasContact                                             bool
+}
+
+type CustomerListFilter struct {
+	Search, Sort, Direction string
+	IncludeArchived         bool
+	Page, PageSize          int
+}
+
+func (filter *CustomerListFilter) Normalize() {
+	filter.Search = strings.TrimSpace(filter.Search)
+	if filter.Sort != "name" && filter.Sort != "locality" && filter.Sort != "jobs" && filter.Sort != "recent" {
+		filter.Sort = "recent"
+	}
+	if filter.Direction != "asc" && filter.Direction != "desc" {
+		if filter.Sort == "recent" || filter.Sort == "jobs" {
+			filter.Direction = "desc"
+		} else {
+			filter.Direction = "asc"
+		}
+	}
+	if filter.Page < 1 {
+		filter.Page = 1
+	}
+	if filter.PageSize < 1 || filter.PageSize > 100 {
+		filter.PageSize = 25
+	}
 }
 
 type Customer struct {
@@ -44,6 +74,9 @@ type Job struct {
 	ReceivedAt                                                          time.Time
 	ArchivedAt                                                          *time.Time
 	Version                                                             int32
+	PileLatitude, PileLongitude                                         *float64
+	PileLocationSource                                                  PileLocationSource
+	PileMapsURL                                                         string
 }
 
 type Note struct {
@@ -51,11 +84,19 @@ type Note struct {
 	CreatedAt                                                 time.Time
 }
 
+type AppointmentHistory struct {
+	ID, JobNumber, Lifecycle, Confirmation string
+	StartsAt, EndsAt                       time.Time
+}
+
 type CustomerDetail struct {
-	Customer Customer
-	Jobs     []Job
-	Notes    map[string][]Note
-	MapsURL  string
+	Customer      Customer
+	Jobs          []Job
+	Appointments  []AppointmentHistory
+	Notes         map[string][]Note
+	Duplicates    []Duplicate
+	MapsURL       string
+	PageRequestID string
 }
 
 type Duplicate struct{ ID, FirstName, LastName, CompanyName, Locality string }
@@ -69,14 +110,35 @@ type WaitlistItem struct {
 	Urgency                                                                        Urgency
 	EnteredAt                                                                      time.Time
 	ManualPriority, WaitlistVersion, EstimatedHackMinutes, AgeDays                 int32
+	WorkflowStatus, NextStep                                                       string
+	UpdatedAt                                                                      time.Time
+	HasPileLocation, HasActiveAppointment, DurationIssue                           bool
+}
+
+type JobDraft struct {
+	CustomerID, CustomerName string
+	Job                      JobInput
+}
+
+type RecentRecord struct {
+	CustomerID, JobID, Label, Context string
+	ViewedAt                          time.Time
+}
+
+type WaitlistFilterFavorite struct {
+	ID, Name string
+	Filter   WaitlistFilter
 }
 
 type Page[T any] struct {
-	Items      []T
-	Page       int
-	PageSize   int
-	Total      int64
-	TotalPages int
+	Items          []T
+	Page           int
+	PageSize       int
+	Total          int64
+	TotalPages     int
+	Recent         []RecentRecord
+	Favorites      []WaitlistFilterFavorite
+	CustomerFilter CustomerListFilter
 }
 
 type CreatedIntake struct {
@@ -107,14 +169,21 @@ type Store interface {
 	CreateJob(context.Context, auth.Actor, CreateJobInput) (CreatedIntake, error)
 	UpdateJob(context.Context, auth.Actor, UpdateJobInput) error
 	ArchiveJob(context.Context, auth.Actor, string, int32, string) error
-	ListCustomers(context.Context, string, int, int) (Page[CustomerSummary], error)
+	ListCustomers(context.Context, CustomerListFilter) (Page[CustomerSummary], error)
 	CustomerDetail(context.Context, string) (CustomerDetail, error)
+	DuplicateJobDraft(context.Context, string) (JobDraft, error)
+	RecordRecentCustomer(context.Context, string, string) error
+	RecordRecentJob(context.Context, string, string) (string, error)
+	ListRecent(context.Context, string, int) ([]RecentRecord, error)
 	UpdateCustomer(context.Context, auth.Actor, UpdateCustomerInput) error
 	ArchiveCustomer(context.Context, auth.Actor, string, int32, string) error
 	ListWaitlist(context.Context, WaitlistFilter) (Page[WaitlistItem], error)
+	ListWaitlistFilterFavorites(context.Context, string) ([]WaitlistFilterFavorite, error)
+	SaveWaitlistFilterFavorite(context.Context, string, string, WaitlistFilter) error
+	DeleteWaitlistFilterFavorite(context.Context, string, string) error
 	UpdateWaitlistPriority(context.Context, auth.Actor, string, int32, int32, string) error
 	RemoveWaitlist(context.Context, auth.Actor, string, int32, string, string) error
-	AddNote(context.Context, auth.Actor, string, string, string, string) (string, error)
+	AddNote(context.Context, auth.Actor, string, string, string, string, string) (string, error)
 }
 
 func (service *Service) CreateJob(ctx context.Context, actor auth.Actor, input CreateJobInput) (CreatedIntake, error) {
@@ -183,15 +252,8 @@ func (service *Service) CreateIntake(ctx context.Context, actor auth.Actor, inpu
 			return CreatedIntake{}, err
 		}
 	}
-	normalizeIntake(&input)
-	if err := input.Customer.Validate(); err != nil {
+	if err := PrepareIntake(&input); err != nil {
 		return CreatedIntake{}, err
-	}
-	if err := input.Job.Validate(); err != nil {
-		return CreatedIntake{}, err
-	}
-	if len([]rune(input.InitialNote)) > 4000 {
-		return CreatedIntake{}, fmt.Errorf("%w: note is too long", ErrValidation)
 	}
 	duplicates, err := service.store.FindDuplicates(ctx, input.Customer)
 	if err != nil {
@@ -205,14 +267,121 @@ func (service *Service) CreateIntake(ctx context.Context, actor auth.Actor, inpu
 	return created, nil
 }
 
-func (service *Service) ListCustomers(ctx context.Context, actor auth.Actor, search string, page int) (Page[CustomerSummary], error) {
+// PrepareIntake applies the same normalization and domain validation to every
+// intake boundary, including the explicitly reviewed voice workflow.
+func PrepareIntake(input *IntakeInput) error {
+	if input == nil {
+		return ErrValidation
+	}
+	normalizeIntake(input)
+	if err := input.Customer.Validate(); err != nil {
+		return err
+	}
+	if err := input.Job.Validate(); err != nil {
+		return err
+	}
+	if len([]rune(input.InitialNote)) > 4000 {
+		return fmt.Errorf("%w: note is too long", ErrValidation)
+	}
+	return nil
+}
+
+func (service *Service) ListCustomers(ctx context.Context, actor auth.Actor, filter CustomerListFilter) (Page[CustomerSummary], error) {
 	if err := actor.Require(auth.PermissionCustomerUpdate); err != nil {
 		return Page[CustomerSummary]{}, err
 	}
-	if page < 1 {
-		page = 1
+	filter.Normalize()
+	if filter.IncludeArchived && actor.Role != auth.RoleAdmin {
+		return Page[CustomerSummary]{}, auth.ErrForbidden
 	}
-	return service.store.ListCustomers(ctx, strings.TrimSpace(search), page, 25)
+	return service.store.ListCustomers(ctx, filter)
+}
+
+func (service *Service) DuplicateJobDraft(ctx context.Context, actor auth.Actor, id string) (JobDraft, error) {
+	if err := actor.Require(auth.PermissionJobCreate); err != nil {
+		return JobDraft{}, err
+	}
+	if strings.TrimSpace(id) == "" {
+		return JobDraft{}, ErrValidation
+	}
+	return service.store.DuplicateJobDraft(ctx, id)
+}
+
+func (service *Service) FindDuplicatesForCustomer(ctx context.Context, actor auth.Actor, customer Customer) ([]Duplicate, error) {
+	if err := actor.Require(auth.PermissionCustomerUpdate); err != nil {
+		return nil, err
+	}
+	duplicates, err := service.store.FindDuplicates(ctx, CustomerInput{
+		FirstName: customer.FirstName, LastName: customer.LastName, CompanyName: customer.CompanyName,
+		Locality: customer.Locality, PhoneRaw: customer.PhoneRaw, Email: customer.Email,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := duplicates[:0]
+	for _, duplicate := range duplicates {
+		if duplicate.ID != customer.ID {
+			result = append(result, duplicate)
+		}
+	}
+	return result, nil
+}
+
+func (service *Service) RecordRecentCustomer(ctx context.Context, actor auth.Actor, customerID string) error {
+	if err := actor.Require(auth.PermissionCustomerUpdate); err != nil {
+		return err
+	}
+	if strings.TrimSpace(customerID) == "" {
+		return ErrValidation
+	}
+	return service.store.RecordRecentCustomer(ctx, actor.UserID, customerID)
+}
+
+func (service *Service) RecordRecentJob(ctx context.Context, actor auth.Actor, jobID string) (string, error) {
+	if err := actor.Require(auth.PermissionJobUpdate); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(jobID) == "" {
+		return "", ErrValidation
+	}
+	return service.store.RecordRecentJob(ctx, actor.UserID, jobID)
+}
+
+func (service *Service) ListRecent(ctx context.Context, actor auth.Actor) ([]RecentRecord, error) {
+	if err := actor.Require(auth.PermissionCustomerUpdate); err != nil {
+		return nil, err
+	}
+	return service.store.ListRecent(ctx, actor.UserID, 12)
+}
+
+func (service *Service) ListWaitlistFilterFavorites(ctx context.Context, actor auth.Actor) ([]WaitlistFilterFavorite, error) {
+	if err := actor.Require(auth.PermissionDashboardView); err != nil {
+		return nil, err
+	}
+	return service.store.ListWaitlistFilterFavorites(ctx, actor.UserID)
+}
+
+func (service *Service) SaveWaitlistFilterFavorite(ctx context.Context, actor auth.Actor, name string, filter WaitlistFilter) error {
+	if err := actor.Require(auth.PermissionDashboardView); err != nil {
+		return err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || len([]rune(name)) > 60 {
+		return ErrValidation
+	}
+	filter.Query = ""
+	filter.Normalize()
+	return service.store.SaveWaitlistFilterFavorite(ctx, actor.UserID, name, filter)
+}
+
+func (service *Service) DeleteWaitlistFilterFavorite(ctx context.Context, actor auth.Actor, id string) error {
+	if err := actor.Require(auth.PermissionDashboardView); err != nil {
+		return err
+	}
+	if strings.TrimSpace(id) == "" {
+		return ErrValidation
+	}
+	return service.store.DeleteWaitlistFilterFavorite(ctx, actor.UserID, id)
 }
 
 func (service *Service) CustomerDetail(ctx context.Context, actor auth.Actor, id string) (CustomerDetail, error) {
@@ -274,15 +443,16 @@ func (service *Service) RemoveWaitlist(ctx context.Context, actor auth.Actor, id
 	return service.store.RemoveWaitlist(ctx, actor, id, version, reason, requestID)
 }
 
-func (service *Service) AddNote(ctx context.Context, actor auth.Actor, jobID string, body string, correctionOfID string, requestID string) (string, error) {
+func (service *Service) AddNote(ctx context.Context, actor auth.Actor, jobID string, body string, correctionOfID string, idempotencyKey string, requestID string) (string, error) {
 	if err := actor.Require(auth.PermissionJobUpdate); err != nil {
 		return "", err
 	}
 	body = strings.TrimSpace(body)
-	if jobID == "" || body == "" || len([]rune(body)) > 4000 {
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if jobID == "" || body == "" || len([]rune(body)) > 4000 || idempotencyKey == "" || len([]rune(idempotencyKey)) > 200 {
 		return "", ErrValidation
 	}
-	return service.store.AddNote(ctx, actor, jobID, body, correctionOfID, requestID)
+	return service.store.AddNote(ctx, actor, jobID, body, correctionOfID, idempotencyKey, requestID)
 }
 
 func normalizeIntake(input *IntakeInput) {

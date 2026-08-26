@@ -4,6 +4,18 @@ SELECT id::text, resource_type, name, exclusive, active, capacity_metadata, COAL
 FROM resources
 ORDER BY active DESC, lower(name), id;
 
+-- name: GetResourceForUpdate :one
+SELECT resource_type, exclusive, active, version
+FROM resources WHERE id=sqlc.arg(id)::uuid FOR UPDATE;
+
+-- name: HasActiveResourceReservations :one
+SELECT EXISTS (
+    SELECT 1 FROM appointment_resources ar
+    JOIN appointments a ON a.id=ar.appointment_id
+    WHERE ar.resource_id=sqlc.arg(resource_id)::uuid
+      AND ar.active AND a.lifecycle_status IN ('proposal','fixed')
+)::boolean;
+
 -- name: InsertResource :one
 INSERT INTO resources (resource_type, name, exclusive, capacity_metadata, internal_note)
 VALUES (sqlc.arg(resource_type), sqlc.arg(name), sqlc.arg(exclusive), sqlc.arg(capacity_metadata)::jsonb,

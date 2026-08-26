@@ -35,6 +35,10 @@ const (
 	PermissionNotificationResend  Permission = "notification.resend"
 	PermissionPlanningView        Permission = "planning.view"
 	PermissionPlanningAdopt       Permission = "planning.adopt"
+	PermissionRoutePlan           Permission = "route.plan"
+	PermissionRouteAssign         Permission = "route.assign"
+	PermissionRouteViewOwn        Permission = "route.view_own"
+	PermissionRouteReorderOwn     Permission = "route.reorder_own"
 	PermissionSettingsManage      Permission = "settings.manage"
 	PermissionAuditView           Permission = "audit.view"
 	PermissionCalendarFeedOwn     Permission = "calendar_feed.manage_own"
@@ -51,6 +55,8 @@ var driverPermissions = map[Permission]struct{}{
 	PermissionWaitlistAdd:         {},
 	PermissionAvailabilityOwn:     {},
 	PermissionCalendarFeedOwn:     {},
+	PermissionRouteViewOwn:        {},
+	PermissionRouteReorderOwn:     {},
 }
 
 // Valid reports whether role is supported.

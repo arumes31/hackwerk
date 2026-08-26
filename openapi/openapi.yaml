@@ -1,11 +1,235 @@
 openapi: 3.1.0
 info:
   title: HackWerk HTTP API
-  version: 0.4.0
+  version: 0.10.0
   description: Interner Vertrag des serverseitig gerenderten HackWerk-Webdienstes.
 servers:
   - url: http://localhost:18533
 paths:
+  /api/v1/voice/drafts:
+    post:
+      operationId: createVoiceDraft
+      description: Validiert und verarbeitet eine begrenzte Audiodatei zu einem eigentümergebundenen, ablaufenden Review-Entwurf. Legt weder Kunde, Auftrag, Wartelisteneintrag noch Termin an.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [audio, duration_ms]
+              properties:
+                audio: { type: string, format: binary, description: WebM, Ogg, WAV oder MP4; serverseitig auf Container und Größe geprüft. }
+                duration_ms: { type: integer, minimum: 1, maximum: 90000 }
+      responses:
+        "201":
+          description: Review-Entwurf oder sicher fehlgeschlagener Entwurf erzeugt; Audio wurde nach dem Versuch gelöscht.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VoiceDraftCreated" }
+        "403": { description: Session, Rolle oder CSRF ungültig. }
+        "413": { description: Upload überschreitet das konfigurierte Limit. }
+        "415": { description: Container oder MIME-Typ wird nicht unterstützt. }
+        "422": { description: Datei ist leer oder die angegebene Dauer ungültig. }
+        "429": { description: Benutzerbezogenes Rate- oder Parallelitätslimit erreicht. }
+        "503": { description: Spracheingabe administrativ deaktiviert. }
+  /api/v1/planning/suggestions:
+    post:
+      operationId: createPlanningSuggestions
+      description: Erzeugt bis zu drei unverbindliche, konfliktgeprüfte Kandidaten; erzeugt keinen Termin und keine Benachrichtigung.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [job_id, csrf_token]
+              properties:
+                job_id: { type: string, format: uuid }
+                csrf_token: { type: string }
+      responses:
+        "201": { description: Persistierter Planning Run mit höchstens drei erklärten Kandidaten. }
+        "403": { description: Nur Administratoren dürfen Vorschläge berechnen. }
+        "409": { description: Job- oder Wartelistenversion hat sich geändert. }
+        "422": { description: Kein valider Slot oder ungültiger Auftrag. }
+  /api/v1/planning/suggestions/{suggestionID}/adopt:
+    post:
+      operationId: adoptPlanningSuggestion
+      description: Revalidiert Version, Ablauf, Availability und Reservations-Constraints atomar und erzeugt ausschließlich ein Proposal.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: suggestionID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "201": { description: Proposal erzeugt; keine Fixierung und keine Benachrichtigung. }
+        "403": { description: Nur Administratoren dürfen Vorschläge übernehmen. }
+        "409": { description: Vorschlag abgelaufen oder Daten/Slot zwischenzeitlich verändert. }
+        "404": { description: Vorschlag nicht gefunden. }
+  /planning/routes:
+    get:
+      operationId: getRoutePlanner
+      description: Zeigt Administratoren alle offenen, noch nicht aktiv verplanten Aufträge mit explizitem Haufenstandort auf einer Karte.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Serverseitig gerenderte Auftragskarte mit Fahrer- und Ressourcenauswahl. }
+        "403": { description: Nur Administratoren dürfen Routen planen. }
+    post:
+      operationId: createRouteDraft
+      description: Optimiert ausgewählte Haufenstandorte und speichert einen unverbindlichen Routenentwurf; erzeugt keine Termine oder Nachrichten.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [job_id, driver_id, chipper_resource_id, departure_date, departure_time, csrf_token]
+              properties:
+                job_id: { type: array, minItems: 1, maxItems: 23, items: { type: string, format: uuid } }
+                fixed_job_id: { type: array, maxItems: 23, items: { type: string, format: uuid }, description: Ausgewählte Stopps, deren relative Position bei Optimierung fixiert bleibt. }
+                driver_id: { type: string, format: uuid }
+                chipper_resource_id: { type: string, format: uuid }
+                transport_resource_id: { type: string, format: uuid }
+                departure_date: { type: string, format: date, description: Lokales Datum in Europe/Vienna. }
+                departure_time: { type: string, pattern: "^[0-2][0-9]:[0-5][0-9]$", description: Lokale Uhrzeit in Europe/Vienna. }
+                optimize: { type: boolean, default: true }
+                end_at_last_stop: { type: boolean, default: false, description: Route endet am letzten Stopp statt wieder am Depot. }
+                csrf_token: { type: string }
+      responses:
+        "303": { description: Routenentwurf berechnet. }
+        "403": { description: Nur Administratoren dürfen Routen planen. }
+        "409": { description: Auftrags- oder Wartelistendaten wurden parallel verändert. }
+        "422": { description: Auswahl, Standort oder Routingdaten ungültig. }
+  /planning/routes/{routeID}/assign:
+    post:
+      operationId: assignRouteDraft
+      description: Revalidiert die vollständige Route atomar und erzeugt je Stopp ausschließlich ein Proposal; keine Fixierung und kein Versand.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: routeID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "303": { description: Route als unverbindliche Terminvorschläge zugewiesen. }
+        "403": { description: Nur Administratoren dürfen Routen zuweisen. }
+        "409": { description: Route, Auftrag, Warteliste, Fahrer oder Ressource hat sich verändert beziehungsweise überschneidet sich. }
+  /planning/routes/{routeID}/move-stop:
+    post:
+      operationId: moveDraftRouteStop
+      description: Verschiebt einen Stopp atomisch zwischen zwei Routenentwürfen, prüft beide Versionen und berechnet beide Strecken neu. Erzeugt keine Termine.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: routeID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "303": { description: Beide Entwürfe wurden aktualisiert. }
+        "403": { description: Nur Administratoren dürfen Routenentwürfe ändern. }
+        "409": { description: Mindestens eine Routenversion oder ein Stopp wurde parallel geändert. }
+  /my-route:
+    get:
+      operationId: getOwnRoute
+      description: Zeigt einem Fahrer ausschließlich die eigene zugewiesene Route eines lokalen Arbeitstags.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: date, in: query, required: false, schema: { type: string, format: date } }
+      responses:
+        "200": { description: Eigene Route oder leerer Zustand. }
+        "403": { description: Kein zugeordnetes Fahrerprofil. }
+  /my-route/{routeID}/reorder:
+    post:
+      operationId: reorderOwnRoute
+      description: Ändert ausschließlich die Stoppfolge der eigenen zugewiesenen Route. Auftragsmenge, Zugehörigkeit, Fahrer, Ressourcen und Terminzeiten bleiben unverändert.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: routeID, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [stop_id, version, csrf_token]
+              properties:
+                stop_id: { type: array, minItems: 1, maxItems: 23, items: { type: string, format: uuid } }
+                version: { type: integer, minimum: 1 }
+                csrf_token: { type: string }
+      responses:
+        "303": { description: Fahrreihenfolge gespeichert und Strecke neu berechnet. }
+        "403": { description: Route gehört nicht zum angemeldeten Fahrer. }
+        "409": { description: Routenversion wurde parallel geändert. }
+        "422": { description: Stoppmenge ist keine exakte Permutation der Route. }
+  /calendar/export.ics:
+    get:
+      operationId: exportCalendarICS
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: detail, in: query, required: false, schema: { type: string, enum: [internal, minimal] } }
+      responses:
+        "200": { description: Begrenzter read-only iCalendar-Download. }
+        "422": { description: Datumsbereich ungültig oder zu groß. }
+  /api/v1/calendar-feeds:
+    get:
+      operationId: listCalendarFeeds
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Eigene Feeds ohne Roh-Token. }
+    post:
+      operationId: createCalendarFeed
+      description: Erzeugt einen privaten Rohlink, der ausschließlich in dieser Antwort vollständig erscheint.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "201": { description: Feed und einmalig sichtbare URL erzeugt. }
+        "422": { description: Filter ungültig. }
+  /api/v1/calendar-feeds/{calendarFeedID}/rotate:
+    post:
+      operationId: rotateCalendarFeed
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: calendarFeedID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Alter Token atomar ersetzt; neue URL einmal sichtbar. }
+        "409": { description: Version veraltet. }
+  /api/v1/calendar-feeds/{calendarFeedID}:
+    delete:
+      operationId: revokeCalendarFeed
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: calendarFeedID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Feed widerrufen. }
+        "409": { description: Version veraltet. }
+  /feeds/{calendarFeedToken}/calendar.ics:
+    get:
+      operationId: getPrivateCalendarFeed
+      description: Öffentlicher read-only Capability-Abruf ohne Sessioncookie; Token wird nur gehasht gespeichert und in Logs redigiert.
+      parameters:
+        - { name: calendarFeedToken, in: path, required: true, schema: { type: string, minLength: 40, maxLength: 100 } }
+      responses:
+        "200": { description: Gefilterter iCalendar-Feed mit ETag und Last-Modified. }
+        "304": { description: Inhalt gemäß ETag unverändert. }
+        "404": { description: Einheitlich für ungültig, widerrufen, abgelaufen oder Owner deaktiviert. }
+        "429": { description: Kalenderclient-tolerantes Abruflimit erreicht. }
+  /dashboard:
+    get:
+      operationId: getDashboard
+      description: Rollenprojizierter, read-only Tagesüberblick mit begrenztem Folge-Horizont.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: Lokaler Tag in Europe/Vienna; ohne Wert wird heute verwendet.
+          schema: { type: string, format: date }
+      responses:
+        "200": { description: Serverseitig gerendertes Dashboard für Admin oder Fahrer. }
+        "401": { description: Anmeldung erforderlich. }
+        "422": { description: Datum ungültig oder außerhalb der begrenzten Auswahl. }
+        "500": { description: Recoverable Fehlerzustand ohne interne Datenbankdetails. }
   /login:
     get:
       operationId: getLogin
@@ -60,6 +284,34 @@ paths:
       responses:
         "303": { description: Benutzer atomar angelegt und auditiert. }
         "403": { description: Adminberechtigung oder CSRF fehlt. }
+  /admin/users/{userID}/details:
+    parameters:
+      - name: userID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: updateUserDetails
+      description: Ändert ausschließlich Benutzername, Anzeigename und E-Mail des Zugangs; ein verknüpftes Fahrerprofil bleibt unverändert.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [csrf_token, version, username, display_name]
+              properties:
+                csrf_token: { type: string, writeOnly: true }
+                version: { type: integer, minimum: 1 }
+                username: { type: string, minLength: 1, maxLength: 200 }
+                display_name: { type: string, minLength: 1, maxLength: 200 }
+                email: { type: string, format: email, maxLength: 320 }
+      responses:
+        "303": { description: Benutzer-Stammdaten versioniert gespeichert und minimiert auditiert. }
+        "403": { description: Adminberechtigung oder CSRF fehlt. }
+        "409": { description: Version veraltet oder Benutzername bereits vergeben. }
+        "422": { description: Benutzername, Anzeigename oder E-Mail ungültig. }
   /customers:
     get:
       operationId: listCustomers
@@ -206,6 +458,34 @@ paths:
         "303": { description: Neue unveränderliche Notiz mit Autor und Zeitstempel angehängt. }
         "403": { description: Berechtigung oder CSRF fehlt. }
         "422": { description: Notiz leer oder zu lang. }
+  /jobs/{jobID}/duplicate:
+    parameters:
+      - $ref: "#/components/parameters/JobID"
+    get:
+      operationId: duplicateJobDraftForm
+      description: Öffnet einen vorbefüllten, prüfbaren neuen Auftragsentwurf. Status, Termine und Notizen werden nicht kopiert.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Neuanlageformular mit fachlichen Feldern des Quellauftrags. }
+        "404": { description: Quellauftrag nicht gefunden. }
+  /recent/customers/{customerID}:
+    parameters: [{ $ref: "#/components/parameters/CustomerID" }]
+    post:
+      operationId: recordRecentCustomer
+      description: Aktualisiert den begrenzten benutzerbezogenen Verlauf ohne Browser-Storage.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Verlauf idempotent aktualisiert und zur Kundenakte weitergeleitet. }
+        "403": { description: Berechtigung oder CSRF fehlt. }
+  /recent/jobs/{jobID}:
+    parameters: [{ $ref: "#/components/parameters/JobID" }]
+    post:
+      operationId: recordRecentJob
+      description: Aktualisiert den begrenzten benutzerbezogenen Verlauf ohne Browser-Storage.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Verlauf idempotent aktualisiert und zum Auftrag weitergeleitet. }
+        "403": { description: Berechtigung oder CSRF fehlt. }
   /waitlist:
     get:
       operationId: listWaitlist
@@ -264,6 +544,24 @@ paths:
         "303": { description: Wartelisteneintrag historisch entfernt und auditiert. }
         "403": { description: Adminberechtigung oder CSRF fehlt. }
         "409": { description: Erwartete Version ist veraltet. }
+  /waitlist/filter-favorites:
+    post:
+      operationId: saveWaitlistFilterFavorite
+      description: Speichert ausschließlich allowlistete, nicht-personenbezogene Filterdimensionen benutzerbezogen.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Filterfavorit gespeichert. }
+        "403": { description: Berechtigung oder CSRF fehlt. }
+        "422": { description: Name oder Filterdimension ungültig. }
+  /waitlist/filter-favorites/{favoriteID}/delete:
+    parameters:
+      - { name: favoriteID, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: deleteWaitlistFilterFavorite
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Eigener Filterfavorit gelöscht. }
+        "403": { description: Berechtigung oder CSRF fehlt. }
   /availability:
     get:
       operationId: getOwnAvailability
@@ -272,6 +570,32 @@ paths:
       responses:
         "200": { description: Wochenplan, Ausnahmen und normalisierte 14-Tage-Vorschau in Europe/Vienna. }
         "403": { description: Kein zugeordnetes eigenes Fahrerprofil. }
+  /availability/rules/{ruleID}/duplicate:
+    parameters:
+      - { name: ruleID, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: duplicateOwnAvailabilityRule
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Eigene Wochenregel auf den gewählten Wochentag dupliziert. }
+        "403": { description: Fremdes Fahrerprofil oder CSRF ungültig. }
+        "409": { description: Überlappende Regel. }
+  /availability/rules/clear-day:
+    post:
+      operationId: clearOwnAvailabilityDay
+      description: Löscht die mit Versionen bestätigte Menge eigener Regeln für einen Wochentag atomar.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Regeln atomar gelöscht. }
+        "409": { description: Regelmenge oder Version wurde parallel geändert. }
+  /availability/exceptions/vacation-preset:
+    post:
+      operationId: createOwnVacationPreset
+      description: Erzeugt Abwesenheitsausnahmen für einen Tag oder eine Arbeitswoche in Europe/Vienna.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Urlaubsausnahmen gespeichert. }
+        "422": { description: Datum oder Ortszeit ungültig. }
   /admin/drivers:
     get:
       operationId: listDriverProfiles
@@ -387,6 +711,20 @@ paths:
         "403": { description: Adminberechtigung oder CSRF fehlt. }
         "409": { description: Version oder exklusive Reservierung kollidiert. }
         "422": { description: Zeit, Verfügbarkeit, Transport oder Zuweisung ungültig. }
+  /api/v1/appointments/{appointmentID}:
+    parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
+    get:
+      operationId: getAppointmentDetail
+      description: Berechtigte Termindetailansicht. Kontaktdaten und tatsächlich konfigurierbare Versandkanäle werden bewusst nur hier geliefert, nie im Kalenderfeed.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200":
+          description: Termindetail mit Kontakt- und Versandvorschau.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppointmentDetail" }
+        "403": { description: Kalenderberechtigung fehlt. }
+        "404": { description: Termin nicht gefunden. }
   /api/v1/appointments/{appointmentID}/move:
     parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
     post:
@@ -454,6 +792,29 @@ paths:
         "403": { description: Nur Administratoren dürfen die Dauer ändern. }
         "409": { description: Stale Version oder physische Überschneidung. }
         "422": { description: Zeit oder Verfügbarkeit ungültig. }
+  /api/v1/appointments/{appointmentID}/alternatives:
+    parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
+    get:
+      operationId: getAppointmentConflictAlternatives
+      description: Liefert für einen gewünschten Zeitraum konkrete konfliktfreie Alternativen sowie betroffene Fahrer, Ressourcen, Aufträge und Kunden.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: starts_at, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: ends_at, in: query, required: true, schema: { type: string, format: date-time } }
+      responses:
+        "200": { description: Konflikte und bis zu drei Alternativslots. }
+        "403": { description: Nur Administratoren dürfen Konfliktalternativen berechnen. }
+        "422": { description: Zeitraum ungültig. }
+  /api/v1/appointments/{appointmentID}/swap:
+    parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
+    post:
+      operationId: swapAppointmentWindows
+      description: Tauscht die Zeitfenster zweier Entwürfe oder Vorschläge atomisch. Fixierte Termine und automatischer Versand sind ausgeschlossen.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Beide Zeitfenster und Versionsstände wurden aktualisiert. }
+        "403": { description: Nur Administratoren dürfen Zeitfenster tauschen. }
+        "409": { description: Version, Lifecycle oder Reservierung kollidiert. }
   /api/v1/appointments/{appointmentID}/fix:
     parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
     post:
@@ -463,12 +824,122 @@ paths:
         required: true
         content:
           application/x-www-form-urlencoded:
-            schema: { $ref: "#/components/schemas/VersionForm" }
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/VersionForm"
+                - type: object
+                  properties: { without_notification_reason: { type: string, maxLength: 1000 } }
       responses:
-        "200": { description: Termin, Auftrag, Warteliste, Reservierungen, Audit und appointment.fixed-Outboxevent atomar gespeichert; kein HTTP-Versand. }
+        "200": { description: Termin, Auftrag, Bestätigungsanfrage, kanalbezogene Notifications, Warteliste, Reservierungen, Audit und Outboxevents atomar gespeichert; kein HTTP-Versand. }
         "403": { description: Nur Administratoren dürfen fixieren. }
         "409": { description: Stale Version oder Reservierungskonflikt. }
-        "422": { description: Fahrer, Hackressource, Transport oder Verfügbarkeit nicht fixierbar. }
+        "422": { description: Fahrer, Hackressource, Transport, Verfügbarkeit oder erreichbarer Versandkanal fehlt; Ausnahme erfordert Grund. }
+
+  /api/v1/appointments/{appointmentID}/confirmation/reissue:
+    parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
+    post:
+      operationId: reissueAppointmentConfirmation
+      description: Widerruft den aktiven Link und plant mit neuer Tokenversion atomar neue Nachrichten. Nur Admin, immer mit Begründung.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/ReasonedVersionForm" }
+      responses:
+        "200": { description: Neue Bestätigungsanfrage und Outboxevents atomar eingereiht. }
+        "403": { description: Adminberechtigung oder CSRF fehlt. }
+        "409": { description: Terminstand geändert, Termin nicht fixiert oder kein erreichbarer Kanal. }
+
+  /api/v1/appointments/{appointmentID}/confirmation/reset:
+    parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
+    post:
+      operationId: resetAppointmentConfirmation
+      description: Setzt eine bestehende Kundenantwort mit Auditgrund auf Antwort offen zurück, ohne einen neuen Token anzulegen.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/ReasonedVersionForm" }
+      responses:
+        "200": { description: Antwort und Terminstatus atomar zurückgesetzt. }
+        "403": { description: Adminberechtigung oder CSRF fehlt. }
+        "409": { description: Terminstand geändert oder keine zurücksetzbare aktive Antwort. }
+
+  /admin/notifications:
+    get:
+      operationId: listFailedNotifications
+      description: Adminseite mit fehlgeschlagenen aktiven Versandaufträgen und maskierten Kontaktzielen.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [all, failed, retry_wait] } }
+      responses:
+        "200": { description: Serverseitig gerenderte Versandfehlerliste. }
+        "403": { description: Berechtigung notification.resend fehlt. }
+
+  /admin/notifications/{notificationID}/retry:
+    parameters:
+      - name: notificationID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: retryNotification
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Fehlgeschlagene Nachricht ohne neuen Token erneut eingereiht. }
+        "403": { description: Adminberechtigung oder CSRF fehlt. }
+        "409": { description: Nachricht oder Bestätigungslink ist nicht mehr aktiv/retrybar. }
+
+  /admin/notifications/{notificationID}/review:
+    parameters:
+      - name: notificationID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: reviewNotification
+      description: Markiert einen Versandhinweis als administrativ geprüft, ohne Versandstatus oder Retryplanung zu verändern.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Versandhinweis als geprüft markiert. }
+        "403": { description: Adminberechtigung oder CSRF fehlt. }
+        "409": { description: Hinweis ist nicht mehr offen oder wurde erneut eingereiht. }
+
+  /admin/notifications/report.csv:
+    get:
+      operationId: exportNotificationReport
+      description: CSV-Bericht mit maskierten Zielen und Formula-Injection-Schutz.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [all, failed, retry_wait] } }
+      responses:
+        "200": { description: Nicht cachebarer CSV-Download. }
+        "403": { description: Adminberechtigung fehlt. }
+
+  /termin/{confirmationToken}:
+    parameters: [{ $ref: "#/components/parameters/ConfirmationToken" }]
+    get:
+      operationId: getPublicConfirmation
+      description: Öffentliche minimale Terminansicht ohne Konto, Drittanbieterassets oder Analytics. Antwort ist immer no-store/no-referrer.
+      responses:
+        "200": { description: Aktiver Termin oder generische ungültige Linkseite ohne Existenzorakel. }
+
+  /termin/{confirmationToken}/antwort:
+    parameters: [{ $ref: "#/components/parameters/ConfirmationToken" }]
+    post:
+      operationId: respondToPublicConfirmation
+      description: Idempotente link- und noncegebundene Kundenantwort; Ablehnung storniert den Termin nicht.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/ConfirmationResponseForm" }
+          multipart/form-data:
+            schema: { $ref: "#/components/schemas/ConfirmationResponseForm" }
+      responses:
+        "200": { description: Gespeicherte Antwort oder generische ungültige Linkseite ohne Existenzorakel. }
   /api/v1/appointments/{appointmentID}/cancel:
     parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
     post:
@@ -488,6 +959,29 @@ paths:
         "403": { description: Nur Administratoren dürfen absagen. }
         "409": { description: Stale Version. }
         "422": { description: Status oder erforderlicher Grund ungültig. }
+  /api/v1/appointments/{appointmentID}/reopen:
+    parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
+    post:
+      operationId: reopenAppointment
+      description: Öffnet einen abgesagten Termin nach vollständiger Konflikt- und Verfügbarkeitsprüfung ausschließlich als Proposal. Erzeugt keine Nachricht und kein Outboxevent.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/VersionForm"
+                - type: object
+                  required: [reason]
+                  properties:
+                    reason: { type: string, minLength: 1, maxLength: 1000 }
+                    override_reason: { type: string, maxLength: 1000 }
+      responses:
+        "200": { description: Cancelled-Termin atomar als Proposal reaktiviert und alte Bestätigungslinks widerrufen. }
+        "403": { description: Nur Administratoren dürfen wieder öffnen. }
+        "409": { description: Stale Version oder Reservierungskonflikt. }
+        "422": { description: Status, Begründung, Zuweisung oder Verfügbarkeit ungültig. }
   /api/v1/appointments/{appointmentID}/complete:
     parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
     post:
@@ -568,7 +1062,20 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    ConfirmationToken:
+      name: confirmationToken
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
   schemas:
+    VoiceDraftCreated:
+      type: object
+      additionalProperties: false
+      required: [draft_id, status, location]
+      properties:
+        draft_id: { type: string, format: uuid }
+        status: { type: string, enum: [needs_review, failed] }
+        location: { type: string, pattern: "^/voice/drafts/[0-9a-f-]+$" }
     CalendarEvent:
       type: object
       additionalProperties: false
@@ -586,6 +1093,75 @@ components:
           type: object
           description: Auftrag, Ort, m³, Status, Zuweisungen, Version und erlaubte Aktionen; niemals Telefon oder E-Mail.
           additionalProperties: true
+    AppointmentDetail:
+      type: object
+      additionalProperties: false
+      required: [id, job_id, customer_id, title, start, end, lifecycle, status_label, locality, volume_m3, drivers, resources, notes, maps_url, phone, email, notification_preference, notification_channels, notification_targets, notification_warning, notification_suggestion, notification_requires_override, notifications, version, can_complete, complete_requires_override, can_fix, can_cancel, can_reopen, can_reschedule, can_swap, can_reissue, can_reset_confirmation]
+      properties:
+        id: { type: string, format: uuid }
+        job_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        title: { type: string }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        lifecycle: { type: string, enum: [draft, proposal, fixed, cancelled, completed] }
+        status_label: { type: string }
+        locality: { type: string }
+        volume_m3: { type: string }
+        drivers: { type: array, items: { type: object, additionalProperties: true } }
+        resources: { type: array, items: { type: object, additionalProperties: true } }
+        notes:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [AuthorName, Body, CreatedAt]
+            properties:
+              AuthorName: { type: string }
+              Body: { type: string }
+              CreatedAt: { type: string, format: date-time }
+        maps_url: { type: string, format: uri }
+        phone: { type: string }
+        email: { type: string }
+        notification_preference: { type: string, enum: [email, sms, both, none] }
+        notification_channels: { type: array, items: { type: string, enum: [E-Mail, SMS] } }
+        notification_targets:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [channel, recipient]
+            properties:
+              channel: { type: string, enum: [E-Mail, SMS] }
+              recipient: { type: string, description: Immer serverseitig maskiert. }
+        notification_warning: { type: string }
+        notification_suggestion: { type: string }
+        notification_requires_override: { type: boolean }
+        notifications: { type: array, items: { $ref: "#/components/schemas/NotificationStatus" } }
+        version: { type: integer, minimum: 1 }
+        can_complete: { type: boolean, description: Der angemeldete Akteur darf diesen fixierten Termin unter den aktuellen Zeit-, Zuweisungs- und Fahrerprofilregeln abschließen. }
+        complete_requires_override: { type: boolean, description: Ein Administrator muss den Abschluss vor Terminbeginn begründen. }
+        can_fix: { type: boolean }
+        can_cancel: { type: boolean }
+        can_reopen: { type: boolean }
+        can_reschedule: { type: boolean, description: Admin darf den editierbaren Termin per Dialog ohne Drag-and-drop verschieben oder in der Dauer ändern. }
+        can_swap: { type: boolean }
+        can_reissue: { type: boolean }
+        can_reset_confirmation: { type: boolean }
+    NotificationStatus:
+      type: object
+      additionalProperties: false
+      required: [id, appointment_id, channel, status, recipient, attempt_count, max_attempts, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        appointment_id: { type: string, format: uuid }
+        channel: { type: string, enum: [email, sms] }
+        status: { type: string, enum: [queued, sending, retry_wait, sent, failed] }
+        recipient: { type: string, description: Immer serverseitig maskiert. }
+        error_code: { type: string, maxLength: 200 }
+        attempt_count: { type: integer, minimum: 0 }
+        max_attempts: { type: integer, minimum: 1, maximum: 50 }
+        updated_at: { type: string, format: date-time }
     PlanAppointmentForm:
       type: object
       required: [csrf_token, job_id, starts_at, duration_minutes, driver_id, primary_driver_id, chipper_resource_id]
@@ -600,14 +1176,18 @@ components:
         transport_resource_id: { type: array, items: { type: string, format: uuid } }
         trailer_resource_id: { type: array, items: { type: string, format: uuid } }
         override_reason: { type: string, maxLength: 1000 }
+        without_notification_reason: { type: string, maxLength: 1000 }
     AppointmentTimeMutation:
       type: object
-      required: [csrf_token, version, starts_at, ends_at]
+      required: [csrf_token, version]
+      description: Drag/Resize sendet UTC `starts_at`/`ends_at`; die mobile und tastaturbedienbare Alternative sendet `starts_at_local` plus `duration_minutes`, die der Server strikt in Europe/Vienna auflöst.
       properties:
         csrf_token: { type: string, writeOnly: true }
         version: { type: integer, minimum: 1 }
         starts_at: { type: string, format: date-time }
         ends_at: { type: string, format: date-time }
+        starts_at_local: { type: string, format: local-date-time }
+        duration_minutes: { type: integer, minimum: 15, maximum: 10080 }
         override_reason: { type: string, maxLength: 1000 }
     AppointmentAssignments:
       type: object
@@ -647,6 +1227,20 @@ components:
         csrf_token: { type: string, writeOnly: true }
         version: { type: integer, minimum: 1 }
         customer_id: { type: string, format: uuid }
+    ReasonedVersionForm:
+      allOf:
+        - $ref: "#/components/schemas/VersionForm"
+        - type: object
+          required: [reason]
+          properties:
+            reason: { type: string, minLength: 1, maxLength: 500 }
+    ConfirmationResponseForm:
+      type: object
+      additionalProperties: false
+      required: [form_nonce, action]
+      properties:
+        form_nonce: { type: string, writeOnly: true, pattern: "^[A-Za-z0-9_-]{43}$" }
+        action: { type: string, enum: [confirmed, declined, callback_requested] }
     CustomerFields:
       type: object
       required: [notification]
@@ -693,4 +1287,4 @@ components:
     sessionCookie:
       type: apiKey
       in: cookie
-      name: hackplan_session
+      name: hackwerk_session

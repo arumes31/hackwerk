@@ -17,10 +17,15 @@ import (
 )
 
 type identityTestStore struct {
-	user      auth.User
-	session   auth.Session
-	revoked   bool
-	findError error
+	user               auth.User
+	users              []auth.UserSummary
+	session            auth.Session
+	revoked            bool
+	findError          error
+	accessError        error
+	updatedAccess      auth.UpdateAccessInput
+	updatedDetails     auth.UpdateUserDetailsInput
+	updateDetailsError error
 }
 
 func (store *identityTestStore) FindUserByUsername(context.Context, string) (auth.User, error) {
@@ -52,13 +57,21 @@ func (store *identityTestStore) LoginRate(context.Context, []byte) (auth.RateLim
 }
 func (store *identityTestStore) RecordLoginFailure(context.Context, []byte) error { return nil }
 func (store *identityTestStore) ListUsers(context.Context) ([]auth.UserSummary, error) {
+	if store.users != nil {
+		return store.users, nil
+	}
 	return []auth.UserSummary{{ID: store.user.ID, Username: store.user.Username, DisplayName: store.user.DisplayName, Role: store.user.Role, Active: true, Version: 1}}, nil
 }
 func (store *identityTestStore) CreateUser(context.Context, auth.Actor, auth.CreateUserInput, string) (string, error) {
 	return "created", nil
 }
-func (store *identityTestStore) UpdateUserAccess(context.Context, auth.Actor, auth.UpdateAccessInput) error {
-	return nil
+func (store *identityTestStore) UpdateUserDetails(_ context.Context, _ auth.Actor, input auth.UpdateUserDetailsInput) error {
+	store.updatedDetails = input
+	return store.updateDetailsError
+}
+func (store *identityTestStore) UpdateUserAccess(_ context.Context, _ auth.Actor, input auth.UpdateAccessInput) error {
+	store.updatedAccess = input
+	return store.accessError
 }
 func (store *identityTestStore) ResetPassword(context.Context, auth.Actor, auth.ResetPasswordInput, string) error {
 	return nil
@@ -74,6 +87,7 @@ func TestIdentityHTTPLoginCSRFAndDriverGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G101 -- deterministic non-secret test fixture password.
 	password := "Ein sicheres Fahrerpasswort 2026"
 	passwordHash, err := hasher.Hash(password)
 	if err != nil {
@@ -88,6 +102,12 @@ func TestIdentityHTTPLoginCSRFAndDriverGate(t *testing.T) {
 	router, err := NewRouter(Dependencies{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pinger{}, Build: buildinfo.Info{Version: "test"}, Identity: identity})
 	if err != nil {
 		t.Fatal(err)
+	}
+	rootRequest := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.test/", nil)
+	rootResponse := httptest.NewRecorder()
+	router.ServeHTTP(rootResponse, rootRequest)
+	if rootResponse.Code != http.StatusSeeOther || rootResponse.Header().Get("Location") != "/login" {
+		t.Fatalf("unauthenticated root = %d, location = %q", rootResponse.Code, rootResponse.Header().Get("Location"))
 	}
 	loginPageRequest := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.test/login", nil)
 	loginPageResponse := httptest.NewRecorder()
@@ -110,7 +130,8 @@ func TestIdentityHTTPLoginCSRFAndDriverGate(t *testing.T) {
 	if err := result.Body.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if len(cookies) != 2 || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteLaxMode || cookies[1].HttpOnly {
+	if len(cookies) != 2 || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteLaxMode ||
+		!cookies[1].HttpOnly || cookies[1].SameSite != http.SameSiteStrictMode {
 		t.Fatalf("login cookies = %#v", cookies)
 	}
 
@@ -156,6 +177,18 @@ func TestIdentityHTTPGenericLoginError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	loginRequest := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.test/login", nil)
+	loginResponse := httptest.NewRecorder()
+	router.ServeHTTP(loginResponse, loginRequest)
+	loginBody := loginResponse.Body.String()
+	if loginResponse.Code != http.StatusOK ||
+		!strings.Contains(loginBody, `href="/assets/login.css?v=`) ||
+		!strings.Contains(loginBody, `href="/assets/login-original.css?v=`) ||
+		!strings.Contains(loginBody, `src="/assets/login-background-loader.js?v=`) ||
+		!strings.Contains(loginBody, `class="scene"`) ||
+		!strings.Contains(loginBody, `class="card form-card login-card"`) {
+		t.Fatalf("login page response = %d %q", loginResponse.Code, loginBody)
+	}
 	form := url.Values{"username": {"nicht-vorhanden"}, "password": {"Falsches Passwort 2026"}}
 	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "https://example.test/login", strings.NewReader(form.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -165,6 +198,133 @@ func TestIdentityHTTPGenericLoginError(t *testing.T) {
 	if response.Code != http.StatusUnauthorized || !strings.Contains(response.Body.String(), genericLoginError) {
 		t.Fatalf("generic login response = %d %q", response.Code, response.Body.String())
 	}
+	missingOrigin := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "https://example.test/login", strings.NewReader(form.Encode()))
+	missingOrigin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	missingOriginResponse := httptest.NewRecorder()
+	router.ServeHTTP(missingOriginResponse, missingOrigin)
+	if missingOriginResponse.Code != http.StatusForbidden {
+		t.Fatalf("missing-origin login response = %d", missingOriginResponse.Code)
+	}
+}
+
+func TestIdentityHTTPUpdateUserDetails(t *testing.T) {
+	tests := []struct {
+		name             string
+		role             auth.Role
+		storeError       error
+		expectedStatus   int
+		expectedBody     string
+		expectedUsername string
+	}{
+		{
+			name: "admin updates details", role: auth.RoleAdmin,
+			expectedStatus: http.StatusSeeOther, expectedUsername: "neuer-name",
+		},
+		{
+			name: "driver is forbidden", role: auth.RoleDriver,
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name: "conflict is visible and retains values", role: auth.RoleAdmin,
+			storeError: auth.ErrConflict, expectedStatus: http.StatusConflict,
+			expectedBody: "bereits vergeben", expectedUsername: "neuer-name",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &identityTestStore{
+				updateDetailsError: test.storeError,
+				users: []auth.UserSummary{{
+					ID: "target", Username: "alt", DisplayName: "Alter Name", Email: "alt@example.test",
+					Role: auth.RoleDriver, Active: true, Version: 4, DriverID: "driver-profile",
+				}},
+			}
+			router := identityRouterForMutationTest(t, store, test.role)
+			form := url.Values{
+				"csrf_token": {"csrf"}, "version": {"4"}, "username": {" neuer-name "},
+				"display_name": {" Neuer Anzeigename "}, "email": {" neu@example.test "},
+			}
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.test/admin/users/target/details", strings.NewReader(form.Encode()))
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			request.Header.Set("Origin", "https://example.test")
+			// #nosec G124 -- request-only test fixture; no cookie is emitted to a browser.
+			request.AddCookie(&http.Cookie{Name: "hackplan_session", Value: "session"})
+			// #nosec G124 -- request-only test fixture; no cookie is emitted to a browser.
+			request.AddCookie(&http.Cookie{Name: "hackplan_csrf", Value: "csrf"})
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+
+			if response.Code != test.expectedStatus {
+				t.Fatalf("status = %d, want %d; body = %q", response.Code, test.expectedStatus, response.Body.String())
+			}
+			if test.expectedBody != "" && !strings.Contains(response.Body.String(), test.expectedBody) {
+				t.Fatalf("body = %q, want %q", response.Body.String(), test.expectedBody)
+			}
+			if test.expectedUsername != "" && store.updatedDetails.Username != test.expectedUsername {
+				t.Fatalf("stored username = %q, want %q", store.updatedDetails.Username, test.expectedUsername)
+			}
+			if test.storeError != nil && !strings.Contains(response.Body.String(), `value="neuer-name"`) {
+				t.Fatalf("submitted username was not retained: %q", response.Body.String())
+			}
+			if test.role == auth.RoleDriver && store.updatedDetails.UserID != "" {
+				t.Fatalf("forbidden update reached store: %#v", store.updatedDetails)
+			}
+		})
+	}
+}
+
+func TestIdentityHTTPLastAdminErrorIsVisible(t *testing.T) {
+	store := &identityTestStore{
+		accessError: auth.ErrLastAdmin,
+		users: []auth.UserSummary{{
+			ID: "admin", Username: "admin", DisplayName: "Anna Admin",
+			Role: auth.RoleAdmin, Active: true, Version: 2,
+		}},
+	}
+	router := identityRouterForMutationTest(t, store, auth.RoleAdmin)
+	form := url.Values{"csrf_token": {"csrf"}, "version": {"2"}, "role": {"driver"}}
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.test/admin/users/admin/access", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Origin", "https://example.test")
+	// #nosec G124 -- request-only test fixtures; no cookies are emitted to a browser.
+	request.AddCookie(&http.Cookie{Name: "hackplan_session", Value: "session"})
+	// #nosec G124 -- request-only test fixtures; no cookies are emitted to a browser.
+	request.AddCookie(&http.Cookie{Name: "hackplan_csrf", Value: "csrf"})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "Mindestens ein aktiver Administrator") ||
+		!strings.Contains(response.Body.String(), `role="alert"`) {
+		t.Fatalf("last-admin response = %d %q", response.Code, response.Body.String())
+	}
+}
+
+func identityRouterForMutationTest(t *testing.T, store *identityTestStore, role auth.Role) http.Handler {
+	t.Helper()
+	now := time.Now()
+	store.session = auth.Session{
+		ID: "session", Actor: auth.Actor{UserID: "actor", Username: "actor", DisplayName: "Actor", Role: role, UserVersion: 1},
+		CSRFTokenHash: auth.TokenHash("csrf"), IdleExpiresAt: now.Add(time.Hour),
+		AbsoluteExpiresAt: now.Add(8 * time.Hour), UserActive: true,
+	}
+	hasher, err := auth.NewPasswordHasher(auth.PasswordParameters{
+		MemoryKiB: 8, Iterations: 1, Parallelism: 1, SaltLength: 16, KeyLength: 16, MinLength: 14,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := auth.NewService(store, hasher, time.Now, time.Hour, 8*time.Hour, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := NewRouter(Dependencies{
+		Config: configForWebTest(), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Database: pinger{}, Build: buildinfo.Info{Version: "test"}, Identity: identity,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return router
 }
 
 func configForWebTest() config.Config {

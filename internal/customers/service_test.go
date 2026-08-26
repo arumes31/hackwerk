@@ -9,10 +9,13 @@ import (
 )
 
 type storeStub struct {
-	createCalls   int
-	priorityCalls int
-	created       CreatedIntake
-	duplicates    []Duplicate
+	createCalls    int
+	priorityCalls  int
+	listCalls      int
+	created        CreatedIntake
+	duplicates     []Duplicate
+	favoriteName   string
+	favoriteFilter WaitlistFilter
 }
 
 func (store *storeStub) FindDuplicates(context.Context, CustomerInput) ([]Duplicate, error) {
@@ -29,11 +32,22 @@ func (store *storeStub) UpdateJob(context.Context, auth.Actor, UpdateJobInput) e
 func (store *storeStub) ArchiveJob(context.Context, auth.Actor, string, int32, string) error {
 	return nil
 }
-func (store *storeStub) ListCustomers(context.Context, string, int, int) (Page[CustomerSummary], error) {
+func (store *storeStub) ListCustomers(context.Context, CustomerListFilter) (Page[CustomerSummary], error) {
+	store.listCalls++
 	return Page[CustomerSummary]{}, nil
 }
 func (store *storeStub) CustomerDetail(context.Context, string) (CustomerDetail, error) {
 	return CustomerDetail{}, nil
+}
+func (store *storeStub) DuplicateJobDraft(context.Context, string) (JobDraft, error) {
+	return JobDraft{}, nil
+}
+func (store *storeStub) RecordRecentCustomer(context.Context, string, string) error { return nil }
+func (store *storeStub) RecordRecentJob(context.Context, string, string) (string, error) {
+	return "", nil
+}
+func (store *storeStub) ListRecent(context.Context, string, int) ([]RecentRecord, error) {
+	return nil, nil
 }
 func (store *storeStub) UpdateCustomer(context.Context, auth.Actor, UpdateCustomerInput) error {
 	return nil
@@ -44,6 +58,17 @@ func (store *storeStub) ArchiveCustomer(context.Context, auth.Actor, string, int
 func (store *storeStub) ListWaitlist(context.Context, WaitlistFilter) (Page[WaitlistItem], error) {
 	return Page[WaitlistItem]{}, nil
 }
+func (store *storeStub) ListWaitlistFilterFavorites(context.Context, string) ([]WaitlistFilterFavorite, error) {
+	return nil, nil
+}
+func (store *storeStub) SaveWaitlistFilterFavorite(_ context.Context, _ string, name string, filter WaitlistFilter) error {
+	store.favoriteName = name
+	store.favoriteFilter = filter
+	return nil
+}
+func (store *storeStub) DeleteWaitlistFilterFavorite(context.Context, string, string) error {
+	return nil
+}
 func (store *storeStub) UpdateWaitlistPriority(context.Context, auth.Actor, string, int32, int32, string) error {
 	store.priorityCalls++
 	return nil
@@ -51,7 +76,7 @@ func (store *storeStub) UpdateWaitlistPriority(context.Context, auth.Actor, stri
 func (store *storeStub) RemoveWaitlist(context.Context, auth.Actor, string, int32, string, string) error {
 	return nil
 }
-func (store *storeStub) AddNote(context.Context, auth.Actor, string, string, string, string) (string, error) {
+func (store *storeStub) AddNote(context.Context, auth.Actor, string, string, string, string, string) (string, error) {
 	return "note-1", nil
 }
 
@@ -100,6 +125,40 @@ func TestDriverCannotPrioritizeWaitlist(t *testing.T) {
 	}
 	if store.priorityCalls != 0 {
 		t.Fatalf("priority calls = %d, want 0", store.priorityCalls)
+	}
+}
+
+func TestDriverCannotIncludeArchivedCustomers(t *testing.T) {
+	t.Parallel()
+	store := &storeStub{}
+	service, _ := NewService(store)
+	_, err := service.ListCustomers(context.Background(), auth.Actor{UserID: "driver-1", Role: auth.RoleDriver}, CustomerListFilter{IncludeArchived: true})
+	if !errors.Is(err, auth.ErrForbidden) || store.listCalls != 0 {
+		t.Fatalf("ListCustomers() error=%v calls=%d", err, store.listCalls)
+	}
+}
+
+func TestFilterFavoriteDropsPersonalSearchAndNormalizesAllowlist(t *testing.T) {
+	t.Parallel()
+	store := &storeStub{}
+	service, _ := NewService(store)
+	err := service.SaveWaitlistFilterFavorite(context.Background(), auth.Actor{UserID: "driver-1", Role: auth.RoleDriver}, "  Nord  ", WaitlistFilter{
+		Query: "Franz Huber", JobType: "invalid", Region: "Nord", Workflow: "proposal", Sort: "customer", Direction: "desc",
+	})
+	if err != nil {
+		t.Fatalf("SaveWaitlistFilterFavorite() error=%v", err)
+	}
+	if store.favoriteName != "Nord" || store.favoriteFilter.Query != "" || store.favoriteFilter.JobType != "" || store.favoriteFilter.Workflow != "proposal" {
+		t.Fatalf("favorite=%q filter=%#v", store.favoriteName, store.favoriteFilter)
+	}
+}
+
+func TestAddNoteRequiresStableIdempotencyKey(t *testing.T) {
+	t.Parallel()
+	service, _ := NewService(&storeStub{})
+	_, err := service.AddNote(context.Background(), auth.Actor{UserID: "driver-1", Role: auth.RoleDriver}, "job-1", "Text", "", "", "request-1")
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("AddNote() error=%v, want validation", err)
 	}
 }
 

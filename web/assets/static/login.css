@@ -1,0 +1,107 @@
+/* Production integration for the original temp/new-lgin.html background.
+   The source background itself remains verbatim in login-original.css,
+   login_background.templ and login-background.js. */
+.login-body { min-width: 320px; }
+
+.login-brand {
+  color: var(--ink);
+  text-decoration: none;
+}
+.login-brand:hover { color: var(--ink); }
+
+.login-card.form-card {
+  width: 100%;
+  max-width: none;
+  border-color: rgb(255 255 255 / 60%);
+  border-radius: 20px;
+  background: rgb(255 253 247 / 92%);
+}
+.login-card .eyebrow { margin-bottom: .65rem; }
+.login-card h1 { max-width: none; }
+.login-card .lede { margin-top: 1rem; }
+.login-card .form-alert { margin-block: .75rem .35rem; }
+.login-form__submit.button { width: 100%; border-radius: 10px; }
+.login-card__note {
+  margin: 1rem 0 0;
+  color: var(--muted);
+  font-size: .78rem;
+  line-height: 1.45;
+}
+
+/* Mobile intentionally does not render or run the original animated scene.
+   The separate loader also avoids importing the simulation below 769px. */
+@media (max-width: 768px) {
+  html,
+  .login-body {
+    min-height: 100%;
+    height: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
+    background:
+      radial-gradient(circle at 18% 0, rgb(216 149 47 / 16%), transparent 36%),
+      linear-gradient(155deg, #eef1e5 0%, var(--paper) 48%, #e3eadc 100%);
+  }
+
+  .login-body .shell {
+    min-height: 100vh;
+    min-height: 100dvh;
+    height: auto;
+    overflow: visible;
+  }
+
+  .login-body .scene,
+  .login-body .shade { display: none; }
+
+  .login-body .login {
+    position: relative;
+    width: min(100%, 31rem);
+    min-height: 100vh;
+    min-height: 100dvh;
+    margin-inline: auto;
+    justify-content: center;
+    padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .login-body .card {
+    padding: 1.25rem;
+    border-color: var(--line);
+    border-radius: .85rem;
+    background: var(--surface);
+    box-shadow: 0 12px 30px rgb(31 47 36 / 10%);
+    backdrop-filter: none;
+  }
+
+  .login-body .brand { margin-bottom: 1rem; }
+  .login-body .brand-mark { box-shadow: none; transform: none; }
+  .login-body h1 { font-size: clamp(2.45rem, 14vw, 3.6rem); }
+  .login-body .lede { margin-block: .65rem .8rem; }
+  .login-body button { box-shadow: none; }
+
+  .login-body *,
+  .login-body *::before,
+  .login-body *::after {
+    animation: none !important;
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}
+
+@media (max-width: 380px), (max-height: 650px) and (max-width: 768px) {
+  .login-body .login { padding-block: .65rem; }
+  .login-body .card { padding: 1rem; }
+  .login-body .brand { margin-bottom: .55rem; }
+  .login-body .brand-mark { width: 2.25rem; height: 2.25rem; }
+  .login-body h1 { font-size: 2.4rem; }
+  .login-card__note { margin-top: .65rem; }
+  .login-form label { margin-top: .35rem; }
+  .login-form__submit.button { margin-top: .7rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-body *,
+  .login-body *::before,
+  .login-body *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

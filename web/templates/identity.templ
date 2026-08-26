@@ -2,28 +2,29 @@ package templates
 
 import (
 	"example.invalid/hackplan/internal/auth"
+	"example.invalid/hackplan/internal/dashboard"
+	"example.invalid/hackplan/internal/notification"
 	"fmt"
+	"strings"
+	"time"
 )
 
 type ShellData struct {
-	Page      PageData
-	Actor     auth.Actor
-	CSRFToken string
-}
-type LoginData struct {
-	Page     PageData
-	Username string
-	Error    string
+	Page       PageData
+	Actor      auth.Actor
+	CSRFToken  string
+	ActivePath string
 }
 type PasswordData struct {
 	Shell ShellData
 	Error string
 }
 type UsersData struct {
-	Shell  ShellData
-	Users  []auth.UserSummary
-	Error  string
-	Values CreateUserValues
+	Shell        ShellData
+	Users        []auth.UserSummary
+	Error        string
+	Values       CreateUserValues
+	EditedUserID string
 }
 type CreateUserValues struct {
 	Username     string
@@ -39,18 +40,104 @@ templ appHeader(shell ShellData) {
 		<div class="site-header__inner">
 			<a class="wordmark" href="/dashboard" aria-label={ shell.Page.AppName + " Übersicht" }><span class="wordmark__mark" aria-hidden="true">H</span><span>{ shell.Page.AppName }</span></a>
 			<nav class="primary-nav" aria-label="Hauptnavigation">
-				<a href="/dashboard">Übersicht</a><a href="/calendar">Kalender</a><a href="/waitlist">Warteliste</a><a href="/customers">Kunden</a>
-				if shell.Actor.Role == auth.RoleDriver {
+				@navLink(shell, "/dashboard", "Übersicht")
+				@navLink(shell, "/calendar", "Kalender")
+				@navLink(shell, "/waitlist", "Warteliste")
+				@navLink(shell, "/customers", "Kunden")
+				if shell.Actor.Role == auth.RoleAdmin {
+					@navLink(shell, "/planning", "Planung")
+					@navLink(shell, "/planning/routes", "Karte & Routen")
+				}
+			</nav>
+			<div class="shell-tools">
+				<details class="nav-menu quick-menu" data-popover-menu data-quick-menu>
+					<summary>Schnell</summary>
+					<div class="nav-menu__panel">
+						<span class="nav-menu__label">Neue Aufgabe</span>
+						<a href="/customers/new">Auftrag erfassen</a>
+						<a href="/voice">Sprachentwurf</a>
+						if shell.Actor.Role == auth.RoleAdmin {
+							<a href="/calendar">Termin vorschlagen</a>
+							<a href="/planning/routes">Route planen</a>
+						} else if shell.Actor.DriverID != "" {
+							<a href="/my-route">Meine Route</a>
+							<a href="/availability">Verfügbarkeit</a>
+						}
+						<span class="nav-menu__label">Darstellung</span>
+						<button class="nav-menu__action" type="button" data-density-toggle>Komfortable Dichte</button>
+						<button class="nav-menu__action" type="button" data-outdoor-toggle>Outdoor-Kontrast</button>
+					</div>
+				</details>
+				if shell.Actor.Role == auth.RoleAdmin {
+					<details class="nav-menu" data-popover-menu data-admin-menu>
+						<summary>Verwaltung</summary>
+						<div class="nav-menu__panel">
+							<span class="nav-menu__label">Administration</span>
+							@navLink(shell, "/admin/users", "Benutzer & Fahrer")
+							@navLink(shell, "/admin/drivers", "Fahrerverfügbarkeit")
+							@navLink(shell, "/admin/resources", "Ressourcen")
+							@navLink(shell, "/admin/notifications", "Versand")
+						</div>
+					</details>
+				}
+				<details class="nav-menu account-menu" data-popover-menu data-account-menu>
+					<summary aria-label={ "Kontomenü für " + shell.Actor.DisplayName }>
+						<span class="account-menu__copy"><strong>{ shell.Actor.DisplayName }</strong><small>{ roleLabel(shell.Actor.Role) }</small></span>
+					</summary>
+					<div class="nav-menu__panel nav-menu__panel--account">
+						<span class="nav-menu__label">Mein Zugang</span>
+						@navLink(shell, "/profile", "Profil")
+						@navLink(shell, "/voice", "Spracheingabe")
+						if shell.Actor.Role == auth.RoleDriver && shell.Actor.DriverID != "" {
+							@navLink(shell, "/my-route", "Meine Route")
+							@navLink(shell, "/availability", "Meine Verfügbarkeit")
+						}
+						<form method="post" action="/logout"><input type="hidden" name="csrf_token" value={ shell.CSRFToken }/><button class="nav-menu__logout" type="submit">Abmelden</button></form>
+					</div>
+				</details>
+			</div>
+		</div>
+	</header>
+	<div class="connectivity-banner" role="status" aria-live="polite" data-connectivity-banner hidden></div>
+	<nav class="mobile-bottom-nav" aria-label="Mobile Hauptnavigation">
+		@navLink(shell, "/dashboard", "Heute")
+		@navLink(shell, "/calendar", "Kalender")
+		@navLink(shell, "/waitlist", "Warteliste")
+		@navLink(shell, "/customers", "Kunden")
+		<details class="mobile-more" data-mobile-menu>
+			<summary aria-label="Weitere Bereiche">Mehr</summary>
+			<div class="mobile-more__panel">
+				<span class="mobile-more__label">Erfassen</span>
+				<a href="/customers/new">Auftrag erfassen</a>
+				<a href="/voice">Auftrag per Sprache</a>
+				if shell.Actor.Role == auth.RoleDriver && shell.Actor.DriverID != "" {
+					<a href="/my-route">Meine Route</a>
 					<a href="/availability">Meine Verfügbarkeit</a>
 				}
 				<a href="/profile">Profil</a>
 				if shell.Actor.Role == auth.RoleAdmin {
-					<a href="/admin/users">Benutzer</a><a href="/admin/drivers">Fahrer</a><a href="/admin/resources">Ressourcen</a>
+					<span class="mobile-more__label">Administration</span>
+					<a href="/planning">Planung</a>
+					<a href="/planning/routes">Karte &amp; Routen</a>
+					<a href="/admin/drivers">Fahrer</a><a href="/admin/resources">Ressourcen</a><a href="/admin/notifications">Versand</a><a href="/admin/users">Benutzer</a>
 				}
-			</nav>
-			<div class="user-menu"><span>{ shell.Actor.DisplayName }</span><span class="role-badge">{ roleLabel(shell.Actor.Role) }</span><form method="post" action="/logout"><input type="hidden" name="csrf_token" value={ shell.CSRFToken }/><button class="button button--quiet" type="submit">Abmelden</button></form></div>
-		</div>
-	</header>
+				<span class="mobile-more__label">Darstellung</span>
+				<button class="button button--quiet" type="button" data-density-toggle>Komfortable Dichte</button>
+				<button class="button button--quiet" type="button" data-outdoor-toggle>Outdoor-Kontrast</button>
+				<form method="post" action="/logout"><input type="hidden" name="csrf_token" value={ shell.CSRFToken }/><button class="button button--quiet" type="submit">Abmelden</button></form>
+			</div>
+		</details>
+	</nav>
+}
+
+templ navLink(shell ShellData, path string, label string) {
+	<a
+		href={ templ.SafeURL(path) }
+		class={ navClass(shell.ActivePath, path) }
+		if isActivePath(shell.ActivePath, path) {
+			aria-current="page"
+		}
+	>{ label }</a>
 }
 
 templ appFooter(page PageData) {
@@ -58,48 +145,182 @@ templ appFooter(page PageData) {
 	<div class="visually-hidden" aria-live="polite" data-live-status></div>
 }
 
-templ Login(data LoginData) {
+type DashboardData struct {
+	Shell              ShellData
+	View               dashboard.View
+	NotificationIssues []notification.Status
+	Error              string
+}
+
+templ Dashboard(data DashboardData) {
 	<!DOCTYPE html>
 	<html lang="de-AT">
-		@documentHead(data.Page, "Anmelden – "+data.Page.AppName)
+		@documentHead(data.Shell.Page, "Übersicht – "+data.Shell.Page.AppName)
 		<body>
-			<a class="skip-link" href="#hauptinhalt">Zum Inhalt springen</a>
-			<header class="site-header"><div class="site-header__inner"><a class="wordmark" href="/"><span class="wordmark__mark" aria-hidden="true">H</span><span>{ data.Page.AppName }</span></a></div></header>
-			<main id="hauptinhalt" class="page auth-page">
-				<section class="form-card" aria-labelledby="login-heading">
-					<p class="eyebrow">Interner Zugang</p>
-					<h1 id="login-heading">Anmelden</h1>
-					<p>Für Administratoren und Fahrer. Es gibt keine öffentliche Registrierung.</p>
-					if data.Error != "" {
-						<div class="form-alert" role="alert">{ data.Error }</div>
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page dashboard-page">
+				<section class="dashboard-intro"><div><p class="eyebrow">Einsatzübersicht</p><h1>Grüß Gott, { data.Shell.Actor.DisplayName }.</h1><p>Termine, Rückmeldungen und Kapazität auf einen Blick.</p></div><a class="button dashboard-primary-action" href="/customers/new">Neuen Auftrag erfassen</a></section>
+				if data.Error != "" {
+					<section class="empty-state" role="alert"><h2>Übersicht nicht verfügbar</h2><p>{ data.Error }</p><a class="button button--quiet" href="/dashboard">Heute erneut laden</a></section>
+				}
+				if data.Error == "" {
+					<nav class="dashboard-date-nav" aria-label="Tag auswählen">
+						<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + data.View.PreviousDate) } aria-label="Vorheriger Tag">←</a>
+						<div><span class="eyebrow">Tag</span><h2>{ data.View.DateLabel }</h2><small>Aktualisiert um { data.View.UpdatedLabel } Uhr</small></div>
+						<a class="button button--quiet" href="/dashboard">Heute</a>
+						<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + data.View.NextDate) } aria-label="Nächster Tag">→</a>
+					</nav>
+					<section class="dashboard-metrics" aria-label="Kennzahlen">
+						@metricCard("Warteliste", data.View.Counts.Waitlist, "/waitlist", "⌛")
+						@metricCard("Termine", data.View.Counts.Appointments, "/calendar", "▣")
+						@metricCard("Offene Antworten", data.View.Counts.Attention, "/calendar", "?")
+						@metricCard("Fahrer", data.View.Counts.ActiveDrivers, driverLink(data.Shell.Actor.Role), "♟")
+						if data.View.Admin {
+							@metricCard("Versandprobleme", data.View.Counts.NotificationIssues, "/admin/notifications", "!")
+							@metricCard("Konflikte/Overrides", data.View.Counts.Overrides, "/calendar", "⚠")
+							@metricCard("Freie Fenster", freeSlotCount(data.View.Capacities), "/calendar", "◷")
+						}
+					</section>
+					if data.View.Counts.Attention > 0 || data.View.Counts.NotificationIssues > 0 || data.View.Counts.Overrides > 0 || len(data.View.UrgentJobs) > 0 {
+						<section class="dashboard-attention" aria-labelledby="dashboard-attention-heading">
+							<div><p class="eyebrow">Priorität</p><h2 id="dashboard-attention-heading">Heute Aufmerksamkeit nötig</h2></div>
+							<div class="dashboard-attention__items">
+								if data.View.Counts.Attention > 0 {
+									<a href="/calendar"><strong>{ fmt.Sprint(data.View.Counts.Attention) }</strong> offene Kundenantworten</a>
+								}
+								if data.View.Admin && data.View.Counts.NotificationIssues > 0 {
+									<a href="/admin/notifications?status=failed"><strong>{ fmt.Sprint(data.View.Counts.NotificationIssues) }</strong> Versandprobleme prüfen/erneut senden</a>
+								}
+								if data.View.Admin && data.View.Counts.Overrides > 0 {
+									<a href="/calendar"><strong>{ fmt.Sprint(data.View.Counts.Overrides) }</strong> Konflikte oder Overrides</a>
+								}
+								if data.View.Admin && len(data.View.UrgentJobs) > 0 {
+									<a href="/waitlist?urgency=urgent"><strong>{ fmt.Sprint(len(data.View.UrgentJobs)) }</strong> dringende Aufträge</a>
+								}
+							</div>
+							if len(data.NotificationIssues) > 0 {
+								<div class="dashboard-notification-issues" aria-label="Versandprobleme direkt bearbeiten">
+									for _, issue := range data.NotificationIssues {
+										<div class="dashboard-notification-issue">
+											<span class={ "status-badge status-badge--" + strings.ReplaceAll(issue.State, "_", "-") }>{ notificationStateLabel(issue.State) }</span>
+											<span>{ notificationChannelLabel(issue.Channel) } · { issue.Recipient }</span>
+											<form method="post" action={ templ.SafeURL("/admin/notifications/" + issue.ID + "/retry") }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Erneut versuchen</button></form>
+										</div>
+									}
+								</div>
+							}
+						</section>
 					}
-					<form method="post" action="/login" class="form-stack"><label for="username">Benutzername</label><input id="username" name="username" value={ data.Username } autocomplete="username" required autofocus/><label for="password">Passwort</label><input id="password" name="password" type="password" autocomplete="current-password" required/><button class="button" type="submit">Sicher anmelden</button></form>
-				</section>
-			</main>@appFooter(data.Page)
+					<div class="dashboard-columns">
+						<section aria-labelledby="today-heading">
+							<div class="section-heading"><div><p class="eyebrow">Heute</p><h2 id="today-heading">Einsätze nach Hackmaschine</h2></div><a href="/calendar">Kalender öffnen</a></div>
+							if len(data.View.Groups) == 0 {
+								<div class="empty-state"><h3>Keine Einsätze</h3><p>Für diesen Tag sind keine Vorschläge oder fixierten Termine eingetragen.</p><a class="button button--quiet" href="/waitlist">Warteliste ansehen</a></div>
+							}
+							for _, group := range data.View.Groups {
+								<section class="dashboard-resource-group" aria-label={ group.ResourceName }>
+									<h3>{ group.ResourceName }</h3>
+									for _, item := range group.Appointments {
+										@dashboardAppointment(item)
+									}
+								</section>
+							}
+						</section>
+						<aside class="dashboard-side" aria-label="Tageshinweise">
+							<section class="dashboard-panel">
+								<h2>{ availabilityTitle(data.View.Admin) }</h2>
+								if data.View.Admin {
+									for _, driver := range data.View.Drivers {
+										@availabilityRow(driver)
+									}
+								} else if data.View.OwnAvailability != nil {
+									@availabilityRow(*data.View.OwnAvailability)
+									<a class="button button--quiet" href="/availability">Verfügbarkeit pflegen</a>
+								} else {
+									<p class="empty-copy">Kein Fahrerprofil ist diesem Zugang zugeordnet.</p>
+								}
+							</section>
+							if data.View.Admin {
+								@capacityPanel(data.View.Capacities)
+								@urgentPanel(data.View.UrgentJobs)
+							}
+						</aside>
+					</div>
+					if len(data.View.Upcoming) > 0 {
+						<section class="dashboard-upcoming" aria-labelledby="upcoming-heading">
+							<div class="section-heading"><h2 id="upcoming-heading">Demnächst</h2><a href="/calendar">Alle Termine</a></div>
+							<div class="compact-list">
+								for index, item := range data.View.Upcoming {
+									if index < 6 {
+										@dashboardAppointment(item)
+									}
+								}
+							</div>
+						</section>
+					}
+				}
+			</main>@appFooter(data.Shell.Page)
 		</body>
 	</html>
 }
 
-templ Dashboard(shell ShellData) {
-	<!DOCTYPE html>
-	<html lang="de-AT">
-		@documentHead(shell.Page, "Übersicht – "+shell.Page.AppName)
-		<body>
-			@appHeader(shell)
-			<main id="hauptinhalt" class="page">
-				<section class="dashboard-intro"><div><p class="eyebrow">Einsatzübersicht</p><h1>Grüß Gott, { shell.Actor.DisplayName }.</h1><p>Die fachlichen Bereiche werden schrittweise freigeschaltet. Berechtigungen gelten bereits serverseitig.</p></div><span class="status-badge status-badge--ready">Sicher angemeldet</span></section>
-				<section class="module-grid" aria-label="Arbeitsbereiche">
-					@moduleCard("Kalender", "Alle geplanten Termine werden für alle Fahrer sichtbar.", "Task 04")
-					@moduleCard("Kunden & Aufträge", "Getrennte Akten, Aufträge und Warteliste.", "Task 02")
-					@moduleCard("Verfügbarkeit", "Eigene Zeiten mobil pflegen.", "Task 03")
-				</section>
-			</main>@appFooter(shell.Page)
-		</body>
-	</html>
+templ metricCard(label string, value int64, href string, icon string) {
+	<a class="metric-card" href={ templ.SafeURL(href) } aria-label={ fmt.Sprintf("%s: %d", label, value) }><span aria-hidden="true">{ icon }</span><strong>{ fmt.Sprint(value) }</strong><small>{ label }</small></a>
 }
 
-templ moduleCard(title string, description string, status string) {
-	<article class="module-card"><span class="module-card__status">{ status }</span><h2>{ title }</h2><p>{ description }</p></article>
+templ dashboardAppointment(item dashboard.Appointment) {
+	<article class="dashboard-appointment">
+		<div class="dashboard-time"><time datetime={ item.StartsAt.Format(time.RFC3339) } data-dashboard-start={ item.StartsAt.Format(time.RFC3339) }>{ dashboardTime(item.StartsAt) }</time><small>{ dashboardTime(item.EndsAt) }</small></div>
+		<div class="dashboard-appointment__body">
+			<div class="badge-row"><span class={ "appointment-badge appointment-badge--" + item.Lifecycle }><span aria-hidden="true">{ appointmentIcon(item.Confirmation) }</span>{ dashboardStatus(item.Lifecycle, item.Confirmation) }</span></div>
+			<h3><a href={ templ.SafeURL("/customers/" + item.CustomerID + "#job-" + item.JobID) }>{ item.CustomerName }</a></h3>
+			<p><strong>{ item.VolumeM3 } m³</strong> · { dashboardJobType(item.JobType) } · { item.Locality }</p>
+			<p>{ item.Drivers }<span class="separator" aria-hidden="true">· </span>{ item.Resources }</p>
+			if item.LatestNote != "" {
+				<p class="note-excerpt">Bemerkung: { item.LatestNote }</p>
+			}
+			if item.OverrideReason != "" {
+				<p class="warning-copy"><span aria-hidden="true">⚠</span> Verfügbarkeit mit Admin-Begründung übersteuert</p>
+			}
+			<div class="dashboard-actions"><a class="button button--quiet" href={ templ.SafeURL(item.MapsURL) } target="_blank" rel="noopener noreferrer">Navigation</a><a class="button button--quiet" href={ templ.SafeURL("/customers/" + item.CustomerID + "#job-" + item.JobID) }>Auftrag öffnen</a><a class="button button--quiet" href={ templ.SafeURL("/customers/" + item.CustomerID + "#notes-" + item.JobID) }>Notiz ergänzen</a></div>
+		</div>
+	</article>
+}
+
+templ availabilityRow(item dashboard.DriverAvailability) {
+	<div class="availability-row"><span class={ "availability-dot availability-dot--" + availabilityClass(item.State) } aria-hidden="true"></span><span><strong>{ item.Name }</strong><small>{ item.State }</small></span></div>
+}
+
+templ capacityPanel(values []dashboard.Capacity) {
+	<section class="dashboard-panel">
+		<h2>Freie Hackkapazität</h2>
+		if len(values) == 0 {
+			<p class="empty-copy">Keine aktive Hackmaschine vorhanden.</p>
+		}
+		for _, capacity := range values {
+			<div class="capacity-item">
+				<strong>{ capacity.ResourceName }</strong>
+				if len(capacity.Free) == 0 {
+					<small>Kein freies Fenster in der Betriebszeit</small>
+				}
+				for _, slot := range capacity.Free {
+					<small>{ dashboardTime(slot.StartsAt) }–{ dashboardTime(slot.EndsAt) } Uhr <span class="muted">(vor Planung erneut prüfen)</span></small>
+				}
+			</div>
+		}
+	</section>
+}
+
+templ urgentPanel(values []dashboard.UrgentJob) {
+	<section class="dashboard-panel">
+		<div class="section-heading"><h2>Dringende Aufträge</h2><a href="/waitlist">Warteliste</a></div>
+		if len(values) == 0 {
+			<p class="empty-copy">Keine überfälligen oder dringenden Aufträge.</p>
+		}
+		for _, item := range values {
+			<a class="urgent-job" href={ templ.SafeURL("/customers/" + item.CustomerID + "#job-" + item.ID) }><strong>{ item.CustomerName } · { item.VolumeM3 } m³</strong><small>{ item.Number } · { dashboardUrgencyLabel(item.Urgency) } · { item.Locality }</small></a>
+		}
+	</section>
 }
 
 templ Profile(shell ShellData) {
@@ -140,34 +361,60 @@ templ Users(data UsersData) {
 		@documentHead(data.Shell.Page, "Benutzer & Fahrer – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page">
-				<div class="page-heading"><div><p class="eyebrow">Administration</p><h1>Benutzer &amp; Fahrer</h1></div><span class="status-badge">{ fmt.Sprint(len(data.Users)) } Zugänge</span></div>
+			<main id="hauptinhalt" class="page users-page">
+				<div class="users-heading">
+					<div><p class="eyebrow">Administration</p><h1>Benutzer &amp; Fahrer</h1><p>Zugänge, Rollen und Passwörter zentral verwalten. Fahrerprofile bleiben eigenständige Datensätze.</p></div>
+					<div class="users-heading__actions"><span class="status-badge">{ fmt.Sprint(len(data.Users)) } Zugänge</span><a class="button" href="#new-user">Neuer Zugang</a></div>
+				</div>
 				if data.Error != "" {
-					<div class="form-alert" role="alert">{ data.Error }</div>
+					<div class="form-alert" role="alert" tabindex="-1" data-error-summary>{ data.Error }</div>
 				}
-				<section class="admin-layout">
-					<div class="table-card">
-						<div class="table-scroll">
-							<table>
-								<thead><tr><th>Benutzer</th><th>Rolle</th><th>Status</th><th>Fahrerprofil</th><th>Aktionen</th></tr></thead>
-								<tbody>
-									for _, user := range data.Users {
-										<tr>
-											<td><strong>{ user.DisplayName }</strong><small>{ user.Username }</small></td>
-											<td>{ roleLabel(user.Role) }</td>
-											<td>{ activeLabel(user.Active) }</td>
-											<td>{ driverLabel(user.DriverID) }</td>
-											<td>
-												<form method="post" action={ "/admin/users/" + user.ID + "/access" } class="inline-form"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(user.Version) }/><select name="role" aria-label={ "Rolle für " + user.Username }><option value="admin" selected?={ user.Role == auth.RoleAdmin }>Admin</option><option value="driver" selected?={ user.Role == auth.RoleDriver }>Fahrer</option></select><label class="check-label"><input type="checkbox" name="active" value="true" checked?={ user.Active }/> aktiv</label><button class="button button--quiet" type="submit">Speichern</button></form>
-												<form method="post" action={ "/admin/users/" + user.ID + "/reset-password" } class="inline-form reset-form"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(user.Version) }/><label><span>Temporäres Passwort</span><input name="password" type="password" autocomplete="new-password" minlength="14" required/></label><button class="button button--quiet" type="submit">Zurücksetzen</button></form>
-											</td>
-										</tr>
-									}
-								</tbody>
-							</table>
-						</div>
+				<section class="user-admin-layout">
+					<div class="user-directory" aria-label="Vorhandene Zugänge">
+						for _, user := range data.Users {
+							<article class="user-card">
+								<header class="user-card__header">
+									<div class="user-card__identity">
+										<h2>{ user.DisplayName }</h2>
+										<p>{ "@" + user.Username }</p>
+										if user.Email != "" {
+											<a href={ templ.SafeURL("mailto:" + user.Email) }>{ user.Email }</a>
+										}
+									</div>
+									<div class="user-card__badges"><span class="user-badge">{ roleLabel(user.Role) }</span><span class={ userStatusClass(user.Active) }>{ activeLabel(user.Active) }</span><span class="user-badge">Fahrerprofil: { driverLabel(user.DriverID) }</span></div>
+								</header>
+								<details class="user-manage edit-card" open?={ data.EditedUserID == user.ID }>
+									<summary><span>Zugang verwalten</span><small>Stammdaten, Rolle und Passwort</small></summary>
+									<div class="user-manage__grid">
+										<form method="post" action={ "/admin/users/" + user.ID + "/details" } class="form-stack user-manage__details">
+											<div><h3>Stammdaten</h3><p>Name und Kontakt des Zugangs ändern.</p></div>
+											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
+											<input type="hidden" name="version" value={ fmt.Sprint(user.Version) }/>
+											<label><span>Benutzername</span><input name="username" value={ user.Username } autocomplete="username" maxlength="200" required/></label>
+											<label><span>Anzeigename</span><input name="display_name" value={ user.DisplayName } maxlength="200" required/></label>
+											<label><span>E-Mail (optional)</span><input name="email" type="email" value={ user.Email } maxlength="320"/></label>
+											<p class="field-help">Das verknüpfte Fahrerprofil bleibt unverändert.</p>
+											<button class="button button--quiet" type="submit">Stammdaten speichern</button>
+										</form>
+										<form method="post" action={ "/admin/users/" + user.ID + "/access" } class="form-stack user-manage__panel">
+											<div><h3>Rolle &amp; Status</h3><p>Zugriff steuern oder vorübergehend sperren.</p></div>
+											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(user.Version) }/>
+											<label><span>Rolle</span><select name="role" aria-label={ "Rolle für " + user.Username }><option value="admin" selected?={ user.Role == auth.RoleAdmin }>Administrator</option><option value="driver" selected?={ user.Role == auth.RoleDriver }>Fahrer</option></select></label>
+											<label class="check-label"><input type="checkbox" name="active" value="true" checked?={ user.Active }/> Zugang aktiv</label>
+											<button class="button button--quiet" type="submit" data-confirm-message="Rolle oder Zugangsstatus wirklich ändern? Aktive Sitzungen können dadurch ihre Berechtigung verlieren.">Zugriff speichern</button>
+										</form>
+										<form method="post" action={ "/admin/users/" + user.ID + "/reset-password" } class="form-stack user-manage__panel reset-form">
+											<div><h3>Passwort zurücksetzen</h3><p>Die Person muss das temporäre Passwort beim nächsten Login ändern.</p></div>
+											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(user.Version) }/>
+											<label><span>Temporäres Passwort</span><input name="password" type="password" autocomplete="new-password" minlength="14" required/></label>
+											<button class="button button--quiet" type="submit" data-confirm-message="Passwort wirklich zurücksetzen? Das bisherige Passwort wird sofort ungültig.">Passwort zurücksetzen</button>
+										</form>
+									</div>
+								</details>
+							</article>
+						}
 					</div>
-					<aside class="form-card"><h2>Zugang anlegen</h2><form method="post" action="/admin/users" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label for="create-username">Benutzername</label><input id="create-username" name="username" value={ data.Values.Username } required/><label for="create-name">Anzeigename</label><input id="create-name" name="display_name" value={ data.Values.DisplayName } required/><label for="create-email">E-Mail (optional)</label><input id="create-email" name="email" type="email" value={ data.Values.Email }/><label for="create-role">Rolle</label><select id="create-role" name="role"><option value="driver" selected?={ data.Values.Role != "admin" }>Fahrer</option><option value="admin" selected?={ data.Values.Role == "admin" }>Admin</option></select><label for="create-password">Temporäres Passwort</label><input id="create-password" name="password" type="password" autocomplete="new-password" minlength="14" required/><label class="check-label"><input name="create_driver" type="checkbox" value="true" checked?={ data.Values.CreateDriver }/> separates Fahrerprofil anlegen</label><button class="button" type="submit">Benutzer anlegen</button></form></aside>
+					<aside id="new-user" class="form-card create-user-card"><p class="eyebrow">Neuer Zugang</p><h2>Zugang anlegen</h2><p>Ein temporäres Passwort wird beim ersten Login zwingend ersetzt.</p><form method="post" action="/admin/users" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label for="create-username">Benutzername</label><input id="create-username" name="username" value={ data.Values.Username } autocomplete="username" required/><label for="create-name">Anzeigename</label><input id="create-name" name="display_name" value={ data.Values.DisplayName } required/><label for="create-email">E-Mail (optional)</label><input id="create-email" name="email" type="email" value={ data.Values.Email }/><label for="create-role">Rolle</label><select id="create-role" name="role"><option value="driver" selected?={ data.Values.Role != "admin" }>Fahrer</option><option value="admin" selected?={ data.Values.Role == "admin" }>Administrator</option></select><label for="create-password">Temporäres Passwort</label><input id="create-password" name="password" type="password" autocomplete="new-password" minlength="14" required/><label class="check-label"><input name="create_driver" type="checkbox" value="true" checked?={ data.Values.CreateDriver }/> Separates Fahrerprofil anlegen</label><button class="button" type="submit">Benutzer anlegen</button></form></aside>
 				</section>
 			</main>@appFooter(data.Shell.Page)
 		</body>
@@ -186,9 +433,117 @@ func activeLabel(active bool) string {
 	}
 	return "Deaktiviert"
 }
+func userStatusClass(active bool) string {
+	if active {
+		return "user-badge user-badge--status"
+	}
+	return "user-badge user-badge--inactive"
+}
 func driverLabel(id string) string {
 	if id == "" {
 		return "Nicht zugeordnet"
 	}
 	return "Zugeordnet"
+}
+
+func isActivePath(active string, path string) bool {
+	if path == "/planning" {
+		return active == path
+	}
+	return active == path || (path != "/dashboard" && strings.HasPrefix(active, path+"/"))
+}
+
+func navClass(active string, path string) string {
+	if isActivePath(active, path) {
+		return "nav-link nav-link--active"
+	}
+	return "nav-link"
+}
+
+func driverLink(role auth.Role) string {
+	if role == auth.RoleAdmin {
+		return "/admin/drivers"
+	}
+	return "/availability"
+}
+
+func availabilityTitle(admin bool) string {
+	if admin {
+		return "Fahrer heute"
+	}
+	return "Meine Verfügbarkeit"
+}
+
+func dashboardTime(value time.Time) string {
+	location, err := time.LoadLocation("Europe/Vienna")
+	if err != nil {
+		return value.UTC().Format("15:04")
+	}
+	return value.In(location).Format("15:04")
+}
+
+func dashboardStatus(lifecycle string, confirmation string) string {
+	if lifecycle == "proposal" {
+		return "Vorschlag"
+	}
+	switch confirmation {
+	case "confirmed":
+		return "Kunde bestätigt"
+	case "declined":
+		return "Kunde abgelehnt"
+	case "callback_requested":
+		return "Rückruf gewünscht"
+	case "not_requested":
+		return "Fixiert – ohne Nachricht"
+	default:
+		return "Fixiert – Antwort offen"
+	}
+}
+
+func appointmentIcon(confirmation string) string {
+	switch confirmation {
+	case "confirmed":
+		return "✓ "
+	case "declined", "callback_requested":
+		return "! "
+	default:
+		return "○ "
+	}
+}
+
+func dashboardJobType(value string) string {
+	if value == "chipping_with_transport" {
+		return "Hacken mit Transport"
+	}
+	return "Nur Hackmaschine"
+}
+
+func availabilityClass(value string) string {
+	switch value {
+	case "verfügbar":
+		return "available"
+	case "eingeschränkt":
+		return "limited"
+	default:
+		return "unavailable"
+	}
+}
+
+func dashboardUrgencyLabel(value string) string {
+	switch value {
+	case "urgent":
+		return "sehr dringend"
+	case "high":
+		return "dringend"
+	default:
+		return "älterer Auftrag"
+	}
+}
+
+func freeSlotCount(values []dashboard.Capacity) int64 {
+	var count int64
+	for _, value := range values {
+		count += int64(len(value.Free))
+	}
+	return count
 }

@@ -19,19 +19,29 @@ type CalendarData struct {
 templ Calendar(data CalendarData) {
 	<!DOCTYPE html>
 	<html lang="de-AT">
-		@documentHead(data.Shell.Page, "Kalender – "+data.Shell.Page.AppName)
+		@calendarDocumentHead(data.Shell.Page, "Kalender – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
 			<main id="hauptinhalt" class="page calendar-page">
-				<div class="page-heading"><div><p class="eyebrow">Zentrale Einsatzplanung</p><h1>Kalender</h1><p>Alle Fahrer sehen denselben Plan. Zeiten werden in Europe/Vienna angezeigt.</p></div><span class="status-badge">{ data.Timezone }</span></div>
+				<div class="page-heading">
+					<div><p class="eyebrow">Zentrale Einsatzplanung</p><h1>Kalender</h1><p>Alle Fahrer sehen denselben Plan. Zeiten werden in Europe/Vienna angezeigt.</p></div>
+					<div class="badge-row calendar-heading-actions">
+						<a class="button button--quiet calendar-feed-button" href="/calendar/feeds">Kalender-Abo</a>
+						if data.Shell.Actor.Role == auth.RoleDriver {
+							<span class="status-badge" data-calendar-read-only>Nur lesen – Planung nur durch Administration</span>
+						}
+						<span class="status-badge">{ data.Timezone }</span>
+					</div>
+				</div>
 				<div class="calendar-layout">
 					if data.Shell.Actor.Role == auth.RoleAdmin {
 						<aside class="calendar-waitlist" aria-labelledby="calendar-waitlist-title">
-							<h2 id="calendar-waitlist-title">Warteliste</h2><p>Ziehen oder „Einplanen“ wählen. Beides erzeugt nur einen Vorschlag.</p>
+							<h2 id="calendar-waitlist-title">Warteliste</h2>
+							<p>Ziehen oder „Einplanen“ wählen. Beides erzeugt nur einen Vorschlag.</p>
 							<div data-calendar-waitlist>
 								for _, item := range data.Options.Waitlist {
-									<article class="calendar-waitlist-item" draggable="true" data-calendar-job={ item.JobID } data-duration={ fmt.Sprint(item.EstimatedHackMinutes) } data-title={ item.CustomerName + " · " + item.JobNumber }>
-						<strong>{ item.CustomerName }</strong><span>{ item.JobNumber } · { item.VolumeM3 } m³</span><small>{ item.Locality } · { calendarJobTypeLabel(item.JobType) }</small>
+									<article class="calendar-waitlist-item" draggable="true" data-calendar-job={ item.JobID } data-job-id={ item.JobID } data-duration={ fmt.Sprint(item.EstimatedHackMinutes) } data-title={ item.CustomerName + " · " + item.JobNumber }>
+										<strong>{ item.CustomerName }</strong><span>{ item.JobNumber } · { item.VolumeM3 } m³</span><small>{ item.Locality } · { calendarJobTypeLabel(item.JobType) }</small>
 										<button class="button button--quiet" type="button" data-plan-job={ item.JobID } data-duration={ fmt.Sprint(item.EstimatedHackMinutes) } data-title={ item.CustomerName + " · " + item.JobNumber }>Einplanen</button>
 									</article>
 								}
@@ -42,12 +52,29 @@ templ Calendar(data CalendarData) {
 						</aside>
 					}
 					<section class="calendar-board" aria-label="Terminplan">
+						<div class="calendar-quick-controls" data-calendar-controls aria-label="Kalender schnell steuern">
+							<button class="button button--quiet" type="button" data-calendar-jump="today">Heute</button>
+							<button class="button button--quiet" type="button" data-calendar-jump="tomorrow">Morgen</button>
+							<button class="button button--quiet" type="button" data-calendar-jump="next-week">Nächste Woche</button>
+							<label>Datum <input type="date" data-calendar-date aria-label="Kalenderdatum wählen"/></label>
+							<label class="check-label"><input type="checkbox" data-calendar-weekends checked/> Wochenende</label>
+						</div>
+						<div class="calendar-legend" aria-label="Kalenderlegende">
+							<span><i class="appointment-badge--proposal" aria-hidden="true"></i> Vorschlag</span>
+							<span><i class="appointment-badge--fixed" aria-hidden="true"></i> Fixiert</span>
+							<span><i class="appointment-badge--cancelled" aria-hidden="true"></i> Abgesagt</span>
+							<span><i class="calendar-legend__now" aria-hidden="true"></i> Aktuelle Zeit</span>
+							if data.Shell.Actor.Role == auth.RoleAdmin {
+								<span class="calendar-edit-hint">Termin ziehen = verschieben · oberen/unteren Rand ziehen = Dauer ändern</span>
+							}
+						</div>
 						<div class="calendar-message" role="status" aria-live="polite" data-calendar-message></div>
 						<div data-calendar data-event-source="/api/v1/calendar" data-csrf={ data.Shell.CSRFToken } data-editable={ fmt.Sprint(data.Shell.Actor.Role == auth.RoleAdmin) }></div>
 						<noscript><p class="form-alert">Die interaktive Tages-/Wochenansicht benötigt JavaScript. Die Agenda und Einplanungsmaske darunter bleiben verfügbar.</p></noscript>
 					</section>
 				</div>
-				<section class="calendar-agenda" aria-labelledby="agenda-title"><h2 id="agenda-title">Kommende Termine</h2>
+				<section class="calendar-agenda" aria-labelledby="agenda-title">
+					<h2 id="agenda-title">Kommende Termine</h2>
 					if len(data.Events) == 0 {
 						<div class="empty-state"><p>In den nächsten Tagen sind keine Termine eingetragen.</p></div>
 					}
@@ -71,38 +98,61 @@ templ planningDialog(data CalendarData) {
 			<div class="dialog-heading"><div><p class="eyebrow">Unverbindlicher Vorschlag</p><h2 id="planning-dialog-title" data-planning-title>Auftrag einplanen</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Dialog schließen">×</button></div>
 			<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="job_id" data-planning-job/>
 			<div class="form-grid"><label>Beginn (Europe/Vienna)<input type="datetime-local" name="starts_at" data-planning-start required/></label><label>Dauer in Minuten<input type="number" name="duration_minutes" min="15" max="10080" step="15" data-planning-duration required/></label></div>
-			<fieldset><legend>Fahrer</legend><div class="choice-grid">
-				for _, item := range data.Options.Drivers {
-					<label class="check-label"><input type="checkbox" name="driver_id" value={ item.ID }/> { item.Name }</label>
-				}
-			</div><label>Primärfahrer<select name="primary_driver_id" required><option value="">Bitte wählen</option>
-				for _, item := range data.Options.Drivers {
-					<option value={ item.ID }>{ item.Name }</option>
-				}
-			</select></label></fieldset>
-			<fieldset><legend>Ressourcen</legend><div class="form-grid">
-				<label>Hackmaschine<select name="chipper_resource_id" required><option value="">Bitte wählen</option>
-					for _, item := range data.Options.Resources {
-						if item.Type == resource.TypeChipper {
+			<fieldset>
+				<legend>Fahrer</legend>
+				<div class="choice-grid">
+					for _, item := range data.Options.Drivers {
+						<label class="check-label"><input type="checkbox" name="driver_id" value={ item.ID }/> { item.Name }</label>
+					}
+				</div>
+				<label>
+					Primärfahrer
+					<select name="primary_driver_id" required>
+						<option value="">Bitte wählen</option>
+						for _, item := range data.Options.Drivers {
 							<option value={ item.ID }>{ item.Name }</option>
 						}
-					}
-				</select></label>
-				<label>Transportmittel (falls intern)<select name="transport_resource_id"><option value="">Keines</option>
-					for _, item := range data.Options.Resources {
-						if item.Type == resource.TypeTransportVehicle {
-							<option value={ item.ID }>{ item.Name }</option>
-						}
-					}
-				</select></label>
-				<label>Anhänger (optional)<select name="trailer_resource_id"><option value="">Keiner</option>
-					for _, item := range data.Options.Resources {
-						if item.Type == resource.TypeTrailer {
-							<option value={ item.ID }>{ item.Name }</option>
-						}
-					}
-				</select></label>
-			</div></fieldset>
+					</select>
+				</label>
+			</fieldset>
+			<fieldset>
+				<legend>Ressourcen</legend>
+				<div class="form-grid">
+					<label>
+						Hackmaschine
+						<select name="chipper_resource_id" required>
+							<option value="">Bitte wählen</option>
+							for _, item := range data.Options.Resources {
+								if item.Type == resource.TypeChipper {
+									<option value={ item.ID }>{ item.Name }</option>
+								}
+							}
+						</select>
+					</label>
+					<label>
+						Transportmittel (falls intern)
+						<select name="transport_resource_id">
+							<option value="">Keines</option>
+							for _, item := range data.Options.Resources {
+								if item.Type == resource.TypeTransportVehicle {
+									<option value={ item.ID }>{ item.Name }</option>
+								}
+							}
+						</select>
+					</label>
+					<label>
+						Anhänger (optional)
+						<select name="trailer_resource_id">
+							<option value="">Keiner</option>
+							for _, item := range data.Options.Resources {
+								if item.Type == resource.TypeTrailer {
+									<option value={ item.ID }>{ item.Name }</option>
+								}
+							}
+						</select>
+					</label>
+				</div>
+			</fieldset>
 			<label>Begründung für Verfügbarkeits-Override (nur falls nötig)<textarea name="override_reason" maxlength="1000"></textarea></label>
 			<div class="form-alert" role="alert" hidden data-planning-error></div>
 			<div class="form-actions"><button class="button" type="submit">Vorschlag speichern</button><button class="button button--quiet" type="button" data-dialog-close>Abbrechen</button></div>
@@ -115,12 +165,50 @@ templ appointmentDialog(csrf string, admin bool) {
 	<dialog class="planning-dialog" data-appointment-dialog aria-labelledby="appointment-dialog-title">
 		<div class="dialog-heading"><div><p class="eyebrow">Termindetail</p><h2 id="appointment-dialog-title" data-appointment-title>Termin</h2></div><button class="icon-button" type="button" data-appointment-close aria-label="Dialog schließen">×</button></div>
 		<div data-appointment-detail></div>
-		if admin {
-			<div class="appointment-actions" data-appointment-actions>
+		<div class="appointment-actions" data-appointment-actions>
+			<div class="form-alert" role="alert" tabindex="-1" hidden data-appointment-error></div>
+			if admin {
+				<fieldset data-appointment-reschedule hidden>
+					<legend>Terminzeit ändern</legend>
+					<div class="form-grid">
+						<label>Beginn (Europe/Vienna)<input type="datetime-local" data-appointment-start required/></label>
+						<label>Dauer in Minuten<input type="number" min="15" max="10080" step="15" data-appointment-duration required/></label>
+					</div>
+					<div class="duration-shortcuts" aria-label="Dauer schnell ändern">
+						<button class="button button--quiet" type="button" data-appointment-duration-adjust="-30">−30 Min.</button>
+						<button class="button button--quiet" type="button" data-appointment-duration-adjust="-15">−15 Min.</button>
+						<button class="button button--quiet" type="button" data-appointment-duration-adjust="15">+15 Min.</button>
+						<button class="button button--quiet" type="button" data-appointment-duration-adjust="30">+30 Min.</button>
+					</div>
+					<label>Begründung für Verfügbarkeits-Override (nur falls nötig)<textarea data-appointment-move-override maxlength="1000" rows="2"></textarea></label>
+					<button class="button button--quiet" type="button" data-appointment-reschedule-submit>Zeit und Dauer speichern</button>
+					<p class="form-hint">Verschieben und Dauer ändern sind hier ohne Drag-and-drop und vollständig per Tastatur möglich.</p>
+				</fieldset>
+				<fieldset data-appointment-swap-panel hidden>
+					<legend>Zeitfenster tauschen</legend>
+					<label>Mit Vorschlag tauschen<select data-appointment-swap-target><option value="">Bitte wählen</option></select></label>
+					<button class="button button--quiet" type="button" data-appointment-swap>Zeitfenster tauschen</button>
+					<p class="form-hint">Nur Entwürfe und Vorschläge können getauscht werden. Beide Versionsstände und Belegungen werden atomisch geprüft.</p>
+				</fieldset>
+				<label data-without-notification hidden>Begründung für Fixierung oder Verschiebung ohne Nachricht<textarea data-without-notification-reason maxlength="1000" rows="3"></textarea></label>
 				<button class="button" type="button" data-appointment-fix>Termin fixieren</button>
+				<div data-confirmation-admin hidden><label>Begründung für Bestätigungsaktion<textarea data-confirmation-admin-reason maxlength="500" rows="3"></textarea></label><div class="action-row"><button class="button button--quiet" type="button" data-confirmation-reissue>Neuen Link senden</button><button class="button button--quiet" type="button" data-confirmation-reset>Antwort zurücksetzen</button></div></div>
 				<label>Absagegrund<input data-appointment-cancel-reason maxlength="1000"/></label><button class="button button--danger" type="button" data-appointment-cancel>Termin absagen</button>
-			</div>
-		}
+				<fieldset data-appointment-reopen-panel hidden>
+					<legend>Abgesagten Termin wieder öffnen</legend>
+					<label>Begründung<textarea data-appointment-reopen-reason maxlength="1000" rows="2" required></textarea></label>
+					<label>Begründung für Verfügbarkeits-Override (nur falls nötig)<textarea data-appointment-reopen-override maxlength="1000" rows="2"></textarea></label>
+					<button class="button button--quiet" type="button" data-appointment-reopen>Als Vorschlag wieder öffnen</button>
+					<p class="form-hint">Der Termin wird nicht fixiert und es wird keine Nachricht versendet.</p>
+				</fieldset>
+			}
+			<fieldset data-appointment-complete-panel hidden>
+				<legend>Auftrag abschließen</legend>
+				<label data-appointment-complete-override hidden>Begründung für vorzeitigen Abschluss<textarea data-appointment-complete-override-reason maxlength="1000" rows="2"></textarea></label>
+				<button class="button" type="button" data-appointment-complete>Termin und Auftrag erledigen</button>
+				<p class="form-hint">Der Abschluss ist endgültig. Fahrer benötigen die Zuweisung, das Abschlussrecht und einen bereits begonnenen Termin.</p>
+			</fieldset>
+		</div>
 		<input type="hidden" value={ csrf } data-appointment-csrf/>
 	</dialog>
 }
@@ -153,9 +241,37 @@ func AppointmentStatusLabel(lifecycle appointment.Lifecycle, confirmation appoin
 	}
 }
 
-func calendarLocalDateTime(value time.Time) string { return value.In(viennaLocation()).Format("Mo, 02.01. · 15:04") }
+func calendarLocalDateTime(value time.Time) string {
+	return value.In(viennaLocation()).Format("Mo, 02.01. · 15:04")
+}
 func calendarLocalTime(value time.Time) string { return value.In(viennaLocation()).Format("15:04") }
-func viennaLocation() *time.Location { location, _ := time.LoadLocation("Europe/Vienna"); return location }
-func namesDrivers(items []appointment.DriverAssignment) string { names := make([]string, 0, len(items)); for _, item := range items { names = append(names, item.Name) }; if len(names) == 0 { return "Kein Fahrer" }; return strings.Join(names, ", ") }
-func namesResources(items []appointment.AssignedResource) string { names := make([]string, 0, len(items)); for _, item := range items { names = append(names, item.Name) }; if len(names) == 0 { return "Keine Ressource" }; return strings.Join(names, ", ") }
-func calendarJobTypeLabel(value string) string { if value == "chipping_with_transport" { return "Hacken mit Transport" }; return "Nur hacken" }
+func viennaLocation() *time.Location {
+	location, _ := time.LoadLocation("Europe/Vienna")
+	return location
+}
+func namesDrivers(items []appointment.DriverAssignment) string {
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		names = append(names, item.Name)
+	}
+	if len(names) == 0 {
+		return "Kein Fahrer"
+	}
+	return strings.Join(names, ", ")
+}
+func namesResources(items []appointment.AssignedResource) string {
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		names = append(names, item.Name)
+	}
+	if len(names) == 0 {
+		return "Keine Ressource"
+	}
+	return strings.Join(names, ", ")
+}
+func calendarJobTypeLabel(value string) string {
+	if value == "chipping_with_transport" {
+		return "Hacken mit Transport"
+	}
+	return "Nur hacken"
+}

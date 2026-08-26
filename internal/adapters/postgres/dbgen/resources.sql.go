@@ -29,6 +29,46 @@ func (q *Queries) DeactivateResource(ctx context.Context, arg DeactivateResource
 	return result.RowsAffected(), nil
 }
 
+const getResourceForUpdate = `-- name: GetResourceForUpdate :one
+SELECT resource_type, exclusive, active, version
+FROM resources WHERE id=$1::uuid FOR UPDATE
+`
+
+type GetResourceForUpdateRow struct {
+	ResourceType string
+	Exclusive    bool
+	Active       bool
+	Version      int32
+}
+
+func (q *Queries) GetResourceForUpdate(ctx context.Context, id pgtype.UUID) (GetResourceForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getResourceForUpdate, id)
+	var i GetResourceForUpdateRow
+	err := row.Scan(
+		&i.ResourceType,
+		&i.Exclusive,
+		&i.Active,
+		&i.Version,
+	)
+	return i, err
+}
+
+const hasActiveResourceReservations = `-- name: HasActiveResourceReservations :one
+SELECT EXISTS (
+    SELECT 1 FROM appointment_resources ar
+    JOIN appointments a ON a.id=ar.appointment_id
+    WHERE ar.resource_id=$1::uuid
+      AND ar.active AND a.lifecycle_status IN ('proposal','fixed')
+)::boolean
+`
+
+func (q *Queries) HasActiveResourceReservations(ctx context.Context, resourceID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveResourceReservations, resourceID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const insertResource = `-- name: InsertResource :one
 INSERT INTO resources (resource_type, name, exclusive, capacity_metadata, internal_note)
 VALUES ($1, $2, $3, $4::jsonb,

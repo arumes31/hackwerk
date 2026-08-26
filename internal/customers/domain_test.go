@@ -41,6 +41,56 @@ func TestJobTransportValidation(t *testing.T) {
 			input.TransportMode = TransportExternal
 			input.ExternalTransportConfirmed = true
 		}},
+		{name: "hack duration exceeds storage bound", mutate: func(input *JobInput) {
+			input.EstimatedHackMinutes = MaxJobDurationMinutes + 1
+		}, wantErr: true},
+		{name: "transport duration exceeds storage bound", mutate: func(input *JobInput) {
+			input.JobType = JobTypeChippingWithTransport
+			input.TransportMode = TransportUndecided
+			input.EstimatedTransportMinutes = MaxJobDurationMinutes + 1
+		}, wantErr: true},
+		{name: "transport trips exceed storage bound", mutate: func(input *JobInput) {
+			input.JobType = JobTypeChippingWithTransport
+			input.TransportMode = TransportUndecided
+			input.TransportTripCount = MaxTransportTrips + 1
+		}, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := base
+			if test.mutate != nil {
+				test.mutate(&input)
+			}
+			err := input.Validate()
+			if test.wantErr != errors.Is(err, ErrValidation) {
+				t.Fatalf("Validate() error = %v, want validation error %v", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestJobPileLocationValidation(t *testing.T) {
+	t.Parallel()
+	validLatitude, validLongitude := 48.20849, 16.37208
+	invalidLatitude := 91.0
+	base := JobInput{JobType: JobTypeChippingOnly, VolumeM3: "80", EstimatedHackMinutes: 180, TransportMode: TransportNone, Urgency: UrgencyNormal, Source: SourcePhone}
+	tests := []struct {
+		name    string
+		mutate  func(*JobInput)
+		wantErr bool
+	}{
+		{name: "optional location"},
+		{name: "valid map pin", mutate: func(input *JobInput) {
+			input.PileLatitude, input.PileLongitude, input.PileLocationSource = &validLatitude, &validLongitude, PileSourceMapPin
+		}},
+		{name: "incomplete pair", mutate: func(input *JobInput) { input.PileLatitude = &validLatitude }, wantErr: true},
+		{name: "source without coordinates", mutate: func(input *JobInput) { input.PileLocationSource = PileSourceCoordinates }, wantErr: true},
+		{name: "coordinates without source", mutate: func(input *JobInput) {
+			input.PileLatitude, input.PileLongitude = &validLatitude, &validLongitude
+		}, wantErr: true},
+		{name: "out of range", mutate: func(input *JobInput) {
+			input.PileLatitude, input.PileLongitude, input.PileLocationSource = &invalidLatitude, &validLongitude, PileSourceCoordinates
+		}, wantErr: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -74,5 +124,24 @@ func TestMapsURLDoesNotAcceptArbitraryURL(t *testing.T) {
 	link := MapsURL(CustomerInput{Street: "Waldstraße 9", PostalCode: "4710", Locality: "Test", CountryCode: "AT", AddressFreeform: "https://evil.invalid"})
 	if !strings.HasPrefix(link, "https://www.google.com/maps/search/?") || strings.Contains(link, "evil.invalid") {
 		t.Fatalf("MapsURL() = %q", link)
+	}
+}
+
+func TestMapsURLIsEmptyWithoutAddressOrCoordinates(t *testing.T) {
+	t.Parallel()
+	if link := MapsURL(CustomerInput{}); link != "" {
+		t.Fatalf("MapsURL() = %q, want empty", link)
+	}
+}
+
+func TestWaitlistFilterNormalizesWorkflowAndReviewFlags(t *testing.T) {
+	t.Parallel()
+	filter := WaitlistFilter{Workflow: "not-a-state", Sort: "customer", Direction: "desc", MissingLocation: true, DurationIssue: true}
+	filter.Normalize()
+	if filter.Workflow != "" || filter.Sort != "customer" || filter.Direction != "desc" || !filter.MissingLocation || !filter.DurationIssue {
+		t.Fatalf("Normalize() = %#v", filter)
+	}
+	if !DurationNeedsReview(14) || DurationNeedsReview(15) || DurationNeedsReview(720) || !DurationNeedsReview(721) {
+		t.Fatal("DurationNeedsReview() boundaries are wrong")
 	}
 }

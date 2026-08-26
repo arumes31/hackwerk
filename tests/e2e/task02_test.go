@@ -23,6 +23,7 @@ import (
 	"example.invalid/hackplan/internal/buildinfo"
 	"example.invalid/hackplan/internal/config"
 	"example.invalid/hackplan/internal/customers"
+	"example.invalid/hackplan/internal/dashboard"
 	"example.invalid/hackplan/internal/web"
 	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
@@ -47,7 +48,7 @@ func TestTask02BrowserJourney(t *testing.T) {
 	}
 	router, err := web.NewRouter(web.Dependencies{
 		Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pool,
-		Build: buildinfo.Info{Version: "e2e"}, Identity: identity, Customers: customerService,
+		Build: buildinfo.Info{Version: "e2e"}, Identity: identity, Customers: customerService, Dashboard: e2eDashboard(t, pool),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +60,7 @@ func TestTask02BrowserJourney(t *testing.T) {
 	options := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(browserPath), chromedp.Headless, chromedp.DisableGPU,
 		chromedp.NoSandbox, chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck,
-		chromedp.UserDataDir(t.TempDir()), chromedp.WindowSize(1280, 900),
+		chromedp.UserDataDir(browserProfileDir(t)), chromedp.WindowSize(1280, 900),
 	)
 	allocatorContext, cancelAllocator := chromedp.NewExecAllocator(context.Background(), options...)
 	t.Cleanup(cancelAllocator)
@@ -67,6 +68,7 @@ func TestTask02BrowserJourney(t *testing.T) {
 	t.Cleanup(cancelBrowser)
 	browserContext, cancelTimeout := context.WithTimeout(browserContext, 180*time.Second)
 	t.Cleanup(cancelTimeout)
+	t.Cleanup(func() { _ = chromedp.Cancel(browserContext) })
 
 	var exceptionLock sync.Mutex
 	exceptions := make([]string, 0)
@@ -78,12 +80,17 @@ func TestTask02BrowserJourney(t *testing.T) {
 		}
 	})
 
+	var rootLocation string
 	var transportInitiallyHidden bool
 	if err := chromedp.Run(browserContext,
-		chromedp.Navigate(server.URL+"/login"),
+		chromedp.Navigate(server.URL+"/"),
 		chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery),
+		chromedp.Location(&rootLocation),
 	); err != nil {
-		t.Fatalf("open login page: %v", err)
+		t.Fatalf("open application root: %v", err)
+	}
+	if !strings.HasSuffix(rootLocation, "/login") {
+		t.Fatalf("application root location = %q, want /login", rootLocation)
 	}
 	if err := chromedp.Run(browserContext,
 		chromedp.SetValue("#username", "driver-e2e", chromedp.ByQuery),
@@ -95,10 +102,28 @@ func TestTask02BrowserJourney(t *testing.T) {
 	if err := runBrowserStep(browserContext, "open intake",
 		chromedp.WaitVisible("a[href='/customers']", chromedp.ByQuery),
 		chromedp.Navigate(server.URL+"/customers/new"),
+		chromedp.WaitVisible("[data-new-customer-panel] summary", chromedp.ByQuery),
+		chromedp.Click("[data-new-customer-panel] summary", chromedp.ByQuery),
 		chromedp.WaitVisible("form[action='/customers']", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector('[data-transport-field]').hidden`, &transportInitiallyHidden),
 	); err != nil {
 		t.Fatalf("open customer intake: %s", browserDiagnostics(browserContext, err))
+	}
+	var invalidSummaryFocused, invalidFieldsAssociated, invalidValuesRetained bool
+	if err := runBrowserStep(browserContext, "validate intake errors",
+		chromedp.SetValue("[name='volume_m3']", "0", chromedp.ByQuery),
+		chromedp.SetValue("[name='hack_duration']", "ungueltig", chromedp.ByQuery),
+		chromedp.Click("form[action='/customers'] button[type='submit']", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-error-summary]", chromedp.ByQuery),
+		chromedp.Poll(`document.activeElement === document.querySelector('[data-error-summary]')`, nil, chromedp.WithPollingTimeout(5*time.Second)),
+		chromedp.Evaluate(`document.activeElement === document.querySelector('[data-error-summary]')`, &invalidSummaryFocused),
+		chromedp.Evaluate(`document.querySelector('#volume_m3').getAttribute('aria-invalid') === 'true' && document.querySelector('#volume_m3').getAttribute('aria-describedby') === 'volume_m3-error'`, &invalidFieldsAssociated),
+		chromedp.Evaluate(`document.querySelector('#volume_m3').value === '0' && document.querySelector('#hack_duration').value === 'ungueltig'`, &invalidValuesRetained),
+	); err != nil {
+		t.Fatalf("validate intake errors: %s", browserDiagnostics(browserContext, err))
+	}
+	if !invalidSummaryFocused || !invalidFieldsAssociated || !invalidValuesRetained {
+		t.Fatalf("invalid form accessibility: focused=%v associated=%v retained=%v", invalidSummaryFocused, invalidFieldsAssociated, invalidValuesRetained)
 	}
 	if err := runBrowserStep(browserContext, "fill customer",
 		chromedp.SetValue("[name='first_name']", "Franz", chromedp.ByQuery),
@@ -126,7 +151,7 @@ func TestTask02BrowserJourney(t *testing.T) {
 		t.Fatalf("submit customer intake: %s", browserDiagnostics(browserContext, err))
 	}
 	if err := chromedp.Run(browserContext,
-		chromedp.WaitVisible("article.job-card", chromedp.ByQuery),
+		chromedp.WaitVisible("details.compact-job-row", chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("customer detail after intake: %s", browserDiagnostics(browserContext, err))
 	}
@@ -142,9 +167,15 @@ func TestTask02BrowserJourney(t *testing.T) {
 	}
 	var mapsURL string
 	var transportVisible, externalConfirmationVisible bool
+	var pickerHorizontalOverflow, pickerTouchTargetTooSmall bool
 	if err := chromedp.Run(browserContext,
 		chromedp.AttributeValue("a[href^='https://www.google.com/maps/search/']", "href", &mapsURL, nil, chromedp.ByQuery),
-		chromedp.Navigate(server.URL+"/customers/"+customerID+"/jobs/new"),
+		chromedp.EmulateViewport(360, 800),
+		chromedp.Navigate(server.URL+"/customers/new"),
+		chromedp.WaitVisible("a[href='/customers/"+customerID+"/jobs/new']", chromedp.ByQuery),
+		chromedp.Evaluate(`document.documentElement.scrollWidth > document.documentElement.clientWidth + 1`, &pickerHorizontalOverflow),
+		chromedp.Evaluate(`(() => { const target=document.querySelector('[data-existing-customer-job]'); const box=target.getBoundingClientRect(); return box.width < 44 || box.height < 44; })()`, &pickerTouchTargetTooSmall),
+		chromedp.Click("a[href='/customers/"+customerID+"/jobs/new']", chromedp.ByQuery),
 		chromedp.WaitVisible("[data-job-type]", chromedp.ByQuery),
 		chromedp.Evaluate(`(() => { const e=document.querySelector('[data-job-type]'); e.value='chipping_with_transport'; e.dispatchEvent(new Event('change',{bubbles:true})); return !document.querySelector('[data-transport-field]').hidden; })()`, &transportVisible),
 		chromedp.Evaluate(`(() => { const e=document.querySelector('[data-transport-mode]'); e.value='external'; e.dispatchEvent(new Event('change',{bubbles:true})); return !document.querySelector('[data-external-confirmation]').hidden; })()`, &externalConfirmationVisible),
@@ -156,12 +187,13 @@ func TestTask02BrowserJourney(t *testing.T) {
 		chromedp.SetValue("[name='region']", "Unterneukirchen", chromedp.ByQuery),
 		chromedp.SetValue("[name='preference_text']", "Oktober", chromedp.ByQuery),
 		chromedp.Click("form[data-transport-form] button[type='submit']", chromedp.ByQuery),
-		chromedp.WaitVisible("article.job-card:nth-of-type(2)", chromedp.ByQuery),
+		chromedp.WaitVisible("details.compact-job-row:nth-of-type(2)", chromedp.ByQuery),
+		chromedp.EmulateViewport(1280, 900),
 	); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(mapsURL, "https://www.google.com/maps/search/") || !transportVisible || !externalConfirmationVisible {
-		t.Fatalf("maps = %q, transport visible = %v, external confirmation visible = %v", mapsURL, transportVisible, externalConfirmationVisible)
+	if !strings.HasPrefix(mapsURL, "https://www.google.com/maps/search/") || !transportVisible || !externalConfirmationVisible || pickerHorizontalOverflow || pickerTouchTargetTooSmall {
+		t.Fatalf("maps=%q transport=%v external=%v picker overflow=%v touch too small=%v", mapsURL, transportVisible, externalConfirmationVisible, pickerHorizontalOverflow, pickerTouchTargetTooSmall)
 	}
 
 	var jobCount int
@@ -188,12 +220,14 @@ func TestTask02BrowserJourney(t *testing.T) {
 	var horizontalOverflow bool
 	var screenshot []byte
 	if err := runBrowserStep(browserContext, "logout driver",
-		chromedp.Click("form[action='/logout'] button[type='submit']", chromedp.ByQuery),
+		chromedp.Click("[data-account-menu] summary", chromedp.ByQuery),
+		chromedp.WaitVisible("form[action='/logout'] button[type='submit']", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector("[data-account-menu] form[action='/logout']").requestSubmit()`, nil),
+		chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("logout driver: %s", browserDiagnostics(browserContext, err))
 	}
 	if err := runBrowserStep(browserContext, "login admin",
-		chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery),
 		chromedp.SetValue("#username", "admin-e2e", chromedp.ByQuery),
 		chromedp.SetValue("#password", adminPassword, chromedp.ByQuery),
 		chromedp.Click("form[action='/login'] button[type='submit']", chromedp.ByQuery),
@@ -209,13 +243,14 @@ func TestTask02BrowserJourney(t *testing.T) {
 		t.Fatalf("submit customer search: %s", browserDiagnostics(browserContext, err))
 	}
 	if err := runBrowserStep(browserContext, "inspect search results",
-		chromedp.WaitVisible("a[href='/customers/"+customerID+"']", chromedp.ByQuery),
+		chromedp.WaitVisible("form[action='/recent/customers/"+customerID+"']", chromedp.ByQuery),
 		chromedp.Location(&searchLocation),
 	); err != nil {
 		t.Fatalf("inspect customer search: %s", browserDiagnostics(browserContext, err))
 	}
 	if err := runBrowserStep(browserContext, "open customer detail",
-		chromedp.Click("a[href='/customers/"+customerID+"']", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector("form[action='/recent/customers/`+customerID+`']").requestSubmit()`, nil),
+		chromedp.WaitVisible("details.edit-card summary", chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("open customer detail: %s", browserDiagnostics(browserContext, err))
 	}
@@ -231,8 +266,8 @@ func TestTask02BrowserJourney(t *testing.T) {
 		chromedp.WaitNotPresent("details.edit-card[open]", chromedp.ByQuery),
 		chromedp.EmulateViewport(360, 800),
 		chromedp.Navigate(server.URL+"/waitlist?sort=volume&direction=desc"),
-		chromedp.WaitVisible("article.waitlist-card", chromedp.ByQuery),
-		chromedp.Text("article.waitlist-card", &firstWaitlistText, chromedp.ByQuery),
+		chromedp.WaitVisible(".waitlist-table tbody tr", chromedp.ByQuery),
+		chromedp.Text(".waitlist-table tbody tr", &firstWaitlistText, chromedp.ByQuery),
 		chromedp.Evaluate(`document.documentElement.scrollWidth > window.innerWidth`, &horizontalOverflow),
 		chromedp.FullScreenshot(&screenshot, 90),
 	); err != nil {
@@ -264,6 +299,21 @@ func TestTask02BrowserJourney(t *testing.T) {
 	}
 }
 
+func e2eDashboard(t *testing.T, pool *pgxpool.Pool) *dashboard.Service {
+	t.Helper()
+	location, err := time.LoadLocation("Europe/Vienna")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := dashboard.New(postgres.NewDashboardStore(pool), dashboard.Config{
+		Location: location, HorizonDays: 14, PendingAfter: 15 * time.Minute, BusinessOpen: "07:00", BusinessClose: "17:00",
+	}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
+}
+
 func runBrowserStep(ctx context.Context, name string, actions ...chromedp.Action) error {
 	stepContext, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -285,6 +335,29 @@ func browserDiagnostics(ctx context.Context, cause error) string {
 		bodyText = bodyText[:500]
 	}
 	return fmt.Sprintf("%v; location=%q; body=%q", cause, location, bodyText)
+}
+
+func browserProfileDir(t *testing.T) string {
+	t.Helper()
+	directory, err := os.MkdirTemp("", "hackwerk-e2e-browser-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			err = os.RemoveAll(directory)
+			if err == nil {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Errorf("remove browser profile %s: %v", directory, err)
+				return
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+	})
+	return directory
 }
 
 func task02Application(t *testing.T, ctx context.Context, databaseURL string) (*pgxpool.Pool, *auth.Service, *customers.Service, string, string) {

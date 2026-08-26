@@ -71,6 +71,22 @@ func (s *ResourceStore) Update(ctx context.Context, actor auth.Actor, id string,
 		return err
 	}
 	return withQueries(ctx, s.pool, func(queries *dbgen.Queries) error {
+		current, getErr := queries.GetResourceForUpdate(ctx, resourceID)
+		if getErr != nil {
+			return getErr
+		}
+		if current.Version != version || !current.Active {
+			return resource.ErrConflict
+		}
+		if current.ResourceType != string(input.Type) || current.Exclusive != input.IsExclusive {
+			reserved, reservedErr := queries.HasActiveResourceReservations(ctx, resourceID)
+			if reservedErr != nil {
+				return reservedErr
+			}
+			if reserved {
+				return resource.ErrConflict
+			}
+		}
 		rows, updateErr := queries.UpdateResource(ctx, dbgen.UpdateResourceParams{
 			ResourceType: string(input.Type), Name: input.Name, Exclusive: input.IsExclusive,
 			CapacityMetadata: capacity, InternalNote: input.InternalNote,
@@ -93,6 +109,20 @@ func (s *ResourceStore) Deactivate(ctx context.Context, actor auth.Actor, id str
 		return resource.ErrNotFound
 	}
 	return withQueries(ctx, s.pool, func(queries *dbgen.Queries) error {
+		current, getErr := queries.GetResourceForUpdate(ctx, resourceID)
+		if getErr != nil {
+			return getErr
+		}
+		if current.Version != version || !current.Active {
+			return resource.ErrConflict
+		}
+		reserved, reservedErr := queries.HasActiveResourceReservations(ctx, resourceID)
+		if reservedErr != nil {
+			return reservedErr
+		}
+		if reserved {
+			return resource.ErrConflict
+		}
 		rows, updateErr := queries.DeactivateResource(ctx, dbgen.DeactivateResourceParams{ID: resourceID, ExpectedVersion: version})
 		if updateErr != nil {
 			return updateErr

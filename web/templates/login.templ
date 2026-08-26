@@ -1,0 +1,42 @@
+package templates
+
+type LoginData struct {
+	Page     PageData
+	Username string
+	Error    string
+}
+
+templ Login(data LoginData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHeadWithStyles(data.Page, "Anmelden – "+data.Page.AppName, data.Page.LoginOriginalCSSPath, data.Page.LoginCSSPath)
+		<body class="login-body">
+			<div class="connectivity-banner" role="status" aria-live="polite" data-connectivity-banner hidden></div>
+			<a class="skip-link" href="#hauptinhalt">Zum Anmeldeformular springen</a>
+			<div class="shell">
+				@loginOriginalScene()
+				<main id="hauptinhalt" class="login login-access">
+					<section class="card form-card login-card" aria-labelledby="login-heading">
+						<a class="brand login-brand" href="/" aria-label={ data.Page.AppName + " Startseite" }><span class="brand-mark" aria-hidden="true">H</span><span>{ data.Page.AppName }</span></a>
+						<p class="eyebrow">Interner Zugang</p>
+						<h1 id="login-heading">Anmelden</h1>
+						<p class="lede">Planung von Hackeinsätzen, Maschine und Transport an einem Ort.</p>
+						if data.Error != "" {
+							<div class="form-alert" role="alert" tabindex="-1">{ data.Error }</div>
+						}
+						<form method="post" action="/login" class="form-stack login-form">
+							<label for="username">Benutzername</label>
+							<input id="username" name="username" value={ data.Username } autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus/>
+							<label for="password">Passwort</label>
+							<input id="password" name="password" type="password" autocomplete="current-password" required/>
+							<button class="button login-form__submit" type="submit">Sicher anmelden</button>
+						</form>
+						<p class="login-card__note">Nur für Administratoren und Fahrer. Keine öffentliche Registrierung.</p>
+					</section>
+				</main>
+			</div>
+			<div class="visually-hidden" aria-live="polite" data-live-status></div>
+			<script data-login-background-loader data-login-background-src={ data.Page.LoginBackgroundJSPath } type="module" src={ data.Page.LoginLoaderJSPath }></script>
+		</body>
+	</html>
+}

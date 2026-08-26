@@ -1,9 +1,15 @@
+-- name: LockSchedulingMutation :exec
+-- Serialize changes that can invalidate routing/travel-time suggestions. Row
+-- locks alone cannot protect against newly inserted or non-overlapping moves.
+SELECT pg_advisory_xact_lock(1214342235, 1396919884);
+
 -- name: GetAppointmentForUpdate :one
 SELECT a.id::text, a.job_id::text, a.lifecycle_status, a.confirmation_status,
        a.starts_at, a.ends_at, a.buffer_before_minutes, a.buffer_after_minutes,
        COALESCE(a.availability_override_reason, '')::text AS availability_override_reason,
+       COALESCE(a.cancellation_reason, '')::text AS cancellation_reason,
        a.version, j.workflow_status, j.job_type, j.transport_mode,
-       j.external_transport_confirmed, j.estimated_hack_minutes
+       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes
 FROM appointments a
 JOIN jobs j ON j.id = a.job_id
 WHERE a.id = sqlc.arg(id)::uuid
@@ -14,7 +20,7 @@ SELECT a.id::text, a.job_id::text, j.job_number, a.lifecycle_status, a.confirmat
        a.starts_at, a.ends_at, a.buffer_before_minutes, a.buffer_after_minutes,
        COALESCE(a.availability_override_reason, '')::text AS availability_override_reason,
        a.version, j.workflow_status, j.job_type, j.transport_mode,
-       j.external_transport_confirmed, j.estimated_hack_minutes
+       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes
 FROM appointments a
 JOIN jobs j ON j.id = a.job_id
 WHERE a.id = sqlc.arg(id)::uuid;
@@ -64,6 +70,17 @@ UPDATE appointments SET lifecycle_status = 'cancelled',
     version = version + 1, updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND version = sqlc.arg(expected_version)
   AND lifecycle_status IN ('draft', 'proposal', 'fixed');
+
+-- name: ReopenCancelledAppointment :execrows
+UPDATE appointments SET lifecycle_status = 'proposal',
+    confirmation_status = 'not_requested',
+    availability_override_reason = NULLIF(sqlc.arg(availability_override_reason)::text, ''),
+    notification_override_reason = NULL,
+    fixed_by_user_id = NULL, fixed_at = NULL,
+    cancelled_by_user_id = NULL, cancelled_at = NULL, cancellation_reason = NULL,
+    version = version + 1, updated_at = now()
+WHERE id = sqlc.arg(id)::uuid AND version = sqlc.arg(expected_version)
+  AND lifecycle_status = 'cancelled';
 
 -- name: SetAppointmentCompleted :execrows
 UPDATE appointments SET lifecycle_status = 'completed',
@@ -116,9 +133,11 @@ FROM appointments a WHERE a.id = d.appointment_id AND a.id = sqlc.arg(appointmen
 -- name: RefreshAppointmentResourceReservations :exec
 UPDATE appointment_resources r SET
     active = a.lifecycle_status IN ('proposal', 'fixed'),
+    exclusive = source.exclusive,
     reserved_starts_at = a.starts_at - make_interval(mins => a.buffer_before_minutes),
     reserved_ends_at = a.ends_at + make_interval(mins => a.buffer_after_minutes)
-FROM appointments a WHERE a.id = r.appointment_id AND a.id = sqlc.arg(appointment_id)::uuid;
+FROM appointments a, resources source
+WHERE a.id = r.appointment_id AND source.id=r.resource_id AND a.id = sqlc.arg(appointment_id)::uuid;
 
 -- name: SetJobWorkflow :exec
 UPDATE jobs SET workflow_status = sqlc.arg(workflow_status), version = version + 1, updated_at = now()
@@ -134,9 +153,9 @@ SELECT sqlc.arg(job_id)::uuid
 WHERE NOT EXISTS (SELECT 1 FROM waitlist_entries WHERE job_id = sqlc.arg(job_id)::uuid AND removed_at IS NULL);
 
 -- name: InsertOutboxEvent :exec
-INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload, idempotency_key)
+INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload, idempotency_key, status, processed_at)
 VALUES (sqlc.arg(event_type), 'appointment', sqlc.arg(aggregate_id)::uuid,
-        sqlc.arg(payload)::jsonb, sqlc.arg(idempotency_key))
+        sqlc.arg(payload)::jsonb, sqlc.arg(idempotency_key), 'processed', now())
 ON CONFLICT (idempotency_key) DO NOTHING;
 
 -- name: ListAppointmentDrivers :many
@@ -157,13 +176,30 @@ SELECT a.id::text, a.job_id::text, j.job_number, a.lifecycle_status, a.confirmat
        j.job_type, j.volume_m3::text, c.id::text AS customer_id,
        concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, ''))::text AS customer_name,
        c.locality, c.street, c.postal_code,
-       COALESCE(c.latitude::text, '')::text AS latitude,
-       COALESCE(c.longitude::text, '')::text AS longitude
+       COALESCE(j.pile_latitude::text, '')::text AS latitude,
+       COALESCE(j.pile_longitude::text, '')::text AS longitude
 FROM appointments a
 JOIN jobs j ON j.id = a.job_id
 JOIN customers c ON c.id = j.customer_id
 WHERE a.starts_at < sqlc.arg(to_utc)::timestamptz AND a.ends_at > sqlc.arg(from_utc)::timestamptz
 ORDER BY a.starts_at, a.id;
+
+-- name: GetAppointmentDetail :one
+SELECT a.id::text, a.job_id::text, j.job_number, a.lifecycle_status, a.confirmation_status,
+       a.starts_at, a.ends_at, a.buffer_before_minutes, a.buffer_after_minutes, a.version,
+       j.workflow_status, j.job_type, j.transport_mode, j.external_transport_confirmed,
+       j.estimated_hack_minutes, j.estimated_transport_minutes, j.volume_m3::text, c.id::text AS customer_id,
+       concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, ''))::text AS customer_name,
+       c.locality, c.street, c.postal_code,
+       COALESCE(j.pile_latitude::text, '')::text AS latitude,
+       COALESCE(j.pile_longitude::text, '')::text AS longitude,
+       COALESCE(c.phone_raw, '')::text AS phone,
+       COALESCE(c.email::text, '')::text AS email,
+       c.notification_preference
+FROM appointments a
+JOIN jobs j ON j.id = a.job_id
+JOIN customers c ON c.id = j.customer_id
+WHERE a.id = sqlc.arg(id)::uuid;
 
 -- name: ListActiveDriversForPlanning :many
 SELECT id::text, display_name, can_complete_jobs FROM drivers WHERE active ORDER BY lower(display_name), id;
@@ -210,6 +246,22 @@ SELECT (
     )
 )::boolean;
 
+-- name: LockAppointmentDrivers :many
+SELECT d.id::text
+FROM appointment_drivers ad
+JOIN drivers d ON d.id = ad.driver_id
+WHERE ad.appointment_id = sqlc.arg(appointment_id)::uuid
+ORDER BY d.id
+FOR SHARE OF d;
+
+-- name: LockAppointmentResources :many
+SELECT r.id::text
+FROM appointment_resources ar
+JOIN resources r ON r.id = ar.resource_id
+WHERE ar.appointment_id = sqlc.arg(appointment_id)::uuid
+ORDER BY r.id
+FOR SHARE OF r;
+
 -- name: ListWaitlistForPlanning :many
 SELECT w.id::text AS waitlist_id, j.id::text AS job_id, j.job_number,
        j.job_type, j.volume_m3::text, j.estimated_hack_minutes,
@@ -223,20 +275,38 @@ ORDER BY w.manual_priority DESC, w.entered_at, w.id;
 
 -- name: FindAppointmentConflicts :many
 SELECT 'driver'::text AS conflict_type, d.driver_id::text AS subject_id, dr.display_name AS subject_name,
-       a.id::text AS appointment_id, a.starts_at, a.ends_at
+       a.id::text AS appointment_id, a.starts_at, a.ends_at, j.job_number,
+       concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, ''))::text AS customer_name
 FROM appointment_drivers d
 JOIN drivers dr ON dr.id = d.driver_id
 JOIN appointments a ON a.id = d.appointment_id
+JOIN jobs j ON j.id=a.job_id
+JOIN customers c ON c.id=j.customer_id
 WHERE d.active AND d.driver_id = ANY(sqlc.arg(driver_ids)::uuid[])
   AND d.reserved_range && tstzrange(sqlc.arg(from_utc)::timestamptz, sqlc.arg(to_utc)::timestamptz, '[)')
   AND (sqlc.arg(exclude_appointment_id)::text = '' OR d.appointment_id <> sqlc.arg(exclude_appointment_id)::uuid)
 UNION ALL
 SELECT 'resource'::text, r.resource_id::text, rs.name,
-       a.id::text, a.starts_at, a.ends_at
+       a.id::text, a.starts_at, a.ends_at, j.job_number,
+       concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, ''))::text
 FROM appointment_resources r
 JOIN resources rs ON rs.id = r.resource_id
 JOIN appointments a ON a.id = r.appointment_id
+JOIN jobs j ON j.id=a.job_id
+JOIN customers c ON c.id=j.customer_id
 WHERE r.active AND r.exclusive AND r.resource_id = ANY(sqlc.arg(resource_ids)::uuid[])
   AND r.reserved_range && tstzrange(sqlc.arg(from_utc)::timestamptz, sqlc.arg(to_utc)::timestamptz, '[)')
   AND (sqlc.arg(exclude_appointment_id)::text = '' OR r.appointment_id <> sqlc.arg(exclude_appointment_id)::uuid)
 ORDER BY starts_at, conflict_type, subject_name;
+
+-- name: PrepareAppointmentSwap :execrows
+UPDATE appointments
+SET lifecycle_status='draft', updated_at=now()
+WHERE id=sqlc.arg(id)::uuid AND version=sqlc.arg(expected_version)
+  AND lifecycle_status IN ('draft', 'proposal');
+
+-- name: RestoreAppointmentSwapStatus :execrows
+UPDATE appointments
+SET lifecycle_status=sqlc.arg(lifecycle_status), updated_at=now()
+WHERE id=sqlc.arg(id)::uuid AND version=sqlc.arg(expected_version)
+  AND lifecycle_status='draft';

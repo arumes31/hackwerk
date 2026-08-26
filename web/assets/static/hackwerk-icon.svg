@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="HackWerk">
+  <rect width="192" height="192" rx="48" fill="#f3efe4"/>
+  <path d="M96 20c35 0 63 25 63 60 0 42-31 84-63 92-32-8-63-50-63-92 0-35 28-60 63-60Z" fill="#214f3a"/>
+  <path d="M62 56h23v29h22V56h23v82h-23v-31H85v31H62Z" fill="#fffdf7"/>
+</svg>

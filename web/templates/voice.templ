@@ -1,0 +1,208 @@
+package templates
+
+import (
+	"example.invalid/hackplan/internal/customers"
+	"example.invalid/hackplan/internal/voice"
+	"fmt"
+)
+
+type VoiceCaptureData struct {
+	Shell                     ShellData
+	Enabled, ExternalProvider bool
+	MaxBytes, MaxSeconds      int
+	ProviderNotice            string
+}
+
+type VoiceReviewData struct {
+	Shell      ShellData
+	Draft      voice.Draft
+	Values     IntakeValues
+	Duplicates []customers.Duplicate
+	Error      string
+}
+
+templ VoiceCapture(data VoiceCaptureData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data.Shell.Page, "Spracheingabe – "+data.Shell.Page.AppName)
+		<body>
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page">
+				<div class="page-heading">
+					<div><p class="eyebrow">Kontrollierte Erfassung</p><h1>Neuen Auftrag per Sprache erfassen</h1><p>Die Aufnahme erzeugt ausschließlich einen prüfbaren Entwurf. Sie speichert keinen Kunden und plant keinen Termin.</p></div>
+					<a class="button button--quiet" href="/customers/new">Manuell erfassen</a>
+				</div>
+				if !data.Enabled {
+					<div class="form-alert" role="status"><strong>Spracheingabe ist deaktiviert.</strong> Die vollständige manuelle Erfassung steht weiterhin zur Verfügung.</div>
+				} else {
+					<section class="voice-capture" data-voice-capture data-max-seconds={ fmt.Sprint(data.MaxSeconds) } data-csrf={ data.Shell.CSRFToken }>
+						<div class="privacy-notice">
+							<h2>Vor der Aufnahme</h2>
+							<p>Maximal { fmt.Sprint(data.MaxSeconds) } Sekunden und { fmt.Sprint(data.MaxBytes / (1 << 20)) } MiB. Audio liegt nur im begrenzten temporären Speicher und wird nach dem Transkriptionsversuch gelöscht.</p>
+							if data.ExternalProvider {
+								<p><strong>Externer Anbieter:</strong> { data.ProviderNotice }</p>
+							}
+						</div>
+						<div class="voice-controls">
+							<button class="button" type="button" data-voice-start>Aufnahme starten</button>
+							<button class="button button--quiet" type="button" data-voice-pause disabled>Pause</button>
+							<button class="button button--danger" type="button" data-voice-stop disabled>Stoppen</button>
+							<button class="button button--quiet" type="button" data-voice-cancel disabled>Abbrechen</button>
+							<span class="status-badge" data-voice-timer>00:00</span>
+						</div>
+						<p data-voice-status role="status">Das Mikrofon wird erst nach „Aufnahme starten“ angefragt.</p>
+						<form data-voice-upload>
+							<label>Oder vorhandene Audiodatei prüfen und hochladen<input type="file" name="audio" accept="audio/webm,audio/ogg,audio/wav,audio/mp4,video/webm,video/mp4" required/></label>
+							<label>Dauer in Sekunden<input name="duration_seconds" type="number" min="1" max={ fmt.Sprint(data.MaxSeconds) } required/></label>
+							<button class="button button--quiet" type="submit">Datei als Entwurf verarbeiten</button>
+						</form>
+					</section>
+				}
+			</main>
+			@appFooter(data.Shell.Page)
+		</body>
+	</html>
+}
+
+templ VoiceReview(data VoiceReviewData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data.Shell.Page, "Sprachentwurf prüfen – "+data.Shell.Page.AppName)
+		<body>
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page">
+				<div class="page-heading">
+					<div><p class="eyebrow">Menschliche Prüfung erforderlich</p><h1>Sprachentwurf prüfen</h1><p>Status: <span class="status-badge">{ voiceStatusLabel(data.Draft.Status) }</span> · Ablauf { data.Draft.ExpiresAt.In(viennaLocation()).Format("02.01.2006 15:04") }</p></div>
+					<a class="button button--quiet" href="/customers/new">Stattdessen manuell erfassen</a>
+				</div>
+				if data.Draft.Status == voice.StatusFailed {
+					<div class="form-alert" role="alert">Die Transkription ist fehlgeschlagen. Audio wurde gelöscht. Sie können bewusst neu aufnehmen oder manuell erfassen.</div>
+					<a class="button" href="/voice">Neu aufnehmen</a>
+				} else if data.Draft.Status == voice.StatusExpired {
+					<div class="form-alert" role="alert">Dieser Entwurf ist abgelaufen und enthält keine weiter nutzbaren Daten.</div>
+				} else if data.Draft.Status == voice.StatusCommitted {
+					<div class="form-alert">Dieser Entwurf wurde bereits übernommen.</div>
+					<a class="button" href={ "/customers/" + data.Draft.Committed.CustomerID }>Zur Kundenakte</a>
+				} else {
+					if data.Error != "" {
+						<div class="form-alert" role="alert">{ data.Error }</div>
+					}
+					<div class="voice-review-grid">
+						<aside class="transcript-card">
+							<h2>Transkript</h2>
+							<p>{ data.Draft.Transcript }</p>
+							<p><small>Provider { data.Draft.ProviderName } · Parser { data.Draft.ParserVersion } · Gesamtkonfidenz { fmt.Sprintf("%.0f %%", data.Draft.OverallConfidence*100) }</small></p>
+							for _, warning := range data.Draft.Warnings {
+								<p class="confidence-warning">⚠ { warning }</p>
+							}
+						</aside>
+						<form method="post" action={ "/voice/drafts/" + data.Draft.ID + "/commit" } class="intake-form" data-transport-form>
+							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(data.Draft.Version) }/><input type="hidden" name="notification" value="none"/><input type="hidden" name="source" value="voice"/><input type="hidden" name="transport_mode" value="none" data-transport-default disabled/>
+							<fieldset>
+								<legend>Kunde</legend>
+								<div class="form-grid">
+									<label>
+										<span>Vorname</span> @confidence(data.Draft.Fields.FirstName)
+										<input name="first_name" value={ data.Values.FirstName }/>
+									</label>
+									<label>
+										<span>Nachname</span> @confidence(data.Draft.Fields.LastName)
+										<input name="last_name" value={ data.Values.LastName }/>
+									</label>
+									<label class="span-2">
+										<span>Firma</span> @confidence(data.Draft.Fields.CompanyName)
+										<input name="company_name" value={ data.Values.CompanyName }/>
+									</label>
+									<label class="span-2">
+										<span>Freie Adresse</span> @confidence(data.Draft.Fields.AddressFreeform)
+										<textarea name="address_freeform">{ data.Values.AddressFreeform }</textarea>
+									</label>
+									<input type="hidden" name="street"/><input type="hidden" name="postal_code"/><input type="hidden" name="locality"/>
+									<label>Region<input name="region" value={ data.Values.Region }/></label>
+									<label>
+										<span>Telefon</span> @confidence(data.Draft.Fields.PhoneRaw)
+										<input name="phone" type="tel" value={ data.Values.Phone }/>
+									</label>
+									<label>
+										<span>E-Mail</span> @confidence(data.Draft.Fields.Email)
+										<input name="email" type="email" value={ data.Values.Email }/>
+									</label>
+								</div>
+							</fieldset>
+							<fieldset>
+								<legend>Auftrag und Warteliste</legend>
+								<div class="form-grid">
+									<label>Auftragstyp – ausdrücklich prüfen<select name="job_type" required data-job-type><option value="chipping_only" selected?={ data.Values.JobType == "chipping_only" }>Nur Hackmaschine</option><option value="chipping_with_transport" selected?={ data.Values.JobType == "chipping_with_transport" }>Mit Transport</option></select></label>
+									<label>
+										<span>Menge m³</span> @confidence(data.Draft.Fields.VolumeM3)
+										<input name="volume_m3" value={ data.Values.Volume } required/>
+									</label>
+									<label>
+										<span>Hackdauer in Minuten</span> @confidence(data.Draft.Fields.EstimatedHackMinutes)
+										<input name="hack_duration" value={ data.Values.HackDuration } required/>
+									</label>
+									<label data-transport-field>Transportdauer Minuten<input name="transport_duration" value={ data.Values.TransportDuration } data-transport-control/></label>
+									<label data-transport-field>Fahrten<input name="transport_trips" value={ data.Values.Trips } type="number" min="0" data-transport-control/></label>
+									<label data-transport-field>Transportmodus<select name="transport_mode" data-transport-control data-transport-mode><option value="undecided" selected?={ data.Values.TransportMode == "undecided" }>Offen</option><option value="internal" selected?={ data.Values.TransportMode == "internal" }>Intern</option><option value="external" selected?={ data.Values.TransportMode == "external" }>Extern</option></select></label>
+									<label class="check-label" data-external-confirmation><input name="external_confirmed" type="checkbox" value="true"/> externer Transport bestätigt</label>
+									<label>
+										<span>Frühestes Datum</span> @confidence(data.Draft.Fields.PreferredStartDate)
+										<input name="preferred_start" type="date" value={ data.Values.PreferredStart }/>
+									</label>
+									<label>
+										<span>Spätestes Datum</span> @confidence(data.Draft.Fields.PreferredEndDate)
+										<input name="preferred_end" type="date" value={ data.Values.PreferredEnd }/>
+									</label>
+									<label>Dringlichkeit<select name="urgency"><option value="normal" selected?={ data.Values.Urgency == "normal" }>Normal</option><option value="low" selected?={ data.Values.Urgency == "low" }>Niedrig</option><option value="high" selected?={ data.Values.Urgency == "high" }>Hoch</option><option value="urgent" selected?={ data.Values.Urgency == "urgent" }>Dringend</option></select></label>
+									<label class="span-2">
+										<span>Wunsch</span> @confidence(data.Draft.Fields.PreferenceText)
+										<textarea name="preference_text">{ data.Values.PreferenceText }</textarea>
+									</label>
+									<label class="span-2">Interne Bemerkung<textarea name="note">{ data.Values.Note }</textarea></label>
+								</div>
+							</fieldset>
+							if len(data.Duplicates) > 0 {
+								<fieldset class="duplicate-review">
+									<legend>Mögliche Dublette bewusst auflösen</legend>
+									<label class="check-label"><input type="radio" name="existing_customer_id" value="" required/> Neuen Kunden anlegen</label>
+									for _, duplicate := range data.Duplicates {
+										<label class="check-label"><input type="radio" name="existing_customer_id" value={ duplicate.ID } required/> Bestehenden Kunden verwenden: { duplicateName(duplicate) }, { fallback(duplicate.Locality) }</label>
+									}
+									<label class="check-label"><input type="checkbox" name="duplicate_reviewed" value="true" required/> Dublettenhinweis geprüft; keine automatische Zusammenführung</label>
+								</fieldset>
+							}
+							<label class="check-label review-confirm"><input type="checkbox" name="reviewed" value="true" required/> Daten geprüft. Kunde, Auftrag und Wartelisteneintrag jetzt anlegen.</label>
+							<div class="form-actions"><button class="button" type="submit">Daten geprüft und in Warteliste übernehmen</button><p>Es wird kein Termin und keine Nachricht erzeugt.</p></div>
+						</form>
+					</div>
+					<form method="post" action={ "/voice/drafts/" + data.Draft.ID + "/discard" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--danger" type="submit" data-confirm-message="Sprachentwurf wirklich verwerfen? Die erfassten Daten können danach nicht wiederhergestellt werden.">Entwurf verwerfen</button></form>
+				}
+			</main>
+			@appFooter(data.Shell.Page)
+		</body>
+	</html>
+}
+
+templ confidence(field voice.Field) {
+	if field.Value == "" {
+		<span class="confidence confidence--missing">fehlt / prüfen</span>
+	} else if field.Confidence < .75 || len(field.Warnings) > 0 {
+		<span class="confidence confidence--low">{ fmt.Sprintf("%.0f %% · prüfen", field.Confidence*100) }</span>
+	} else {
+		<span class="confidence confidence--high">{ fmt.Sprintf("%.0f %%", field.Confidence*100) }</span>
+	}
+	if field.Source != "" {
+		<small class="field-source">Quelle: { field.Source }</small>
+	}
+}
+
+func voiceStatusLabel(status voice.Status) string {
+	return map[voice.Status]string{voice.StatusTranscribing: "Transkription", voice.StatusNeedsReview: "Prüfung erforderlich", voice.StatusFailed: "Fehlgeschlagen", voice.StatusCommitted: "Übernommen", voice.StatusExpired: "Abgelaufen"}[status]
+}
+
+func duplicateName(value customers.Duplicate) string {
+	if value.CompanyName != "" {
+		return value.CompanyName
+	}
+	return value.FirstName + " " + value.LastName
+}

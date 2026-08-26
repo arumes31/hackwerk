@@ -1,0 +1,173 @@
+package templates
+
+import (
+	"example.invalid/hackplan/internal/notification"
+	"fmt"
+	"net/url"
+	"strings"
+	"time"
+)
+
+type NotificationFailuresData struct {
+	Shell         ShellData
+	Notifications []notification.Status
+	Filter        notification.FailureFilter
+	Callbacks     []notification.CallbackRequest
+	Preview       notification.TemplatePreview
+}
+
+templ NotificationFailures(data NotificationFailuresData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data.Shell.Page, "Versandfehler – "+data.Shell.Page.AppName)
+		<body>
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page">
+				<div class="page-heading"><div><p class="eyebrow">Administration</p><h1>Benachrichtigungen</h1><p>Fehlgeschlagene oder wartende Versandaufträge mit maskierten Zielen und sicheren Providerhinweisen.</p></div><span class="status-badge">{ fmt.Sprint(len(data.Notifications)) } offen</span></div>
+				<section class="table-card" aria-labelledby="notification-table-title">
+					<div class="section-heading"><div><h2 id="notification-table-title">Versandfehler</h2><p>„Geprüft“ dokumentiert die interne Sichtung, ändert aber weder Versandstatus noch Wiederholungslogik.</p></div><a class="button button--quiet" href={ notificationCSVURL(data.Filter) }>CSV exportieren</a></div>
+					<nav class="action-row" aria-label="Versandstatus filtern">
+						<a class={ notificationFilterClass(data.Filter, notification.FailureAll) } href="/admin/notifications">Alle</a>
+						<a class={ notificationFilterClass(data.Filter, notification.FailureFailed) } href="/admin/notifications?status=failed">Fehlgeschlagen</a>
+						<a class={ notificationFilterClass(data.Filter, notification.FailureRetryWait) } href="/admin/notifications?status=retry_wait">Wartet auf Wiederholung</a>
+					</nav>
+					if len(data.Notifications) > 0 {
+						<div class="table-scroll">
+							<table>
+								<caption class="visually-hidden">Offene Versandprobleme</caption>
+								<thead><tr><th>Kanal/Ziel</th><th>Status/Zeit</th><th>Fehler und Handlung</th><th>Referenz</th><th>Prüfung</th><th>Aktion</th></tr></thead>
+								<tbody>
+									for _, value := range data.Notifications {
+										<tr>
+											<td><strong>{ notificationChannelLabel(value.Channel) }</strong><br/><span>{ value.Recipient }</span></td>
+											<td>
+												<span class={ "status-badge status-badge--" + notificationStatusClass(value.State) }>{ notificationStateLabel(value.State) }</span>
+												<br/>
+												<small>{ notificationAge(value.CreatedAt) } · Versuch { fmt.Sprintf("%d/%d", value.AttemptCount, value.MaxAttempts) }</small>
+												if value.State == "retry_wait" && !value.AvailableAt.IsZero() {
+													<br/>
+													<small>Nächster Versuch: { notificationLocalTime(value.AvailableAt) }</small>
+												}
+											</td>
+											<td><code>{ value.ErrorCode }</code><br/><strong>{ value.ErrorSummary }</strong><br/><small>{ value.SuggestedAction }</small></td>
+											<td>
+												if value.ProviderReference == "" {
+													<span>Keine</span>
+												} else {
+													<code>{ value.ProviderReference }</code>
+													<br/>
+													<button class="button button--quiet" type="button" data-copy-value={ value.ProviderReference }>Referenz kopieren</button>
+												}
+											</td>
+											<td>
+												if value.Reviewed {
+													<span class="status-badge">Geprüft</span>
+													<br/>
+													<small>{ notificationLocalTime(value.ReviewedAt) }</small>
+												} else {
+													<form method="post" action={ "/admin/notifications/" + value.ID + "/review" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Als geprüft markieren</button></form>
+												}
+											</td>
+											<td><a class="button button--quiet" href={ "/calendar?appointment=" + url.QueryEscape(value.AppointmentID) }>Termin</a><form method="post" action={ "/admin/notifications/" + value.ID + "/retry" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Erneut senden</button></form></td>
+										</tr>
+									}
+								</tbody>
+							</table>
+						</div>
+					} else {
+						<p>Für diesen Filter sind keine Versandfehler offen.</p>
+					}
+				</section>
+				<section class="table-card" aria-labelledby="callback-table-title">
+					<div class="section-heading"><div><h2 id="callback-table-title">Offene Rückrufwünsche</h2><p>Nur aktive Kundenantworten; Telefonnummern bleiben maskiert.</p></div><span class="status-badge">{ fmt.Sprint(len(data.Callbacks)) } offen</span></div>
+					if len(data.Callbacks) > 0 {
+						<div class="table-scroll">
+							<table>
+								<caption class="visually-hidden">Offene Rückrufwünsche</caption><thead><tr><th>Auftrag</th><th>Kunde/Ort</th><th>Telefon</th><th>Antwort</th><th>Link gültig bis</th><th>Aktion</th></tr></thead>
+								<tbody>
+									for _, value := range data.Callbacks {
+										<tr><td>{ value.JobNumber }</td><td><strong>{ value.CustomerName }</strong><br/>{ value.Locality }</td><td>{ value.Phone }</td><td>{ notificationLocalTime(value.RespondedAt) }</td><td>{ notificationLocalTime(value.ExpiresAt) }</td><td><a class="button button--quiet" href={ "/calendar?appointment=" + url.QueryEscape(value.AppointmentID) }>Termin öffnen</a></td></tr>
+									}
+								</tbody>
+							</table>
+						</div>
+					} else {
+						<p>Derzeit ist kein Rückruf offen.</p>
+					}
+				</section>
+				<section class="table-card" aria-labelledby="template-preview-title">
+					<div class="section-heading"><div><p class="eyebrow">Synthetische Beispieldaten</p><h2 id="template-preview-title">Nachrichtenvorschau</h2><p>Diese Vorschau verwendet keine Kunden-, Termin- oder Providerdaten und löst keinen Versand aus.</p></div></div>
+					<div class="form-grid"><div><h3>E-Mail</h3><p><strong>Betreff:</strong> { data.Preview.Subject }</p><pre>{ data.Preview.Text }</pre></div><div><h3>SMS</h3><p><span class="status-badge">{ fmt.Sprintf("%d Segment(e) · %s", data.Preview.SMSSegments, data.Preview.SMSEncoding) }</span></p><pre>{ data.Preview.SMS }</pre></div></div>
+					<div class="form-alert"><strong>Kanalprüfung vor Fixierung</strong><p>HackWerk zeigt den konfigurierten Kanal und das maskierte Ziel. Fehlen Wunschkanal oder Kontaktdaten, wird der konkrete Grund genannt. Ein anderer vorhandener Kanal wird nur vorgeschlagen und niemals automatisch entgegen der Kundenpräferenz verwendet. Bei Präferenz „Keine“ bleibt eine begründete Adminausnahme erforderlich.</p></div>
+				</section>
+			</main>@appFooter(data.Shell.Page)
+		</body>
+	</html>
+}
+
+func notificationFilterClass(current, expected notification.FailureFilter) string {
+	if current == expected {
+		return "button"
+	}
+	return "button button--quiet"
+}
+
+func notificationCSVURL(filter notification.FailureFilter) string {
+	if filter == notification.FailureAll {
+		return "/admin/notifications/report.csv"
+	}
+	return "/admin/notifications/report.csv?status=" + string(filter)
+}
+
+func notificationLocalTime(value time.Time) string {
+	if value.IsZero() {
+		return "–"
+	}
+	return value.In(viennaLocation()).Format("02.01.2006, 15:04 Uhr")
+}
+
+func notificationAge(value time.Time) string {
+	if value.IsZero() {
+		return "Zeit unbekannt"
+	}
+	duration := time.Since(value)
+	if duration < 0 {
+		return "gerade eingereiht"
+	}
+	if duration < time.Hour {
+		return fmt.Sprintf("seit %d Min.", max(1, int(duration/time.Minute)))
+	}
+	if duration < 24*time.Hour {
+		return fmt.Sprintf("seit %d Std.", int(duration/time.Hour))
+	}
+	return fmt.Sprintf("seit %d Tagen", int(duration/(24*time.Hour)))
+}
+
+func notificationChannelLabel(value string) string {
+	if value == "email" {
+		return "E-Mail"
+	}
+	if value == "sms" {
+		return "SMS"
+	}
+	return value
+}
+
+func notificationStateLabel(value string) string {
+	switch value {
+	case "retry_wait":
+		return "Wartet auf Wiederholung"
+	case "failed":
+		return "Fehlgeschlagen"
+	case "sent":
+		return "Versendet"
+	case "sending":
+		return "Wird versendet"
+	default:
+		return "Eingereiht"
+	}
+}
+
+func notificationStatusClass(value string) string {
+	return strings.ReplaceAll(value, "_", "-")
+}

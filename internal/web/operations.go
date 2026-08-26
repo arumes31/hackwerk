@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -26,7 +27,10 @@ func registerDriverRoutes(router chi.Router, dependencies Dependencies, page tem
 	router.Post("/availability/rules", createAvailabilityRule(drivers, logger, false))
 	router.Post("/availability/rules/{ruleID}", updateAvailabilityRule(drivers, logger, false))
 	router.Post("/availability/rules/{ruleID}/delete", deleteAvailabilityRule(drivers, logger, false))
+	router.Post("/availability/rules/{ruleID}/duplicate", duplicateAvailabilityRule(drivers, logger, false))
+	router.Post("/availability/rules/clear-day", clearAvailabilityDay(drivers, logger, false))
 	router.Post("/availability/exceptions", createAvailabilityException(drivers, logger, false))
+	router.Post("/availability/exceptions/vacation-preset", createVacationPreset(drivers, logger, false))
 	router.Post("/availability/exceptions/{exceptionID}", updateAvailabilityException(drivers, logger, false))
 	router.Post("/availability/exceptions/{exceptionID}/delete", deleteAvailabilityException(drivers, logger, false))
 	router.Get("/api/v1/me/availability", availabilityAPI(drivers, logger, false))
@@ -43,7 +47,10 @@ func registerDriverRoutes(router chi.Router, dependencies Dependencies, page tem
 			driverAdmin.Post("/drivers/{driverID}/availability/rules", createAvailabilityRule(drivers, logger, true))
 			driverAdmin.Post("/drivers/{driverID}/availability/rules/{ruleID}", updateAvailabilityRule(drivers, logger, true))
 			driverAdmin.Post("/drivers/{driverID}/availability/rules/{ruleID}/delete", deleteAvailabilityRule(drivers, logger, true))
+			driverAdmin.Post("/drivers/{driverID}/availability/rules/{ruleID}/duplicate", duplicateAvailabilityRule(drivers, logger, true))
+			driverAdmin.Post("/drivers/{driverID}/availability/rules/clear-day", clearAvailabilityDay(drivers, logger, true))
 			driverAdmin.Post("/drivers/{driverID}/availability/exceptions", createAvailabilityException(drivers, logger, true))
+			driverAdmin.Post("/drivers/{driverID}/availability/exceptions/vacation-preset", createVacationPreset(drivers, logger, true))
 			driverAdmin.Post("/drivers/{driverID}/availability/exceptions/{exceptionID}", updateAvailabilityException(drivers, logger, true))
 			driverAdmin.Post("/drivers/{driverID}/availability/exceptions/{exceptionID}/delete", deleteAvailabilityException(drivers, logger, true))
 		})
@@ -220,6 +227,10 @@ func availabilityPage(service *driver.Service, page templates.PageData, csrfCook
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
 		target := availabilityTarget(session.Actor, request, admin)
+		if !admin && target == "" {
+			http.Redirect(response, request, "/dashboard", http.StatusSeeOther)
+			return
+		}
 		data, err := service.Schedule(request.Context(), session.Actor, target)
 		if err != nil {
 			operationsPageError(response, request, page, logger, err, "Verfügbarkeit nicht verfügbar")
@@ -248,6 +259,43 @@ func createAvailabilityRule(service *driver.Service, logger *slog.Logger, admin 
 		target := availabilityTarget(session.Actor, request, admin)
 		_, err := service.CreateRule(request.Context(), session.Actor, target, ruleInput(request), middleware.GetReqID(request.Context()))
 		availabilityMutationResult(response, request, logger, err, target, admin, "availability_rule_create_rejected")
+	}
+}
+
+func duplicateAvailabilityRule(service *driver.Service, logger *slog.Logger, admin bool) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		target := availabilityTarget(session.Actor, request, admin)
+		weekday, err := strconv.Atoi(request.Form.Get("weekday"))
+		if err == nil {
+			_, err = service.DuplicateRule(request.Context(), session.Actor, target, chi.URLParam(request, "ruleID"), weekday, middleware.GetReqID(request.Context()))
+		}
+		availabilityMutationResult(response, request, logger, err, target, admin, "availability_rule_duplicate_rejected")
+	}
+}
+
+func clearAvailabilityDay(service *driver.Service, logger *slog.Logger, admin bool) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		target := availabilityTarget(session.Actor, request, admin)
+		weekday, err := strconv.Atoi(request.Form.Get("weekday"))
+		refs := make([]driver.RuleRef, 0, len(request.Form["rule_id"]))
+		if err == nil && len(request.Form["rule_id"]) == len(request.Form["rule_version"]) {
+			for index, id := range request.Form["rule_id"] {
+				version, parseErr := parseVersion(request.Form["rule_version"][index])
+				if parseErr != nil {
+					err = parseErr
+					break
+				}
+				refs = append(refs, driver.RuleRef{ID: id, Version: version})
+			}
+		} else if err == nil {
+			err = driver.ErrValidation
+		}
+		if err == nil {
+			err = service.ClearRulesForDay(request.Context(), session.Actor, target, weekday, refs, middleware.GetReqID(request.Context()))
+		}
+		availabilityMutationResult(response, request, logger, err, target, admin, "availability_day_clear_rejected")
 	}
 }
 
@@ -284,6 +332,15 @@ func createAvailabilityException(service *driver.Service, logger *slog.Logger, a
 			_, err = service.CreateException(request.Context(), session.Actor, target, input, middleware.GetReqID(request.Context()))
 		}
 		availabilityMutationResult(response, request, logger, err, target, admin, "availability_exception_create_rejected")
+	}
+}
+
+func createVacationPreset(service *driver.Service, logger *slog.Logger, admin bool) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		target := availabilityTarget(session.Actor, request, admin)
+		err := service.CreateVacationPreset(request.Context(), session.Actor, target, request.Form.Get("local_date"), request.Form.Get("workweek") == "true", request.Form.Get("internal_note"), middleware.GetReqID(request.Context()))
+		availabilityMutationResult(response, request, logger, err, target, admin, "availability_vacation_preset_rejected")
 	}
 }
 
@@ -359,15 +416,23 @@ func availabilityMutationResult(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	location := "/availability"
-	if admin {
-		location = "/admin/drivers/" + target + "/availability"
+	if admin && safeID(target) {
+		location = "/admin/drivers/" + url.PathEscape(target) + "/availability"
 	}
 	http.Redirect(response, request, location, http.StatusSeeOther)
 }
 
 func ruleInput(request *http.Request) driver.RuleInput {
 	weekday, _ := strconv.Atoi(request.Form.Get("weekday"))
-	return driver.RuleInput{Weekday: weekday, LocalStart: request.Form.Get("local_start"), LocalEnd: request.Form.Get("local_end"), ValidFrom: request.Form.Get("valid_from"), ValidUntil: request.Form.Get("valid_until"), Status: driver.RuleStatus(request.Form.Get("status")), InternalNote: request.Form.Get("internal_note")}
+	start := request.Form.Get("start_time")
+	if start == "" {
+		start = request.Form.Get("local_start")
+	}
+	end := request.Form.Get("end_time")
+	if end == "" {
+		end = request.Form.Get("local_end")
+	}
+	return driver.RuleInput{Weekday: weekday, LocalStart: start, LocalEnd: end, ValidFrom: request.Form.Get("valid_from"), ValidUntil: request.Form.Get("valid_until"), Status: driver.RuleStatus(request.Form.Get("status")), InternalNote: request.Form.Get("internal_note")}
 }
 
 func exceptionInput(request *http.Request) (driver.ExceptionInput, error) {

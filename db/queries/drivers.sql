@@ -16,6 +16,9 @@ FROM drivers d
 LEFT JOIN users u ON u.id = d.user_id
 WHERE d.id = sqlc.arg(id)::uuid;
 
+-- name: LockDriverForAvailability :one
+SELECT id::text FROM drivers WHERE id=sqlc.arg(id)::uuid FOR UPDATE;
+
 -- name: InsertDriverProfile :one
 INSERT INTO drivers (user_id, display_name, phone, email, can_complete_jobs, internal_note)
 SELECT NULLIF(sqlc.arg(user_id)::text, '')::uuid, sqlc.arg(display_name), NULLIF(sqlc.arg(phone)::text, ''),
@@ -39,6 +42,19 @@ WHERE drivers.id = sqlc.arg(id)::uuid AND drivers.version = sqlc.arg(expected_ve
 -- name: DeactivateDriverProfile :execrows
 UPDATE drivers SET active = false, version = version + 1, updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND version = sqlc.arg(expected_version) AND active;
+
+-- name: LockDriverProfile :one
+SELECT version, active FROM drivers
+WHERE id=sqlc.arg(id)::uuid
+FOR UPDATE;
+
+-- name: HasActiveDriverReservations :one
+SELECT EXISTS (
+    SELECT 1 FROM appointment_drivers ad
+    JOIN appointments a ON a.id=ad.appointment_id
+    WHERE ad.driver_id=sqlc.arg(driver_id)::uuid
+      AND ad.active AND a.lifecycle_status IN ('proposal','fixed')
+)::boolean;
 
 -- name: ListAvailabilityRulesForDriver :many
 SELECT id::text, driver_id::text, iso_weekday, to_char(local_start, 'HH24:MI')::text AS local_start,
@@ -81,6 +97,17 @@ WHERE id = sqlc.arg(id)::uuid AND driver_id = sqlc.arg(driver_id)::uuid AND vers
 -- name: DeleteAvailabilityRule :execrows
 DELETE FROM availability_rules
 WHERE id = sqlc.arg(id)::uuid AND driver_id = sqlc.arg(driver_id)::uuid AND version = sqlc.arg(expected_version);
+
+-- name: LockAvailabilityRulesForDay :many
+SELECT id::text, version
+FROM availability_rules
+WHERE driver_id=sqlc.arg(driver_id)::uuid AND iso_weekday=sqlc.arg(iso_weekday)
+ORDER BY id
+FOR UPDATE;
+
+-- name: ClearAvailabilityRulesForDay :execrows
+DELETE FROM availability_rules
+WHERE driver_id=sqlc.arg(driver_id)::uuid AND iso_weekday=sqlc.arg(iso_weekday);
 
 -- name: ListAvailabilityExceptionsForDriver :many
 SELECT id::text, driver_id::text, exception_type, all_day,

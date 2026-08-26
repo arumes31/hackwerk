@@ -12,7 +12,7 @@ snapshot() {
 }
 
 snapshot >"$before"
-$(MAKE) generate
+"${MAKE:-make}" generate
 snapshot >"$after"
 
 if ! diff -u "$before" "$after"; then

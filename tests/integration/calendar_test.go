@@ -17,6 +17,7 @@ import (
 	"example.invalid/hackplan/internal/auth"
 	"example.invalid/hackplan/internal/config"
 	"example.invalid/hackplan/internal/driver"
+	"example.invalid/hackplan/internal/resource"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -52,7 +53,7 @@ func TestCalendarReservationsAndAtomicFix(t *testing.T) {
 		t.Fatalf("second active appointment error = %v, want conflict", err)
 	}
 
-	fixed, err := fixture.service.FixAppointment(fixture.ctx, fixture.admin, appointment.MutateInput{ID: first.ID, ExpectedVersion: first.Version, RequestID: "fix"})
+	fixed, err := fixture.service.FixAppointment(fixture.ctx, fixture.admin, appointment.FixInput{MutateInput: appointment.MutateInput{ID: first.ID, ExpectedVersion: first.Version, RequestID: "fix"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,6 +97,99 @@ func TestCalendarReservationsAndAtomicFix(t *testing.T) {
 	}
 }
 
+func TestRescheduleMayOverlapOwnPreviousReservation(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	start := time.Date(2026, 9, 8, 6, 0, 0, 0, time.UTC)
+	proposed := fixture.proposal(
+		t,
+		fixture.job(t, "HW-2026-SELF-OVERLAP"),
+		fixture.driver1,
+		fixture.chipper1,
+		start,
+		3*time.Hour,
+	)
+
+	moved, err := fixture.service.MoveAppointment(fixture.ctx, fixture.admin, appointment.MoveInput{
+		MutateInput: appointment.MutateInput{
+			ID:              proposed.ID,
+			ExpectedVersion: proposed.Version,
+			RequestID:       "move-inside-own-reservation",
+		},
+		StartsAt: start.Add(30 * time.Minute),
+		EndsAt:   start.Add(3*time.Hour + 30*time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("move overlapping own previous reservation: %v", err)
+	}
+
+	resized, err := fixture.service.ResizeAppointment(fixture.ctx, fixture.admin, appointment.ResizeInput{
+		MutateInput: appointment.MutateInput{
+			ID:              moved.ID,
+			ExpectedVersion: moved.Version,
+			RequestID:       "resize-inside-own-reservation",
+		},
+		StartsAt: moved.StartsAt,
+		EndsAt:   moved.EndsAt.Add(30 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("resize overlapping own previous reservation: %v", err)
+	}
+	if !resized.StartsAt.Equal(start.Add(30*time.Minute)) || !resized.EndsAt.Equal(start.Add(4*time.Hour)) {
+		t.Fatalf("resized range = %s..%s", resized.StartsAt, resized.EndsAt)
+	}
+
+	var driverStart, driverEnd, resourceStart, resourceEnd time.Time
+	if err := fixture.pool.QueryRow(fixture.ctx, `
+		SELECT d.reserved_starts_at, d.reserved_ends_at,
+		       r.reserved_starts_at, r.reserved_ends_at
+		FROM appointment_drivers d
+		JOIN appointment_resources r ON r.appointment_id = d.appointment_id
+		WHERE d.appointment_id = $1`, proposed.ID).Scan(
+		&driverStart,
+		&driverEnd,
+		&resourceStart,
+		&resourceEnd,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !driverStart.Equal(resized.StartsAt) || !driverEnd.Equal(resized.EndsAt) ||
+		!resourceStart.Equal(resized.StartsAt) || !resourceEnd.Equal(resized.EndsAt) {
+		t.Fatalf(
+			"reservations not refreshed: driver=%s..%s resource=%s..%s appointment=%s..%s",
+			driverStart,
+			driverEnd,
+			resourceStart,
+			resourceEnd,
+			resized.StartsAt,
+			resized.EndsAt,
+		)
+	}
+
+	blocker := fixture.proposal(
+		t,
+		fixture.job(t, "HW-2026-REAL-OVERLAP"),
+		fixture.driver1,
+		fixture.chipper1,
+		resized.EndsAt,
+		3*time.Hour,
+	)
+	if blocker.Lifecycle != appointment.LifecycleProposal {
+		t.Fatalf("blocker lifecycle = %s", blocker.Lifecycle)
+	}
+	_, err = fixture.service.ResizeAppointment(fixture.ctx, fixture.admin, appointment.ResizeInput{
+		MutateInput: appointment.MutateInput{
+			ID:              resized.ID,
+			ExpectedVersion: resized.Version,
+			RequestID:       "resize-into-other-reservation",
+		},
+		StartsAt: resized.StartsAt,
+		EndsAt:   resized.EndsAt.Add(15 * time.Minute),
+	})
+	if !errors.Is(err, appointment.ErrConflict) {
+		t.Fatalf("resize into other appointment error = %v, want conflict", err)
+	}
+}
+
 func TestConcurrentFixIsIdempotentByVersionAndAtomic(t *testing.T) {
 	fixture := newCalendarFixture(t)
 	start := time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC)
@@ -108,7 +202,7 @@ func TestConcurrentFixIsIdempotentByVersionAndAtomic(t *testing.T) {
 		go func() {
 			defer group.Done()
 			<-gate
-			_, err := fixture.service.FixAppointment(fixture.ctx, fixture.admin, appointment.MutateInput{ID: proposed.ID, ExpectedVersion: proposed.Version, RequestID: "parallel-fix"})
+			_, err := fixture.service.FixAppointment(fixture.ctx, fixture.admin, appointment.FixInput{MutateInput: appointment.MutateInput{ID: proposed.ID, ExpectedVersion: proposed.Version, RequestID: "parallel-fix"}})
 			results <- err
 		}()
 	}
@@ -144,9 +238,9 @@ func TestFixRejectsDeactivatedAssignmentWithoutSideEffects(t *testing.T) {
 	if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE drivers SET active=false WHERE id=$1", fixture.driver1); err != nil {
 		t.Fatal(err)
 	}
-	_, err := fixture.service.FixAppointment(fixture.ctx, fixture.admin, appointment.MutateInput{ID: proposed.ID, ExpectedVersion: proposed.Version, RequestID: "inactive-fix"})
-	if !errors.Is(err, appointment.ErrValidation) {
-		t.Fatalf("inactive assignment fix error = %v, want validation", err)
+	_, err := fixture.service.FixAppointment(fixture.ctx, fixture.admin, appointment.FixInput{MutateInput: appointment.MutateInput{ID: proposed.ID, ExpectedVersion: proposed.Version, RequestID: "inactive-fix"}})
+	if !errors.Is(err, appointment.ErrValidation) && !errors.Is(err, appointment.ErrAvailability) {
+		t.Fatalf("inactive assignment fix error = %v, want validation or availability rejection", err)
 	}
 	var lifecycle, workflow string
 	var outbox int
@@ -158,6 +252,106 @@ func TestFixRejectsDeactivatedAssignmentWithoutSideEffects(t *testing.T) {
 	}
 	if lifecycle != "proposal" || workflow != "planning" || outbox != 0 {
 		t.Fatalf("failed fix lifecycle/workflow/outbox = %s/%s/%d", lifecycle, workflow, outbox)
+	}
+}
+
+func TestAppointmentStoreRevalidatesAvailabilityInsideFixTransaction(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	start := time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC)
+	proposed := fixture.proposal(t, fixture.job(t, "HW-2026-0303"), fixture.driver1, fixture.chipper1, start, 3*time.Hour)
+	if _, err := fixture.pool.Exec(fixture.ctx, `INSERT INTO availability_exceptions
+		(driver_id, exception_type, all_day, starts_at, ends_at)
+		VALUES ($1,'vacation',false,$2,$3)`, fixture.driver1, start, start.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	store := postgres.NewAppointmentStore(fixture.pool)
+	_, err := store.Fix(fixture.ctx, fixture.admin, appointment.FixInput{MutateInput: appointment.MutateInput{
+		ID: proposed.ID, ExpectedVersion: proposed.Version, RequestID: "transactional-availability",
+	}})
+	if !errors.Is(err, appointment.ErrAvailability) {
+		t.Fatalf("store fix error=%v want availability rejection", err)
+	}
+	var lifecycle string
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT lifecycle_status FROM appointments WHERE id=$1", proposed.ID).Scan(&lifecycle); err != nil {
+		t.Fatal(err)
+	}
+	if lifecycle != "proposal" {
+		t.Fatalf("failed transactional revalidation changed lifecycle to %q", lifecycle)
+	}
+}
+
+func TestProposalRejectsDurationShorterThanJobEstimate(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	jobID := fixture.job(t, "HW-2026-0304")
+	if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE jobs SET estimated_hack_minutes=180 WHERE id=$1", jobID); err != nil {
+		t.Fatal(err)
+	}
+	assigned := fixture.draftAssigned(t, jobID, fixture.driver1, fixture.chipper1, time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC), 2*time.Hour)
+	_, err := fixture.service.ProposeAppointment(fixture.ctx, fixture.admin, appointment.MutateInput{
+		ID: assigned.ID, ExpectedVersion: assigned.Version, RequestID: "short-duration",
+	}, "")
+	if !errors.Is(err, appointment.ErrValidation) {
+		t.Fatalf("short proposal error=%v want validation", err)
+	}
+}
+
+func TestActiveResourceRejectsCriticalMutationAndDeactivation(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	_ = fixture.proposal(t, fixture.job(t, "HW-2026-0305"), fixture.driver1, fixture.chipper1, time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC), 3*time.Hour)
+	service, err := resource.New(postgres.NewResourceStore(fixture.pool))
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := service.List(fixture.ctx, fixture.admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var current resource.Resource
+	for _, value := range values {
+		if value.ID == fixture.chipper1 {
+			current = value
+		}
+	}
+	input := resource.Input{Type: current.Type, Name: current.Name, IsExclusive: false, Capacity: current.Capacity, InternalNote: current.InternalNote}
+	if err := service.Update(fixture.ctx, fixture.admin, current.ID, current.Version, input, "critical-update"); !errors.Is(err, resource.ErrConflict) {
+		t.Fatalf("critical resource update error=%v want conflict", err)
+	}
+	if err := service.Deactivate(fixture.ctx, fixture.admin, current.ID, current.Version, "deactivate-active"); !errors.Is(err, resource.ErrConflict) {
+		t.Fatalf("active resource deactivation error=%v want conflict", err)
+	}
+}
+
+func TestActiveDriverRejectsDeactivation(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	_ = fixture.proposal(t, fixture.job(t, "HW-2026-0306"), fixture.driver1, fixture.chipper1, time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC), 3*time.Hour)
+	location, err := time.LoadLocation("Europe/Vienna")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := driver.New(postgres.NewDriverStore(fixture.pool), location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles, err := service.ListProfiles(fixture.ctx, fixture.admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var version int32
+	for _, profile := range profiles {
+		if profile.ID == fixture.driver1 {
+			version = profile.Version
+			break
+		}
+	}
+	if err := service.DeactivateProfile(fixture.ctx, fixture.admin, fixture.driver1, version, "deactivate-reserved"); !errors.Is(err, driver.ErrConflict) {
+		t.Fatalf("active driver deactivation error=%v want conflict", err)
+	}
+	var active bool
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT active FROM drivers WHERE id=$1", fixture.driver1).Scan(&active); err != nil {
+		t.Fatal(err)
+	}
+	if !active {
+		t.Fatal("reserved driver was deactivated")
 	}
 }
 
@@ -218,7 +412,7 @@ func TestConcurrentMovesIntoSameSlotHaveOneWinner(t *testing.T) {
 			startsAt := target.Add(time.Duration(offset) * 30 * time.Minute)
 			_, err := fixture.service.MoveAppointment(fixture.ctx, fixture.admin, appointment.MoveInput{
 				MutateInput: appointment.MutateInput{ID: candidate.ID, ExpectedVersion: candidate.Version, RequestID: "parallel-move"},
-				StartsAt: startsAt, EndsAt: startsAt.Add(3 * time.Hour),
+				StartsAt:    startsAt, EndsAt: startsAt.Add(3 * time.Hour),
 			})
 			results <- err
 		}(index, value)
@@ -243,6 +437,33 @@ func TestConcurrentMovesIntoSameSlotHaveOneWinner(t *testing.T) {
 	}
 	if successes != 1 || conflicts != 1 || targetReservations != 1 {
 		t.Fatalf("parallel move successes/conflicts/target reservations = %d/%d/%d", successes, conflicts, targetReservations)
+	}
+}
+
+func TestSwapProposalWindowsIsAtomicAndNotificationFree(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	start := time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC)
+	first := fixture.proposal(t, fixture.job(t, "HW-2026-SWAP-1"), fixture.driver1, fixture.chipper1, start, 90*time.Minute)
+	second := fixture.proposal(t, fixture.job(t, "HW-2026-SWAP-2"), fixture.driver2, fixture.chipper2, start.Add(4*time.Hour), 2*time.Hour)
+
+	values, err := fixture.service.SwapAppointments(fixture.ctx, fixture.admin, appointment.SwapInput{
+		FirstID: first.ID, SecondID: second.ID, FirstVersion: first.Version, SecondVersion: second.Version, RequestID: "swap-integration",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 2 || !values[0].StartsAt.Equal(second.StartsAt) || !values[1].StartsAt.Equal(first.StartsAt) || values[0].Lifecycle != appointment.LifecycleProposal || values[1].Lifecycle != appointment.LifecycleProposal {
+		t.Fatalf("swapped appointments = %#v", values)
+	}
+	var outboxCount int
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM outbox_events").Scan(&outboxCount); err != nil {
+		t.Fatal(err)
+	}
+	if outboxCount != 0 {
+		t.Fatalf("swap created %d outbox events", outboxCount)
+	}
+	if _, err := fixture.service.SwapAppointments(fixture.ctx, fixture.admin, appointment.SwapInput{FirstID: first.ID, SecondID: second.ID, FirstVersion: first.Version, SecondVersion: second.Version}); !errors.Is(err, appointment.ErrConflict) {
+		t.Fatalf("stale swap error = %v", err)
 	}
 }
 
@@ -312,10 +533,10 @@ func newCalendarFixture(t *testing.T) calendarFixture {
 func (fixture calendarFixture) job(t *testing.T, number string) string {
 	t.Helper()
 	var customerID, jobID string
-	if err := fixture.pool.QueryRow(fixture.ctx, "INSERT INTO customers (first_name, last_name, street, postal_code, locality) VALUES ('Test', $1, 'Waldweg 1', '4710', 'Grieskirchen') RETURNING id::text", number).Scan(&customerID); err != nil {
+	if err := fixture.pool.QueryRow(fixture.ctx, "INSERT INTO customers (first_name, last_name, street, postal_code, locality, email, notification_preference) VALUES ('Test', $1, 'Waldweg 1', '4710', 'Grieskirchen', $1 || '@example.test', 'email') RETURNING id::text", number).Scan(&customerID); err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.pool.QueryRow(fixture.ctx, "INSERT INTO jobs (job_number, customer_id, job_type, volume_m3, estimated_hack_minutes) VALUES ($1, $2, 'chipping_only', 30, 180) RETURNING id::text", number, customerID).Scan(&jobID); err != nil {
+	if err := fixture.pool.QueryRow(fixture.ctx, "INSERT INTO jobs (job_number, customer_id, job_type, volume_m3, estimated_hack_minutes) VALUES ($1, $2, 'chipping_only', 30, 60) RETURNING id::text", number, customerID).Scan(&jobID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.pool.Exec(fixture.ctx, "INSERT INTO waitlist_entries (job_id) VALUES ($1)", jobID); err != nil {

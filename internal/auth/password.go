@@ -12,7 +12,10 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-const argon2Version = 19
+const (
+	argon2Version               = 19
+	maxEncodedPasswordHashBytes = 4096
+)
 
 // PasswordParameters are stored in every PHC hash and can be upgraded on login.
 type PasswordParameters struct {
@@ -78,7 +81,7 @@ func (hasher PasswordHasher) Verify(password string, encodedHash string) (valid 
 	if err != nil {
 		return false, false, err
 	}
-	actual := argon2.IDKey([]byte(password), salt, parameters.Iterations, parameters.MemoryKiB, parameters.Parallelism, uint32(len(expected)))
+	actual := argon2.IDKey([]byte(password), salt, parameters.Iterations, parameters.MemoryKiB, parameters.Parallelism, parameters.KeyLength)
 	valid = subtle.ConstantTimeCompare(actual, expected) == 1
 	needsRehash = valid && !sameHashParameters(parameters, hasher.parameters)
 	return valid, needsRehash, nil
@@ -93,6 +96,9 @@ func sameHashParameters(left PasswordParameters, right PasswordParameters) bool 
 }
 
 func parsePasswordHash(encodedHash string) (PasswordParameters, []byte, []byte, error) {
+	if len(encodedHash) > maxEncodedPasswordHashBytes {
+		return PasswordParameters{}, nil, nil, errors.New("auth: malformed password hash")
+	}
 	parts := strings.Split(encodedHash, "$")
 	if len(parts) != 6 || parts[1] != "argon2id" || parts[2] != "v=19" {
 		return PasswordParameters{}, nil, nil, errors.New("auth: malformed password hash")
@@ -110,7 +116,9 @@ func parsePasswordHash(encodedHash string) (PasswordParameters, []byte, []byte, 
 	if err != nil {
 		return PasswordParameters{}, nil, nil, errors.New("auth: malformed password key")
 	}
+	// #nosec G115 -- the complete encoded hash is bounded to 4096 bytes above.
 	parameters.SaltLength = uint32(len(salt))
+	// #nosec G115 -- the complete encoded hash is bounded to 4096 bytes above.
 	parameters.KeyLength = uint32(len(key))
 	parameters.MinLength = 0
 	if parameters.MemoryKiB < 8 || parameters.Iterations < 1 || parameters.Parallelism < 1 || len(salt) < 16 || len(key) < 16 {

@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"example.invalid/hackplan/internal/auth"
+	dashboarddomain "example.invalid/hackplan/internal/dashboard"
+	"example.invalid/hackplan/internal/notification"
 	"example.invalid/hackplan/web/templates"
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
@@ -30,20 +32,29 @@ func registerIdentityRoutes(router chi.Router, dependencies Dependencies, page t
 			http.Redirect(response, request, "/dashboard", http.StatusSeeOther)
 			return
 		}
-		render(response, request, templates.Home(page), http.StatusOK, dependencies.Logger)
+		http.Redirect(response, request, "/login", http.StatusSeeOther)
 	})
 	router.Get("/login", loginPage(page, dependencies.Logger))
 	router.Post("/login", login(identity, dependencies, page))
+	if dependencies.Confirmations != nil {
+		registerConfirmationRoutes(router, dependencies, page)
+	}
+	if dependencies.CalendarFeeds != nil {
+		registerPublicCalendarFeedRoute(router, dependencies)
+	}
 
 	router.Group(func(protected chi.Router) {
 		protected.Use(requireAuthentication(page, dependencies.Logger))
 		protected.Use(requirePasswordChange(page, dependencies.Logger))
 		protected.Use(csrfProtection(identity, dependencies.Config.Auth.CSRFCookieName, page, dependencies.Logger))
-		protected.Get("/dashboard", dashboard(page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
+		protected.Get("/dashboard", dashboardPage(dependencies.Dashboard, dependencies.Notifications, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 		protected.Get("/profile", profile(page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 		protected.Get("/password", passwordPage(page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 		protected.Post("/password", changePassword(identity, dependencies, page))
 		protected.Post("/logout", logout(identity, dependencies))
+		if dependencies.MapTiles != nil {
+			registerMapTileRoutes(protected, dependencies.MapTiles)
+		}
 		if dependencies.Customers != nil {
 			registerCustomerRoutes(protected, dependencies, page)
 		}
@@ -53,13 +64,29 @@ func registerIdentityRoutes(router chi.Router, dependencies Dependencies, page t
 		if dependencies.Appointments != nil {
 			registerAppointmentRoutes(protected, dependencies, page)
 		}
+		if dependencies.Notifications != nil {
+			registerNotificationRoutes(protected, dependencies, page)
+		}
+		if dependencies.CalendarFeeds != nil {
+			registerCalendarFeedRoutes(protected, dependencies, page)
+		}
+		if dependencies.Planning != nil {
+			registerPlanningRoutes(protected, dependencies, page)
+		}
+		if dependencies.Routes != nil {
+			registerRouteRoutes(protected, dependencies, page)
+		}
+		if dependencies.Voice != nil {
+			registerVoiceRoutes(protected, dependencies, page)
+		}
 
 		protected.Route("/admin/users", func(adminRouter chi.Router) {
 			adminRouter.Use(requirePermission(auth.PermissionUserManage, page, dependencies.Logger))
 			adminRouter.Get("/", usersPage(identity, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 			adminRouter.Post("/", createUser(identity, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
-			adminRouter.Post("/{userID}/access", updateAccess(identity, dependencies.Logger))
-			adminRouter.Post("/{userID}/reset-password", resetPassword(identity, dependencies.Logger))
+			adminRouter.Post("/{userID}/details", updateUserDetails(identity, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
+			adminRouter.Post("/{userID}/access", updateAccess(identity, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
+			adminRouter.Post("/{userID}/reset-password", resetPassword(identity, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 		})
 	})
 }
@@ -141,14 +168,21 @@ func csrfProtection(identity *auth.Service, csrfCookieName string, page template
 				render(response, request, templates.Error(page, http.StatusForbidden, "Anfrage abgewiesen", "Die Sicherheitsprüfung der Anfrage ist fehlgeschlagen."), http.StatusForbidden, logger)
 				return
 			}
-			request.Body = http.MaxBytesReader(response, request.Body, maxFormBytes)
-			if err := request.ParseForm(); err != nil {
-				http.Error(response, "Formular ist zu groß oder ungültig.", http.StatusBadRequest)
-				return
-			}
 			presented := request.Header.Get("X-CSRF-Token")
-			if presented == "" {
-				presented = request.Form.Get("csrf_token")
+			if strings.HasPrefix(strings.ToLower(request.Header.Get("Content-Type")), "multipart/form-data") {
+				if presented == "" {
+					render(response, request, templates.Error(page, http.StatusForbidden, "Anfrage abgewiesen", "Audio-Uploads benötigen das Sicherheitsmerkmal im Request-Header."), http.StatusForbidden, logger)
+					return
+				}
+			} else {
+				request.Body = http.MaxBytesReader(response, request.Body, maxFormBytes)
+				if err := request.ParseForm(); err != nil {
+					http.Error(response, "Formular ist zu groß oder ungültig.", http.StatusBadRequest)
+					return
+				}
+				if presented == "" {
+					presented = request.Form.Get("csrf_token")
+				}
 			}
 			csrfCookie, cookieErr := request.Cookie(csrfCookieName)
 			session, _ := sessionFromContext(request.Context())
@@ -205,9 +239,33 @@ func login(identity *auth.Service, dependencies Dependencies, page templates.Pag
 
 const genericLoginError = "Benutzername oder Passwort ist ungültig. Bitte versuchen Sie es später erneut."
 
-func dashboard(page templates.PageData, csrfCookieName string, logger *slog.Logger) http.HandlerFunc {
+func dashboardPage(service *dashboarddomain.Service, notifications *notification.AdminService, page templates.PageData, csrfCookieName string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
-		render(response, request, templates.Dashboard(shell(request, page, csrfCookieName)), http.StatusOK, logger)
+		if service == nil {
+			render(response, request, templates.Error(page, http.StatusServiceUnavailable, "Übersicht nicht verfügbar", "Der Tagesüberblick kann derzeit nicht geladen werden."), http.StatusServiceUnavailable, logger)
+			return
+		}
+		session, _ := sessionFromContext(request.Context())
+		value, err := service.View(request.Context(), session.Actor, request.URL.Query().Get("date"))
+		if err != nil {
+			status := http.StatusInternalServerError
+			message := "Der Tagesüberblick kann derzeit nicht geladen werden."
+			if errors.Is(err, dashboarddomain.ErrInvalidDate) {
+				status = http.StatusUnprocessableEntity
+				message = "Das gewählte Datum ist ungültig oder liegt außerhalb des erlaubten Bereichs."
+			}
+			render(response, request, templates.Dashboard(templates.DashboardData{Shell: shell(request, page, csrfCookieName), Error: message}), status, logger)
+			return
+		}
+		data := templates.DashboardData{Shell: shell(request, page, csrfCookieName), View: value}
+		if value.Admin && notifications != nil && value.Counts.NotificationIssues > 0 {
+			data.NotificationIssues, err = notifications.Failed(request.Context(), session.Actor, notification.FailureAll, 5)
+			if err != nil {
+				logger.WarnContext(request.Context(), "dashboard notification issues unavailable", slog.String("error_code", "dashboard_notification_issues_unavailable"))
+				data.NotificationIssues = nil
+			}
+		}
+		render(response, request, templates.Dashboard(data), http.StatusOK, logger)
 	}
 }
 
@@ -254,7 +312,7 @@ func logout(identity *auth.Service, dependencies Dependencies) http.HandlerFunc 
 
 func usersPage(identity *auth.Service, page templates.PageData, csrfCookieName string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
-		renderUsers(response, request, identity, page, csrfCookieName, logger, "", templates.CreateUserValues{}, http.StatusOK)
+		renderUsers(response, request, identity, page, csrfCookieName, logger, usersRenderState{Status: http.StatusOK})
 	}
 }
 
@@ -264,14 +322,53 @@ func createUser(identity *auth.Service, page templates.PageData, csrfCookieName 
 		values := templates.CreateUserValues{Username: strings.TrimSpace(request.Form.Get("username")), DisplayName: strings.TrimSpace(request.Form.Get("display_name")), Email: strings.TrimSpace(request.Form.Get("email")), Role: request.Form.Get("role"), CreateDriver: request.Form.Get("create_driver") == "true"}
 		_, err := identity.CreateUser(request.Context(), session.Actor, auth.CreateUserInput{Username: values.Username, DisplayName: values.DisplayName, Email: values.Email, Role: auth.Role(values.Role), Password: request.Form.Get("password"), CreateDriver: values.CreateDriver, RequestID: middleware.GetReqID(request.Context())})
 		if err != nil {
-			renderUsers(response, request, identity, page, csrfCookieName, logger, "Der Zugang konnte nicht angelegt werden. Prüfen Sie eindeutigen Benutzernamen und Passwortvorgaben.", values, http.StatusUnprocessableEntity)
+			renderUsers(response, request, identity, page, csrfCookieName, logger, usersRenderState{
+				Error:        "Der Zugang konnte nicht angelegt werden. Prüfen Sie eindeutigen Benutzernamen und Passwortvorgaben.",
+				CreateValues: values,
+				Status:       http.StatusUnprocessableEntity,
+			})
 			return
 		}
 		http.Redirect(response, request, "/admin/users", http.StatusSeeOther)
 	}
 }
 
-func updateAccess(identity *auth.Service, logger *slog.Logger) http.HandlerFunc {
+func updateUserDetails(identity *auth.Service, page templates.PageData, csrfCookieName string, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		input := auth.UpdateUserDetailsInput{
+			UserID:      chi.URLParam(request, "userID"),
+			Username:    strings.TrimSpace(request.Form.Get("username")),
+			DisplayName: strings.TrimSpace(request.Form.Get("display_name")),
+			Email:       strings.TrimSpace(request.Form.Get("email")),
+			RequestID:   middleware.GetReqID(request.Context()),
+		}
+		version, err := parseVersion(request.Form.Get("version"))
+		if err == nil {
+			input.ExpectedVersion = version
+			err = identity.UpdateUserDetails(request.Context(), session.Actor, input)
+		}
+		if err != nil {
+			logger.WarnContext(request.Context(), "user details update rejected", slog.String("error_code", "user_details_rejected"))
+			status := http.StatusUnprocessableEntity
+			message := "Benutzername, Anzeigename oder E-Mail sind ungültig."
+			if errors.Is(err, auth.ErrConflict) {
+				status = http.StatusConflict
+				message = "Der Benutzer wurde zwischenzeitlich geändert oder der Benutzername ist bereits vergeben. Bitte laden Sie die Seite neu."
+			} else if !errors.Is(err, auth.ErrInvalidInput) {
+				status = http.StatusInternalServerError
+				message = "Die Benutzerdaten konnten derzeit nicht gespeichert werden."
+			}
+			renderUsers(response, request, identity, page, csrfCookieName, logger, usersRenderState{
+				Error: message, EditedDetails: &input, EditedUserID: input.UserID, Status: status,
+			})
+			return
+		}
+		http.Redirect(response, request, "/admin/users", http.StatusSeeOther)
+	}
+}
+
+func updateAccess(identity *auth.Service, page templates.PageData, csrfCookieName string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
 		version, err := parseVersion(request.Form.Get("version"))
@@ -280,14 +377,20 @@ func updateAccess(identity *auth.Service, logger *slog.Logger) http.HandlerFunc 
 		}
 		if err != nil {
 			logger.WarnContext(request.Context(), "user access update rejected", slog.String("error_code", "user_access_rejected"))
-			http.Error(response, "Änderung abgewiesen. Mindestens ein aktiver Administrator muss erhalten bleiben.", http.StatusConflict)
+			message := "Die Zugriffsänderung konnte nicht gespeichert werden. Bitte laden Sie die Seite neu."
+			if errors.Is(err, auth.ErrLastAdmin) {
+				message = "Änderung abgewiesen. Mindestens ein aktiver Administrator muss erhalten bleiben."
+			}
+			renderUsers(response, request, identity, page, csrfCookieName, logger, usersRenderState{
+				Error: message, EditedUserID: chi.URLParam(request, "userID"), Status: http.StatusConflict,
+			})
 			return
 		}
 		http.Redirect(response, request, "/admin/users", http.StatusSeeOther)
 	}
 }
 
-func resetPassword(identity *auth.Service, logger *slog.Logger) http.HandlerFunc {
+func resetPassword(identity *auth.Service, page templates.PageData, csrfCookieName string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
 		version, err := parseVersion(request.Form.Get("version"))
@@ -296,21 +399,46 @@ func resetPassword(identity *auth.Service, logger *slog.Logger) http.HandlerFunc
 		}
 		if err != nil {
 			logger.WarnContext(request.Context(), "password reset rejected", slog.String("error_code", "password_reset_rejected"))
-			http.Error(response, "Passwort konnte nicht zurückgesetzt werden.", http.StatusConflict)
+			renderUsers(response, request, identity, page, csrfCookieName, logger, usersRenderState{
+				Error:        "Das Passwort konnte nicht zurückgesetzt werden. Verwenden Sie mindestens 14 Zeichen.",
+				EditedUserID: chi.URLParam(request, "userID"), Status: http.StatusConflict,
+			})
 			return
 		}
 		http.Redirect(response, request, "/admin/users", http.StatusSeeOther)
 	}
 }
 
-func renderUsers(response http.ResponseWriter, request *http.Request, identity *auth.Service, page templates.PageData, csrfCookieName string, logger *slog.Logger, formError string, values templates.CreateUserValues, status int) {
+type usersRenderState struct {
+	Error         string
+	CreateValues  templates.CreateUserValues
+	EditedDetails *auth.UpdateUserDetailsInput
+	EditedUserID  string
+	Status        int
+}
+
+func renderUsers(response http.ResponseWriter, request *http.Request, identity *auth.Service, page templates.PageData, csrfCookieName string, logger *slog.Logger, state usersRenderState) {
 	session, _ := sessionFromContext(request.Context())
 	users, err := identity.ListUsers(request.Context(), session.Actor)
 	if err != nil {
 		render(response, request, templates.Error(page, http.StatusInternalServerError, "Benutzer nicht verfügbar", "Die Liste kann derzeit nicht geladen werden."), http.StatusInternalServerError, logger)
 		return
 	}
-	render(response, request, templates.Users(templates.UsersData{Shell: shell(request, page, csrfCookieName), Users: users, Error: formError, Values: values}), status, logger)
+	editedUserID := state.EditedUserID
+	if state.EditedDetails != nil {
+		for index := range users {
+			if users[index].ID != state.EditedDetails.UserID {
+				continue
+			}
+			users[index].Username = state.EditedDetails.Username
+			users[index].DisplayName = state.EditedDetails.DisplayName
+			users[index].Email = state.EditedDetails.Email
+		}
+	}
+	render(response, request, templates.Users(templates.UsersData{
+		Shell: shell(request, page, csrfCookieName), Users: users,
+		Error: state.Error, Values: state.CreateValues, EditedUserID: editedUserID,
+	}), state.Status, logger)
 }
 
 func sessionFromContext(ctx context.Context) (auth.Session, bool) {
@@ -324,19 +452,22 @@ func shell(request *http.Request, page templates.PageData, csrfCookieName string
 	if cookie, err := request.Cookie(csrfCookieName); err == nil {
 		csrf = cookie.Value
 	}
-	return templates.ShellData{Page: page, Actor: session.Actor, CSRFToken: csrf}
+	return templates.ShellData{Page: page, Actor: session.Actor, CSRFToken: csrf, ActivePath: request.URL.Path}
 }
 
 func setAuthCookies(response http.ResponseWriter, dependencies Dependencies, tokens auth.SessionTokens) {
 	secure := dependencies.Config.Auth.CookieSecure
 	maxAge := int(dependencies.Config.Auth.SessionAbsoluteTTL.Seconds())
+	// #nosec G124 -- production validation requires Secure=true; local HTTP development is explicit.
 	http.SetCookie(response, &http.Cookie{Name: dependencies.Config.Auth.SessionCookieName, Value: tokens.SessionToken, Path: "/", MaxAge: maxAge, HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode})
-	http.SetCookie(response, &http.Cookie{Name: dependencies.Config.Auth.CSRFCookieName, Value: tokens.CSRFToken, Path: "/", MaxAge: maxAge, HttpOnly: false, Secure: secure, SameSite: http.SameSiteStrictMode})
+	// #nosec G124 -- production validation requires Secure=true; CSRF values are rendered server-side.
+	http.SetCookie(response, &http.Cookie{Name: dependencies.Config.Auth.CSRFCookieName, Value: tokens.CSRFToken, Path: "/", MaxAge: maxAge, HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode})
 }
 
 func clearAuthCookies(response http.ResponseWriter, dependencies Dependencies) {
 	for _, name := range []string{dependencies.Config.Auth.SessionCookieName, dependencies.Config.Auth.CSRFCookieName} {
-		http.SetCookie(response, &http.Cookie{Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: name == dependencies.Config.Auth.SessionCookieName, Secure: dependencies.Config.Auth.CookieSecure, SameSite: http.SameSiteStrictMode})
+		// #nosec G124 -- production validation requires Secure=true; this expires both cookies.
+		http.SetCookie(response, &http.Cookie{Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: dependencies.Config.Auth.CookieSecure, SameSite: http.SameSiteStrictMode})
 	}
 }
 
@@ -346,7 +477,7 @@ func sameOrigin(request *http.Request) bool {
 	}
 	origin := request.Header.Get("Origin")
 	if origin == "" {
-		return true
+		return false
 	}
 	parsed, err := url.Parse(origin)
 	return err == nil && strings.EqualFold(parsed.Host, request.Host) && (parsed.Scheme == "http" || parsed.Scheme == "https")

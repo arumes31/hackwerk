@@ -122,19 +122,25 @@ func (q *Queries) DriverCanCompleteAppointment(ctx context.Context, arg DriverCa
 
 const findAppointmentConflicts = `-- name: FindAppointmentConflicts :many
 SELECT 'driver'::text AS conflict_type, d.driver_id::text AS subject_id, dr.display_name AS subject_name,
-       a.id::text AS appointment_id, a.starts_at, a.ends_at
+       a.id::text AS appointment_id, a.starts_at, a.ends_at, j.job_number,
+       concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, ''))::text AS customer_name
 FROM appointment_drivers d
 JOIN drivers dr ON dr.id = d.driver_id
 JOIN appointments a ON a.id = d.appointment_id
+JOIN jobs j ON j.id=a.job_id
+JOIN customers c ON c.id=j.customer_id
 WHERE d.active AND d.driver_id = ANY($1::uuid[])
   AND d.reserved_range && tstzrange($2::timestamptz, $3::timestamptz, '[)')
   AND ($4::text = '' OR d.appointment_id <> $4::uuid)
 UNION ALL
 SELECT 'resource'::text, r.resource_id::text, rs.name,
-       a.id::text, a.starts_at, a.ends_at
+       a.id::text, a.starts_at, a.ends_at, j.job_number,
+       concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, ''))::text
 FROM appointment_resources r
 JOIN resources rs ON rs.id = r.resource_id
 JOIN appointments a ON a.id = r.appointment_id
+JOIN jobs j ON j.id=a.job_id
+JOIN customers c ON c.id=j.customer_id
 WHERE r.active AND r.exclusive AND r.resource_id = ANY($5::uuid[])
   AND r.reserved_range && tstzrange($2::timestamptz, $3::timestamptz, '[)')
   AND ($4::text = '' OR r.appointment_id <> $4::uuid)
@@ -156,6 +162,8 @@ type FindAppointmentConflictsRow struct {
 	AppointmentID string
 	StartsAt      pgtype.Timestamptz
 	EndsAt        pgtype.Timestamptz
+	JobNumber     string
+	CustomerName  string
 }
 
 func (q *Queries) FindAppointmentConflicts(ctx context.Context, arg FindAppointmentConflictsParams) ([]FindAppointmentConflictsRow, error) {
@@ -180,6 +188,8 @@ func (q *Queries) FindAppointmentConflicts(ctx context.Context, arg FindAppointm
 			&i.AppointmentID,
 			&i.StartsAt,
 			&i.EndsAt,
+			&i.JobNumber,
+			&i.CustomerName,
 		); err != nil {
 			return nil, err
 		}
@@ -196,7 +206,7 @@ SELECT a.id::text, a.job_id::text, j.job_number, a.lifecycle_status, a.confirmat
        a.starts_at, a.ends_at, a.buffer_before_minutes, a.buffer_after_minutes,
        COALESCE(a.availability_override_reason, '')::text AS availability_override_reason,
        a.version, j.workflow_status, j.job_type, j.transport_mode,
-       j.external_transport_confirmed, j.estimated_hack_minutes
+       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes
 FROM appointments a
 JOIN jobs j ON j.id = a.job_id
 WHERE a.id = $1::uuid
@@ -219,6 +229,7 @@ type GetAppointmentRow struct {
 	TransportMode              string
 	ExternalTransportConfirmed bool
 	EstimatedHackMinutes       int32
+	EstimatedTransportMinutes  int32
 }
 
 func (q *Queries) GetAppointment(ctx context.Context, id pgtype.UUID) (GetAppointmentRow, error) {
@@ -241,6 +252,90 @@ func (q *Queries) GetAppointment(ctx context.Context, id pgtype.UUID) (GetAppoin
 		&i.TransportMode,
 		&i.ExternalTransportConfirmed,
 		&i.EstimatedHackMinutes,
+		&i.EstimatedTransportMinutes,
+	)
+	return i, err
+}
+
+const getAppointmentDetail = `-- name: GetAppointmentDetail :one
+SELECT a.id::text, a.job_id::text, j.job_number, a.lifecycle_status, a.confirmation_status,
+       a.starts_at, a.ends_at, a.buffer_before_minutes, a.buffer_after_minutes, a.version,
+       j.workflow_status, j.job_type, j.transport_mode, j.external_transport_confirmed,
+       j.estimated_hack_minutes, j.estimated_transport_minutes, j.volume_m3::text, c.id::text AS customer_id,
+       concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, ''))::text AS customer_name,
+       c.locality, c.street, c.postal_code,
+       COALESCE(j.pile_latitude::text, '')::text AS latitude,
+       COALESCE(j.pile_longitude::text, '')::text AS longitude,
+       COALESCE(c.phone_raw, '')::text AS phone,
+       COALESCE(c.email::text, '')::text AS email,
+       c.notification_preference
+FROM appointments a
+JOIN jobs j ON j.id = a.job_id
+JOIN customers c ON c.id = j.customer_id
+WHERE a.id = $1::uuid
+`
+
+type GetAppointmentDetailRow struct {
+	AID                        string
+	AJobID                     string
+	JobNumber                  string
+	LifecycleStatus            string
+	ConfirmationStatus         string
+	StartsAt                   pgtype.Timestamptz
+	EndsAt                     pgtype.Timestamptz
+	BufferBeforeMinutes        int32
+	BufferAfterMinutes         int32
+	Version                    int32
+	WorkflowStatus             string
+	JobType                    string
+	TransportMode              string
+	ExternalTransportConfirmed bool
+	EstimatedHackMinutes       int32
+	EstimatedTransportMinutes  int32
+	JVolumeM3                  string
+	CustomerID                 string
+	CustomerName               string
+	Locality                   string
+	Street                     string
+	PostalCode                 string
+	Latitude                   string
+	Longitude                  string
+	Phone                      string
+	Email                      string
+	NotificationPreference     string
+}
+
+func (q *Queries) GetAppointmentDetail(ctx context.Context, id pgtype.UUID) (GetAppointmentDetailRow, error) {
+	row := q.db.QueryRow(ctx, getAppointmentDetail, id)
+	var i GetAppointmentDetailRow
+	err := row.Scan(
+		&i.AID,
+		&i.AJobID,
+		&i.JobNumber,
+		&i.LifecycleStatus,
+		&i.ConfirmationStatus,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.BufferBeforeMinutes,
+		&i.BufferAfterMinutes,
+		&i.Version,
+		&i.WorkflowStatus,
+		&i.JobType,
+		&i.TransportMode,
+		&i.ExternalTransportConfirmed,
+		&i.EstimatedHackMinutes,
+		&i.EstimatedTransportMinutes,
+		&i.JVolumeM3,
+		&i.CustomerID,
+		&i.CustomerName,
+		&i.Locality,
+		&i.Street,
+		&i.PostalCode,
+		&i.Latitude,
+		&i.Longitude,
+		&i.Phone,
+		&i.Email,
+		&i.NotificationPreference,
 	)
 	return i, err
 }
@@ -249,8 +344,9 @@ const getAppointmentForUpdate = `-- name: GetAppointmentForUpdate :one
 SELECT a.id::text, a.job_id::text, a.lifecycle_status, a.confirmation_status,
        a.starts_at, a.ends_at, a.buffer_before_minutes, a.buffer_after_minutes,
        COALESCE(a.availability_override_reason, '')::text AS availability_override_reason,
+       COALESCE(a.cancellation_reason, '')::text AS cancellation_reason,
        a.version, j.workflow_status, j.job_type, j.transport_mode,
-       j.external_transport_confirmed, j.estimated_hack_minutes
+       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes
 FROM appointments a
 JOIN jobs j ON j.id = a.job_id
 WHERE a.id = $1::uuid
@@ -267,12 +363,14 @@ type GetAppointmentForUpdateRow struct {
 	BufferBeforeMinutes        int32
 	BufferAfterMinutes         int32
 	AvailabilityOverrideReason string
+	CancellationReason         string
 	Version                    int32
 	WorkflowStatus             string
 	JobType                    string
 	TransportMode              string
 	ExternalTransportConfirmed bool
 	EstimatedHackMinutes       int32
+	EstimatedTransportMinutes  int32
 }
 
 func (q *Queries) GetAppointmentForUpdate(ctx context.Context, id pgtype.UUID) (GetAppointmentForUpdateRow, error) {
@@ -288,12 +386,14 @@ func (q *Queries) GetAppointmentForUpdate(ctx context.Context, id pgtype.UUID) (
 		&i.BufferBeforeMinutes,
 		&i.BufferAfterMinutes,
 		&i.AvailabilityOverrideReason,
+		&i.CancellationReason,
 		&i.Version,
 		&i.WorkflowStatus,
 		&i.JobType,
 		&i.TransportMode,
 		&i.ExternalTransportConfirmed,
 		&i.EstimatedHackMinutes,
+		&i.EstimatedTransportMinutes,
 	)
 	return i, err
 }
@@ -427,9 +527,9 @@ func (q *Queries) InsertAppointmentResource(ctx context.Context, arg InsertAppoi
 }
 
 const insertOutboxEvent = `-- name: InsertOutboxEvent :exec
-INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload, idempotency_key)
+INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload, idempotency_key, status, processed_at)
 VALUES ($1, 'appointment', $2::uuid,
-        $3::jsonb, $4)
+        $3::jsonb, $4, 'processed', now())
 ON CONFLICT (idempotency_key) DO NOTHING
 `
 
@@ -602,8 +702,8 @@ SELECT a.id::text, a.job_id::text, j.job_number, a.lifecycle_status, a.confirmat
        j.job_type, j.volume_m3::text, c.id::text AS customer_id,
        concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, ''))::text AS customer_name,
        c.locality, c.street, c.postal_code,
-       COALESCE(c.latitude::text, '')::text AS latitude,
-       COALESCE(c.longitude::text, '')::text AS longitude
+       COALESCE(j.pile_latitude::text, '')::text AS latitude,
+       COALESCE(j.pile_longitude::text, '')::text AS longitude
 FROM appointments a
 JOIN jobs j ON j.id = a.job_id
 JOIN customers c ON c.id = j.customer_id
@@ -730,6 +830,95 @@ func (q *Queries) ListWaitlistForPlanning(ctx context.Context) ([]ListWaitlistFo
 	return items, nil
 }
 
+const lockAppointmentDrivers = `-- name: LockAppointmentDrivers :many
+SELECT d.id::text
+FROM appointment_drivers ad
+JOIN drivers d ON d.id = ad.driver_id
+WHERE ad.appointment_id = $1::uuid
+ORDER BY d.id
+FOR SHARE OF d
+`
+
+func (q *Queries) LockAppointmentDrivers(ctx context.Context, appointmentID pgtype.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, lockAppointmentDrivers, appointmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var d_id string
+		if err := rows.Scan(&d_id); err != nil {
+			return nil, err
+		}
+		items = append(items, d_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockAppointmentResources = `-- name: LockAppointmentResources :many
+SELECT r.id::text
+FROM appointment_resources ar
+JOIN resources r ON r.id = ar.resource_id
+WHERE ar.appointment_id = $1::uuid
+ORDER BY r.id
+FOR SHARE OF r
+`
+
+func (q *Queries) LockAppointmentResources(ctx context.Context, appointmentID pgtype.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, lockAppointmentResources, appointmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var r_id string
+		if err := rows.Scan(&r_id); err != nil {
+			return nil, err
+		}
+		items = append(items, r_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockSchedulingMutation = `-- name: LockSchedulingMutation :exec
+SELECT pg_advisory_xact_lock(1214342235, 1396919884)
+`
+
+// Serialize changes that can invalidate routing/travel-time suggestions. Row
+// locks alone cannot protect against newly inserted or non-overlapping moves.
+func (q *Queries) LockSchedulingMutation(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, lockSchedulingMutation)
+	return err
+}
+
+const prepareAppointmentSwap = `-- name: PrepareAppointmentSwap :execrows
+UPDATE appointments
+SET lifecycle_status='draft', updated_at=now()
+WHERE id=$1::uuid AND version=$2
+  AND lifecycle_status IN ('draft', 'proposal')
+`
+
+type PrepareAppointmentSwapParams struct {
+	ID              pgtype.UUID
+	ExpectedVersion int32
+}
+
+func (q *Queries) PrepareAppointmentSwap(ctx context.Context, arg PrepareAppointmentSwapParams) (int64, error) {
+	result, err := q.db.Exec(ctx, prepareAppointmentSwap, arg.ID, arg.ExpectedVersion)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const refreshAppointmentReservations = `-- name: RefreshAppointmentReservations :exec
 UPDATE appointment_drivers d SET
     active = a.lifecycle_status IN ('proposal', 'fixed'),
@@ -746,9 +935,11 @@ func (q *Queries) RefreshAppointmentReservations(ctx context.Context, appointmen
 const refreshAppointmentResourceReservations = `-- name: RefreshAppointmentResourceReservations :exec
 UPDATE appointment_resources r SET
     active = a.lifecycle_status IN ('proposal', 'fixed'),
+    exclusive = source.exclusive,
     reserved_starts_at = a.starts_at - make_interval(mins => a.buffer_before_minutes),
     reserved_ends_at = a.ends_at + make_interval(mins => a.buffer_after_minutes)
-FROM appointments a WHERE a.id = r.appointment_id AND a.id = $1::uuid
+FROM appointments a, resources source
+WHERE a.id = r.appointment_id AND source.id=r.resource_id AND a.id = $1::uuid
 `
 
 func (q *Queries) RefreshAppointmentResourceReservations(ctx context.Context, appointmentID pgtype.UUID) error {
@@ -764,6 +955,53 @@ WHERE job_id = $1::uuid AND removed_at IS NULL
 func (q *Queries) RemoveWaitlistScheduled(ctx context.Context, jobID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, removeWaitlistScheduled, jobID)
 	return err
+}
+
+const reopenCancelledAppointment = `-- name: ReopenCancelledAppointment :execrows
+UPDATE appointments SET lifecycle_status = 'proposal',
+    confirmation_status = 'not_requested',
+    availability_override_reason = NULLIF($1::text, ''),
+    notification_override_reason = NULL,
+    fixed_by_user_id = NULL, fixed_at = NULL,
+    cancelled_by_user_id = NULL, cancelled_at = NULL, cancellation_reason = NULL,
+    version = version + 1, updated_at = now()
+WHERE id = $2::uuid AND version = $3
+  AND lifecycle_status = 'cancelled'
+`
+
+type ReopenCancelledAppointmentParams struct {
+	AvailabilityOverrideReason string
+	ID                         pgtype.UUID
+	ExpectedVersion            int32
+}
+
+func (q *Queries) ReopenCancelledAppointment(ctx context.Context, arg ReopenCancelledAppointmentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reopenCancelledAppointment, arg.AvailabilityOverrideReason, arg.ID, arg.ExpectedVersion)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const restoreAppointmentSwapStatus = `-- name: RestoreAppointmentSwapStatus :execrows
+UPDATE appointments
+SET lifecycle_status=$1, updated_at=now()
+WHERE id=$2::uuid AND version=$3
+  AND lifecycle_status='draft'
+`
+
+type RestoreAppointmentSwapStatusParams struct {
+	LifecycleStatus string
+	ID              pgtype.UUID
+	ExpectedVersion int32
+}
+
+func (q *Queries) RestoreAppointmentSwapStatus(ctx context.Context, arg RestoreAppointmentSwapStatusParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreAppointmentSwapStatus, arg.LifecycleStatus, arg.ID, arg.ExpectedVersion)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const restoreWaitlistAfterCancellation = `-- name: RestoreWaitlistAfterCancellation :exec

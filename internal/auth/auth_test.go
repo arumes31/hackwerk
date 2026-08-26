@@ -13,6 +13,12 @@ func TestRoleAllows(t *testing.T) {
 	if RoleDriver.Allows(PermissionAppointmentFix) {
 		t.Fatal("driver must not fix appointments")
 	}
+	if !RoleDriver.Allows(PermissionRouteViewOwn) || !RoleDriver.Allows(PermissionRouteReorderOwn) {
+		t.Fatal("driver must manage the order of the own assigned route")
+	}
+	if RoleDriver.Allows(PermissionRoutePlan) || RoleDriver.Allows(PermissionRouteAssign) {
+		t.Fatal("driver must not plan or assign routes")
+	}
 	if Role("unknown").Allows(PermissionDashboardView) {
 		t.Fatal("unknown role must be denied")
 	}

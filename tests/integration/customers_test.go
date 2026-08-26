@@ -159,7 +159,7 @@ func TestCustomersPersistence(t *testing.T) {
 		_, err = pool.Exec(ctx, "INSERT INTO waitlist_entries (job_id) VALUES ($1)", created.JobID)
 		assertPostgresCode(t, err, "23505")
 
-		noteID, err := service.AddNote(ctx, driver, created.JobID, "Bleibt unverändert", "", "request-note")
+		noteID, err := service.AddNote(ctx, driver, created.JobID, "Bleibt unverändert", "", "integration-note-key", "request-note")
 		if err != nil {
 			t.Fatal(err)
 		}

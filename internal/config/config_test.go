@@ -1,9 +1,11 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoad(t *testing.T) {
@@ -19,7 +21,26 @@ func TestLoad(t *testing.T) {
 		{name: "test environment", values: map[string]string{"APP_ENV": "test"}, expectedEnv: EnvironmentTest},
 		{name: "invalid pool", values: map[string]string{"DATABASE_MIN_CONNS": "5", "DATABASE_MAX_CONNS": "2"}, expectError: "pool"},
 		{name: "invalid duration", values: map[string]string{"APP_SHUTDOWN_TIMEOUT": "later"}, expectError: "duration"},
+		{name: "invalid dashboard hours", values: map[string]string{"DASHBOARD_BUSINESS_OPEN": "18:00", "DASHBOARD_BUSINESS_CLOSE": "07:00"}, expectError: "dashboard business hours"},
+		{name: "unbounded dashboard horizon", values: map[string]string{"DASHBOARD_HORIZON_DAYS": "90"}, expectError: "dashboard limits"},
+		{name: "invalid calendar feed domain", values: map[string]string{"CALENDAR_UID_DOMAIN": "bad domain"}, expectError: "calendar feed"},
+		{name: "invalid planning horizon", values: map[string]string{"PLANNING_HORIZON_DAYS": "91"}, expectError: "planning settings"},
+		{name: "enabled voice needs transcriber", values: map[string]string{"VOICE_ENABLED": "true"}, expectError: "active transcriber"},
+		{name: "OpenAI voice needs secret", values: map[string]string{"VOICE_ENABLED": "true", "VOICE_TRANSCRIBER": "openai"}, expectError: "API key"},
+		{name: "production rejects fake voice", values: map[string]string{"APP_ENV": "production", "APP_BASE_URL": "https://hackwerk.example", "SESSION_COOKIE_SECURE": "true", "DATABASE_URL": "postgres://secure@example/hackwerk", "CONFIRMATION_TOKEN_KEY_ID": "production", "CONFIRMATION_TOKEN_KEYS": `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`, "VOICE_TRANSCRIBER": "fake"}, expectError: "fake voice"},
+		{name: "OSRM rejects request-controlled query", values: map[string]string{"PLANNING_ROUTER": "osrm", "PLANNING_ROUTING_URL": "https://router.example/table?target=internal"}, expectError: "static non-loopback HTTPS"},
+		{name: "map tiles reject loopback upstream", values: map[string]string{"MAP_TILE_URL": "https://127.0.0.1/{z}/{x}/{y}.png"}, expectError: "map tiles"},
+		{name: "map tiles require all placeholders", values: map[string]string{"MAP_TILE_URL": "https://tiles.example/{z}/{x}.png"}, expectError: "z, x and y"},
+		{name: "map tile token requires placeholder", values: map[string]string{"MAP_TILE_TOKEN": "secret-value"}, expectError: "configured together"},
 		{name: "production requires https", values: map[string]string{"APP_ENV": "production"}, expectError: "https"},
+		{name: "external SMTP rejects loopback", values: map[string]string{"MAIL_ENABLED": "true", "MAIL_SMTP_HOST": "127.0.0.1"}, expectError: "external SMTP"},
+		{name: "SMS rejects loopback webhook", values: map[string]string{
+			"SMS_ENABLED": "true", "SMS_PROVIDER": "webhook", "SMS_WEBHOOK_URL": "https://127.0.0.1/send", "SMS_WEBHOOK_HMAC_SECRET": "01234567890123456789012345678901",
+		}, expectError: "non-loopback HTTPS"},
+		{name: "Sendberry requires complete credentials", values: map[string]string{
+			"SMS_ENABLED": "true", "SMS_PROVIDER": "sendberry", "SENDBERRY_API_URL": "https://api.sendberry.example/SMS/SEND",
+			"SENDBERRY_API_KEY": "01234567890123456789012345678901", "SMS_SENDER": "SMS Inform",
+		}, expectError: "access name"},
 	}
 
 	for _, tt := range tests {
@@ -45,7 +66,49 @@ func TestLoad(t *testing.T) {
 			if tt.name == "development defaults" && cfg.AppName != "HackWerk" {
 				t.Fatalf("AppName = %q, want HackWerk", cfg.AppName)
 			}
+			if tt.name == "development defaults" && (cfg.SMS.Provider != "sendberry" || cfg.SMS.SendberryURL != "" || cfg.SMS.Sender != "") {
+				t.Fatalf("default SMS provider and environment-only URL/sender = %q/%q/%q", cfg.SMS.Provider, cfg.SMS.SendberryURL, cfg.SMS.Sender)
+			}
 		})
+	}
+}
+
+func TestLoadVoiceConfigurationFromEnvironment(t *testing.T) {
+	t.Parallel()
+	values := map[string]string{"VOICE_ENABLED": "true", "VOICE_TRANSCRIBER": "openai", "VOICE_EXTRACTOR": "openai", "VOICE_OPENAI_API_KEY": "01234567890123456789012345678901", "VOICE_OPENAI_MODEL": "speech-model", "VOICE_OPENAI_EXTRACTION_MODEL": "extract-model", "VOICE_MAX_DURATION": "75s", "VOICE_MAX_BYTES": "1048576", "VOICE_DRAFT_RETENTION": "12h", "VOICE_PROVIDER_TIMEOUT": "20s", "VOICE_MAX_RESPONSE_BYTES": "65536", "VOICE_TEMP_DIR": "/tmp/voice-test", "VOICE_RATE_LIMIT_PER_MINUTE": "7", "VOICE_CONCURRENT_PER_USER": "1"}
+	cfg, err := load(func(name string) string { return values[name] }, func(string) ([]byte, error) { return nil, errors.New("unexpected read") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Voice.Enabled || cfg.Voice.Transcriber != "openai" || cfg.Voice.Extractor != "openai" || cfg.Voice.OpenAIAPIKey != values["VOICE_OPENAI_API_KEY"] || cfg.Voice.OpenAIModel != "speech-model" || cfg.Voice.OpenAIExtractionModel != "extract-model" || cfg.Voice.MaxDuration != 75*time.Second || cfg.Voice.MaxBytes != 1048576 || cfg.Voice.DraftRetention != 12*time.Hour || cfg.Voice.ProviderTimeout != 20*time.Second || cfg.Voice.MaxResponseBytes != 65536 || cfg.Voice.TempDir != "/tmp/voice-test" || cfg.Voice.RateLimitPerMinute != 7 || cfg.Voice.ConcurrentPerUser != 1 {
+		t.Fatalf("voice config=%+v", cfg.Voice)
+	}
+}
+
+func TestLoadPlanningConfigurationFromEnvironment(t *testing.T) {
+	t.Parallel()
+	values := map[string]string{"PLANNING_ROUTER": "osrm", "PLANNING_ROUTING_URL": "https://router.example/base", "PLANNING_HORIZON_DAYS": "42", "PLANNING_SLOT_MINUTES": "20", "PLANNING_BUFFER_MINUTES": "25", "PLANNING_DEPOT_LATITUDE": "48.31", "PLANNING_DEPOT_LONGITUDE": "14.29", "PLANNING_WEIGHT_TRAVEL": "30"}
+	cfg, err := load(func(name string) string { return values[name] }, func(string) ([]byte, error) { return nil, errors.New("unexpected read") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Planning.Router != "osrm" || cfg.Planning.RoutingURL != values["PLANNING_ROUTING_URL"] || cfg.Planning.HorizonDays != 42 || cfg.Planning.SlotMinutes != 20 || cfg.Planning.BufferMinutes != 25 || cfg.Planning.DepotLatitude != 48.31 || cfg.Planning.WeightTravel != 30 {
+		t.Fatalf("planning config=%+v", cfg.Planning)
+	}
+}
+
+func TestLoadMapConfigurationFromEnvironment(t *testing.T) {
+	t.Parallel()
+	values := map[string]string{
+		"MAP_TILE_URL": "https://tiles.example/{z}/{x}/{y}.png?key={token}", "MAP_TILE_TOKEN": "environment-secret",
+		"MAP_TILE_ATTRIBUTION": "Beispieldaten", "MAP_TILE_TIMEOUT": "4s", "MAP_TILE_MAX_RESPONSE_BYTES": "65536", "MAP_TILE_MAX_ZOOM": "17",
+	}
+	cfg, err := load(func(name string) string { return values[name] }, func(string) ([]byte, error) { return nil, errors.New("unexpected read") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Map.TileURL != values["MAP_TILE_URL"] || cfg.Map.TileToken != values["MAP_TILE_TOKEN"] || cfg.Map.Attribution != "Beispieldaten" || cfg.Map.Timeout != 4*time.Second || cfg.Map.MaxResponseBytes != 65536 || cfg.Map.MaxZoom != 17 {
+		t.Fatalf("map config=%+v", cfg.Map)
 	}
 }
 
@@ -69,5 +132,89 @@ func TestLoadSecretFile(t *testing.T) {
 	}
 	if cfg.Database.URL != "postgres://secret" {
 		t.Fatalf("Database.URL = %q", cfg.Database.URL)
+	}
+}
+
+func TestLoadSendberryConfigurationFromEnvironment(t *testing.T) {
+	t.Parallel()
+
+	values := map[string]string{
+		"SMS_ENABLED": "true", "SMS_PROVIDER": "sendberry", "SENDBERRY_API_URL": "https://sms.example.test/SMS/SEND",
+		"SENDBERRY_API_KEY": "01234567890123456789012345678901", "SENDBERRY_ACCESS_NAME": "environment-user",
+		"SENDBERRY_ACCESS_PASSWORD": "environment-password", "SMS_SENDER": "HackWerk", "SMS_TIMEOUT": "9s", "SMS_MAX_ATTEMPTS": "4",
+	}
+	cfg, err := load(func(name string) string { return values[name] }, func(string) ([]byte, error) {
+		return nil, errors.New("unexpected read")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.SMS.Enabled || cfg.SMS.Provider != "sendberry" || cfg.SMS.SendberryURL != values["SENDBERRY_API_URL"] ||
+		cfg.SMS.SendberryKey != values["SENDBERRY_API_KEY"] || cfg.SMS.SendberryName != values["SENDBERRY_ACCESS_NAME"] ||
+		cfg.SMS.SendberryPassword != values["SENDBERRY_ACCESS_PASSWORD"] || cfg.SMS.Sender != "HackWerk" ||
+		cfg.SMS.Timeout != 9*time.Second || cfg.SMS.MaxAttempts != 4 {
+		t.Fatal("Sendberry configuration did not match the environment values")
+	}
+}
+
+func TestLoadForCommandKeepsProviderSecretsOutOfWebProcess(t *testing.T) {
+	for _, name := range []string{
+		"SENDBERRY_API_URL", "SENDBERRY_API_KEY", "SENDBERRY_API_KEY_FILE",
+		"SENDBERRY_ACCESS_NAME", "SENDBERRY_ACCESS_NAME_FILE",
+		"SENDBERRY_ACCESS_PASSWORD", "SENDBERRY_ACCESS_PASSWORD_FILE", "SMS_SENDER",
+	} {
+		t.Setenv(name, "")
+	}
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("CONFIRMATION_TOKEN_KEY_ID", "development-v1")
+	t.Setenv("CONFIRMATION_TOKEN_KEYS", "")
+	t.Setenv("SMS_ENABLED", "true")
+	t.Setenv("SMS_PROVIDER", "sendberry")
+	webConfig, err := LoadForCommand("serve")
+	if err != nil {
+		t.Fatalf("serve config unexpectedly requires worker credentials: %v", err)
+	}
+	if !webConfig.SMS.Enabled {
+		t.Fatal("serve config lost the SMS feature flag used by the UI")
+	}
+	if _, err := LoadForCommand("worker"); err == nil {
+		t.Fatal("worker config accepted enabled Sendberry without credentials")
+	}
+}
+
+func TestProductionRequiresTrustedProxyAndRejectsWildcardHost(t *testing.T) {
+	base := map[string]string{
+		"APP_ENV": "production", "APP_BASE_URL": "https://hackwerk.example", "APP_ALLOWED_HOSTS": "hackwerk.example",
+		"SESSION_COOKIE_SECURE": "true", "DATABASE_URL": "postgres://secure@example/hackwerk?sslmode=require",
+		"CONFIRMATION_TOKEN_KEY_ID": "production", "CONFIRMATION_TOKEN_KEYS": `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`,
+	}
+	get := func(values map[string]string) func(string) string {
+		return func(name string) string { return values[name] }
+	}
+	if _, err := load(get(base), func(string) ([]byte, error) { return nil, errors.New("unexpected read") }); err == nil || !strings.Contains(err.Error(), "trusted proxy") {
+		t.Fatalf("missing proxy error=%v", err)
+	}
+	base["APP_TRUSTED_PROXY_CIDRS"] = "10.0.0.0/8"
+	base["CALENDAR_UID_DOMAIN"] = "calendar.hackwerk.example"
+	base["APP_ALLOWED_HOSTS"] = "*"
+	if _, err := load(get(base), func(string) ([]byte, error) { return nil, errors.New("unexpected read") }); err == nil || !strings.Contains(err.Error(), "allowed host") {
+		t.Fatalf("wildcard host error=%v", err)
+	}
+	base["APP_ALLOWED_HOSTS"] = "hackwerk.example"
+	if _, err := load(get(base), func(string) ([]byte, error) { return nil, errors.New("unexpected read") }); err != nil {
+		t.Fatalf("secure production config error=%v", err)
+	}
+}
+
+func TestDiagnosticDoesNotExposeSecrets(t *testing.T) {
+	cfg := Config{Database: Database{URL: "database-canary"}, SMS: SMS{SendberryKey: "sms-canary", SendberryPassword: "password-canary"}, Voice: Voice{OpenAIAPIKey: "voice-canary"}}
+	encoded, err := json.Marshal(cfg.Diagnostic())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"database-canary", "sms-canary", "password-canary", "voice-canary"} {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("diagnostic leaked %q: %s", secret, encoded)
+		}
 	}
 }

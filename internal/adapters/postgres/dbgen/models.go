@@ -29,6 +29,7 @@ type Appointment struct {
 	Version                    int32
 	CreatedAt                  pgtype.Timestamptz
 	UpdatedAt                  pgtype.Timestamptz
+	NotificationOverrideReason *string
 }
 
 type AppointmentDriver struct {
@@ -100,6 +101,41 @@ type AvailabilityRule struct {
 	UpdatedAt    pgtype.Timestamptz
 }
 
+type CalendarFeed struct {
+	ID            pgtype.UUID
+	OwnerUserID   pgtype.UUID
+	TokenHash     []byte
+	Name          string
+	FeedScope     string
+	DetailLevel   string
+	ResourceTypes []string
+	TokenVersion  int32
+	Active        bool
+	ExpiresAt     pgtype.Timestamptz
+	LastUsedAt    pgtype.Timestamptz
+	RevokedAt     pgtype.Timestamptz
+	Version       int32
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+}
+
+type ConfirmationRequest struct {
+	ID            pgtype.UUID
+	AppointmentID pgtype.UUID
+	TokenHash     []byte
+	FormNonceHash []byte
+	TokenKeyID    string
+	TokenVersion  int32
+	Status        string
+	Response      *string
+	RespondedAt   pgtype.Timestamptz
+	ExpiresAt     pgtype.Timestamptz
+	RevokedAt     pgtype.Timestamptz
+	RevokeReason  *string
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+}
+
 type Customer struct {
 	ID                     pgtype.UUID
 	FirstName              string
@@ -162,6 +198,10 @@ type Job struct {
 	Version                    int32
 	CreatedAt                  pgtype.Timestamptz
 	UpdatedAt                  pgtype.Timestamptz
+	PileLatitude               pgtype.Numeric
+	PileLongitude              pgtype.Numeric
+	PileLocationSource         *string
+	PileLocationUpdatedAt      pgtype.Timestamptz
 }
 
 type JobNote struct {
@@ -171,11 +211,33 @@ type JobNote struct {
 	Body           string
 	CorrectionOfID pgtype.UUID
 	CreatedAt      pgtype.Timestamptz
+	IdempotencyKey *string
 }
 
 type JobNumberCounter struct {
 	Year      int32
 	NextValue int64
+}
+
+type Notification struct {
+	ID                    pgtype.UUID
+	AppointmentID         pgtype.UUID
+	ConfirmationRequestID pgtype.UUID
+	Channel               string
+	RecipientSnapshot     string
+	TemplateVersion       int32
+	Parameters            []byte
+	Status                string
+	ProviderID            *string
+	AttemptCount          int32
+	MaxAttempts           int32
+	AvailableAt           pgtype.Timestamptz
+	LastErrorCode         *string
+	SentAt                pgtype.Timestamptz
+	CreatedAt             pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
+	ReviewedAt            pgtype.Timestamptz
+	ReviewedByUserID      pgtype.UUID
 }
 
 type OutboxEvent struct {
@@ -192,6 +254,54 @@ type OutboxEvent struct {
 	ProcessedAt    pgtype.Timestamptz
 	LastErrorCode  *string
 	CreatedAt      pgtype.Timestamptz
+	PayloadVersion int32
+	MaxAttempts    int32
+	ClaimedBy      *string
+	LeaseUntil     pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+}
+
+type PlanningRun struct {
+	ID               pgtype.UUID
+	JobID            pgtype.UUID
+	ActorUserID      pgtype.UUID
+	JobVersion       int32
+	WaitlistVersion  int32
+	SearchFrom       pgtype.Timestamptz
+	SearchTo         pgtype.Timestamptz
+	InputFingerprint []byte
+	ConfigSnapshot   []byte
+	CreatedAt        pgtype.Timestamptz
+	ExpiresAt        pgtype.Timestamptz
+}
+
+type PlanningSuggestion struct {
+	ID                   pgtype.UUID
+	RunID                pgtype.UUID
+	Rank                 int16
+	StartsAt             pgtype.Timestamptz
+	EndsAt               pgtype.Timestamptz
+	DriverID             pgtype.UUID
+	ResourceIds          []pgtype.UUID
+	ResourcePurposes     []string
+	Score                pgtype.Numeric
+	Components           []byte
+	Reasons              []string
+	Warnings             []string
+	RoutingSource        string
+	DistanceMeters       *int32
+	DurationSeconds      *int32
+	Status               string
+	AdoptedAppointmentID pgtype.UUID
+	AdoptedAt            pgtype.Timestamptz
+	CreatedAt            pgtype.Timestamptz
+}
+
+type RecentRecord struct {
+	UserID     pgtype.UUID
+	CustomerID pgtype.UUID
+	JobID      pgtype.UUID
+	ViewedAt   pgtype.Timestamptz
 }
 
 type Resource struct {
@@ -205,6 +315,43 @@ type Resource struct {
 	Version          int32
 	CreatedAt        pgtype.Timestamptz
 	UpdatedAt        pgtype.Timestamptz
+}
+
+type RouteDraft struct {
+	ID                  pgtype.UUID
+	ActorUserID         pgtype.UUID
+	DriverID            pgtype.UUID
+	ChipperResourceID   pgtype.UUID
+	TransportResourceID pgtype.UUID
+	DepartureAt         pgtype.Timestamptz
+	StartLatitude       pgtype.Numeric
+	StartLongitude      pgtype.Numeric
+	EndLatitude         pgtype.Numeric
+	EndLongitude        pgtype.Numeric
+	Status              string
+	RoutingSource       string
+	DistanceMeters      int32
+	DurationSeconds     int32
+	RouteGeometry       []byte
+	AssignedAt          pgtype.Timestamptz
+	Version             int32
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+}
+
+type RouteStop struct {
+	ID                    pgtype.UUID
+	RouteDraftID          pgtype.UUID
+	JobID                 pgtype.UUID
+	JobVersion            int32
+	WaitlistVersion       int32
+	Position              int32
+	TravelDistanceMeters  int32
+	TravelDurationSeconds int32
+	PlannedStartsAt       pgtype.Timestamptz
+	PlannedEndsAt         pgtype.Timestamptz
+	AppointmentID         pgtype.UUID
+	CreatedAt             pgtype.Timestamptz
 }
 
 type SchemaMetadatum struct {
@@ -240,6 +387,29 @@ type User struct {
 	UpdatedAt          pgtype.Timestamptz
 }
 
+type VoiceDraft struct {
+	ID                  pgtype.UUID
+	OwnerUserID         pgtype.UUID
+	Status              string
+	Transcript          *string
+	ExtractedFields     []byte
+	Warnings            []string
+	OverallConfidence   pgtype.Numeric
+	ProviderName        string
+	ProviderVersion     string
+	ParserVersion       string
+	FailureCode         string
+	RetryCount          int16
+	CommittedCustomerID pgtype.UUID
+	CommittedJobID      pgtype.UUID
+	CommittedWaitlistID pgtype.UUID
+	CommittedAt         pgtype.Timestamptz
+	ExpiresAt           pgtype.Timestamptz
+	Version             int32
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+}
+
 type WaitlistEntry struct {
 	ID             pgtype.UUID
 	JobID          pgtype.UUID
@@ -250,4 +420,28 @@ type WaitlistEntry struct {
 	RemovedAt      pgtype.Timestamptz
 	RemovedReason  *string
 	Version        int32
+}
+
+type WaitlistFilterFavorite struct {
+	ID              pgtype.UUID
+	UserID          pgtype.UUID
+	Name            string
+	JobType         string
+	Region          string
+	Urgency         string
+	PreferredMonth  string
+	Workflow        string
+	MissingLocation bool
+	DurationIssue   bool
+	SortKey         string
+	SortDirection   string
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+}
+
+type WorkerHeartbeat struct {
+	WorkerID    string
+	StartedAt   pgtype.Timestamptz
+	HeartbeatAt pgtype.Timestamptz
+	Status      string
 }

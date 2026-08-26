@@ -50,6 +50,13 @@ UPDATE users
 SET role = sqlc.arg(role), active = sqlc.arg(active), version = version + 1, updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND version = sqlc.arg(expected_version);
 
+-- name: UpdateUserDetails :execrows
+UPDATE users
+SET username = sqlc.arg(username), display_name = sqlc.arg(display_name),
+    email = NULLIF(sqlc.arg(email)::text, '')::citext,
+    version = version + 1, updated_at = now()
+WHERE id = sqlc.arg(id)::uuid AND version = sqlc.arg(expected_version);
+
 -- name: RevokeUserSessions :exec
 UPDATE sessions SET revoked_at = COALESCE(revoked_at, now())
 WHERE user_id = sqlc.arg(user_id)::uuid AND revoked_at IS NULL;

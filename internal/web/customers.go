@@ -4,8 +4,11 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/mail"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"example.invalid/hackplan/internal/auth"
 	"example.invalid/hackplan/internal/customers"
@@ -19,19 +22,25 @@ func registerCustomerRoutes(router chi.Router, dependencies Dependencies, page t
 	csrfCookie := dependencies.Config.Auth.CSRFCookieName
 	router.Get("/customers", customerList(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers/search", customerSearch(service, page, csrfCookie, dependencies.Logger))
-	router.Get("/customers/new", intakePage(page, csrfCookie, dependencies.Logger))
+	router.Get("/customers/new", intakePage(service, page, csrfCookie, dependencies.Logger))
+	router.Post("/customers/new/search", intakeCustomerSearch(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers", createIntake(service, page, csrfCookie, dependencies.Logger))
 	router.Get("/customers/{customerID}", customerDetail(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers/{customerID}", updateCustomer(service, dependencies.Logger))
 	router.Post("/customers/{customerID}/archive", archiveCustomer(service, dependencies.Logger))
 	router.Get("/customers/{customerID}/jobs/new", jobForm(service, page, csrfCookie, dependencies.Logger))
+	router.Get("/jobs/{jobID}/duplicate", duplicateJobForm(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers/{customerID}/jobs", createJob(service, page, csrfCookie, dependencies.Logger))
+	router.Post("/recent/customers/{customerID}", recordRecentCustomer(service, dependencies.Logger))
+	router.Post("/recent/jobs/{jobID}", recordRecentJob(service, dependencies.Logger))
 	router.Post("/jobs/{jobID}/notes", addJobNote(service, dependencies.Logger))
 	router.Post("/jobs/{jobID}", updateJob(service, dependencies.Logger))
 	router.Post("/jobs/{jobID}/archive", archiveJob(service, dependencies.Logger))
 	router.Get("/waitlist", waitlistPage(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/waitlist/{waitlistID}/priority", updateWaitlistPriority(service, dependencies.Logger))
 	router.Post("/waitlist/{waitlistID}/remove", removeWaitlist(service, dependencies.Logger))
+	router.Post("/waitlist/filter-favorites", saveWaitlistFilterFavorite(service, dependencies.Logger))
+	router.Post("/waitlist/filter-favorites/{favoriteID}/delete", deleteWaitlistFilterFavorite(service, dependencies.Logger))
 }
 
 func updateCustomer(service *customers.Service, logger *slog.Logger) http.HandlerFunc {
@@ -48,7 +57,7 @@ func updateCustomer(service *customers.Service, logger *slog.Logger) http.Handle
 			mutationError(response, err, logger, request, "customer_update_rejected")
 			return
 		}
-		http.Redirect(response, request, "/customers/"+chi.URLParam(request, "customerID"), http.StatusSeeOther)
+		http.Redirect(response, request, "/customers/"+url.PathEscape(chi.URLParam(request, "customerID")), http.StatusSeeOther)
 	}
 }
 
@@ -60,6 +69,7 @@ func jobForm(service *customers.Service, page templates.PageData, csrfCookie str
 			renderCustomerError(response, request, page, logger, err, "Kundenakte nicht verfügbar")
 			return
 		}
+		detail.PageRequestID = middleware.GetReqID(request.Context())
 		if detail.Customer.ArchivedAt != nil {
 			render(response, request, templates.Error(page, http.StatusConflict, "Kunde archiviert", "Für einen archivierten Kunden kann kein Auftrag angelegt werden."), http.StatusConflict, logger)
 			return
@@ -67,6 +77,8 @@ func jobForm(service *customers.Service, page templates.PageData, csrfCookie str
 		render(response, request, templates.JobForm(templates.JobFormData{
 			Shell: shell(request, page, csrfCookie), CustomerID: detail.Customer.ID,
 			CustomerName: displayCustomerName(detail.Customer), Values: defaultIntakeValues(),
+			CustomerRegion:   detail.Customer.Region,
+			CustomerLatitude: floatFormValue(detail.Customer.Latitude), CustomerLongitude: floatFormValue(detail.Customer.Longitude),
 		}), http.StatusOK, logger)
 	}
 }
@@ -74,6 +86,18 @@ func jobForm(service *customers.Service, page templates.PageData, csrfCookie str
 func createJob(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		values := intakeValues(request)
+		fieldErrors := intakeFormErrors(values, false)
+		if len(fieldErrors) > 0 {
+			render(response, request, templates.JobForm(templates.JobFormData{
+				Shell:        shell(request, page, csrfCookie),
+				CustomerID:   chi.URLParam(request, "customerID"),
+				CustomerName: "bestehenden Kunden",
+				Values:       values,
+				Error:        "Bitte korrigieren Sie die markierten Felder.",
+				FieldErrors:  fieldErrors,
+			}), http.StatusUnprocessableEntity, logger)
+			return
+		}
 		job, err := jobInput(values)
 		if err == nil {
 			session, _ := sessionFromContext(request.Context())
@@ -94,13 +118,38 @@ func createJob(service *customers.Service, page templates.PageData, csrfCookie s
 			}), status, logger)
 			return
 		}
-		http.Redirect(response, request, "/customers/"+chi.URLParam(request, "customerID"), http.StatusSeeOther)
+		http.Redirect(response, request, "/customers/"+url.PathEscape(chi.URLParam(request, "customerID")), http.StatusSeeOther)
+	}
+}
+
+func duplicateJobForm(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		draft, err := service.DuplicateJobDraft(request.Context(), session.Actor, chi.URLParam(request, "jobID"))
+		if err != nil {
+			renderCustomerError(response, request, page, logger, err, "Auftragsentwurf nicht verfügbar")
+			return
+		}
+		detail, err := service.CustomerDetail(request.Context(), session.Actor, draft.CustomerID)
+		if err != nil || detail.Customer.ArchivedAt != nil {
+			renderCustomerError(response, request, page, logger, customers.ErrConflict, "Auftragsentwurf nicht verfügbar")
+			return
+		}
+		render(response, request, templates.JobForm(templates.JobFormData{
+			Shell: shell(request, page, csrfCookie), CustomerID: draft.CustomerID, CustomerName: draft.CustomerName,
+			Values: jobDraftValues(draft.Job), CustomerLatitude: floatFormValue(detail.Customer.Latitude),
+			CustomerLongitude: floatFormValue(detail.Customer.Longitude), CustomerRegion: detail.Customer.Region,
+		}), http.StatusOK, logger)
 	}
 }
 
 func customerList(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
-		renderCustomerList(response, request, service, page, csrfCookie, logger, "", 1)
+		renderCustomerList(response, request, service, page, csrfCookie, logger, customers.CustomerListFilter{
+			Search: request.URL.Query().Get("q"), Sort: request.URL.Query().Get("sort"),
+			Direction: request.URL.Query().Get("direction"), IncludeArchived: request.URL.Query().Get("archived") == "1",
+			Page: queryPage(request), PageSize: 25,
+		})
 	}
 }
 
@@ -110,40 +159,72 @@ func customerSearch(service *customers.Service, page templates.PageData, csrfCoo
 		if err != nil || pageNumber < 1 {
 			pageNumber = 1
 		}
-		renderCustomerList(response, request, service, page, csrfCookie, logger, request.Form.Get("q"), pageNumber)
+		renderCustomerList(response, request, service, page, csrfCookie, logger, customers.CustomerListFilter{
+			Search: request.Form.Get("q"), Sort: request.Form.Get("sort"), Direction: request.Form.Get("direction"),
+			IncludeArchived: request.Form.Get("archived") == "1", Page: pageNumber, PageSize: 25,
+		})
 	}
 }
 
-func renderCustomerList(response http.ResponseWriter, request *http.Request, service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger, search string, pageNumber int) {
+func renderCustomerList(response http.ResponseWriter, request *http.Request, service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger, filter customers.CustomerListFilter) {
 	response.Header().Set("Cache-Control", "no-store")
 	session, _ := sessionFromContext(request.Context())
-	result, err := service.ListCustomers(request.Context(), session.Actor, search, pageNumber)
+	filter.Normalize()
+	result, err := service.ListCustomers(request.Context(), session.Actor, filter)
 	if err != nil {
 		renderCustomerError(response, request, page, logger, err, "Kunden nicht verfügbar")
 		return
 	}
+	result.CustomerFilter = filter
+	result.Recent, err = service.ListRecent(request.Context(), session.Actor)
+	if err != nil {
+		renderCustomerError(response, request, page, logger, err, "Kundenverlauf nicht verfügbar")
+		return
+	}
 	render(response, request, templates.Customers(templates.CustomerListData{
-		Shell: shell(request, page, csrfCookie), Page: result, Search: search,
+		Shell: shell(request, page, csrfCookie), Page: result, Search: filter.Search,
 	}), http.StatusOK, logger)
 }
 
-func intakePage(page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
+func intakePage(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
-		render(response, request, templates.Intake(templates.IntakeData{
-			Shell: shell(request, page, csrfCookie), Values: defaultIntakeValues(),
-		}), http.StatusOK, logger)
+		renderIntakePage(response, request, service, page, csrfCookie, logger, "", defaultIntakeValues(), "", nil, http.StatusOK)
 	}
+}
+
+func intakeCustomerSearch(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		renderIntakePage(response, request, service, page, csrfCookie, logger, request.Form.Get("q"), defaultIntakeValues(), "", nil, http.StatusOK)
+	}
+}
+
+func renderIntakePage(response http.ResponseWriter, request *http.Request, service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger, search string, values templates.IntakeValues, formError string, fieldErrors []templates.FormFieldError, status int) {
+	response.Header().Set("Cache-Control", "no-store")
+	session, _ := sessionFromContext(request.Context())
+	result, err := service.ListCustomers(request.Context(), session.Actor, customers.CustomerListFilter{
+		Search: search, Sort: "recent", Direction: "desc", Page: 1, PageSize: 25,
+	})
+	if err != nil {
+		renderCustomerError(response, request, page, logger, err, "Kundenauswahl nicht verfügbar")
+		return
+	}
+	render(response, request, templates.Intake(templates.IntakeData{
+		Shell: shell(request, page, csrfCookie), Customers: result, CustomerSearch: search,
+		Values: values, Error: formError, FieldErrors: fieldErrors,
+	}), status, logger)
 }
 
 func createIntake(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		values := intakeValues(request)
+		fieldErrors := intakeFormErrors(values, true)
+		if len(fieldErrors) > 0 {
+			renderIntakePage(response, request, service, page, csrfCookie, logger, "", values, "Bitte korrigieren Sie die markierten Felder.", fieldErrors, http.StatusUnprocessableEntity)
+			return
+		}
 		input, err := intakeInput(values)
 		if err != nil {
-			render(response, request, templates.Intake(templates.IntakeData{
-				Shell: shell(request, page, csrfCookie), Values: values,
-				Error: "Bitte prüfen Sie Menge, Dauer und Transportangaben.",
-			}), http.StatusUnprocessableEntity, logger)
+			renderIntakePage(response, request, service, page, csrfCookie, logger, "", values, "Bitte prüfen Sie Menge, Dauer und Transportangaben.", nil, http.StatusUnprocessableEntity)
 			return
 		}
 		session, _ := sessionFromContext(request.Context())
@@ -153,10 +234,7 @@ func createIntake(service *customers.Service, page templates.PageData, csrfCooki
 			if errors.Is(err, auth.ErrForbidden) {
 				status = http.StatusForbidden
 			}
-			render(response, request, templates.Intake(templates.IntakeData{
-				Shell: shell(request, page, csrfCookie), Values: values,
-				Error: "Der Auftrag konnte nicht gespeichert werden. Prüfen Sie die Pflichtfelder und Transportangaben.",
-			}), status, logger)
+			renderIntakePage(response, request, service, page, csrfCookie, logger, "", values, "Der Auftrag konnte nicht gespeichert werden. Prüfen Sie die Pflichtfelder und Transportangaben.", nil, status)
 			return
 		}
 		location := "/customers/" + created.CustomerID
@@ -179,6 +257,11 @@ func customerDetail(service *customers.Service, page templates.PageData, csrfCoo
 		message := ""
 		if request.URL.Query().Get("duplicate_warning") == "1" {
 			message = "Hinweis: Es gibt ähnlich wirkende Kundenakten. Bitte prüfen Sie diese vor einer späteren Zusammenführung. Es wurde nichts automatisch verbunden."
+			detail.Duplicates, err = service.FindDuplicatesForCustomer(request.Context(), session.Actor, detail.Customer)
+			if err != nil {
+				renderCustomerError(response, request, page, logger, err, "Dublettenvergleich nicht verfügbar")
+				return
+			}
 		}
 		render(response, request, templates.CustomerDetail(templates.CustomerDetailData{
 			Shell: shell(request, page, csrfCookie), Detail: detail, Error: message,
@@ -197,14 +280,14 @@ func archiveCustomer(service *customers.Service, logger *slog.Logger) http.Handl
 			mutationError(response, err, logger, request, "customer_archive_rejected")
 			return
 		}
-		http.Redirect(response, request, "/customers/"+chi.URLParam(request, "customerID"), http.StatusSeeOther)
+		http.Redirect(response, request, "/customers/"+url.PathEscape(chi.URLParam(request, "customerID")), http.StatusSeeOther)
 	}
 }
 
 func addJobNote(service *customers.Service, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
-		_, err := service.AddNote(request.Context(), session.Actor, chi.URLParam(request, "jobID"), request.Form.Get("body"), "", middleware.GetReqID(request.Context()))
+		_, err := service.AddNote(request.Context(), session.Actor, chi.URLParam(request, "jobID"), request.Form.Get("body"), "", request.Form.Get("idempotency_key"), middleware.GetReqID(request.Context()))
 		if err != nil {
 			mutationError(response, err, logger, request, "job_note_rejected")
 			return
@@ -214,7 +297,7 @@ func addJobNote(service *customers.Service, logger *slog.Logger) http.HandlerFun
 			http.Redirect(response, request, "/customers", http.StatusSeeOther)
 			return
 		}
-		http.Redirect(response, request, "/customers/"+customerID, http.StatusSeeOther)
+		http.Redirect(response, request, "/customers/"+url.PathEscape(customerID), http.StatusSeeOther)
 	}
 }
 
@@ -257,12 +340,7 @@ func archiveJob(service *customers.Service, logger *slog.Logger) http.HandlerFun
 
 func waitlistPage(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
-		filter := customers.WaitlistFilter{
-			Query: request.URL.Query().Get("q"), JobType: request.URL.Query().Get("type"),
-			Region: request.URL.Query().Get("region"), Urgency: request.URL.Query().Get("urgency"),
-			PreferredMonth: request.URL.Query().Get("month"), Sort: request.URL.Query().Get("sort"),
-			Direction: request.URL.Query().Get("direction"), Page: queryPage(request), PageSize: 25,
-		}
+		filter := waitlistFilterFromRequest(request)
 		filter.Normalize()
 		session, _ := sessionFromContext(request.Context())
 		result, err := service.ListWaitlist(request.Context(), session.Actor, filter)
@@ -270,9 +348,62 @@ func waitlistPage(service *customers.Service, page templates.PageData, csrfCooki
 			renderCustomerError(response, request, page, logger, err, "Warteliste nicht verfügbar")
 			return
 		}
+		result.Favorites, err = service.ListWaitlistFilterFavorites(request.Context(), session.Actor)
+		if err != nil {
+			renderCustomerError(response, request, page, logger, err, "Filterfavoriten nicht verfügbar")
+			return
+		}
 		render(response, request, templates.Waitlist(templates.WaitlistData{
 			Shell: shell(request, page, csrfCookie), Page: result, Filter: filter,
 		}), http.StatusOK, logger)
+	}
+}
+
+func recordRecentCustomer(service *customers.Service, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		id := chi.URLParam(request, "customerID")
+		if err := service.RecordRecentCustomer(request.Context(), session.Actor, id); err != nil {
+			mutationError(response, err, logger, request, "recent_customer_rejected")
+			return
+		}
+		http.Redirect(response, request, "/customers/"+url.PathEscape(id), http.StatusSeeOther)
+	}
+}
+
+func recordRecentJob(service *customers.Service, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		jobID := chi.URLParam(request, "jobID")
+		customerID, err := service.RecordRecentJob(request.Context(), session.Actor, jobID)
+		if err != nil {
+			mutationError(response, err, logger, request, "recent_job_rejected")
+			return
+		}
+		http.Redirect(response, request, "/customers/"+url.PathEscape(customerID)+"#job-"+url.PathEscape(jobID), http.StatusSeeOther)
+	}
+}
+
+func saveWaitlistFilterFavorite(service *customers.Service, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		filter := waitlistFilterFromRequest(request)
+		if err := service.SaveWaitlistFilterFavorite(request.Context(), session.Actor, request.FormValue("name"), filter); err != nil {
+			mutationError(response, err, logger, request, "waitlist_filter_favorite_rejected")
+			return
+		}
+		http.Redirect(response, request, waitlistFilterLocation(filter), http.StatusSeeOther)
+	}
+}
+
+func deleteWaitlistFilterFavorite(service *customers.Service, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		if err := service.DeleteWaitlistFilterFavorite(request.Context(), session.Actor, chi.URLParam(request, "favoriteID")); err != nil {
+			mutationError(response, err, logger, request, "waitlist_filter_favorite_delete_rejected")
+			return
+		}
+		http.Redirect(response, request, "/waitlist", http.StatusSeeOther)
 	}
 }
 
@@ -321,12 +452,160 @@ func intakeValues(request *http.Request) templates.IntakeValues {
 		PreferredStart: request.Form.Get("preferred_start"), PreferredEnd: request.Form.Get("preferred_end"),
 		PreferenceText: request.Form.Get("preference_text"), Urgency: request.Form.Get("urgency"),
 		Source: request.Form.Get("source"), Note: request.Form.Get("note"),
-		ExternalConfirmed: request.Form.Get("external_confirmed") == "true",
+		PileLatitude: request.Form.Get("pile_latitude"), PileLongitude: request.Form.Get("pile_longitude"),
+		PileLocationSource: request.Form.Get("pile_location_source"),
+		ExternalConfirmed:  request.Form.Get("external_confirmed") == "true",
 	}
 }
 
 func defaultIntakeValues() templates.IntakeValues {
 	return templates.IntakeValues{Notification: "none", JobType: "chipping_only", TransportMode: "none", Urgency: "normal", Source: "phone"}
+}
+
+func jobDraftValues(job customers.JobInput) templates.IntakeValues {
+	values := templates.IntakeValues{
+		JobType: string(job.JobType), Volume: job.VolumeM3, HackDuration: strconv.Itoa(job.EstimatedHackMinutes),
+		TransportMode: string(job.TransportMode), PreferredStart: job.PreferredStartDate,
+		PreferredEnd: job.PreferredEndDate, PreferenceText: job.PreferenceText, Urgency: string(job.Urgency),
+		Region: job.Region, Source: string(job.Source), ExternalConfirmed: job.ExternalTransportConfirmed,
+		PileLocationSource: string(job.PileLocationSource),
+	}
+	if job.EstimatedTransportMinutes > 0 {
+		values.TransportDuration = strconv.Itoa(job.EstimatedTransportMinutes)
+	}
+	if job.TransportTripCount > 0 {
+		values.Trips = strconv.Itoa(job.TransportTripCount)
+	}
+	values.PileLatitude = floatFormValue(job.PileLatitude)
+	values.PileLongitude = floatFormValue(job.PileLongitude)
+	return values
+}
+
+func waitlistFilterFromRequest(request *http.Request) customers.WaitlistFilter {
+	filter := customers.WaitlistFilter{
+		Query: request.FormValue("q"), JobType: request.FormValue("type"), Region: request.FormValue("region"),
+		Urgency: request.FormValue("urgency"), PreferredMonth: request.FormValue("month"),
+		Workflow: request.FormValue("workflow"), Sort: request.FormValue("sort"), Direction: request.FormValue("direction"),
+		MissingLocation: request.FormValue("missing_location") == "1",
+		DurationIssue:   request.FormValue("duration_issue") == "1", Page: queryPage(request), PageSize: 25,
+	}
+	filter.Normalize()
+	return filter
+}
+
+func waitlistFilterLocation(filter customers.WaitlistFilter) string {
+	values := url.Values{}
+	for key, value := range map[string]string{
+		"type": filter.JobType, "region": filter.Region, "urgency": filter.Urgency, "month": filter.PreferredMonth,
+		"workflow": filter.Workflow, "sort": filter.Sort, "direction": filter.Direction,
+	} {
+		if value != "" {
+			values.Set(key, value)
+		}
+	}
+	if filter.MissingLocation {
+		values.Set("missing_location", "1")
+	}
+	if filter.DurationIssue {
+		values.Set("duration_issue", "1")
+	}
+	if encoded := values.Encode(); encoded != "" {
+		return "/waitlist?" + encoded
+	}
+	return "/waitlist"
+}
+
+func intakeFormErrors(values templates.IntakeValues, includeCustomer bool) []templates.FormFieldError {
+	fieldErrors := make([]templates.FormFieldError, 0, 8)
+	add := func(field, label, message string) {
+		fieldErrors = append(fieldErrors, templates.FormFieldError{Field: field, Label: label, Message: message})
+	}
+
+	if includeCustomer {
+		validateCustomerForm(values, add)
+	}
+	validateJobForm(values, add)
+
+	return fieldErrors
+}
+
+func validateCustomerForm(values templates.IntakeValues, add func(string, string, string)) {
+	noName := strings.TrimSpace(values.FirstName) == "" &&
+		strings.TrimSpace(values.LastName) == "" &&
+		strings.TrimSpace(values.CompanyName) == ""
+	if noName {
+		add("first_name", "Kundenname", "Vorname, Nachname oder Firma angeben.")
+	}
+	if values.Email != "" {
+		parsed, err := mail.ParseAddress(values.Email)
+		invalidEmail := err != nil || parsed.Address != values.Email || strings.ContainsAny(values.Email, "\r\n")
+		if invalidEmail {
+			add("email", "E-Mail", "Eine gültige E-Mail-Adresse eingeben.")
+		}
+	}
+	if values.Phone != "" && customers.NormalizePhone(values.Phone) == "" {
+		add("phone", "Telefon", "Eine gültige österreichische oder internationale Telefonnummer eingeben.")
+	}
+	if !customers.NotificationPreference(values.Notification).Valid() {
+		add("notification", "Benachrichtigung", "Einen gültigen Benachrichtigungskanal auswählen.")
+	}
+}
+
+func validateJobForm(values templates.IntakeValues, add func(string, string, string)) {
+	jobType := customers.JobType(values.JobType)
+	transportMode := customers.TransportMode(values.TransportMode)
+	if !jobType.Valid() {
+		add("job_type", "Auftragstyp", "Einen gültigen Auftragstyp auswählen.")
+	}
+	if _, err := customers.CanonicalVolume(values.Volume); err != nil {
+		add("volume_m3", "Menge", "Eine positive Menge in m³ eingeben.")
+	}
+	if minutes, err := customers.ParseDuration(values.HackDuration); err != nil || minutes > customers.MaxJobDurationMinutes {
+		add("hack_duration", "Hackdauer", "Eine Dauer als Stunden:Minuten oder positive Gesamtminuten eingeben.")
+	}
+	if strings.TrimSpace(values.TransportDuration) != "" {
+		if minutes, err := customers.ParseDuration(values.TransportDuration); err != nil || minutes > customers.MaxJobDurationMinutes {
+			add("transport_duration", "Transportdauer", "Eine Dauer als Stunden:Minuten oder positive Gesamtminuten eingeben.")
+		}
+	}
+	if strings.TrimSpace(values.Trips) != "" {
+		trips, err := strconv.Atoi(values.Trips)
+		if err != nil || trips < 0 || trips > customers.MaxTransportTrips {
+			add("transport_trips", "Transportfahrten", "Eine ganze Zahl zwischen 0 und 1000 eingeben.")
+		}
+	}
+	if !transportMode.Valid() || (jobType == customers.JobTypeChippingWithTransport && transportMode == customers.TransportNone) {
+		add("transport_mode", "Transportmodus", "Für einen Transportauftrag einen Transportmodus auswählen.")
+	}
+	if jobType == customers.JobTypeChippingOnly &&
+		(strings.TrimSpace(values.TransportDuration) != "" || strings.TrimSpace(values.Trips) != "" || transportMode != customers.TransportNone) {
+		add("job_type", "Auftragstyp", "Transportangaben sind nur bei einem Transportauftrag zulässig.")
+	}
+	if values.ExternalConfirmed && (jobType != customers.JobTypeChippingWithTransport || transportMode != customers.TransportExternal) {
+		add("external_confirmed", "Transportbestätigung", "Nur externen Transport ausdrücklich bestätigen.")
+	}
+	validatePreferredDates(values, add)
+	if _, _, _, err := pileLocation(values); err != nil {
+		add("pile_latitude", "Haufenstandort", "Gültige, vollständige Koordinaten übernehmen oder den Standort entfernen.")
+	}
+}
+
+func validatePreferredDates(values templates.IntakeValues, add func(string, string, string)) {
+	start, startErr := parseFormDate(values.PreferredStart)
+	end, endErr := parseFormDate(values.PreferredEnd)
+	if startErr != nil {
+		add("preferred_start", "Frühestes Datum", "Ein gültiges Datum eingeben.")
+	}
+	if endErr != nil || (startErr == nil && !start.IsZero() && !end.IsZero() && end.Before(start)) {
+		add("preferred_end", "Spätestes Datum", "Ein gültiges Datum wählen, das nicht vor dem frühesten Datum liegt.")
+	}
+}
+
+func parseFormDate(value string) (time.Time, error) {
+	if strings.TrimSpace(value) == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.DateOnly, value)
 }
 
 func intakeInput(values templates.IntakeValues) (customers.IntakeInput, error) {
@@ -356,6 +635,10 @@ func jobInput(values templates.IntakeValues) (customers.JobInput, error) {
 			return customers.JobInput{}, err
 		}
 	}
+	pileLatitude, pileLongitude, pileSource, err := pileLocation(values)
+	if err != nil {
+		return customers.JobInput{}, err
+	}
 	return customers.JobInput{
 		JobType: customers.JobType(values.JobType), VolumeM3: values.Volume, EstimatedHackMinutes: hackMinutes,
 		EstimatedTransportMinutes: transportMinutes, TransportTripCount: trips,
@@ -363,7 +646,33 @@ func jobInput(values templates.IntakeValues) (customers.JobInput, error) {
 		PreferredEndDate: values.PreferredEnd, PreferenceText: values.PreferenceText,
 		Urgency: customers.Urgency(values.Urgency), Region: values.Region, Source: customers.Source(values.Source),
 		ExternalTransportConfirmed: values.ExternalConfirmed,
+		PileLatitude:               pileLatitude, PileLongitude: pileLongitude, PileLocationSource: pileSource,
 	}, nil
+}
+
+func pileLocation(values templates.IntakeValues) (*float64, *float64, customers.PileLocationSource, error) {
+	latitudeValue := strings.TrimSpace(values.PileLatitude)
+	longitudeValue := strings.TrimSpace(values.PileLongitude)
+	source := customers.PileLocationSource(strings.TrimSpace(values.PileLocationSource))
+	if latitudeValue == "" && longitudeValue == "" && source == "" {
+		return nil, nil, "", nil
+	}
+	if latitudeValue == "" || longitudeValue == "" || !source.Valid() {
+		return nil, nil, "", customers.ErrValidation
+	}
+	latitude, latitudeErr := strconv.ParseFloat(strings.ReplaceAll(latitudeValue, ",", "."), 64)
+	longitude, longitudeErr := strconv.ParseFloat(strings.ReplaceAll(longitudeValue, ",", "."), 64)
+	if latitudeErr != nil || longitudeErr != nil {
+		return nil, nil, "", customers.ErrValidation
+	}
+	return &latitude, &longitude, source, nil
+}
+
+func floatFormValue(value *float64) string {
+	if value == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*value, 'f', 6, 64)
 }
 
 func customerInputFromValues(values templates.IntakeValues) customers.CustomerInput {
@@ -443,7 +752,7 @@ func safeID(value string) bool {
 func redirectCustomer(response http.ResponseWriter, request *http.Request) {
 	customerID := request.Form.Get("customer_id")
 	if safeID(customerID) {
-		http.Redirect(response, request, "/customers/"+customerID, http.StatusSeeOther)
+		http.Redirect(response, request, "/customers/"+url.PathEscape(customerID), http.StatusSeeOther)
 		return
 	}
 	http.Redirect(response, request, "/customers", http.StatusSeeOther)

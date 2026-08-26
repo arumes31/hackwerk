@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"net/mail"
 	"strings"
 	"time"
 )
@@ -90,6 +91,16 @@ type UpdateAccessInput struct {
 	RequestID       string
 }
 
+// UpdateUserDetailsInput changes login and display metadata without touching a driver profile.
+type UpdateUserDetailsInput struct {
+	UserID          string
+	Username        string
+	DisplayName     string
+	Email           string
+	ExpectedVersion int32
+	RequestID       string
+}
+
 // ResetPasswordInput revokes sessions and forces a subsequent password change.
 type ResetPasswordInput struct {
 	UserID          string
@@ -110,6 +121,7 @@ type Store interface {
 	RecordLoginFailure(context.Context, []byte) error
 	ListUsers(context.Context) ([]UserSummary, error)
 	CreateUser(context.Context, Actor, CreateUserInput, string) (string, error)
+	UpdateUserDetails(context.Context, Actor, UpdateUserDetailsInput) error
 	UpdateUserAccess(context.Context, Actor, UpdateAccessInput) error
 	ResetPassword(context.Context, Actor, ResetPasswordInput, string) error
 	ChangeOwnPassword(context.Context, Actor, string, int32) error
@@ -264,14 +276,33 @@ func (service *Service) CreateUser(ctx context.Context, actor Actor, input Creat
 	if err := actor.Require(PermissionUserManage); err != nil {
 		return "", err
 	}
-	if !input.Role.Valid() || strings.TrimSpace(input.Username) == "" || strings.TrimSpace(input.DisplayName) == "" {
-		return "", errors.New("auth: invalid user input")
+	username, displayName, email, err := normalizeUserDetails(input.Username, input.DisplayName, input.Email)
+	if err != nil || !input.Role.Valid() {
+		return "", ErrInvalidInput
 	}
+	input.Username = username
+	input.DisplayName = displayName
+	input.Email = email
 	hash, err := service.hasher.Hash(input.Password)
 	if err != nil {
 		return "", err
 	}
 	return service.store.CreateUser(ctx, actor, input, hash)
+}
+
+// UpdateUserDetails changes only account metadata and leaves a linked driver profile unchanged.
+func (service *Service) UpdateUserDetails(ctx context.Context, actor Actor, input UpdateUserDetailsInput) error {
+	if err := actor.Require(PermissionUserManage); err != nil {
+		return err
+	}
+	username, displayName, email, err := normalizeUserDetails(input.Username, input.DisplayName, input.Email)
+	if err != nil || strings.TrimSpace(input.UserID) == "" || input.ExpectedVersion < 1 {
+		return ErrInvalidInput
+	}
+	input.Username = username
+	input.DisplayName = displayName
+	input.Email = email
+	return service.store.UpdateUserDetails(ctx, actor, input)
 }
 
 // UpdateUserAccess enforces admin permission; the store protects the last active admin atomically.
@@ -311,4 +342,23 @@ func (service *Service) ChangeOwnPassword(ctx context.Context, actor Actor, pass
 
 func actorFromUser(user User) Actor {
 	return Actor{UserID: user.ID, Username: user.Username, DisplayName: user.DisplayName, Role: user.Role, DriverID: user.DriverID, MustChangePassword: user.MustChangePassword, UserVersion: user.Version}
+}
+
+func normalizeUserDetails(username string, displayName string, email string) (string, string, string, error) {
+	username = strings.TrimSpace(username)
+	displayName = strings.TrimSpace(displayName)
+	email = strings.TrimSpace(email)
+	invalidText := username == "" || displayName == "" || len([]rune(username)) > 200 ||
+		len([]rune(displayName)) > 200 || strings.ContainsAny(username+displayName, "\r\n")
+	if invalidText {
+		return "", "", "", ErrInvalidInput
+	}
+	if email == "" {
+		return username, displayName, email, nil
+	}
+	address, err := mail.ParseAddress(email)
+	if err != nil || address.Address != email || len(email) > 320 || strings.ContainsAny(email, "\r\n") {
+		return "", "", "", ErrInvalidInput
+	}
+	return username, displayName, email, nil
 }

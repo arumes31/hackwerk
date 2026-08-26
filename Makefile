@@ -3,13 +3,25 @@ SHELL := /bin/sh
 
 VERSION ?= dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || printf unknown)
+ifeq ($(OS),Windows_NT)
+BUILD_TIME ?= $(shell powershell -NoProfile -Command "[DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')")
+else
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+endif
 LDFLAGS := -s -w -X example.invalid/hackplan/internal/buildinfo.Version=$(VERSION) -X example.invalid/hackplan/internal/buildinfo.Commit=$(COMMIT) -X example.invalid/hackplan/internal/buildinfo.BuildTime=$(BUILD_TIME)
 
-.PHONY: help dev up down logs generate generate-check format lint test test-integration test-e2e test-race build check scan release-check
+ifeq ($(OS),Windows_NT)
+DOCKER_RUN_PREFIX := set MSYS_NO_PATHCONV=1&&
+ENSURE_DIST := if not exist dist mkdir dist
+else
+DOCKER_RUN_PREFIX := MSYS_NO_PATHCONV=1
+ENSURE_DIST := mkdir -p dist
+endif
+
+.PHONY: help dev up down logs clean generate generate-check format format-check lint test test-integration test-migrations test-e2e test-race build build-image image-archive check scan scan-code scan-license scan-image sbom backup-restore-smoke container-smoke docs-check release-check
 
 help:
-	@printf '%s\n' 'HackWerk: dev up down logs generate generate-check format lint test test-integration test-e2e test-race build check scan release-check'
+	@printf '%s\n' 'HackWerk: dev up down logs clean generate generate-check format format-check lint test test-integration test-migrations test-e2e test-race build check scan scan-license backup-restore-smoke container-smoke docs-check release-check'
 
 dev: up
 
@@ -22,6 +34,9 @@ down:
 logs:
 	docker compose logs -f app worker
 
+clean:
+	rm -rf -- bin dist
+
 generate:
 	go tool templ generate
 	go tool sqlc generate -f db/sqlc.yaml
@@ -33,6 +48,10 @@ format:
 	gofmt -w $$(find cmd db internal tests web -type f -name '*.go')
 	go tool templ fmt web/templates
 
+format-check:
+	test -z "$$(gofmt -l $$(find cmd db internal tests web -type f -name '*.go'))"
+	go tool templ fmt -fail web/templates
+
 lint:
 	go vet ./...
 	go tool golangci-lint run ./...
@@ -42,6 +61,10 @@ test:
 
 test-integration:
 	go test -tags=integration ./tests/integration/...
+
+test-migrations: build-image
+	go test -count=1 -tags=integration ./tests/integration/... -run '^TestMigrationsUpDownUp$$'
+	sh scripts/release/migration-smoke.sh
 
 test-e2e:
 	go test -count=1 -tags=e2e ./tests/e2e/...
@@ -53,9 +76,37 @@ build:
 	mkdir -p bin
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/hackwerk ./cmd/hackwerk
 
-check: generate-check format lint test test-integration build
+check: generate-check format-check lint test test-integration build
 
-scan:
-	go tool govulncheck ./...
+scan-license:
+	go tool go-licenses check --ignore example.invalid/hackplan ./cmd/hackwerk
 
-release-check: check test-race test-e2e scan
+scan-code: scan-license
+	$(DOCKER_RUN_PREFIX) docker run --rm -v "$(CURDIR):/src:ro" -w /src golang:1.27.0-bookworm sh -c "go mod download && go mod verify && go tool govulncheck ./..."
+	go run ./cmd/repo-audit
+
+image-archive: build-image
+	$(ENSURE_DIST)
+	docker save --output dist/hackwerk-scan.tar hackwerk-scan:local
+
+scan-image: image-archive
+	$(DOCKER_RUN_PREFIX) docker run --rm -v "$(CURDIR)/dist:/work:ro" -v "$(CURDIR)/dist:/out" ghcr.io/aquasecurity/trivy:0.74.0 image --input /work/hackwerk-scan.tar --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --format json --output /out/trivy-report.json
+
+sbom: image-archive
+	$(DOCKER_RUN_PREFIX) docker run --rm -v "$(CURDIR)/dist:/work:ro" -v "$(CURDIR)/dist:/out" anchore/syft:v1.51.0 docker-archive:/work/hackwerk-scan.tar -o cyclonedx-json=/out/hackwerk.cdx.json -o spdx-json=/out/hackwerk.spdx.json
+
+build-image:
+	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(BUILD_TIME) -t hackwerk-scan:local .
+
+scan: scan-code scan-image sbom
+
+backup-restore-smoke: build-image
+	sh scripts/release/backup-restore-smoke.sh
+
+container-smoke: build-image
+	sh scripts/release/container-smoke.sh
+
+docs-check:
+	go run ./cmd/docs-check
+
+release-check: clean check test-race test-e2e test-migrations backup-restore-smoke scan container-smoke docs-check

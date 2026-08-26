@@ -3,29 +3,73 @@ package templates
 import "fmt"
 
 type PageData struct {
-	AppName string
-	Version string
-	CSSPath string
-	JSPath  string
-	FullCalendarJSPath string
-	FullCalendarThemeJSPath string
+	AppName                     string
+	Version                     string
+	CSSPath                     string
+	ControlFoundationCSSPath    string
+	JSPath                      string
+	ManifestPath                string
+	IconPath                    string
+	LoginOriginalCSSPath        string
+	LoginCSSPath                string
+	LoginLoaderJSPath           string
+	LoginBackgroundJSPath       string
+	MapLibreJSPath              string
+	MapLibreWorkerPath          string
+	MapLibreCSSPath             string
+	MapAttribution              string
+	FullCalendarJSPath          string
+	FullCalendarThemeJSPath     string
 	FullCalendarSkeletonCSSPath string
-	FullCalendarThemeCSSPath string
-	FullCalendarPaletteCSSPath string
+	FullCalendarThemeCSSPath    string
+	FullCalendarPaletteCSSPath  string
 }
 
 templ documentHead(data PageData, title string) {
+	@documentHeadWithAssets(data, title, "", "", false)
+}
+
+templ calendarDocumentHead(data PageData, title string) {
+	@documentHeadWithAssets(data, title, "", "", true)
+}
+
+templ documentHeadWithStyle(data PageData, title string, stylePath string) {
+	@documentHeadWithAssets(data, title, stylePath, "", false)
+}
+
+templ documentHeadWithStyles(data PageData, title string, firstStylePath string, secondStylePath string) {
+	@documentHeadWithAssets(data, title, firstStylePath, secondStylePath, false)
+}
+
+templ documentHeadWithAssets(data PageData, title string, firstStylePath string, secondStylePath string, includeCalendar bool) {
 	<head>
 		<meta charset="utf-8"/>
 		<meta name="viewport" content="width=device-width, initial-scale=1"/>
 		<meta name="color-scheme" content="light"/>
+		<meta name="theme-color" content="#214f3a"/>
+		<meta name="application-name" content={ data.AppName }/>
+		<meta name="mobile-web-app-capable" content="yes"/>
+		<meta name="apple-mobile-web-app-capable" content="yes"/>
+		<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
 		<title>{ title }</title>
+		<link rel="manifest" href={ data.ManifestPath }/>
+		<link rel="icon" href={ data.IconPath } type="image/svg+xml"/>
+		<link rel="apple-touch-icon" href={ data.IconPath }/>
+		<link rel="stylesheet" href={ data.ControlFoundationCSSPath }/>
 		<link rel="stylesheet" href={ data.CSSPath }/>
-		<link rel="stylesheet" href={ data.FullCalendarSkeletonCSSPath }/>
-		<link rel="stylesheet" href={ data.FullCalendarThemeCSSPath }/>
-		<link rel="stylesheet" href={ data.FullCalendarPaletteCSSPath }/>
-		<script src={ data.FullCalendarJSPath } defer></script>
-		<script src={ data.FullCalendarThemeJSPath } defer></script>
+		if firstStylePath != "" {
+			<link rel="stylesheet" href={ templ.SafeURL(firstStylePath) }/>
+		}
+		if secondStylePath != "" {
+			<link rel="stylesheet" href={ templ.SafeURL(secondStylePath) }/>
+		}
+		if includeCalendar {
+			<link rel="stylesheet" href={ data.FullCalendarSkeletonCSSPath }/>
+			<link rel="stylesheet" href={ data.FullCalendarThemeCSSPath }/>
+			<link rel="stylesheet" href={ data.FullCalendarPaletteCSSPath }/>
+			<script src={ data.FullCalendarJSPath } defer></script>
+			<script src={ data.FullCalendarThemeJSPath } defer></script>
+		}
 		<script type="module" src={ data.JSPath } defer></script>
 	</head>
 }
@@ -35,6 +79,7 @@ templ Home(data PageData) {
 	<html lang="de-AT">
 		@documentHead(data, data.AppName+" – Einsatzplanung")
 		<body>
+			<div class="connectivity-banner" role="status" aria-live="polite" data-connectivity-banner hidden></div>
 			<a class="skip-link" href="#hauptinhalt">Zum Inhalt springen</a>
 			<header class="site-header">
 				<div class="site-header__inner">
@@ -87,6 +132,7 @@ templ Error(data PageData, status int, heading string, message string) {
 	<html lang="de-AT">
 		@documentHead(data, heading+" – "+data.AppName)
 		<body>
+			<div class="connectivity-banner" role="status" aria-live="polite" data-connectivity-banner hidden></div>
 			<a class="skip-link" href="#hauptinhalt">Zum Inhalt springen</a>
 			<main id="hauptinhalt" class="page error-page">
 				<div class="error-code" aria-hidden="true">{ fmt.Sprint(status) }</div>

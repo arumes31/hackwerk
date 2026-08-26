@@ -11,6 +11,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearAvailabilityRulesForDay = `-- name: ClearAvailabilityRulesForDay :execrows
+DELETE FROM availability_rules
+WHERE driver_id=$1::uuid AND iso_weekday=$2
+`
+
+type ClearAvailabilityRulesForDayParams struct {
+	DriverID   pgtype.UUID
+	IsoWeekday int16
+}
+
+func (q *Queries) ClearAvailabilityRulesForDay(ctx context.Context, arg ClearAvailabilityRulesForDayParams) (int64, error) {
+	result, err := q.db.Exec(ctx, clearAvailabilityRulesForDay, arg.DriverID, arg.IsoWeekday)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deactivateDriverProfile = `-- name: DeactivateDriverProfile :execrows
 UPDATE drivers SET active = false, version = version + 1, updated_at = now()
 WHERE id = $1::uuid AND version = $2 AND active
@@ -110,6 +128,22 @@ func (q *Queries) GetDriverProfile(ctx context.Context, id pgtype.UUID) (GetDriv
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const hasActiveDriverReservations = `-- name: HasActiveDriverReservations :one
+SELECT EXISTS (
+    SELECT 1 FROM appointment_drivers ad
+    JOIN appointments a ON a.id=ad.appointment_id
+    WHERE ad.driver_id=$1::uuid
+      AND ad.active AND a.lifecycle_status IN ('proposal','fixed')
+)::boolean
+`
+
+func (q *Queries) HasActiveDriverReservations(ctx context.Context, driverID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveDriverReservations, driverID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const insertAvailabilityException = `-- name: InsertAvailabilityException :one
@@ -511,6 +545,73 @@ func (q *Queries) ListDriverProfiles(ctx context.Context) ([]ListDriverProfilesR
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockAvailabilityRulesForDay = `-- name: LockAvailabilityRulesForDay :many
+SELECT id::text, version
+FROM availability_rules
+WHERE driver_id=$1::uuid AND iso_weekday=$2
+ORDER BY id
+FOR UPDATE
+`
+
+type LockAvailabilityRulesForDayParams struct {
+	DriverID   pgtype.UUID
+	IsoWeekday int16
+}
+
+type LockAvailabilityRulesForDayRow struct {
+	ID      string
+	Version int32
+}
+
+func (q *Queries) LockAvailabilityRulesForDay(ctx context.Context, arg LockAvailabilityRulesForDayParams) ([]LockAvailabilityRulesForDayRow, error) {
+	rows, err := q.db.Query(ctx, lockAvailabilityRulesForDay, arg.DriverID, arg.IsoWeekday)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LockAvailabilityRulesForDayRow{}
+	for rows.Next() {
+		var i LockAvailabilityRulesForDayRow
+		if err := rows.Scan(&i.ID, &i.Version); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockDriverForAvailability = `-- name: LockDriverForAvailability :one
+SELECT id::text FROM drivers WHERE id=$1::uuid FOR UPDATE
+`
+
+func (q *Queries) LockDriverForAvailability(ctx context.Context, id pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, lockDriverForAvailability, id)
+	var id_2 string
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const lockDriverProfile = `-- name: LockDriverProfile :one
+SELECT version, active FROM drivers
+WHERE id=$1::uuid
+FOR UPDATE
+`
+
+type LockDriverProfileRow struct {
+	Version int32
+	Active  bool
+}
+
+func (q *Queries) LockDriverProfile(ctx context.Context, id pgtype.UUID) (LockDriverProfileRow, error) {
+	row := q.db.QueryRow(ctx, lockDriverProfile, id)
+	var i LockDriverProfileRow
+	err := row.Scan(&i.Version, &i.Active)
+	return i, err
 }
 
 const updateAvailabilityException = `-- name: UpdateAvailabilityException :execrows
