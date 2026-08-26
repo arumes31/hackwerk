@@ -3,12 +3,31 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
 	"example.invalid/hackplan/internal/config"
 )
+
+type heartbeatCall struct {
+	workerID    string
+	startedAt   time.Time
+	heartbeatAt time.Time
+	status      string
+}
+
+type heartbeatFake struct {
+	calls chan heartbeatCall
+	err   error
+}
+
+func (fake heartbeatFake) Heartbeat(_ context.Context, workerID string, startedAt, heartbeatAt time.Time, status string) error {
+	fake.calls <- heartbeatCall{workerID: workerID, startedAt: startedAt, heartbeatAt: heartbeatAt, status: status}
+	return fake.err
+}
 
 type workerHealthFake struct {
 	readyErr     error
@@ -64,5 +83,37 @@ func TestWorkerIdentityUsesStableConfiguredValueOrHostname(t *testing.T) {
 	}
 	if value, err := workerIdentity("", func() (string, error) { return "container-42", nil }); err != nil || value != "container-42" {
 		t.Fatalf("hostname identity = %q/%v", value, err)
+	}
+}
+
+func TestRunWorkerHeartbeatContinuesWhileNotificationBatchIsBusy(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	ticks := make(chan time.Time)
+	calls := make(chan heartbeatCall, 1)
+	done := make(chan struct{})
+	startedAt := time.Date(2026, time.August, 27, 8, 0, 0, 0, time.UTC)
+	heartbeatAt := startedAt.Add(30 * time.Second)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	go func() {
+		defer close(done)
+		runWorkerHeartbeat(ctx, heartbeatFake{calls: calls}, "worker-a", startedAt, ticks, logger)
+	}()
+
+	ticks <- heartbeatAt
+	select {
+	case call := <-calls:
+		if call.workerID != "worker-a" || !call.startedAt.Equal(startedAt) || !call.heartbeatAt.Equal(heartbeatAt) || call.status != "running" {
+			t.Fatalf("heartbeat call = %#v", call)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat was blocked by worker processing")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat loop did not stop after cancellation")
 	}
 }

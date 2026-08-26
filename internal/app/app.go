@@ -263,7 +263,16 @@ func Worker(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if heartbeatInterval < 5*time.Second {
 		heartbeatInterval = 5 * time.Second
 	}
-	nextHeartbeat := startedAt.Add(heartbeatInterval)
+	heartbeatTicker := time.NewTicker(heartbeatInterval)
+	heartbeatDone := make(chan struct{})
+	go func() {
+		defer close(heartbeatDone)
+		runWorkerHeartbeat(ctx, operations, workerID, startedAt, heartbeatTicker.C, logger)
+	}()
+	defer func() {
+		heartbeatTicker.Stop()
+		<-heartbeatDone
+	}()
 
 	for {
 		if _, processErr := processor.RunOnce(ctx); processErr != nil && ctx.Err() == nil {
@@ -275,17 +284,31 @@ func Worker(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			}
 			nextVoiceCleanup = now.Add(time.Hour)
 		}
-		if now := time.Now().UTC(); !now.Before(nextHeartbeat) {
-			if heartbeatErr := operations.Heartbeat(ctx, workerID, startedAt, now, "running"); heartbeatErr != nil && ctx.Err() == nil {
-				logger.WarnContext(ctx, "worker heartbeat failed", slog.String("error_code", "worker_heartbeat_failed"))
-			}
-			nextHeartbeat = now.Add(heartbeatInterval)
-		}
 		select {
 		case <-ctx.Done():
 			logger.Info("worker stopped")
 			return nil
 		case <-ticker.C:
+		}
+	}
+}
+
+type workerHeartbeatStore interface {
+	Heartbeat(context.Context, string, time.Time, time.Time, string) error
+}
+
+func runWorkerHeartbeat(ctx context.Context, operations workerHeartbeatStore, workerID string, startedAt time.Time, ticks <-chan time.Time, logger *slog.Logger) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now, ok := <-ticks:
+			if !ok {
+				return
+			}
+			if err := operations.Heartbeat(ctx, workerID, startedAt, now.UTC(), "running"); err != nil && ctx.Err() == nil {
+				logger.WarnContext(ctx, "worker heartbeat failed", slog.String("error_code", "worker_heartbeat_failed"))
+			}
 		}
 	}
 }
