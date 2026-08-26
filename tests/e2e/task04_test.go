@@ -629,15 +629,23 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
-	if err := runBrowserStep(browserContext, "driver adds job note",
+	if err := runBrowserStep(browserContext, "driver opens job note editor",
 		chromedp.Evaluate(fmt.Sprintf(`document.querySelector(%q).open=true`, "#job-"+jobID), nil),
 		chromedp.WaitVisible("#notes-"+jobID+" summary", chromedp.ByQuery),
 		chromedp.Evaluate(fmt.Sprintf(`document.querySelector(%q).open=true`, "#notes-"+jobID), nil),
 		chromedp.SetValue("form[action='/jobs/"+jobID+"/notes'] textarea[name='body']", "Arbeit vor Ort abgeschlossen", chromedp.ByQuery),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if err := runBrowserStep(browserContext, "driver submits job note",
 		chromedp.Evaluate(`document.documentElement.dataset.e2eNavigationMarker='pending'`, nil),
 		chromedp.Click("form[action='/jobs/"+jobID+"/notes'] button[type='submit']", chromedp.ByQuery),
 		chromedp.WaitNotPresent("html[data-e2e-navigation-marker='pending']", chromedp.ByQuery),
 		chromedp.WaitVisible("#job-"+jobID+" > summary", chromedp.ByQuery),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if err := runBrowserStep(browserContext, "driver verifies job note",
 		chromedp.Evaluate(fmt.Sprintf(`document.querySelector(%q).open=true;document.querySelector(%q).open=true`, "#job-"+jobID, "#notes-"+jobID), nil),
 		chromedp.WaitVisible("#notes-"+jobID+" blockquote", chromedp.ByQuery),
 		chromedp.Text("#notes-"+jobID+" blockquote p", &customerNoteText, chromedp.ByQuery),
