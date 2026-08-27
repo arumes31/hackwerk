@@ -49,6 +49,7 @@ func registerIdentityRoutes(router chi.Router, dependencies Dependencies, page t
 		protected.Use(csrfProtection(identity, dependencies.Config.Auth.CSRFCookieName, page, dependencies.Logger))
 		protected.Get("/dashboard", dashboardPage(dependencies.Dashboard, dependencies.Notifications, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 		protected.Get("/profile", profile(page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
+		protected.Get("/hilfe/erste-schritte", onboardingPage(page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 		protected.Get("/password", passwordPage(page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 		protected.Post("/password", changePassword(identity, dependencies, page))
 		protected.Post("/logout", logout(identity, dependencies))

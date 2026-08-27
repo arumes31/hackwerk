@@ -1,0 +1,127 @@
+package templates
+
+import "example.invalid/hackplan/internal/auth"
+
+type OnboardingData struct {
+	Shell ShellData
+}
+
+type onboardingStep struct {
+	Number string
+	Title  string
+	Body   string
+	Note   string
+	Path   string
+	Action string
+}
+
+templ Onboarding(data OnboardingData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data.Shell.Page, "Erste Schritte – "+data.Shell.Page.AppName)
+		<body>
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page onboarding-page">
+				<header class="onboarding-hero">
+					<div>
+						<p class="eyebrow">Erste Schritte</p>
+						if data.Shell.Actor.Role == auth.RoleAdmin {
+							<h1>HackWerk sicher einrichten und erklären.</h1>
+							<p class="onboarding-lead">Dieser Leitfaden führt durch die erste Einrichtung und den täglichen Ablauf. Die Fahrer-Anleitung steht darunter vollständig für die gemeinsame Einschulung bereit.</p>
+						} else {
+							<h1>Sicher durch den ersten Arbeitstag.</h1>
+							<p class="onboarding-lead">Von der eigenen Verfügbarkeit bis zum abgeschlossenen Auftrag: Hier steht, was Fahrer in HackWerk sehen und erledigen können.</p>
+						}
+					</div>
+					<aside class="onboarding-orientation" aria-label="Orientierung">
+						<span class="onboarding-orientation__mark" aria-hidden="true">HW</span>
+						<div><strong>Kurzanleitung für den Einsatz</strong><span>Deutsch · mobil lesbar · druckbar</span></div>
+					</aside>
+				</header>
+				<section class="onboarding-rules" aria-labelledby="onboarding-rules-title">
+					<div><p class="eyebrow">Vor dem Start</p><h2 id="onboarding-rules-title">Drei Regeln, die immer gelten</h2></div>
+					<ul>
+						<li><strong>Termine bleiben Adminsache.</strong> Nur Administratoren dürfen planen, verschieben, fixieren, absagen oder neu öffnen.</li>
+						<li><strong>Ein gemeinsamer Kalender.</strong> Alle Fahrer sehen alle geplanten Termine – nicht nur die eigene Zuweisung.</li>
+						<li><strong>Entwürfe bleiben Entwürfe.</strong> Planungsvorschläge und Spracheingaben werden geprüft und nie automatisch verbindlich gespeichert.</li>
+					</ul>
+				</section>
+				if data.Shell.Actor.Role == auth.RoleAdmin {
+					<nav class="onboarding-guide-nav" aria-label="Anleitung auswählen">
+						<span>Anleitung auswählen</span>
+						<a href="#fuer-administratoren">Für Administratoren</a>
+						<a href="#fuer-fahrer">Für Fahrer</a>
+					</nav>
+					@onboardingGuide(
+						"fuer-administratoren",
+						"Für Administratoren",
+						"Einrichten, planen und freigeben",
+						"Arbeiten Sie die Schritte bei einer neuen Instanz der Reihe nach durch. Danach kann das Team Aufträge erfassen, während verbindliche Terminentscheidungen bei den Administratoren bleiben.",
+						adminOnboardingSteps(),
+					)
+				}
+				@onboardingGuide(
+					"fuer-fahrer",
+					"Für Fahrer",
+					"Erfassen, orientieren und durchführen",
+					"Diese Anleitung gilt für jeden Fahrerzugang. Administratoren können sie bei der Einschulung gemeinsam mit dem Fahrer durchgehen.",
+					driverOnboardingSteps(),
+				)
+			</main>
+			@appFooter(data.Shell.Page)
+		</body>
+	</html>
+}
+
+templ onboardingGuide(id string, audience string, title string, intro string, steps []onboardingStep) {
+	<section id={ id } class="onboarding-guide" tabindex="-1">
+		<header class="onboarding-guide__heading">
+			<p class="eyebrow">{ audience }</p>
+			<h2>{ title }</h2>
+			<p>{ intro }</p>
+		</header>
+		<ol class="onboarding-steps">
+			for _, step := range steps {
+				<li class="onboarding-step">
+					<span class="onboarding-step__number" aria-hidden="true">{ step.Number }</span>
+					<div class="onboarding-step__content">
+						<h3>{ step.Title }</h3>
+						<p>{ step.Body }</p>
+						if step.Note != "" {
+							<p class="onboarding-step__note"><strong>Wichtig:</strong> { step.Note }</p>
+						}
+						<a class="button button--quiet onboarding-step__action" href={ templ.SafeURL(step.Path) }>{ step.Action } <span aria-hidden="true">→</span></a>
+					</div>
+				</li>
+			}
+		</ol>
+	</section>
+}
+
+func adminOnboardingSteps() []onboardingStep {
+	return []onboardingStep{
+		{Number: "01", Title: "Eigenen Zugang prüfen", Body: "Melden Sie sich mit Ihrem persönlichen Zugang an, ersetzen Sie ein temporäres Passwort und kontrollieren Sie Anzeigename sowie E-Mail-Adresse.", Note: "Adminzugänge werden nicht geteilt. Jede verantwortliche Person arbeitet mit dem eigenen Konto.", Path: "/profile", Action: "Profil öffnen"},
+		{Number: "02", Title: "Zweiten Administrator anlegen", Body: "Legen Sie frühzeitig einen zweiten aktiven Administrator mit eigenem Zugang an. So bleibt die Verwaltung erreichbar, wenn eine Person ausfällt.", Note: "Der letzte aktive Administrator kann nicht deaktiviert oder zum Fahrer herabgestuft werden.", Path: "/admin/users", Action: "Benutzer verwalten"},
+		{Number: "03", Title: "Fahrerzugänge und Fahrerprofile verbinden", Body: "Erstellen Sie für Mitarbeiter passende Fahrerzugänge und ordnen Sie jedem Login das getrennte Fahrerprofil zu. Ein Fahrerprofil kann auch ohne Login für die Planung bestehen.", Note: "Benutzerkonto und Fahrerprofil sind zwei getrennte Objekte und werden nicht zusammengelegt.", Path: "/admin/users", Action: "Fahrerzugänge einrichten"},
+		{Number: "04", Title: "Ressourcen kontrollieren", Body: "Prüfen Sie Hackmaschinen, Transportfahrzeuge und weitere Betriebsmittel. Ergänzen oder deaktivieren Sie Ressourcen so, wie sie tatsächlich eingesetzt werden.", Note: "Planung darf nie von genau einer fest eingebauten Maschine ausgehen.", Path: "/admin/resources", Action: "Ressourcen öffnen"},
+		{Number: "05", Title: "Verfügbarkeiten vorbereiten", Body: "Hinterlegen Sie gemeinsam mit den Fahrern Wochenregeln und Ausnahmen wie Urlaub oder Krankheit. Fahrer pflegen ihre eigene Verfügbarkeit anschließend selbst.", Note: "Eine fehlende Verfügbarkeit wird vor der Terminfixierung geprüft; ein Override braucht eine bewusste Adminentscheidung.", Path: "/admin/drivers", Action: "Fahrerverfügbarkeit prüfen"},
+		{Number: "06", Title: "Ersten Auftrag erfassen", Body: "Suchen oder erstellen Sie den Kunden, erfassen Sie Auftrag, Menge, Dauer, Transport und Haufenstandort und setzen Sie den Auftrag anschließend auf die Warteliste.", Note: "Kunde, Auftrag, Termin, Fahrer und Ressource bleiben getrennte Datensätze.", Path: "/customers/new", Action: "Neuen Auftrag erfassen"},
+		{Number: "07", Title: "Vorschlag planen und zuweisen", Body: "Erzeugen Sie für einen Wartelistenauftrag einen nachvollziehbaren Vorschlag und wählen Sie Fahrer sowie Ressourcen aus. Prüfen Sie Wunschzeitraum, Fahrzeit, Verfügbarkeit und Konflikte.", Note: "Ein Planungsvorschlag ist noch kein verbindlicher Termin und fixiert sich niemals selbst.", Path: "/planning", Action: "Planung öffnen"},
+		{Number: "08", Title: "Termin prüfen und fixieren", Body: "Öffnen Sie den Vorschlag im Kalender, kontrollieren Sie Zeit, Dauer, Fahrer, Ressourcen, Transport und mögliche Konflikte. Erst die separate Adminaktion macht den Termin verbindlich und stößt die Benachrichtigung an.", Note: "Drag-and-drop erzeugt oder verändert höchstens einen Vorschlag. Fixieren bleibt eine ausdrückliche Aktion.", Path: "/calendar", Action: "Kalender öffnen"},
+		{Number: "09", Title: "Antworten und Versand verfolgen", Body: "Beobachten Sie Bestätigungen, Ablehnungen und Rückrufwünsche. Fehlgeschlagene Benachrichtigungen werden geprüft und erst danach gezielt erneut versendet.", Note: "Kundenantworten ändern keinen Termin unbemerkt; notwendige Folgeentscheidungen bleiben sichtbar.", Path: "/admin/notifications", Action: "Versandstatus prüfen"},
+		{Number: "10", Title: "Fahrer gemeinsam einschulen", Body: "Gehen Sie den vollständigen Fahrerleitfaden mit jedem Mitarbeiter durch: gemeinsamer Kalender, eigene Verfügbarkeit, Auftragserfassung, Route und Abschluss.", Note: "Zeigen Sie besonders, welche Kalenderinformationen alle sehen und welche Aktionen ausschließlich Administratoren ausführen.", Path: "#fuer-fahrer", Action: "Zur Fahrer-Anleitung"},
+	}
+}
+
+func driverOnboardingSteps() []onboardingStep {
+	return []onboardingStep{
+		{Number: "01", Title: "Zugang und Profil prüfen", Body: "Ersetzen Sie beim ersten Login das temporäre Passwort. Prüfen Sie danach Ihren Anzeigenamen und die hinterlegte E-Mail-Adresse im Profil.", Note: "Passwörter und Zugänge werden nicht weitergegeben.", Path: "/profile", Action: "Profil öffnen"},
+		{Number: "02", Title: "Tagesübersicht und Kalender kennenlernen", Body: "Die Übersicht zeigt den Arbeitstag, anstehende Einsätze und wichtige Hinweise. Im Kalender sehen alle Fahrer sämtliche geplanten Termine, auch wenn jemand anderes zugewiesen ist.", Note: "Fahrer können Termine ansehen, aber nicht planen, verschieben, fixieren, absagen oder neu öffnen.", Path: "/calendar", Action: "Gemeinsamen Kalender öffnen"},
+		{Number: "03", Title: "Eigene Verfügbarkeit pflegen", Body: "Tragen Sie Ihre regelmäßigen Arbeitszeiten ein und ergänzen Sie Ausnahmen für Urlaub, Krankheit oder andere Abwesenheiten möglichst frühzeitig.", Note: "Als Fahrer bearbeiten Sie nur die eigene Verfügbarkeit.", Path: "/availability", Action: "Verfügbarkeit öffnen"},
+		{Number: "04", Title: "Kunden und Aufträge erfassen", Body: "Suchen Sie zuerst nach einem vorhandenen Kunden. Erfassen oder bearbeiten Sie anschließend Kontaktdaten, Auftrag, Menge, Dauer, Transport und Haufenstandort.", Note: "Speichern Sie Änderungen ausdrücklich und prüfen Sie insbesondere Telefonnummer, Adresse und Einsatzort.", Path: "/customers/new", Action: "Auftrag erfassen"},
+		{Number: "05", Title: "Warteliste und Bemerkungen nutzen", Body: "Legen Sie neue Aufträge auf die Warteliste und ergänzen Sie interne Bemerkungen, die Kollegen für Planung und Durchführung benötigen.", Note: "Interne Bemerkungen sind für angemeldete Mitarbeiter bestimmt und werden Kunden nicht angezeigt.", Path: "/waitlist", Action: "Warteliste öffnen"},
+		{Number: "06", Title: "Eigene Route und Navigation öffnen", Body: "Rufen Sie am Einsatztag Ihre zugewiesene Route auf. Kontrollieren Sie Reihenfolge, Kundendaten und Standort und starten Sie die Navigation über den angebotenen Maps-Link.", Note: "Prüfen Sie vor der Abfahrt, ob der markierte Haufenstandort zur Beschreibung passt.", Path: "/my-route", Action: "Meine Route öffnen"},
+		{Number: "07", Title: "Spracheingabe als Entwurf verwenden", Body: "Die optionale Spracheingabe kann aus einer Aufnahme einen prüfbaren Entwurf vorbereiten. Vergleichen und korrigieren Sie jedes Feld vor dem bewussten Speichern.", Note: "Eine Spracheingabe legt niemals automatisch einen Kunden, Auftrag oder Termin an.", Path: "/voice", Action: "Sprachentwurf starten"},
+		{Number: "08", Title: "Durchgeführten Auftrag abschließen", Body: "Ergänzen Sie nach dem Einsatz eine hilfreiche interne Bemerkung. Wenn Ihr Fahrerprofil dazu berechtigt ist, können Sie den zugewiesenen und bereits begonnenen Auftrag als erledigt markieren.", Note: "Fahrer dürfen einen Termin danach nicht erneut öffnen oder verschieben.", Path: "/dashboard", Action: "Zur Tagesübersicht"},
+	}
+}

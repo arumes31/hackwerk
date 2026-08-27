@@ -91,6 +91,7 @@ templ appHeader(shell ShellData) {
 					<div class="nav-menu__panel nav-menu__panel--account">
 						<span class="nav-menu__label">Mein Zugang</span>
 						@navLink(shell, "/profile", "Profil")
+						@navLink(shell, "/hilfe/erste-schritte", "Erste Schritte")
 						@navLink(shell, "/voice", "Spracheingabe")
 						if shell.Actor.Role == auth.RoleDriver && shell.Actor.DriverID != "" {
 							@navLink(shell, "/my-route", "Meine Route")
@@ -119,6 +120,8 @@ templ appHeader(shell ShellData) {
 					@navLink(shell, "/availability", "Meine Verfügbarkeit")
 				}
 				@navLink(shell, "/profile", "Profil")
+				<span class="mobile-more__label">Hilfe</span>
+				@navLink(shell, "/hilfe/erste-schritte", "Erste Schritte")
 				if shell.Actor.Role == auth.RoleAdmin {
 					<span class="mobile-more__label">Administration</span>
 					@navLink(shell, "/planning", "Planung")
