@@ -75,6 +75,26 @@ func TestHealthcheckUsesLocalListenerAndPublicHostHeader(t *testing.T) {
 	}
 }
 
+func TestHealthcheckClientDisablesProxyResolution(t *testing.T) {
+	t.Parallel()
+
+	client := loopbackHTTPClient(time.Second)
+
+	if client.Timeout != time.Second {
+		t.Fatalf("client timeout = %s, want %s", client.Timeout, time.Second)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("client transport = %T, want *http.Transport", client.Transport)
+	}
+	if transport.Proxy != nil {
+		t.Fatal("loopback healthcheck transport resolves proxies")
+	}
+	if transport == http.DefaultTransport {
+		t.Fatal("loopback healthcheck mutates the shared default transport")
+	}
+}
+
 func TestLocalHealthEndpointNormalizesUnspecifiedListener(t *testing.T) {
 	t.Parallel()
 	endpoint, err := localHealthEndpoint(":18533")

@@ -1873,11 +1873,6 @@ function initializeJobLocationEditor(editor, maplibregl) {
     if (searchStatus) searchStatus.textContent = text;
   };
   const searchAddress = async () => {
-    if (!map) {
-      clearSearchResults();
-      showSearchStatus("Die Karte ist derzeit nicht verfügbar. Koordinaten können weiterhin direkt eingegeben werden.");
-      return;
-    }
     const query = String(searchInput?.value || "").trim();
     if (query.length < 3) {
       clearSearchResults();
@@ -1918,6 +1913,12 @@ function initializeJobLocationEditor(editor, maplibregl) {
         button.className = "location-search__result";
         button.textContent = label;
         button.addEventListener("click", () => {
+          if (!map) {
+            setDraft(point, "coordinates", `Koordinaten aus „${label}“ vorbereitet. Mit „Standort übernehmen“ in das Formular übernehmen.`);
+            showSearchStatus(`Koordinaten aus „${label}“ vorbereitet.`);
+            latitudeInput.focus({ preventScroll: true });
+            return;
+          }
           const bounds = Array.isArray(result.bounds) ? result.bounds.map(Number) : [];
           const boundsValid = bounds.length === 4 && bounds.every(Number.isFinite) && bounds[0] <= bounds[1] && bounds[2] <= bounds[3];
           if (boundsValid && (bounds[0] !== bounds[1] || bounds[2] !== bounds[3])) {

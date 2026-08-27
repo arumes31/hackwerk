@@ -321,7 +321,7 @@ func Healthcheck(ctx context.Context, listenAddr, baseURL string, timeout time.D
 	if err != nil || publicURL.Hostname() == "" || publicURL.User != nil {
 		return errors.New("healthcheck: invalid public base URL")
 	}
-	client := &http.Client{Timeout: timeout}
+	client := loopbackHTTPClient(timeout)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return fmt.Errorf("healthcheck: creating request: %w", err)
@@ -338,6 +338,12 @@ func Healthcheck(ctx context.Context, listenAddr, baseURL string, timeout time.D
 		return fmt.Errorf("healthcheck: readiness returned status %s", strconv.Itoa(response.StatusCode))
 	}
 	return nil
+}
+
+func loopbackHTTPClient(timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	return &http.Client{Timeout: timeout, Transport: transport}
 }
 
 func localHealthEndpoint(listenAddr string) (string, error) {

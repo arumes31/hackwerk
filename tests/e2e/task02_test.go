@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -28,6 +29,7 @@ import (
 	"example.invalid/hackplan/internal/dashboard"
 	"example.invalid/hackplan/internal/geocode"
 	"example.invalid/hackplan/internal/web"
+	"example.invalid/hackplan/web/assets"
 	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -368,6 +370,83 @@ func TestTask02BrowserJourney(t *testing.T) {
 	defer exceptionLock.Unlock()
 	if len(exceptions) > 0 {
 		t.Fatalf("browser JavaScript exceptions: %v", exceptions)
+	}
+}
+
+func TestTask02LocationSearchWithoutMap(t *testing.T) {
+	appJavaScript, err := assets.Files.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/":
+			response.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = io.WriteString(response, `<!doctype html><html><body>
+<span hidden data-map-assets data-map-script="/missing-map.js" data-map-worker="/missing-worker.js" data-map-css="/missing-map.css" data-map-attribution="Kartendaten"></span>
+<form><input type="hidden" name="csrf_token" value="test-csrf">
+<section data-job-location-editor>
+  <div data-map-canvas tabindex="0"><p data-map-fallback hidden></p></div>
+  <span data-location-badge>Fehlt</span>
+  <input data-location-latitude><input data-location-longitude>
+  <input type="hidden" data-location-committed-latitude><input type="hidden" data-location-committed-longitude><input type="hidden" data-location-committed-source>
+  <input type="search" data-location-search-input><button type="button" data-location-search-submit>Suchen</button>
+  <p data-location-search-status></p><ul data-location-search-results hidden></ul>
+  <p data-location-message></p><button type="button" data-location-commit>Standort übernehmen</button>
+</section></form><script src="/assets/app.js"></script></body></html>`)
+		case "/assets/app.js":
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = response.Write(appJavaScript)
+		case "/api/v1/geocoding/search":
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(response, `{"results":[{"label":"Waldstraße 9, Unterneukirchen","latitude":46.71,"longitude":15.57,"bounds":[46.70,46.72,15.56,15.58]}]}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	options := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(browserExecutable(t)), chromedp.Headless, chromedp.DisableGPU,
+		chromedp.NoSandbox, chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck,
+		chromedp.UserDataDir(browserProfileDir(t)), chromedp.WindowSize(1280, 900),
+	)
+	allocatorContext, cancelAllocator := chromedp.NewExecAllocator(context.Background(), options...)
+	t.Cleanup(cancelAllocator)
+	browserContext, cancelBrowser := chromedp.NewContext(allocatorContext)
+	t.Cleanup(cancelBrowser)
+	browserContext, cancelTimeout := context.WithTimeout(browserContext, 60*time.Second)
+	t.Cleanup(cancelTimeout)
+	t.Cleanup(func() { _ = chromedp.Cancel(browserContext) })
+
+	var draftPrepared, committed bool
+	if err := chromedp.Run(browserContext,
+		chromedp.Navigate(server.URL),
+		chromedp.WaitVisible("[data-map-fallback]:not([hidden])", chromedp.ByQuery),
+		chromedp.SetValue("[data-location-search-input]", "Waldstraße 9, Unterneukirchen", chromedp.ByQuery),
+		chromedp.Click("[data-location-search-submit]", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-location-search-results] .location-search__result", chromedp.ByQuery),
+		chromedp.Click("[data-location-search-results] .location-search__result", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const editor = document.querySelector('[data-job-location-editor]');
+			return editor.querySelector('[data-location-latitude]').value === '46.710000'
+				&& editor.querySelector('[data-location-longitude]').value === '15.570000'
+				&& editor.querySelector('[data-location-committed-latitude]').value === ''
+				&& editor.querySelector('[data-location-committed-longitude]').value === ''
+				&& editor.querySelector('[data-location-committed-source]').value === '';
+		})()`, &draftPrepared),
+		chromedp.Click("[data-location-commit]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const editor = document.querySelector('[data-job-location-editor]');
+			return editor.querySelector('[data-location-committed-latitude]').value === '46.710000'
+				&& editor.querySelector('[data-location-committed-longitude]').value === '15.570000'
+				&& editor.querySelector('[data-location-committed-source]').value === 'coordinates';
+		})()`, &committed),
+	); err != nil {
+		t.Fatalf("location fallback journey: %s", browserDiagnostics(browserContext, err))
+	}
+	if !draftPrepared || !committed {
+		t.Fatalf("fallback draft prepared=%v, committed=%v", draftPrepared, committed)
 	}
 }
 
