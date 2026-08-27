@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"testing"
+	"time"
 )
 
 type staticResolver struct {
@@ -14,6 +15,12 @@ type staticResolver struct {
 
 func (resolver staticResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
 	return append([]netip.Addr(nil), resolver.addresses...), nil
+}
+
+type failingResolver struct{ err error }
+
+func (resolver failingResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	return nil, resolver.err
 }
 
 func TestRestrictedDialContextRejectsPrivateAndSpecialUseAddressesBeforeDial(t *testing.T) {
@@ -74,5 +81,63 @@ func TestTransportDisablesProxyResolutionBypass(t *testing.T) {
 	t.Parallel()
 	if Transport().Proxy != nil {
 		t.Fatal("outbound transport allows an unchecked proxy resolution path")
+	}
+}
+
+func TestResolveHandlesIPLiteralsResolverFailuresAndEmptyAnswers(t *testing.T) {
+	direct, err := resolve(t.Context(), staticResolver{}, "::ffff:93.184.216.34")
+	if err != nil || len(direct) != 1 || direct[0].String() != "93.184.216.34" {
+		t.Fatalf("resolve literal = %#v, %v", direct, err)
+	}
+	wantErr := errors.New("DNS unavailable")
+	if _, err := resolve(t.Context(), failingResolver{err: wantErr}, "provider.example"); !errors.Is(err, wantErr) {
+		t.Fatalf("resolve failure = %v, want wrapped resolver error", err)
+	}
+	if _, err := resolve(t.Context(), staticResolver{}, "provider.example"); err == nil {
+		t.Fatal("resolve() accepted an empty DNS response")
+	}
+}
+
+func TestRestrictedDialContextRejectsMalformedDestinationsAndTriesValidatedAddresses(t *testing.T) {
+	dial := restrictedDialContext(staticResolver{addresses: []netip.Addr{netip.MustParseAddr("93.184.216.34")}}, func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("unexpected dial")
+	})
+	for _, address := range []string{"provider.example", ":443"} {
+		if _, err := dial(t.Context(), "tcp", address); err == nil {
+			t.Fatalf("dial(%q) accepted malformed destination", address)
+		}
+	}
+
+	firstErr := errors.New("first address unavailable")
+	secondErr := errors.New("second address unavailable")
+	var attempts []string
+	dial = restrictedDialContext(staticResolver{addresses: []netip.Addr{netip.MustParseAddr("93.184.216.34"), netip.MustParseAddr("1.1.1.1")}}, func(_ context.Context, _ string, address string) (net.Conn, error) {
+		attempts = append(attempts, address)
+		if len(attempts) == 1 {
+			return nil, firstErr
+		}
+		return nil, secondErr
+	})
+	if _, err := dial(t.Context(), "tcp", "provider.example:443"); !errors.Is(err, firstErr) || !errors.Is(err, secondErr) || len(attempts) != 2 {
+		t.Fatalf("dial errors/attempts = %v/%#v", err, attempts)
+	}
+
+	var peer net.Conn
+	dial = restrictedDialContext(staticResolver{addresses: []netip.Addr{netip.MustParseAddr("1.1.1.1")}}, func(context.Context, string, string) (net.Conn, error) {
+		connection, other := net.Pipe()
+		peer = other
+		return connection, nil
+	})
+	connection, err := dial(t.Context(), "tcp", "provider.example:443")
+	if err != nil || connection == nil || peer == nil {
+		t.Fatalf("successful dial = %v, %v, %v", connection, peer, err)
+	}
+	_ = connection.Close()
+	_ = peer.Close()
+}
+
+func TestDialContextReturnsRestrictedDialer(t *testing.T) {
+	if dial := DialContext(time.Second); dial == nil {
+		t.Fatal("DialContext() returned nil")
 	}
 }

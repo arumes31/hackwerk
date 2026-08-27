@@ -15,7 +15,6 @@ func testConfig(t *testing.T) Config {
 		t.Fatal(err)
 	}
 	cfg := DefaultConfig(location)
-	cfg.Depot = Point{48.2, 14.2}
 	cfg.HorizonDays = 7
 	cfg.CandidateLimit = 1000
 	return cfg

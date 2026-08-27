@@ -192,6 +192,7 @@ func TestRouteServicePlanOptimizesDeterministicallyAndBuildsTimeline(t *testing.
 
 	route, err := service.Plan(t.Context(), routeAdmin(), PlanRouteInput{
 		Departure: departure, DriverID: "driver", ChipperResourceID: "chipper",
+		StartLabel: "Betriebshof", EndLabel: "Betriebshof",
 		Start: Point{Latitude: 48.1, Longitude: 14.1}, End: Point{Latitude: 48.1, Longitude: 14.1},
 		JobIDs: []string{"job-b", "job-a"}, Optimize: true, RequestID: "request",
 	})
@@ -261,12 +262,40 @@ func TestRouteServicePlanCanEndAtLastStop(t *testing.T) {
 	}}}
 	service := newRouteTestService(t, store)
 	input.EndAtLastStop = true
+	input.End = Point{}
 	route, err := service.Plan(t.Context(), routeAdmin(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if route.End != last {
 		t.Fatalf("route end = %#v, want last stop %#v", route.End, last)
+	}
+	if route.EndLabel != "Letzter Stopp" {
+		t.Fatalf("route end label = %q", route.EndLabel)
+	}
+}
+
+func TestRouteServicePlanNormalizesEndpointLabels(t *testing.T) {
+	t.Parallel()
+	input := validPlanRouteInput()
+	input.StartLabel = "  Betriebshof Nord  "
+	input.EndLabel = "  Lager Süd  "
+	store := &routeStoreFake{candidates: []RouteCandidate{{
+		JobID: input.JobIDs[0], JobType: "chipping_only", Location: Point{Latitude: 48.25, Longitude: 14.25},
+		WorkDuration: time.Hour, JobVersion: 1, WaitlistVersion: 1,
+	}}}
+	service := newRouteTestService(t, store)
+	route, err := service.Plan(t.Context(), routeAdmin(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if route.StartLabel != "Betriebshof Nord" || route.EndLabel != "Lager Süd" {
+		t.Fatalf("endpoint labels = %q/%q", route.StartLabel, route.EndLabel)
+	}
+
+	input.StartLabel = string(make([]rune, 201))
+	if _, err := service.Plan(t.Context(), routeAdmin(), input); !errors.Is(err, ErrValidation) {
+		t.Fatalf("long endpoint label error = %v, want %v", err, ErrValidation)
 	}
 }
 
@@ -462,6 +491,7 @@ func testDirections(points []Point, duration time.Duration) RouteDirections {
 func validPlanRouteInput() PlanRouteInput {
 	return PlanRouteInput{
 		Departure: time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC), DriverID: "driver", ChipperResourceID: "chipper",
+		StartLabel: "Betriebshof", EndLabel: "Betriebshof",
 		Start: Point{Latitude: 48.1, Longitude: 14.1}, End: Point{Latitude: 48.1, Longitude: 14.1}, JobIDs: []string{"job-a"},
 	}
 }

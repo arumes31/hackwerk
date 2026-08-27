@@ -90,12 +90,12 @@ func TestLoadVoiceConfigurationFromEnvironment(t *testing.T) {
 
 func TestLoadPlanningConfigurationFromEnvironment(t *testing.T) {
 	t.Parallel()
-	values := map[string]string{"PLANNING_ROUTER": "osrm", "PLANNING_ROUTING_URL": "https://router.example/base", "PLANNING_HORIZON_DAYS": "42", "PLANNING_SLOT_MINUTES": "20", "PLANNING_BUFFER_MINUTES": "25", "PLANNING_DEPOT_LATITUDE": "48.31", "PLANNING_DEPOT_LONGITUDE": "14.29", "PLANNING_WEIGHT_TRAVEL": "30"}
+	values := map[string]string{"PLANNING_ROUTER": "osrm", "PLANNING_ROUTING_URL": "https://router.example/base", "PLANNING_HORIZON_DAYS": "42", "PLANNING_SLOT_MINUTES": "20", "PLANNING_BUFFER_MINUTES": "25", "PLANNING_WEIGHT_TRAVEL": "30"}
 	cfg, err := load(func(name string) string { return values[name] }, func(string) ([]byte, error) { return nil, errors.New("unexpected read") })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Planning.Router != "osrm" || cfg.Planning.RoutingURL != values["PLANNING_ROUTING_URL"] || cfg.Planning.HorizonDays != 42 || cfg.Planning.SlotMinutes != 20 || cfg.Planning.BufferMinutes != 25 || cfg.Planning.DepotLatitude != 48.31 || cfg.Planning.WeightTravel != 30 {
+	if cfg.Planning.Router != "osrm" || cfg.Planning.RoutingURL != values["PLANNING_ROUTING_URL"] || cfg.Planning.HorizonDays != 42 || cfg.Planning.SlotMinutes != 20 || cfg.Planning.BufferMinutes != 25 || cfg.Planning.WeightTravel != 30 {
 		t.Fatalf("planning config=%+v", cfg.Planning)
 	}
 }

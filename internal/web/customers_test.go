@@ -536,3 +536,40 @@ func validCustomerHTTPForm(csrfToken string) url.Values {
 		"transport_mode": {"none"}, "urgency": {"normal"}, "source": {"phone"}, "note": {"Interne Bemerkung"},
 	}
 }
+
+func TestCustomerPresentationHelpers(t *testing.T) {
+	latitude, longitude := 48.234567, 14.345678
+	values := jobDraftValues(customers.JobInput{
+		JobType: customers.JobTypeChippingWithTransport, VolumeM3: "80", EstimatedHackMinutes: 90,
+		EstimatedTransportMinutes: 45, TransportTripCount: 2, TransportMode: customers.TransportExternal,
+		PreferredStartDate: "2026-09-01", PreferredEndDate: "2026-09-30", PreferenceText: "vormittags",
+		Urgency: customers.UrgencyUrgent, Region: "Nord", Source: customers.SourcePhone,
+		ExternalTransportConfirmed: true, PileLatitude: &latitude, PileLongitude: &longitude,
+		PileLocationSource: customers.PileSourceMapPin,
+	})
+	if values.HackDuration != "90" || values.TransportDuration != "45" || values.Trips != "2" ||
+		values.PileLatitude != "48.234567" || values.PileLongitude != "14.345678" || !values.ExternalConfirmed {
+		t.Fatalf("job draft values = %#v", values)
+	}
+	if empty := jobDraftValues(customers.JobInput{}); empty.TransportDuration != "" || empty.Trips != "" || empty.PileLatitude != "" || empty.PileLongitude != "" {
+		t.Fatalf("empty job draft values = %#v", empty)
+	}
+
+	filter := customers.WaitlistFilter{JobType: "chipping_only", Region: "Nord", Urgency: "urgent", PreferredMonth: "2026-09", Workflow: "open", Sort: "priority", Direction: "desc", MissingLocation: true, DurationIssue: true}
+	location := waitlistFilterLocation(filter)
+	for _, fragment := range []string{"type=chipping_only", "region=Nord", "missing_location=1", "duration_issue=1"} {
+		if !strings.Contains(location, fragment) {
+			t.Fatalf("filter location %q misses %q", location, fragment)
+		}
+	}
+	if location := waitlistFilterLocation(customers.WaitlistFilter{}); location != "/waitlist" {
+		t.Fatalf("empty filter location = %q", location)
+	}
+
+	if name := displayCustomerName(customers.Customer{FirstName: "Franz", LastName: "Huber"}); name != "Franz Huber" {
+		t.Fatalf("personal customer name = %q", name)
+	}
+	if name := displayCustomerName(customers.Customer{FirstName: "Franz", LastName: "Huber", CompanyName: "Forst GmbH"}); name != "Forst GmbH · Franz Huber" {
+		t.Fatalf("company customer name = %q", name)
+	}
+}

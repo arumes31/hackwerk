@@ -202,6 +202,10 @@ func (r *OSRMRouter) Matrix(ctx context.Context, points []Point) (result Matrix,
 				r.failed()
 				return Matrix{}, errors.New("planning: incomplete routing matrix")
 			}
+			if !validRouteMetric(*decoded.Distances[i][j]) || !validRouteDuration(*decoded.Durations[i][j]) {
+				r.failed()
+				return Matrix{}, errors.New("planning: routing matrix value invalid")
+			}
 			cells[i][j] = MatrixCell{DistanceMeters: int(math.Round(*decoded.Distances[i][j])), Duration: time.Duration(*decoded.Durations[i][j] * float64(time.Second))}
 		}
 	}

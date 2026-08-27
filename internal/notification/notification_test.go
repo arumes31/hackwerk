@@ -116,19 +116,25 @@ func TestBackoffAndRecipientMasking(t *testing.T) {
 }
 
 type processorStore struct {
-	events    []ClaimedEvent
-	delivery  Delivery
-	marked    bool
-	completed bool
-	retried   bool
-	dead      bool
-	errorCode string
-	available time.Time
-	markErr   error
-	stateErr  error
+	events      []ClaimedEvent
+	delivery    Delivery
+	claimErr    error
+	loadErr     error
+	marked      bool
+	completed   bool
+	retried     bool
+	dead        bool
+	errorCode   string
+	available   time.Time
+	markErr     error
+	stateErr    error
+	completeErr error
 }
 
 func (store *processorStore) Claim(_ context.Context, _ string, _, _ time.Time, batchSize int32) ([]ClaimedEvent, error) {
+	if store.claimErr != nil {
+		return nil, store.claimErr
+	}
 	if len(store.events) == 0 {
 		return nil, nil
 	}
@@ -138,7 +144,7 @@ func (store *processorStore) Claim(_ context.Context, _ string, _, _ time.Time, 
 	return result, nil
 }
 func (store *processorStore) LoadDelivery(context.Context, string) (Delivery, error) {
-	return store.delivery, nil
+	return store.delivery, store.loadErr
 }
 func (store *processorStore) MarkSending(context.Context, ClaimedEvent, string, time.Time, time.Time) error {
 	store.marked = true
@@ -171,7 +177,7 @@ func TestProcessorDoesNotResendUncertainDelivery(t *testing.T) {
 }
 func (store *processorStore) Complete(context.Context, ClaimedEvent, string, string) error {
 	store.completed = true
-	return nil
+	return store.completeErr
 }
 func (store *processorStore) Retry(_ context.Context, _ ClaimedEvent, _ string, available time.Time, code string) error {
 	store.retried, store.available, store.errorCode = true, available, code

@@ -80,6 +80,9 @@ func registerIdentityRoutes(router chi.Router, dependencies Dependencies, page t
 		if dependencies.Routes != nil {
 			registerRouteRoutes(protected, dependencies, page)
 		}
+		if dependencies.RouteLocations != nil {
+			registerRouteLocationRoutes(protected, dependencies, page)
+		}
 		if dependencies.Voice != nil {
 			registerVoiceRoutes(protected, dependencies, page)
 		}

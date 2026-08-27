@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,10 +11,24 @@ import (
 	"example.invalid/hackplan/internal/config"
 	"example.invalid/hackplan/internal/driver"
 	"example.invalid/hackplan/internal/planning"
+	"example.invalid/hackplan/internal/routelocation"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type planningAvailability struct{ service *driver.Service }
+
+type planningDefaultStart struct{ store *postgres.RouteLocationStore }
+
+func (p planningDefaultStart) DefaultStart(ctx context.Context) (planning.Point, error) {
+	location, err := p.store.DefaultStart(ctx)
+	if errors.Is(err, routelocation.ErrNotFound) {
+		return planning.Point{}, planning.ErrConfiguration
+	}
+	if err != nil {
+		return planning.Point{}, err
+	}
+	return planning.Point{Latitude: location.Latitude, Longitude: location.Longitude}, nil
+}
 
 func (a planningAvailability) Resolve(ctx context.Context, actor auth.Actor, driverID string, from, to time.Time) ([]planning.Interval, error) {
 	values, err := a.service.ResolveAvailability(ctx, actor, driverID, from, to)
@@ -27,7 +42,7 @@ func (a planningAvailability) Resolve(ctx context.Context, actor auth.Actor, dri
 	return result, nil
 }
 
-func PlanningService(cfg config.Config, pool *pgxpool.Pool, drivers *driver.Service, observers ...planning.Observer) (*planning.Service, error) {
+func PlanningService(cfg config.Config, pool *pgxpool.Pool, drivers *driver.Service, starts *postgres.RouteLocationStore, observers ...planning.Observer) (*planning.Service, error) {
 	location, err := time.LoadLocation(cfg.Timezone)
 	if err != nil {
 		return nil, err
@@ -44,11 +59,13 @@ func PlanningService(cfg config.Config, pool *pgxpool.Pool, drivers *driver.Serv
 	if err != nil {
 		return nil, err
 	}
-	options := make([]planning.Option, 0, len(observers))
+	options := make([]planning.Option, 0, len(observers)+1)
+	options = append(options, planning.WithDefaultStartProvider(planningDefaultStart{store: starts}))
 	for _, observer := range observers {
 		options = append(options, planning.WithObserver(observer))
 	}
-	service, err := planning.New(postgres.NewPlanningStore(pool), planningAvailability{service: drivers}, router, planning.Config{Location: location, RouterName: cfg.Planning.Router, BusinessOpen: open, BusinessClose: closeMinute, SlotMinutes: cfg.Planning.SlotMinutes, HorizonDays: cfg.Planning.HorizonDays, BufferMinutes: cfg.Planning.BufferMinutes, CandidateLimit: cfg.Planning.CandidateLimit, SuggestionTTL: cfg.Planning.SuggestionTTL, Depot: planning.Point{Latitude: cfg.Planning.DepotLatitude, Longitude: cfg.Planning.DepotLongitude}, Weights: planning.Weights{Preference: cfg.Planning.WeightPreference, Travel: cfg.Planning.WeightTravel, Driver: cfg.Planning.WeightDriver, Resource: cfg.Planning.WeightResource, Utilization: cfg.Planning.WeightUtilization, Urgency: cfg.Planning.WeightUrgency, Region: cfg.Planning.WeightRegion}}, time.Now, options...)
+	store := postgres.NewPlanningStore(pool)
+	service, err := planning.New(store, planningAvailability{service: drivers}, router, planning.Config{Location: location, RouterName: cfg.Planning.Router, BusinessOpen: open, BusinessClose: closeMinute, SlotMinutes: cfg.Planning.SlotMinutes, HorizonDays: cfg.Planning.HorizonDays, BufferMinutes: cfg.Planning.BufferMinutes, CandidateLimit: cfg.Planning.CandidateLimit, SuggestionTTL: cfg.Planning.SuggestionTTL, Weights: planning.Weights{Preference: cfg.Planning.WeightPreference, Travel: cfg.Planning.WeightTravel, Driver: cfg.Planning.WeightDriver, Resource: cfg.Planning.WeightResource, Utilization: cfg.Planning.WeightUtilization, Urgency: cfg.Planning.WeightUrgency, Region: cfg.Planning.WeightRegion}}, time.Now, options...)
 	if err != nil {
 		return nil, fmt.Errorf("app: creating planning service: %w", err)
 	}

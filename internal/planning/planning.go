@@ -17,10 +17,11 @@ import (
 )
 
 var (
-	ErrConflict   = errors.New("planning: stale or conflicting suggestion")
-	ErrNoCapacity = errors.New("planning: no valid capacity")
-	ErrNotFound   = errors.New("planning: not found")
-	ErrValidation = errors.New("planning: validation failed")
+	ErrConfiguration = errors.New("planning: default start location is not configured")
+	ErrConflict      = errors.New("planning: stale or conflicting suggestion")
+	ErrNoCapacity    = errors.New("planning: no valid capacity")
+	ErrNotFound      = errors.New("planning: not found")
+	ErrValidation    = errors.New("planning: validation failed")
 )
 
 type Point struct{ Latitude, Longitude float64 }
@@ -96,7 +97,6 @@ type Config struct {
 	SlotMinutes, HorizonDays      int
 	BufferMinutes, CandidateLimit int
 	SuggestionTTL                 time.Duration
-	Depot                         Point
 	Weights                       Weights
 }
 
@@ -104,8 +104,8 @@ func DefaultConfig(location *time.Location) Config {
 	return Config{
 		Location: location, RouterName: "haversine", BusinessOpen: 7 * 60, BusinessClose: 17 * 60,
 		SlotMinutes: 15, HorizonDays: 56, BufferMinutes: 15, CandidateLimit: 2500,
-		SuggestionTTL: 30 * time.Minute, Depot: Point{Latitude: 48.2, Longitude: 14.2},
-		Weights: Weights{Preference: 25, Travel: 25, Driver: 15, Resource: 10, Utilization: 10, Urgency: 10, Region: 5},
+		SuggestionTTL: 30 * time.Minute,
+		Weights:       Weights{Preference: 25, Travel: 25, Driver: 15, Resource: 10, Utilization: 10, Urgency: 10, Region: 5},
 	}
 }
 
@@ -170,6 +170,12 @@ type Availability interface {
 	Resolve(context.Context, auth.Actor, string, time.Time, time.Time) ([]Interval, error)
 }
 
+// DefaultStartProvider resolves the current operating start point without relying
+// on process configuration. It is a narrow port so the setting can be persisted.
+type DefaultStartProvider interface {
+	DefaultStart(context.Context) (Point, error)
+}
+
 type Observer interface {
 	ObservePlanning(time.Duration, int, bool)
 }
@@ -179,6 +185,11 @@ func WithObserver(observer Observer) Option {
 	return func(service *Service) { service.observer = observer }
 }
 
+// WithDefaultStartProvider supplies the runtime-managed start point for suggestions.
+func WithDefaultStartProvider(provider DefaultStartProvider) Option {
+	return func(service *Service) { service.defaultStart = provider }
+}
+
 type Service struct {
 	store        Store
 	availability Availability
@@ -186,6 +197,7 @@ type Service struct {
 	config       Config
 	now          func() time.Time
 	observer     Observer
+	defaultStart DefaultStartProvider
 }
 
 func New(store Store, availability Availability, router Router, cfg Config, now func() time.Time, options ...Option) (*Service, error) {
@@ -218,6 +230,10 @@ func (s *Service) Suggest(ctx context.Context, actor auth.Actor, jobID string) (
 	if jobID == "" {
 		return Run{}, ErrValidation
 	}
+	defaultStart, err := s.resolveDefaultStart(ctx)
+	if err != nil {
+		return Run{}, err
+	}
 	now := s.now().UTC()
 	from := ceilTime(now, time.Duration(s.config.SlotMinutes)*time.Minute)
 	to := from.AddDate(0, 0, s.config.HorizonDays)
@@ -232,7 +248,7 @@ func (s *Service) Suggest(ctx context.Context, actor auth.Actor, jobID string) (
 		}
 		snapshot.Drivers[i].Availability = intervals
 	}
-	suggestions, err := Generate(ctx, snapshot, s.router, s.config, from)
+	suggestions, err := GenerateWithDefaultStart(ctx, snapshot, s.router, s.config, defaultStart, from)
 	if err != nil {
 		return Run{}, err
 	}
@@ -246,6 +262,20 @@ func (s *Service) Suggest(ctx context.Context, actor auth.Actor, jobID string) (
 		}
 	}
 	return s.store.SaveRun(ctx, actor, snapshot, from, to, suggestions, s.config)
+}
+
+func (s *Service) resolveDefaultStart(ctx context.Context) (Point, error) {
+	if s.defaultStart == nil {
+		return Point{}, ErrConfiguration
+	}
+	start, err := s.defaultStart.DefaultStart(ctx)
+	if err != nil {
+		return Point{}, fmt.Errorf("%w: resolving default start: %w", ErrConfiguration, err)
+	}
+	if !start.Valid() {
+		return Point{}, ErrConfiguration
+	}
+	return start, nil
 }
 
 func (s *Service) ListRun(ctx context.Context, actor auth.Actor, runID string) (Run, error) {
@@ -320,6 +350,18 @@ func Clusters(values []ClusterEntry, radiusKM float64, minimum int) []ClusterHin
 }
 
 func Generate(ctx context.Context, snapshot Snapshot, router Router, cfg Config, now time.Time) ([]Suggestion, error) {
+	return generate(ctx, snapshot, router, cfg, Point{}, now)
+}
+
+// GenerateWithDefaultStart evaluates suggestions using a verified, runtime-supplied start point.
+func GenerateWithDefaultStart(ctx context.Context, snapshot Snapshot, router Router, cfg Config, defaultStart Point, now time.Time) ([]Suggestion, error) {
+	if !defaultStart.Valid() {
+		return nil, ErrConfiguration
+	}
+	return generate(ctx, snapshot, router, cfg, defaultStart, now)
+}
+
+func generate(ctx context.Context, snapshot Snapshot, router Router, cfg Config, defaultStart Point, now time.Time) ([]Suggestion, error) {
 	if cfg.Validate() != nil || snapshot.Job.HackMinutes <= 0 || len(snapshot.Drivers) == 0 {
 		return nil, ErrValidation
 	}
@@ -328,7 +370,13 @@ func Generate(ctx context.Context, snapshot Snapshot, router Router, cfg Config,
 		return nil, ErrNoCapacity
 	}
 	duration := time.Duration(snapshot.Job.HackMinutes+snapshot.Job.TransportMinutes+cfg.BufferMinutes) * time.Minute
-	points := []Point{snapshot.Job.Location, cfg.Depot}
+	points := make([]Point, 0, 25)
+	if snapshot.Job.Location.Valid() {
+		points = append(points, snapshot.Job.Location)
+	}
+	if defaultStart.Valid() {
+		points = append(points, defaultStart)
+	}
 	reservationPoint := make(map[string]int)
 	if snapshot.Job.Location.Valid() {
 		for _, reservation := range snapshot.Reservations {

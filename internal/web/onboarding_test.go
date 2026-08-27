@@ -34,10 +34,11 @@ func TestOnboardingContentByRole(t *testing.T) {
 			want: []string{
 				`id="fuer-fahrer"`,
 				"Gemeinsamen Kalender öffnen",
+				"Kontrollieren Sie Abfahrtszeit, Startort, Endort, Reihenfolge und Kundendaten",
 				"Eine Spracheingabe legt niemals automatisch einen Kunden, Auftrag oder Termin an.",
 				"Fahrer können Termine ansehen, aber nicht planen, verschieben, fixieren, absagen oder neu öffnen.",
 			},
-			doNotWant: []string{`id="fuer-administratoren"`, `href="/admin/`, "Zweiten Administrator anlegen"},
+			doNotWant: []string{`id="fuer-administratoren"`, `href="/admin/`, `href="/settings/route-locations"`, "Zweiten Administrator anlegen"},
 		},
 		{
 			name: "admin sees both complete guides",
@@ -48,7 +49,10 @@ func TestOnboardingContentByRole(t *testing.T) {
 				`id="fuer-administratoren"`,
 				`id="fuer-fahrer"`,
 				"Zweiten Administrator anlegen",
+				"Routenorte und Standards einrichten",
+				"In der Routenplanung können Sie immer einen anderen Start- oder Endort bestätigen",
 				"Durchgeführten Auftrag abschließen",
+				`href="/settings/route-locations"`,
 				`href="/admin/notifications"`,
 				"Ein Planungsvorschlag ist noch kein verbindlicher Termin und fixiert sich niemals selbst.",
 			},

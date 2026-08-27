@@ -15,6 +15,7 @@ import (
 	"example.invalid/hackplan/internal/buildinfo"
 	"example.invalid/hackplan/internal/driver"
 	"example.invalid/hackplan/internal/resource"
+	"example.invalid/hackplan/web/templates"
 )
 
 const (
@@ -209,6 +210,91 @@ func TestAvailabilityAPIRedactsInternalNote(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), `"status":"unavailable"`) || !strings.Contains(response.Body.String(), `"source":"exception"`) {
 		t.Fatalf("missing minimal provenance: %s", response.Body.String())
+	}
+}
+
+func TestOperationsHTTPAdminMutationHandlers(t *testing.T) {
+	driverStore := defaultDriverHTTPStore()
+	resourceStore := &resourceHTTPStore{}
+	router, session, csrf := operationsTestRouter(t, auth.RoleAdmin, operationDriverID, driverStore, resourceStore)
+	ruleForm := func() url.Values {
+		return url.Values{"csrf_token": {csrf}, "weekday": {"1"}, "local_start": {"08:00"}, "local_end": {"17:00"}, "valid_from": {"2026-01-01"}, "status": {"available"}}
+	}
+	tests := []struct {
+		name     string
+		method   string
+		path     string
+		form     url.Values
+		redirect string
+		body     string
+	}{
+		{name: "drivers page", method: http.MethodGet, path: "/admin/drivers", body: "Fahrerprofile"},
+		{name: "create driver", method: http.MethodPost, path: "/admin/drivers", form: url.Values{"csrf_token": {csrf}, "user_id": {"user-2"}, "display_name": {"Anna Fahrerin"}, "phone": {"+436601234567"}, "email": {"anna@example.test"}, "can_complete_jobs": {"true"}}, redirect: "/admin/drivers"},
+		{name: "update driver", method: http.MethodPost, path: "/admin/drivers/driver-1", form: url.Values{"csrf_token": {csrf}, "version": {"1"}, "display_name": {"Anna Fahrerin"}, "phone": {"+436601234567"}, "email": {"anna@example.test"}}, redirect: "/admin/drivers"},
+		{name: "deactivate driver", method: http.MethodPost, path: "/admin/drivers/driver-1/deactivate", form: url.Values{"csrf_token": {csrf}, "version": {"1"}}, redirect: "/admin/drivers"},
+		{name: "resources page", method: http.MethodGet, path: "/admin/resources", body: "Ressourcen"},
+		{name: "update resource", method: http.MethodPost, path: "/admin/resources/resource-1", form: url.Values{"csrf_token": {csrf}, "version": {"1"}, "type": {"chipper"}, "name": {"Hackmaschine 1"}, "exclusive": {"true"}, "volume_m3": {"160"}}, redirect: "/admin/resources"},
+		{name: "deactivate resource", method: http.MethodPost, path: "/admin/resources/resource-1/deactivate", form: url.Values{"csrf_token": {csrf}, "version": {"1"}}, redirect: "/admin/resources"},
+		{name: "update availability rule", method: http.MethodPost, path: "/availability/rules/rule-1", form: func() url.Values { values := ruleForm(); values.Set("version", "1"); return values }(), redirect: "/availability"},
+		{name: "delete availability rule", method: http.MethodPost, path: "/availability/rules/rule-1/delete", form: url.Values{"csrf_token": {csrf}, "version": {"1"}}, redirect: "/availability"},
+		{name: "create all-day exception", method: http.MethodPost, path: "/availability/exceptions", form: url.Values{"csrf_token": {csrf}, "type": {"vacation"}, "all_day": {"true"}, "local_date": {"2026-09-04"}}, redirect: "/availability"},
+		{name: "update all-day exception", method: http.MethodPost, path: "/availability/exceptions/exception-1", form: url.Values{"csrf_token": {csrf}, "version": {"1"}, "type": {"vacation"}, "all_day": {"true"}, "local_date": {"2026-09-04"}}, redirect: "/availability"},
+		{name: "delete exception", method: http.MethodPost, path: "/availability/exceptions/exception-1/delete", form: url.Values{"csrf_token": {csrf}, "version": {"1"}}, redirect: "/availability"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, authenticatedCustomerRequest(t, test.method, test.path, test.form, session, csrf))
+			if test.redirect != "" && (response.Code != http.StatusSeeOther || response.Header().Get("Location") != test.redirect) {
+				t.Fatalf("status=%d location=%q body=%s", response.Code, response.Header().Get("Location"), response.Body.String())
+			}
+			if test.body != "" && (response.Code != http.StatusOK || !strings.Contains(response.Body.String(), test.body)) {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestOperationsInputAndErrorPresentations(t *testing.T) {
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(url.Values{"type": {"sick"}, "starts_at": {"2026-09-04T08:00"}, "ends_at": {"2026-09-04T17:00"}}.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if err := request.ParseForm(); err != nil {
+		t.Fatal(err)
+	}
+	exception, err := exceptionInput(request)
+	if err != nil || exception.StartsAt.IsZero() || exception.EndsAt.IsZero() {
+		t.Fatalf("exception=%+v err=%v", exception, err)
+	}
+	for _, value := range []string{"", "17", "not-a-number"} {
+		_, _ = optionalFloat(value)
+		_, _ = optionalInt32(value)
+	}
+
+	tests := []struct {
+		name    string
+		err     error
+		status  int
+		message string
+	}{
+		{name: "forbidden", err: auth.ErrForbidden, status: http.StatusForbidden, message: "Berechtigung"},
+		{name: "conflict", err: driver.ErrConflict, status: http.StatusConflict, message: "zwischenzeitlich"},
+		{name: "missing", err: resource.ErrNotFound, status: http.StatusNotFound, message: "nicht gefunden"},
+		{name: "local time", err: driver.ErrLocalTime, status: http.StatusUnprocessableEntity, message: "Ortszeit"},
+		{name: "validation", err: driver.ErrValidation, status: http.StatusUnprocessableEntity, message: "Eingaben"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			operationsMutationError(response, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil), slog.Default(), test.err, "test")
+			if response.Code != test.status || !strings.Contains(response.Body.String(), test.message) {
+				t.Fatalf("mutation response=%d %s", response.Code, response.Body.String())
+			}
+			page := httptest.NewRecorder()
+			operationsPageError(page, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil), templates.PageData{AppName: "HackWerk"}, slog.Default(), test.err, "Nicht verfügbar")
+			if page.Code < http.StatusForbidden || page.Code > http.StatusInternalServerError {
+				t.Fatalf("page status=%d", page.Code)
+			}
+		})
 	}
 }
 

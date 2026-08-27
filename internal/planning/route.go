@@ -75,6 +75,7 @@ type RouteComparison struct {
 type RouteDraft struct {
 	ID, DriverID, ChipperResourceID, TransportResourceID string
 	DriverName, ChipperName, TransportName               string
+	StartLabel, EndLabel                                 string
 	Status                                               RouteStatus
 	Version                                              int32
 	Departure                                            time.Time
@@ -92,6 +93,7 @@ type PlanRouteInput struct {
 	Departure                   time.Time
 	DriverID, ChipperResourceID string
 	TransportResourceID         string
+	StartLabel, EndLabel        string
 	Start, End                  Point
 	JobIDs                      []string
 	FixedJobIDs                 []string
@@ -319,6 +321,11 @@ func (s *RouteService) Plan(ctx context.Context, actor auth.Actor, input PlanRou
 		}
 	}
 	manual := append([]RouteCandidate(nil), ordered...)
+	if input.EndAtLastStop {
+		// The optimizer orders only candidate-to-candidate legs. Seed the required
+		// matrix endpoint from a validated candidate until the actual last stop is known.
+		input.End = ordered[len(ordered)-1].Location
+	}
 	if input.Optimize {
 		ordered, err = s.optimize(ctx, input.Start, input.End, ordered, input.FixedJobIDs)
 		if err != nil {
@@ -327,11 +334,12 @@ func (s *RouteService) Plan(ctx context.Context, actor auth.Actor, input PlanRou
 	}
 	if input.EndAtLastStop {
 		input.End = ordered[len(ordered)-1].Location
+		input.EndLabel = routeCandidateLabel(ordered[len(ordered)-1])
 	}
 	route := RouteDraft{
 		ID: input.ID, DriverID: input.DriverID, ChipperResourceID: input.ChipperResourceID,
 		TransportResourceID: input.TransportResourceID, Status: RouteStatusDraft,
-		Version: input.ExpectedVersion, Departure: input.Departure.UTC(), Start: input.Start, End: input.End,
+		Version: input.ExpectedVersion, Departure: input.Departure.UTC(), StartLabel: strings.TrimSpace(input.StartLabel), EndLabel: strings.TrimSpace(input.EndLabel), Start: input.Start, End: input.End,
 	}
 	route.Stops = make([]RouteStop, 0, len(ordered))
 	for index, candidate := range ordered {
@@ -352,6 +360,7 @@ func (s *RouteService) Plan(ctx context.Context, actor auth.Actor, input PlanRou
 		manualRoute.Stops = routeStopsFromCandidates(manual)
 		if input.EndAtLastStop {
 			manualRoute.End = manual[len(manual)-1].Location
+			manualRoute.EndLabel = routeCandidateLabel(manual[len(manual)-1])
 		}
 		if err := s.calculateDirections(ctx, &manualRoute, false); err == nil {
 			route.Comparison = RouteComparison{
@@ -468,7 +477,11 @@ func (s *RouteService) validatePlanInput(input PlanRouteInput) error {
 	if input.ID == "" && input.ExpectedVersion != 0 {
 		return ErrValidation
 	}
-	if input.Departure.IsZero() || input.DriverID == "" || input.ChipperResourceID == "" || !input.Start.Valid() || !input.End.Valid() || len(input.JobIDs) < 1 || len(input.JobIDs) > s.config.MaxStops {
+	startLabel := strings.TrimSpace(input.StartLabel)
+	endLabel := strings.TrimSpace(input.EndLabel)
+	if input.Departure.IsZero() || input.DriverID == "" || input.ChipperResourceID == "" || !input.Start.Valid() ||
+		startLabel == "" || (!input.EndAtLastStop && (!input.End.Valid() || endLabel == "")) ||
+		len([]rune(startLabel)) > 200 || len([]rune(endLabel)) > 200 || len(input.JobIDs) < 1 || len(input.JobIDs) > s.config.MaxStops {
 		return ErrValidation
 	}
 	seen := make(map[string]struct{}, len(input.JobIDs))
@@ -482,6 +495,20 @@ func (s *RouteService) validatePlanInput(input PlanRouteInput) error {
 		seen[id] = struct{}{}
 	}
 	return nil
+}
+
+func routeCandidateLabel(candidate RouteCandidate) string {
+	parts := make([]string, 0, 2)
+	if value := strings.TrimSpace(candidate.JobNumber); value != "" {
+		parts = append(parts, value)
+	}
+	if value := strings.TrimSpace(candidate.Locality); value != "" {
+		parts = append(parts, value)
+	}
+	if len(parts) == 0 {
+		return "Letzter Stopp"
+	}
+	return strings.Join(parts, " · ")
 }
 
 func (s *RouteService) optimize(ctx context.Context, start, end Point, candidates []RouteCandidate, fixedJobIDs []string) ([]RouteCandidate, error) {

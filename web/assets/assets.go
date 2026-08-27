@@ -18,6 +18,7 @@ var Files embed.FS
 // Paths lists the public URLs of the current asset bundle.
 type Paths struct {
 	JavaScript                  string
+	RouteLocationsJavaScript    string
 	CSS                         string
 	ControlFoundationCSS        string
 	Manifest                    string
@@ -46,7 +47,7 @@ func LoadPaths() (Paths, error) {
 		return Paths{}, err
 	}
 	required := []string{
-		"app.js", "app.css", "control-foundation.css", "manifest.json", "hackwerk-icon.svg",
+		"app.js", "route-locations.js", "app.css", "control-foundation.css", "manifest.json", "hackwerk-icon.svg",
 		"login-original.css", "login.css", "login-background-loader.js", "login-background.js",
 		"maplibre-gl-csp.js", "maplibre-gl-csp-worker.js", "maplibre-gl.css",
 		"fullcalendar.min.js", "fullcalendar-theme.min.js", "fullcalendar-skeleton.css",
@@ -63,6 +64,7 @@ func LoadPaths() (Paths, error) {
 
 	return Paths{
 		JavaScript:                  versioned("app.js"),
+		RouteLocationsJavaScript:    versioned("route-locations.js"),
 		CSS:                         versioned("app.css"),
 		ControlFoundationCSS:        versioned("control-foundation.css"),
 		Manifest:                    versioned("manifest.json"),

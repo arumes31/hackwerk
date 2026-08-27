@@ -642,7 +642,7 @@ func newCalendarFixture(t *testing.T) calendarFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, "TRUNCATE outbox_events, appointments, waitlist_entries, jobs, customers, availability_exceptions, availability_rules, resources, audit_events, auth_rate_limits, sessions, drivers, users RESTART IDENTITY CASCADE"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE route_locations, outbox_events, appointments, waitlist_entries, jobs, customers, availability_exceptions, availability_rules, resources, audit_events, auth_rate_limits, sessions, drivers, users RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatal(err)
 	}
 	admin := auth.Actor{Role: auth.RoleAdmin, DisplayName: "Admin"}

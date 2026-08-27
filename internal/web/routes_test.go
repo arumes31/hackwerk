@@ -15,6 +15,7 @@ import (
 	"example.invalid/hackplan/internal/auth"
 	"example.invalid/hackplan/internal/buildinfo"
 	"example.invalid/hackplan/internal/planning"
+	"example.invalid/hackplan/internal/routelocation"
 )
 
 type routeHTTPStore struct {
@@ -22,6 +23,7 @@ type routeHTTPStore struct {
 	options    planning.RouteOptions
 	route      planning.RouteDraft
 	savedOrder []string
+	savedRoute planning.RouteDraft
 }
 
 func (store *routeHTTPStore) LoadRouteCandidates(context.Context, []string) ([]planning.RouteCandidate, error) {
@@ -36,6 +38,7 @@ func (store *routeHTTPStore) LoadRouteOptions(context.Context) (planning.RouteOp
 }
 func (store *routeHTTPStore) SaveRouteDraft(_ context.Context, _ auth.Actor, input planning.SaveRouteDraftInput) (planning.RouteDraft, error) {
 	input.Route.ID, input.Route.Version = "route-1", 1
+	store.savedRoute = input.Route
 	return input.Route, nil
 }
 func (store *routeHTTPStore) GetRoute(context.Context, string) (planning.RouteDraft, error) {
@@ -74,7 +77,8 @@ func TestRouteHTTPAdminSeesRoutableJobsAndDriverCannotPlan(t *testing.T) {
 	body := response.Body.String()
 	if response.Code != http.StatusOK || !strings.Contains(body, "Auftragskarte &amp; Route") ||
 		!strings.Contains(body, "HA-2026-0042") || !strings.Contains(body, "data-route-candidate") ||
-		!strings.Contains(body, `data-depot-latitude="48.200000"`) ||
+		!strings.Contains(body, `value="custom"`) || !strings.Contains(body, "Anderen Startort verwenden") ||
+		!strings.Contains(body, "Anderen Endort verwenden") || !strings.Contains(body, "Beim letzten Stopp") ||
 		!strings.Contains(body, `data-route-admin="true"`) || !strings.Contains(body, "Aufträge ohne Haufenstandort") {
 		t.Fatalf("admin route page=%d %s", response.Code, response.Body.String())
 	}
@@ -101,7 +105,7 @@ func TestRouteHTTPAdminRendersInteractiveBaseMapWithoutCandidates(t *testing.T) 
 	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodGet, "/planning/routes", nil, session, csrf))
 	body := response.Body.String()
 	if response.Code != http.StatusOK || !strings.Contains(body, `aria-label="Interaktive Karte der offenen Aufträge"`) ||
-		!strings.Contains(body, `data-depot-latitude="48.200000"`) ||
+		strings.Contains(body, "data-depot-latitude") ||
 		!strings.Contains(body, "Keine routierbaren Aufträge") {
 		t.Fatalf("empty route map page=%d %s", response.Code, body)
 	}
@@ -129,6 +133,8 @@ func TestRouteHTTPDriverCanReorderOnlyOwnAssignedRoute(t *testing.T) {
 	router.ServeHTTP(page, authenticatedCustomerRequest(t, http.MethodGet, "/my-route?date=2026-08-27", nil, session, csrf))
 	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Meine Route") || !strings.Contains(page.Body.String(), "Nur Fahrreihenfolge") ||
 		!strings.Contains(page.Body.String(), `data-route-own="true"`) || !strings.Contains(page.Body.String(), `type="submit" name="move_up" value="stop-2"`) ||
+		!strings.Contains(page.Body.String(), `data-route-start-label="Betriebshof" data-route-start-latitude="48.200000"`) ||
+		!strings.Contains(page.Body.String(), `data-route-end-label="Betriebshof" data-route-end-latitude="48.200000"`) ||
 		!strings.Contains(page.Body.String(), "data-wake-lock") ||
 		!strings.Contains(page.Body.String(), "data-route-navigation") || !strings.Contains(page.Body.String(), "data-route-call") {
 		t.Fatalf("own route page=%d %s", page.Code, page.Body.String())
@@ -161,6 +167,150 @@ func TestApplyOwnRouteStepRejectsAmbiguousOrInvalidMove(t *testing.T) {
 	}
 }
 
+func TestRouteHTTPAdminPlansConfirmedCustomEndpoints(t *testing.T) {
+	store := routeHTTPFixture()
+	router, session, csrf := routeTestRouter(t, auth.RoleAdmin, "", store)
+	form := url.Values{
+		"csrf_token":             {csrf},
+		"departure":              {"2026-08-27T08:00"},
+		"driver_id":              {"driver-1"},
+		"chipper_resource_id":    {"resource-1"},
+		"job_id":                 {"job-1"},
+		"start_selection":        {"custom"},
+		"start_custom_confirmed": {"true"},
+		"start_custom_label":     {"Hof Süd"},
+		"start_custom_address":   {"Hofstraße 1"},
+		"start_latitude":         {"48,200000"},
+		"start_longitude":        {"14,200000"},
+		"end_selection":          {"custom"},
+		"end_custom_confirmed":   {"true"},
+		"end_custom_label":       {"Lager Nord"},
+		"end_custom_address":     {"Lagerweg 2"},
+		"end_latitude":           {"48,250000"},
+		"end_longitude":          {"14,250000"},
+		"optimize":               {"true"},
+	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/planning/routes", form, session, csrf))
+	if response.Code != http.StatusSeeOther || !strings.HasPrefix(response.Header().Get("Location"), "/planning/routes?") ||
+		!strings.Contains(response.Header().Get("Location"), "route_id=route-1") {
+		t.Fatalf("plan=%d location=%q body=%s", response.Code, response.Header().Get("Location"), response.Body.String())
+	}
+	if store.savedRoute.StartLabel != "Hof Süd" || store.savedRoute.EndLabel != "Lager Nord" ||
+		store.savedRoute.Start != (planning.Point{Latitude: 48.2, Longitude: 14.2}) || store.savedRoute.End != (planning.Point{Latitude: 48.25, Longitude: 14.25}) {
+		t.Fatalf("saved route=%+v", store.savedRoute)
+	}
+}
+
+func TestRouteHTTPPlanRejectsUnconfirmedOrUnavailableEndpoints(t *testing.T) {
+	tests := []struct {
+		name   string
+		form   url.Values
+		status int
+		body   string
+	}{
+		{
+			name: "custom endpoint requires explicit confirmation",
+			form: url.Values{
+				"departure": {"2026-08-27T08:00"}, "driver_id": {"driver-1"}, "chipper_resource_id": {"resource-1"}, "job_id": {"job-1"},
+				"start_selection": {"custom"}, "start_custom_label": {"Hof Süd"}, "start_custom_address": {"Hofstraße 1"}, "start_latitude": {"48.2"}, "start_longitude": {"14.2"},
+				"end_selection": {"last_stop"},
+			}, status: http.StatusUnprocessableEntity, body: "Start- und Endort auswählen",
+		},
+		{
+			name: "saved endpoint cannot be forged without configured locations",
+			form: url.Values{
+				"departure": {"2026-08-27T08:00"}, "driver_id": {"driver-1"}, "chipper_resource_id": {"resource-1"}, "job_id": {"job-1"},
+				"start_selection": {"saved:location-1"}, "start_location_id": {"location-1"}, "start_location_version": {"1"}, "end_selection": {"last_stop"},
+			}, status: http.StatusNotFound, body: "nicht mehr verfügbar",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := routeHTTPFixture()
+			router, session, csrf := routeTestRouter(t, auth.RoleAdmin, "", store)
+			test.form.Set("csrf_token", csrf)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/planning/routes", test.form, session, csrf))
+			if response.Code != test.status || !strings.Contains(response.Body.String(), test.body) || store.savedRoute.ID != "" {
+				t.Fatalf("response=%d body=%s saved=%+v", response.Code, response.Body.String(), store.savedRoute)
+			}
+		})
+	}
+}
+
+func TestRouteHelperErrorAndComparisonMappings(t *testing.T) {
+	route := &planning.RouteDraft{}
+	applyRouteComparisonQuery(route, url.Values{
+		"manual_distance": {"1200"}, "optimized_distance": {"900"}, "manual_duration": {"900"}, "optimized_duration": {"700"},
+	})
+	if route.Comparison.ManualDistanceMeters != 1200 || route.Comparison.OptimizedDuration != 700*time.Second {
+		t.Fatalf("comparison=%+v", route.Comparison)
+	}
+	applyRouteComparisonQuery(route, url.Values{
+		"manual_distance": {"-1"}, "optimized_distance": {"900"}, "manual_duration": {"900"}, "optimized_duration": {"700"},
+	})
+	if route.Comparison.ManualDistanceMeters != 1200 {
+		t.Fatalf("invalid comparison overwrote valid value: %+v", route.Comparison)
+	}
+
+	tests := []struct {
+		name   string
+		err    error
+		status int
+		body   string
+	}{
+		{name: "forbidden", err: auth.ErrForbidden, status: http.StatusForbidden, body: "Berechtigung"},
+		{name: "conflict", err: planning.ErrConflict, status: http.StatusConflict, body: "geändert"},
+		{name: "capacity", err: planning.ErrNoCapacity, status: http.StatusUnprocessableEntity, body: "nicht verfügbar"},
+		{name: "validation", err: planning.ErrValidation, status: http.StatusUnprocessableEntity, body: "vollständig"},
+		{name: "not found", err: planning.ErrNotFound, status: http.StatusNotFound, body: "nicht gefunden"},
+		{name: "location conflict", err: routelocation.ErrConflict, status: http.StatusConflict, body: "Start- oder Endort"},
+		{name: "location missing", err: routelocation.ErrNotFound, status: http.StatusNotFound, body: "nicht mehr verfügbar"},
+		{name: "location invalid", err: routelocation.ErrValidation, status: http.StatusUnprocessableEntity, body: "auswählen"},
+		{name: "internal", err: errors.New("database unavailable"), status: http.StatusInternalServerError, body: "derzeit"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			status, body := routeError(test.err)
+			if status != test.status || !strings.Contains(body, test.body) {
+				t.Fatalf("routeError(%v)=(%d,%q)", test.err, status, body)
+			}
+		})
+	}
+}
+
+func TestRouteHTTPDraftMutationAndOwnRouteErrorFlows(t *testing.T) {
+	store := routeHTTPFixture()
+	store.route.Status = planning.RouteStatusDraft
+	router, session, csrf := routeTestRouter(t, auth.RoleAdmin, "", store)
+	assign := httptest.NewRecorder()
+	router.ServeHTTP(assign, authenticatedCustomerRequest(t, http.MethodPost, "/planning/routes/route-1/assign", url.Values{"csrf_token": {csrf}, "version": {"1"}}, session, csrf))
+	if assign.Code != http.StatusSeeOther || !strings.Contains(assign.Header().Get("Location"), "route_id=route-1") {
+		t.Fatalf("assign=%d location=%q", assign.Code, assign.Header().Get("Location"))
+	}
+
+	move := httptest.NewRecorder()
+	router.ServeHTTP(move, authenticatedCustomerRequest(t, http.MethodPost, "/planning/routes/route-1/move-stop", url.Values{"csrf_token": {csrf}, "source_version": {"invalid"}, "target_version": {"1"}, "date": {"2026-08-27"}}, session, csrf))
+	if move.Code != http.StatusSeeOther || !strings.Contains(move.Header().Get("Location"), "error=") {
+		t.Fatalf("invalid move=%d location=%q", move.Code, move.Header().Get("Location"))
+	}
+
+	store.route = planning.RouteDraft{}
+	driverRouter, driverSession, driverCSRF := routeTestRouter(t, auth.RoleDriver, "driver-1", store)
+	missingOwnRoute := httptest.NewRecorder()
+	driverRouter.ServeHTTP(missingOwnRoute, authenticatedCustomerRequest(t, http.MethodGet, "/my-route?date=2026-08-27", nil, driverSession, driverCSRF))
+	if missingOwnRoute.Code != http.StatusOK || !strings.Contains(missingOwnRoute.Body.String(), "Keine zugewiesene Route") {
+		t.Fatalf("missing own route=%d body=%s", missingOwnRoute.Code, missingOwnRoute.Body.String())
+	}
+
+	invalidReorder := httptest.NewRecorder()
+	driverRouter.ServeHTTP(invalidReorder, authenticatedCustomerRequest(t, http.MethodPost, "/my-route/route-1/reorder", url.Values{"csrf_token": {driverCSRF}, "version": {"invalid"}}, driverSession, driverCSRF))
+	if invalidReorder.Code != http.StatusSeeOther || !strings.Contains(invalidReorder.Header().Get("Location"), "error=") {
+		t.Fatalf("invalid reorder=%d location=%q", invalidReorder.Code, invalidReorder.Header().Get("Location"))
+	}
+}
+
 func routeHTTPFixture() *routeHTTPStore {
 	departure := time.Date(2026, 8, 27, 5, 0, 0, 0, time.UTC)
 	stops := []planning.RouteStop{
@@ -170,7 +320,7 @@ func routeHTTPFixture() *routeHTTPStore {
 	return &routeHTTPStore{
 		candidates: []planning.RouteCandidate{{JobID: "job-1", JobNumber: "HA-2026-0042", CustomerName: "Maria Maier", Region: "Forsttal", VolumeM3: "80.00", JobType: "chipping_only", Location: stops[0].Location, WorkDuration: time.Hour, JobVersion: 1, WaitlistVersion: 1}},
 		options:    planning.RouteOptions{Drivers: []planning.RouteDriverOption{{ID: "driver-1", Name: "Anna Fahrerin"}}, Resources: []planning.RouteResourceOption{{ID: "resource-1", Name: "Hackmaschine 1", Type: "chipper"}}},
-		route:      planning.RouteDraft{ID: "route-1", DriverID: "driver-1", DriverName: "Anna Fahrerin", ChipperResourceID: "resource-1", ChipperName: "Hackmaschine 1", Status: planning.RouteStatusAssigned, Version: 1, Departure: departure, Start: planning.Point{Latitude: 48.2, Longitude: 14.2}, End: planning.Point{Latitude: 48.2, Longitude: 14.2}, Stops: stops, Directions: planning.RouteDirections{Geometry: []planning.Point{{Latitude: 48.2, Longitude: 14.2}, {Latitude: 48.3, Longitude: 14.3}}, Legs: []planning.RouteLeg{{Duration: 10 * time.Minute, DistanceMeters: 8000}, {Duration: 10 * time.Minute, DistanceMeters: 8000}, {Duration: 10 * time.Minute, DistanceMeters: 8000}}, Source: "osrm", DistanceMeters: 24000, Duration: 30 * time.Minute}, EstimatedEndAt: departure.Add(150 * time.Minute)},
+		route:      planning.RouteDraft{ID: "route-1", DriverID: "driver-1", DriverName: "Anna Fahrerin", ChipperResourceID: "resource-1", ChipperName: "Hackmaschine 1", Status: planning.RouteStatusAssigned, Version: 1, Departure: departure, StartLabel: "Betriebshof", EndLabel: "Betriebshof", Start: planning.Point{Latitude: 48.2, Longitude: 14.2}, End: planning.Point{Latitude: 48.2, Longitude: 14.2}, Stops: stops, Directions: planning.RouteDirections{Geometry: []planning.Point{{Latitude: 48.2, Longitude: 14.2}, {Latitude: 48.3, Longitude: 14.3}}, Legs: []planning.RouteLeg{{Duration: 10 * time.Minute, DistanceMeters: 8000}, {Duration: 10 * time.Minute, DistanceMeters: 8000}, {Duration: 10 * time.Minute, DistanceMeters: 8000}}, Source: "osrm", DistanceMeters: 24000, Duration: 30 * time.Minute}, EstimatedEndAt: departure.Add(150 * time.Minute)},
 	}
 }
 
@@ -192,8 +342,6 @@ func routeTestRouter(t *testing.T, role auth.Role, driverID string, store *route
 		t.Fatal(err)
 	}
 	webConfig := configForWebTest()
-	webConfig.Planning.DepotLatitude = 48.2
-	webConfig.Planning.DepotLongitude = 14.2
 	router, err := NewRouter(Dependencies{Config: webConfig, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pinger{}, Build: buildinfo.Info{Version: "test"}, Identity: identity, Routes: service})
 	if err != nil {
 		t.Fatal(err)

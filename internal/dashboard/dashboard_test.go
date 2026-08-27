@@ -87,3 +87,74 @@ func TestViewRejectsInvalidOrUnboundedDateAndStoreFailure(t *testing.T) {
 		t.Fatal("store failure was ignored")
 	}
 }
+
+func TestNewRejectsIncompleteOrUnsafeConfiguration(t *testing.T) {
+	location := time.UTC
+	valid := Config{Location: location, HorizonDays: 7, PendingAfter: time.Minute, BusinessOpen: "07:00", BusinessClose: "17:00"}
+	tests := []struct {
+		name  string
+		store Store
+		cfg   Config
+	}{
+		{name: "missing store", cfg: valid},
+		{name: "missing location", store: &fakeStore{}, cfg: Config{HorizonDays: 7, PendingAfter: time.Minute, BusinessOpen: "07:00", BusinessClose: "17:00"}},
+		{name: "horizon too short", store: &fakeStore{}, cfg: Config{Location: location, HorizonDays: 0, PendingAfter: time.Minute, BusinessOpen: "07:00", BusinessClose: "17:00"}},
+		{name: "horizon too long", store: &fakeStore{}, cfg: Config{Location: location, HorizonDays: 32, PendingAfter: time.Minute, BusinessOpen: "07:00", BusinessClose: "17:00"}},
+		{name: "pending duration too short", store: &fakeStore{}, cfg: Config{Location: location, HorizonDays: 7, PendingAfter: 0, BusinessOpen: "07:00", BusinessClose: "17:00"}},
+		{name: "invalid opening time", store: &fakeStore{}, cfg: Config{Location: location, HorizonDays: 7, PendingAfter: time.Minute, BusinessOpen: "morning", BusinessClose: "17:00"}},
+		{name: "closing before opening", store: &fakeStore{}, cfg: Config{Location: location, HorizonDays: 7, PendingAfter: time.Minute, BusinessOpen: "17:00", BusinessClose: "07:00"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if service, err := New(test.store, test.cfg, nil); err == nil || service != nil {
+				t.Fatalf("New() = %v, %v; want configuration error", service, err)
+			}
+		})
+	}
+}
+
+func TestViewProjectsAdminAppointmentsGroupsAndCapacity(t *testing.T) {
+	location := time.UTC
+	now := time.Date(2026, 9, 1, 9, 0, 0, 0, location)
+	store := &fakeStore{snapshot: Snapshot{
+		Counts: Counts{NotificationIssues: 2, Overrides: 1},
+		Appointments: []Appointment{
+			{ID: "today-b", Chippers: "Maschine B", StartsAt: now.Add(-time.Hour), EndsAt: now.Add(time.Hour)},
+			{ID: "today-none", StartsAt: now.Add(time.Hour), EndsAt: now.Add(2 * time.Hour)},
+			{ID: "future", Chippers: "Maschine A", StartsAt: now.AddDate(0, 0, 2), EndsAt: now.AddDate(0, 0, 2).Add(time.Hour)},
+		},
+		Bookings: []Booking{
+			{ResourceID: "a", ResourceName: "Maschine A", StartsAt: now.Add(-3 * time.Hour), EndsAt: now.Add(-2 * time.Hour), Valid: true},
+			{ResourceID: "b", ResourceName: "Maschine B", StartsAt: now.Add(2 * time.Hour), EndsAt: now.Add(3 * time.Hour), Valid: true},
+		},
+	}}
+	service, err := New(store, Config{Location: location, HorizonDays: 7, PendingAfter: 15 * time.Minute, BusinessOpen: "07:00", BusinessClose: "17:00"}, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := service.View(t.Context(), auth.Actor{UserID: "admin", Role: auth.RoleAdmin}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.Admin || len(view.Today) != 2 || len(view.Upcoming) != 1 || len(view.Groups) != 2 || view.Groups[0].ResourceName != "Maschine B" || view.Groups[1].ResourceName != "Ohne Hackmaschine" {
+		t.Fatalf("admin appointments = %#v", view)
+	}
+	if view.Counts.NotificationIssues != 2 || len(view.Capacities) != 2 || len(view.Capacities[0].Free) != 1 {
+		t.Fatalf("admin data missing = %#v", view)
+	}
+}
+
+func TestViewRejectsActorWithoutDashboardPermissionAndGroupsDefaultMachine(t *testing.T) {
+	location := time.UTC
+	service, err := New(&fakeStore{}, Config{Location: location, HorizonDays: 7, PendingAfter: time.Minute, BusinessOpen: "07:00", BusinessClose: "17:00"}, func() time.Time { return time.Date(2026, 1, 2, 12, 0, 0, 0, location) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.View(t.Context(), auth.Actor{}, ""); err == nil {
+		t.Fatal("View() accepted actor without dashboard permission")
+	}
+	groups := groupAppointments([]Appointment{{ID: "one"}, {ID: "two", Chippers: "Maschine A"}, {ID: "three"}})
+	if len(groups) != 2 || groups[0].ResourceName != "Maschine A" || len(groups[1].Appointments) != 2 {
+		t.Fatalf("groupAppointments() = %#v", groups)
+	}
+}

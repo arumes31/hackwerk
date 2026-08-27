@@ -110,6 +110,88 @@ func TestAppointmentHTTPDriverCannotReopenAppointment(t *testing.T) {
 	}
 }
 
+func TestAppointmentHTTPAdminMutationAndConflictEndpoints(t *testing.T) {
+	startsAt := time.Date(2026, 8, 24, 6, 0, 0, 0, time.UTC)
+	fixture := func(lifecycle appointment.Lifecycle) *appointmentHTTPStore {
+		return &appointmentHTTPStore{current: appointment.Appointment{
+			ID: testAppointmentID, JobID: testJobID, JobType: "chipping_only", Lifecycle: lifecycle, Version: 1,
+			StartsAt: startsAt, EndsAt: startsAt.Add(2 * time.Hour),
+			Drivers:   []appointment.DriverAssignment{{ID: operationDriverID, Name: "Anna Fahrerin", Primary: true}},
+			Resources: []appointment.AssignedResource{{ID: testAppointmentResourceID, Name: "Hacker 1", Type: resource.TypeChipper, Purpose: appointment.PurposeChipping, Exclusive: true}},
+		}, planningOptions: appointmentPlanningOptionsFixture()}
+	}
+	tests := []struct {
+		name     string
+		store    *appointmentHTTPStore
+		path     string
+		form     url.Values
+		wantBody string
+	}{
+		{name: "assign draft", store: fixture(appointment.LifecycleDraft), path: "/api/v1/appointments/" + testAppointmentID + "/assign", form: url.Values{"version": {"1"}, "driver_id": {operationDriverID}, "primary_driver_id": {operationDriverID}, "chipper_resource_id": {testAppointmentResourceID}}, wantBody: `"lifecycle":"draft"`},
+		{name: "propose assigned draft", store: fixture(appointment.LifecycleDraft), path: "/api/v1/appointments/" + testAppointmentID + "/propose", form: url.Values{"version": {"1"}}, wantBody: `"lifecycle":"proposal"`},
+		{name: "fix proposal", store: fixture(appointment.LifecycleProposal), path: "/api/v1/appointments/" + testAppointmentID + "/fix", form: url.Values{"version": {"1"}}, wantBody: `"id":"` + testAppointmentID + `"`},
+		{name: "cancel proposal", store: fixture(appointment.LifecycleProposal), path: "/api/v1/appointments/" + testAppointmentID + "/cancel", form: url.Values{"version": {"1"}, "reason": {"Kunde abgesagt"}}, wantBody: `"lifecycle":"cancelled"`},
+		{name: "complete past fixed appointment", store: fixture(appointment.LifecycleFixed), path: "/api/v1/appointments/" + testAppointmentID + "/complete", form: url.Values{"version": {"1"}}, wantBody: `"id":"` + testAppointmentID + `"`},
+		{name: "swap two drafts", store: fixture(appointment.LifecycleDraft), path: "/api/v1/appointments/" + testAppointmentID + "/swap", form: url.Values{"version": {"1"}, "other_appointment_id": {"other-appointment"}, "other_version": {"1"}}, wantBody: `"appointments"`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			router, session, csrf := appointmentTestRouter(t, auth.RoleAdmin, test.store)
+			test.form.Set("csrf_token", csrf)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, test.path, test.form, session, csrf))
+			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), test.wantBody) {
+				t.Fatalf("response=%d %s", response.Code, response.Body.String())
+			}
+		})
+	}
+
+	store := fixture(appointment.LifecycleProposal)
+	router, session, csrf := appointmentTestRouter(t, auth.RoleAdmin, store)
+	validAlternatives := httptest.NewRecorder()
+	router.ServeHTTP(validAlternatives, authenticatedCustomerRequest(t, http.MethodGet, "/api/v1/appointments/"+testAppointmentID+"/alternatives?starts_at=2026-08-24T08:00:00Z&ends_at=2026-08-24T10:00:00Z", nil, session, csrf))
+	if validAlternatives.Code != http.StatusOK || !strings.Contains(validAlternatives.Body.String(), "RequestedStartsAt") {
+		t.Fatalf("alternatives=%d %s", validAlternatives.Code, validAlternatives.Body.String())
+	}
+	invalidAlternatives := httptest.NewRecorder()
+	router.ServeHTTP(invalidAlternatives, authenticatedCustomerRequest(t, http.MethodGet, "/api/v1/appointments/"+testAppointmentID+"/alternatives?starts_at=x", nil, session, csrf))
+	if invalidAlternatives.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid alternatives=%d %s", invalidAlternatives.Code, invalidAlternatives.Body.String())
+	}
+	conflicts := httptest.NewRecorder()
+	router.ServeHTTP(conflicts, authenticatedCustomerRequest(t, http.MethodGet, "/api/v1/calendar/conflicts?from=2026-08-24T00:00:00Z&to=2026-08-25T00:00:00Z&driver_id="+operationDriverID, nil, session, csrf))
+	if conflicts.Code != http.StatusOK || !strings.Contains(conflicts.Body.String(), "conflicts") {
+		t.Fatalf("conflicts=%d %s", conflicts.Code, conflicts.Body.String())
+	}
+}
+
+func TestAppointmentErrorPresentationMapsStablePublicErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{name: "forbidden", err: auth.ErrForbidden, status: http.StatusForbidden, code: "forbidden"},
+		{name: "not found", err: appointment.ErrNotFound, status: http.StatusNotFound, code: "not_found"},
+		{name: "conflict", err: appointment.ErrConflict, status: http.StatusConflict, code: "reservation_conflict"},
+		{name: "availability", err: appointment.ErrAvailability, status: http.StatusUnprocessableEntity, code: "driver_unavailable"},
+		{name: "notification", err: appointment.ErrNotification, status: http.StatusUnprocessableEntity, code: "notification_channel_missing"},
+		{name: "transition", err: appointment.ErrTransition, status: http.StatusUnprocessableEntity, code: "invalid_transition"},
+		{name: "local time", err: driver.ErrLocalTime, status: http.StatusUnprocessableEntity, code: "invalid_local_time"},
+		{name: "validation", err: appointment.ErrValidation, status: http.StatusUnprocessableEntity, code: "validation_failed"},
+		{name: "internal", err: errors.New("database"), status: http.StatusInternalServerError, code: "internal_error"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			presentation := appointmentErrorPresentation(test.err)
+			if presentation.Status != test.status || presentation.Code != test.code {
+				t.Fatalf("presentation=%+v", presentation)
+			}
+		})
+	}
+}
+
 func TestCalendarFeedIsBoundedAndContainsNoContactData(t *testing.T) {
 	store := &appointmentHTTPStore{events: []appointment.CalendarEvent{{
 		Appointment: appointment.Appointment{ID: testAppointmentID, JobID: testJobID, JobNumber: "HW-2026-0001", Lifecycle: appointment.LifecycleFixed, Confirmation: appointment.ConfirmationPending, StartsAt: time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC), EndsAt: time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC), Version: 4},

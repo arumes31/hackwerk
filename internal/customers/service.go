@@ -409,6 +409,7 @@ func (service *Service) ArchiveCustomer(ctx context.Context, actor auth.Actor, i
 	if err := actor.Require(auth.PermissionCustomerArchive); err != nil {
 		return err
 	}
+	id = strings.TrimSpace(id)
 	if id == "" || version < 1 {
 		return ErrValidation
 	}

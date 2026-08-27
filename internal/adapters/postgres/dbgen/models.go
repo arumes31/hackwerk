@@ -337,6 +337,22 @@ type RouteDraft struct {
 	Version             int32
 	CreatedAt           pgtype.Timestamptz
 	UpdatedAt           pgtype.Timestamptz
+	StartLabel          string
+	EndLabel            string
+}
+
+type RouteLocation struct {
+	ID           pgtype.UUID
+	Label        string
+	Address      string
+	Latitude     pgtype.Numeric
+	Longitude    pgtype.Numeric
+	Active       bool
+	DefaultStart bool
+	DefaultEnd   bool
+	Version      int32
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
 }
 
 type RouteStop struct {

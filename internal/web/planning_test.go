@@ -14,6 +14,7 @@ import (
 	"example.invalid/hackplan/internal/auth"
 	"example.invalid/hackplan/internal/buildinfo"
 	"example.invalid/hackplan/internal/planning"
+	"example.invalid/hackplan/internal/routelocation"
 )
 
 const planningJobID = "70000000-0000-0000-0000-000000000001"
@@ -56,6 +57,12 @@ func (s *planningHTTPStore) ClusterEntries(context.Context) ([]planning.ClusterE
 
 type planningHTTPAvailability struct{ now time.Time }
 
+type planningHTTPDefaultStart struct{}
+
+func (planningHTTPDefaultStart) DefaultStart(context.Context) (planning.Point, error) {
+	return planning.Point{Latitude: 48.21, Longitude: 14.21}, nil
+}
+
 func (a planningHTTPAvailability) Resolve(context.Context, auth.Actor, string, time.Time, time.Time) ([]planning.Interval, error) {
 	return []planning.Interval{{StartsAt: a.now.Add(-time.Hour), EndsAt: a.now.AddDate(0, 0, 10), Status: "available"}}, nil
 }
@@ -67,7 +74,8 @@ func TestPlanningHTTPRouteSelectionWorksWithoutEnhancement(t *testing.T) {
 	router.ServeHTTP(page, authenticatedCustomerRequest(t, http.MethodGet, "/planning", nil, session, csrf))
 	body := page.Body.String()
 	if page.Code != http.StatusOK || !strings.Contains(body, `form="planning-route-selection" type="checkbox" name="job_id" value="job-1"`) ||
-		!strings.Contains(body, `type="submit" data-planning-route>Auswahl als Tagesroute planen`) {
+		!strings.Contains(body, `type="submit" data-planning-route>Auswahl als Tagesroute planen`) ||
+		!strings.Contains(body, `data-planning-radius-latitude="48.200000" data-planning-radius-longitude="14.200000"`) {
 		t.Fatalf("planning route fallback=%d %s", page.Code, body)
 	}
 
@@ -162,6 +170,16 @@ func TestPlanningHTTPStaleAdoptionKeepsRunContextForRecalculation(t *testing.T) 
 	}
 }
 
+func TestPlanningErrorConfigurationExplainsMissingDefaultStart(t *testing.T) {
+	status, message := planningError(planning.ErrConfiguration)
+	if status != http.StatusServiceUnavailable || !strings.Contains(message, "Standard-Startort") {
+		t.Fatalf("planningError(configuration)=(%d,%q)", status, message)
+	}
+	if code := planningErrorCode(planning.ErrConfiguration); code != "planning_configuration" {
+		t.Fatalf("planningErrorCode(configuration)=%q", code)
+	}
+}
+
 func planningTestRouter(t *testing.T, role auth.Role, store *planningHTTPStore) (http.Handler, string, string) {
 	t.Helper()
 	now := store.now
@@ -176,7 +194,7 @@ func planningTestRouter(t *testing.T, role auth.Role, store *planningHTTPStore) 
 	cfg := planning.DefaultConfig(location)
 	cfg.HorizonDays = 7
 	cfg.CandidateLimit = 100
-	service, err := planning.New(store, planningHTTPAvailability{now: now}, planning.NewHaversineRouter(1.3, 55), cfg, func() time.Time { return now })
+	service, err := planning.New(store, planningHTTPAvailability{now: now}, planning.NewHaversineRouter(1.3, 55), cfg, func() time.Time { return now }, planning.WithDefaultStartProvider(planningHTTPDefaultStart{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,8 +203,12 @@ func planningTestRouter(t *testing.T, role auth.Role, store *planningHTTPStore) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	routeLocations, err := routelocation.New(routeLocationHTTPFixture())
+	if err != nil {
+		t.Fatal(err)
+	}
 	webCfg := configForWebTest()
-	router, err := NewRouter(Dependencies{Config: webCfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pinger{}, Build: buildinfo.Info{Version: "test"}, Identity: identity, Planning: service, Routes: routeService})
+	router, err := NewRouter(Dependencies{Config: webCfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pinger{}, Build: buildinfo.Info{Version: "test"}, Identity: identity, Planning: service, Routes: routeService, RouteLocations: routeLocations})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,6 +18,7 @@ import (
 	"example.invalid/hackplan/internal/maptile"
 	"example.invalid/hackplan/internal/notification"
 	"example.invalid/hackplan/internal/observability"
+	"example.invalid/hackplan/internal/routelocation"
 	"example.invalid/hackplan/internal/web"
 )
 
@@ -53,6 +54,11 @@ func Serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	routeLocationStore := postgres.NewRouteLocationStore(pool)
+	routeLocationService, err := routelocation.New(routeLocationStore)
+	if err != nil {
+		return err
+	}
 	appointmentService, err := AppointmentService(cfg, pool, driverService)
 	if err != nil {
 		return err
@@ -83,7 +89,7 @@ func Serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			return err
 		}
 	}
-	planningService, err := PlanningService(cfg, pool, driverService, metrics)
+	planningService, err := PlanningService(cfg, pool, driverService, routeLocationStore, metrics)
 	if err != nil {
 		return err
 	}
@@ -117,25 +123,26 @@ func Serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 
 	router, err := web.NewRouter(web.Dependencies{
-		Config:        cfg,
-		Logger:        logger,
-		Database:      operations,
-		Build:         build,
-		Identity:      identity,
-		Customers:     customerService,
-		Drivers:       driverService,
-		Resources:     resourceService,
-		Appointments:  appointmentService,
-		Confirmations: confirmationService,
-		Notifications: notificationAdmin,
-		Dashboard:     dashboardService,
-		CalendarFeeds: calendarFeedService,
-		Planning:      planningService,
-		Routes:        routeService,
-		Voice:         voiceService,
-		Metrics:       metrics,
-		MapTiles:      mapTiles,
-		Geocoder:      geocoder,
+		Config:         cfg,
+		Logger:         logger,
+		Database:       operations,
+		Build:          build,
+		Identity:       identity,
+		Customers:      customerService,
+		Drivers:        driverService,
+		Resources:      resourceService,
+		RouteLocations: routeLocationService,
+		Appointments:   appointmentService,
+		Confirmations:  confirmationService,
+		Notifications:  notificationAdmin,
+		Dashboard:      dashboardService,
+		CalendarFeeds:  calendarFeedService,
+		Planning:       planningService,
+		Routes:         routeService,
+		Voice:          voiceService,
+		Metrics:        metrics,
+		MapTiles:       mapTiles,
+		Geocoder:       geocoder,
 	})
 	if err != nil {
 		return err

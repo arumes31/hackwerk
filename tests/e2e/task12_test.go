@@ -28,6 +28,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		t.Fatal("TEST_DATABASE_URL is required for browser tests")
 	}
 	pool, identity, drivers, resources, appointments, driverID, chipperID, jobID, secondJobID, adminPassword, driverPassword := task04Application(t, databaseURL)
+	routeLocations, _ := e2eRouteLocations(t, pool)
 	if _, err := pool.Exec(t.Context(), `UPDATE jobs
 		SET pile_latitude=CASE id WHEN $1 THEN 48.210000 ELSE 48.245000 END,
 		    pile_longitude=CASE id WHEN $1 THEN 14.210000 ELSE 14.265000 END,
@@ -54,12 +55,12 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		AppName: "HackWerk", BaseURL: "http://127.0.0.1:18533", Timezone: "Europe/Vienna",
 		Database: config.Database{ReadinessTimeout: 2 * time.Second},
 		Auth:     config.Auth{SessionCookieName: "hackplan_session", CSRFCookieName: "hackplan_csrf", SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour},
-		Planning: config.Planning{BusinessOpen: "07:00", DepotLatitude: 48.2, DepotLongitude: 14.2},
+		Planning: config.Planning{BusinessOpen: "07:00"},
 		Map:      config.Map{Attribution: "OpenStreetMap-Mitwirkende"},
 	}
 	handler, err := web.NewRouter(web.Dependencies{
 		Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pool, Build: buildinfo.Info{Version: "e2e"},
-		Identity: identity, Customers: customerService, Drivers: drivers, Resources: resources, Appointments: appointments, Dashboard: e2eDashboard(t, pool), Routes: routes,
+		Identity: identity, Customers: customerService, Drivers: drivers, Resources: resources, Appointments: appointments, Dashboard: e2eDashboard(t, pool), Routes: routes, RouteLocations: routeLocations,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +125,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	var routePresetAudit struct {
 		Actual, Expected []string
 	}
-	var candidateMarkerCount, depotMarkerCount int
+	var candidateMarkerCount, startMarkerCount int
 	var smallDesktopTargets []string
 	if err := runBrowserStep(browser, "plan desktop route",
 		chromedp.Navigate(server.URL+"/planning/routes"), chromedp.WaitVisible("form[action='/planning/routes']", chromedp.ByQuery),
@@ -143,7 +144,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 			return {Actual:actual,Expected:[format(today),format(tomorrow),format(business)]};
 		})()`, &routePresetAudit),
 		chromedp.Evaluate(`document.querySelectorAll('.route-map-marker--candidate').length`, &candidateMarkerCount),
-		chromedp.Evaluate(`document.querySelectorAll('.route-map-marker--depot').length`, &depotMarkerCount),
+		chromedp.Evaluate(`document.querySelectorAll('.route-map-marker--start').length`, &startMarkerCount),
 		chromedp.Evaluate(`(() => {
 			const workspace=document.querySelector('[data-route-context][data-route-admin="true"]');
 			const builder=workspace.querySelector('.route-builder').getBoundingClientRect();
@@ -170,8 +171,8 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
-	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || depotMarkerCount != 1 || !selectedByMap || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate {
-		t.Fatalf("desktop route map-ready/admin/toolbar/presets/candidates/depot/selected/overflow/small-target/layout=%v/%v/%v/%v/%d/%d/%v/%v/%v/%+v targets=%v", mapReady, adminRouteContext, mapToolbar, routeDatePresets, candidateMarkerCount, depotMarkerCount, selectedByMap, desktopOverflow, smallDesktopTarget, desktopLayout, smallDesktopTargets)
+	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || startMarkerCount != 1 || !selectedByMap || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate {
+		t.Fatalf("desktop route map-ready/admin/toolbar/presets/candidates/start/selected/overflow/small-target/layout=%v/%v/%v/%v/%d/%d/%v/%v/%v/%+v targets=%v", mapReady, adminRouteContext, mapToolbar, routeDatePresets, candidateMarkerCount, startMarkerCount, selectedByMap, desktopOverflow, smallDesktopTarget, desktopLayout, smallDesktopTargets)
 	}
 
 	var routeText string

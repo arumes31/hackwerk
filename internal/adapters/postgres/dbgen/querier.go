@@ -19,6 +19,10 @@ type Querier interface {
 	CleanupExpiredVoiceDrafts(ctx context.Context) (int64, error)
 	ClearAvailabilityRulesForDay(ctx context.Context, arg ClearAvailabilityRulesForDayParams) (int64, error)
 	ClearLoginFailures(ctx context.Context, keyHash []byte) error
+	ClearRouteLocationEndDefaultForCreate(ctx context.Context) error
+	ClearRouteLocationEndDefaultForUpdate(ctx context.Context, id pgtype.UUID) error
+	ClearRouteLocationStartDefaultForCreate(ctx context.Context) error
+	ClearRouteLocationStartDefaultForUpdate(ctx context.Context, id pgtype.UUID) error
 	CommitVoiceDraft(ctx context.Context, arg CommitVoiceDraftParams) (int64, error)
 	CompleteVoiceDraft(ctx context.Context, arg CompleteVoiceDraftParams) (int64, error)
 	CountActiveAdmins(ctx context.Context) (int64, error)
@@ -31,6 +35,7 @@ type Querier interface {
 	DatabaseTime(ctx context.Context) (pgtype.Timestamptz, error)
 	DeactivateDriverProfile(ctx context.Context, arg DeactivateDriverProfileParams) (int64, error)
 	DeactivateResource(ctx context.Context, arg DeactivateResourceParams) (int64, error)
+	DeactivateRouteLocation(ctx context.Context, arg DeactivateRouteLocationParams) (int64, error)
 	DeleteAppointmentAssignments(ctx context.Context, appointmentID pgtype.UUID) error
 	DeleteAppointmentResourceAssignments(ctx context.Context, appointmentID pgtype.UUID) error
 	DeleteAvailabilityException(ctx context.Context, arg DeleteAvailabilityExceptionParams) (int64, error)
@@ -50,6 +55,7 @@ type Querier interface {
 	FindUserByUsername(ctx context.Context, username string) (FindUserByUsernameRow, error)
 	GetActiveConfirmationForUpdate(ctx context.Context, appointmentID pgtype.UUID) (GetActiveConfirmationForUpdateRow, error)
 	GetActiveCustomer(ctx context.Context, id pgtype.UUID) (string, error)
+	GetActiveRouteLocation(ctx context.Context, id pgtype.UUID) (GetActiveRouteLocationRow, error)
 	GetAppointment(ctx context.Context, id pgtype.UUID) (GetAppointmentRow, error)
 	GetAppointmentDetail(ctx context.Context, id pgtype.UUID) (GetAppointmentDetailRow, error)
 	GetAppointmentForUpdate(ctx context.Context, id pgtype.UUID) (GetAppointmentForUpdateRow, error)
@@ -59,6 +65,7 @@ type Querier interface {
 	GetConfirmationForUpdate(ctx context.Context, tokenHash []byte) (GetConfirmationForUpdateRow, error)
 	GetCustomer(ctx context.Context, id pgtype.UUID) (GetCustomerRow, error)
 	GetDashboardCounts(ctx context.Context, arg GetDashboardCountsParams) (GetDashboardCountsRow, error)
+	GetDefaultRouteStartLocation(ctx context.Context) (GetDefaultRouteStartLocationRow, error)
 	GetDriverProfile(ctx context.Context, id pgtype.UUID) (GetDriverProfileRow, error)
 	GetJob(ctx context.Context, id pgtype.UUID) (GetJobRow, error)
 	GetNotificationDelivery(ctx context.Context, id pgtype.UUID) (GetNotificationDeliveryRow, error)
@@ -68,6 +75,7 @@ type Querier interface {
 	GetPlanningSuggestionForUpdate(ctx context.Context, id pgtype.UUID) (GetPlanningSuggestionForUpdateRow, error)
 	GetResourceForUpdate(ctx context.Context, id pgtype.UUID) (GetResourceForUpdateRow, error)
 	GetRouteDraft(ctx context.Context, id pgtype.UUID) (GetRouteDraftRow, error)
+	GetRouteLocationForUpdate(ctx context.Context, id pgtype.UUID) (GetRouteLocationForUpdateRow, error)
 	GetVoiceDraftForOwner(ctx context.Context, arg GetVoiceDraftForOwnerParams) (GetVoiceDraftForOwnerRow, error)
 	HasActiveDriverReservations(ctx context.Context, driverID pgtype.UUID) (bool, error)
 	HasActiveResourceReservations(ctx context.Context, resourceID pgtype.UUID) (bool, error)
@@ -93,6 +101,7 @@ type Querier interface {
 	InsertPlanningSuggestion(ctx context.Context, arg InsertPlanningSuggestionParams) (string, error)
 	InsertResource(ctx context.Context, arg InsertResourceParams) (string, error)
 	InsertRouteDraft(ctx context.Context, arg InsertRouteDraftParams) (InsertRouteDraftRow, error)
+	InsertRouteLocation(ctx context.Context, arg InsertRouteLocationParams) (InsertRouteLocationRow, error)
 	InsertRouteStop(ctx context.Context, arg InsertRouteStopParams) (string, error)
 	InsertSession(ctx context.Context, arg InsertSessionParams) (string, error)
 	InsertUser(ctx context.Context, arg InsertUserParams) (string, error)
@@ -105,6 +114,7 @@ type Querier interface {
 	LinkRouteStopAppointment(ctx context.Context, arg LinkRouteStopAppointmentParams) (int64, error)
 	ListActiveDriversForPlanning(ctx context.Context) ([]ListActiveDriversForPlanningRow, error)
 	ListActiveResourcesForPlanning(ctx context.Context) ([]ListActiveResourcesForPlanningRow, error)
+	ListActiveRouteLocations(ctx context.Context) ([]ListActiveRouteLocationsRow, error)
 	ListAppointmentDrivers(ctx context.Context, appointmentIds []pgtype.UUID) ([]ListAppointmentDriversRow, error)
 	ListAppointmentNotifications(ctx context.Context, appointmentID pgtype.UUID) ([]ListAppointmentNotificationsRow, error)
 	ListAppointmentResources(ctx context.Context, appointmentIds []pgtype.UUID) ([]ListAppointmentResourcesRow, error)
@@ -134,6 +144,7 @@ type Querier interface {
 	ListResources(ctx context.Context) ([]ListResourcesRow, error)
 	ListRouteCandidates(ctx context.Context, jobIds []pgtype.UUID) ([]ListRouteCandidatesRow, error)
 	ListRouteDrivers(ctx context.Context) ([]ListRouteDriversRow, error)
+	ListRouteLocations(ctx context.Context) ([]ListRouteLocationsRow, error)
 	ListRouteMissingLocations(ctx context.Context) ([]ListRouteMissingLocationsRow, error)
 	ListRouteResources(ctx context.Context) ([]ListRouteResourcesRow, error)
 	ListRouteStopPhones(ctx context.Context, jobIds []pgtype.UUID) ([]ListRouteStopPhonesRow, error)
@@ -156,6 +167,7 @@ type Querier interface {
 	LockPlanningDriver(ctx context.Context, id pgtype.UUID) (string, error)
 	LockPlanningResources(ctx context.Context, ids []pgtype.UUID) ([]string, error)
 	LockRouteDraft(ctx context.Context, id pgtype.UUID) (LockRouteDraftRow, error)
+	LockRouteLocationDefaults(ctx context.Context) error
 	LockRouteStopsForAssignment(ctx context.Context, routeDraftID pgtype.UUID) ([]LockRouteStopsForAssignmentRow, error)
 	// Serialize changes that can invalidate routing/travel-time suggestions. Row
 	// locks alone cannot protect against newly inserted or non-overlapping moves.
@@ -220,6 +232,7 @@ type Querier interface {
 	UpdateResource(ctx context.Context, arg UpdateResourceParams) (int64, error)
 	UpdateRouteDraft(ctx context.Context, arg UpdateRouteDraftParams) (int64, error)
 	UpdateRouteDraftMetrics(ctx context.Context, arg UpdateRouteDraftMetricsParams) (int64, error)
+	UpdateRouteLocation(ctx context.Context, arg UpdateRouteLocationParams) (UpdateRouteLocationRow, error)
 	UpdateRouteStopPosition(ctx context.Context, arg UpdateRouteStopPositionParams) (int64, error)
 	UpdateRouteStopTravel(ctx context.Context, arg UpdateRouteStopTravelParams) (int64, error)
 	UpdateUserAccess(ctx context.Context, arg UpdateUserAccessParams) (int64, error)

@@ -21,6 +21,18 @@ type pinger struct{ err error }
 
 func (p pinger) Ping(context.Context) error { return p.err }
 
+type operationsPinger struct {
+	pinger
+	readyErr   error
+	workerErr  error
+	workerGood bool
+}
+
+func (p operationsPinger) Ready(context.Context, int64) error { return p.readyErr }
+func (p operationsPinger) WorkerHealthy(context.Context, time.Duration) (time.Time, bool, error) {
+	return time.Now().UTC(), p.workerGood, p.workerErr
+}
+
 func TestHealthEndpoints(t *testing.T) {
 	t.Parallel()
 
@@ -50,6 +62,70 @@ func TestHealthEndpoints(t *testing.T) {
 				t.Fatalf("body = %q, want containing %q", response.Body.String(), tt.expectedBody)
 			}
 		})
+	}
+}
+
+func TestOperationalHealthAndServerConfiguration(t *testing.T) {
+	tests := []struct {
+		name   string
+		db     DatabasePinger
+		path   string
+		status int
+	}{
+		{name: "operations ready", db: operationsPinger{workerGood: true}, path: "/health/ready", status: http.StatusOK},
+		{name: "operations schema stale", db: operationsPinger{readyErr: errors.New("schema")}, path: "/health/ready", status: http.StatusServiceUnavailable},
+		{name: "worker ready", db: operationsPinger{workerGood: true}, path: "/health/worker", status: http.StatusOK},
+		{name: "worker stale", db: operationsPinger{}, path: "/health/worker", status: http.StatusServiceUnavailable},
+		{name: "worker error", db: operationsPinger{workerErr: errors.New("database")}, path: "/health/worker", status: http.StatusServiceUnavailable},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			testRouter(t, test.db).ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, test.path, nil))
+			if response.Code != test.status {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+
+	cfg := testConfig()
+	cfg.ListenAddr = "127.0.0.1:18533"
+	server := Server(cfg, http.NotFoundHandler())
+	if server.Addr != cfg.ListenAddr || server.ReadHeaderTimeout != cfg.HTTP.ReadHeaderTimeout || server.MaxHeaderBytes != cfg.HTTP.MaxHeaderBytes {
+		t.Fatalf("server=%#v", server)
+	}
+	metrics := MetricsServer(cfg, http.NotFoundHandler())
+	if metrics.Addr != cfg.Metrics.ListenAddr || metrics.ReadHeaderTimeout != 3*time.Second || metrics.MaxHeaderBytes != 64<<10 {
+		t.Fatalf("metrics=%#v", metrics)
+	}
+}
+
+func TestWebErrorsAndLocalHealthValidation(t *testing.T) {
+	for _, listener := range []string{"not-an-address", "example.com:8080", "127.0.0.1:"} {
+		if _, err := localHealthEndpoint(listener); err == nil {
+			t.Fatalf("localHealthEndpoint(%q) unexpectedly succeeded", listener)
+		}
+	}
+	if endpoint, err := localHealthEndpoint("[::]:8080"); err != nil || endpoint != "http://[::1]:8080/health/ready" {
+		t.Fatalf("ipv6 endpoint=%q err=%v", endpoint, err)
+	}
+	if err := Healthcheck(t.Context(), "invalid", "https://example.com", time.Second); err == nil {
+		t.Fatal("invalid listener healthcheck unexpectedly succeeded")
+	}
+	if err := Healthcheck(t.Context(), "127.0.0.1:18533", "https://user@example.com", time.Second); err == nil {
+		t.Fatal("credential-bearing public URL healthcheck unexpectedly succeeded")
+	}
+
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	panicResponse := httptest.NewRecorder()
+	recoverer(logger)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("test") })).ServeHTTP(panicResponse, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil))
+	if panicResponse.Code != http.StatusInternalServerError || !strings.Contains(panicResponse.Body.String(), "Fehlerreferenz") {
+		t.Fatalf("panic response=%d %s", panicResponse.Code, panicResponse.Body.String())
+	}
+	jsonResponse := httptest.NewRecorder()
+	writeJSON(jsonResponse, http.StatusOK, map[string]any{"unsupported": make(chan int)})
+	if jsonResponse.Code != http.StatusInternalServerError {
+		t.Fatalf("json response=%d %s", jsonResponse.Code, jsonResponse.Body.String())
 	}
 }
 

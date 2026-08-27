@@ -23,7 +23,9 @@ import (
 	"example.invalid/hackplan/internal/config"
 	"example.invalid/hackplan/internal/customers"
 	"example.invalid/hackplan/internal/driver"
+	"example.invalid/hackplan/internal/planning"
 	"example.invalid/hackplan/internal/resource"
+	"example.invalid/hackplan/internal/routelocation"
 	"example.invalid/hackplan/internal/web"
 	"github.com/chromedp/cdproto/emulation"
 	cdpinput "github.com/chromedp/cdproto/input"
@@ -835,7 +837,12 @@ func task04Application(t *testing.T, databaseURL string) (*pgxpool.Pool, *auth.S
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, "TRUNCATE outbox_events, appointments, waitlist_entries, jobs, customers, availability_exceptions, availability_rules, resources, audit_events, auth_rate_limits, sessions, drivers, users RESTART IDENTITY CASCADE"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE route_locations, outbox_events, appointments, waitlist_entries, jobs, customers, availability_exceptions, availability_rules, resources, audit_events, auth_rate_limits, sessions, drivers, users RESTART IDENTITY CASCADE"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO route_locations
+		(label,address,latitude,longitude,default_start,default_end)
+		VALUES ('E2E Betriebshof','Teststraße 1, 4710 Grieskirchen',48.200000,14.200000,true,true)`); err != nil {
 		t.Fatal(err)
 	}
 	hasher, err := auth.NewPasswordHasher(auth.PasswordParameters{MemoryKiB: 8, Iterations: 1, Parallelism: 1, SaltLength: 16, KeyLength: 16, MinLength: 14})
@@ -903,6 +910,26 @@ func task04Application(t *testing.T, databaseURL string) (*pgxpool.Pool, *auth.S
 		t.Fatal(err)
 	}
 	return pool, identity, drivers, resources, appointments, driverID, chipperID, jobID, dragJobID, adminPassword, driverPassword
+}
+
+type e2eDefaultStart struct{ store *postgres.RouteLocationStore }
+
+func (provider e2eDefaultStart) DefaultStart(ctx context.Context) (planning.Point, error) {
+	location, err := provider.store.DefaultStart(ctx)
+	if err != nil {
+		return planning.Point{}, err
+	}
+	return planning.Point{Latitude: location.Latitude, Longitude: location.Longitude}, nil
+}
+
+func e2eRouteLocations(t *testing.T, pool *pgxpool.Pool) (*routelocation.Service, *postgres.RouteLocationStore) {
+	t.Helper()
+	store := postgres.NewRouteLocationStore(pool)
+	service, err := routelocation.New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service, store
 }
 
 type dragCoordinates struct {

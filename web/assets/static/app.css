@@ -1258,7 +1258,8 @@ textarea { min-height: 6rem; resize: vertical; }
   font-style: normal;
   font-weight: 850;
 }
-.route-map-legend .route-map-legend__depot { border-radius: .32rem; background: var(--ink); }
+.route-map-legend .route-map-legend__start { border-radius: .32rem; background: var(--ink); }
+.route-map-legend .route-map-legend__end { border-radius: .32rem; background: #2459a6; }
 .route-map-legend .route-map-legend__selected { background: var(--rust); }
 .route-map-legend .route-map-legend__unavailable { color: var(--ink); background: #a8ada7; }
 
@@ -1286,7 +1287,8 @@ textarea { min-height: 6rem; resize: vertical; }
 .route-map-marker--candidate { background: var(--moss); }
 .route-map-marker--candidate-unavailable { color: var(--ink); background: #a8ada7; }
 .route-map-marker--selected { background: var(--rust); box-shadow: 0 0 0 4px rgb(178 106 41 / 28%), 0 .25rem .9rem rgb(24 32 26 / 35%); }
-.route-map-marker--depot { border-radius: .55rem; background: var(--ink); }
+.route-map-marker--start { border-radius: .55rem; background: var(--ink); }
+.route-map-marker--end { border-radius: .55rem; background: #2459a6; }
 
 .route-map-popup {
   min-width: 12rem;
@@ -1481,8 +1483,8 @@ textarea { min-height: 6rem; resize: vertical; }
 .route-candidate--focused { border-color: var(--rust); box-shadow: 0 0 0 3px rgb(155 73 49 / 18%); }
 .route-map-marker--focused { transform: translateY(-2px) scale(1.12); box-shadow: 0 0 0 5px rgb(216 149 47 / 38%); }
 .route-map-marker--location { color: #fff; background: #2459a6; cursor: default; font-size: .72rem; }
-.route-map-labels-hidden .route-map-marker:not(.route-map-marker--depot):not(.route-map-marker--location) { color: transparent; }
-.route-map-labels-hidden .route-map-marker:not(.route-map-marker--depot):not(.route-map-marker--location)::after { width: .55rem; height: .55rem; border-radius: 50%; background: #fff; content: ""; }
+.route-map-labels-hidden .route-map-marker:not(.route-map-marker--start):not(.route-map-marker--end):not(.route-map-marker--location) { color: transparent; }
+.route-map-labels-hidden .route-map-marker:not(.route-map-marker--start):not(.route-map-marker--end):not(.route-map-marker--location)::after { width: .55rem; height: .55rem; border-radius: 50%; background: #fff; content: ""; }
 .route-sticky-navigation { position: sticky; z-index: 12; bottom: .5rem; display: grid; gap: .4rem; padding: .5rem; border: 1px solid var(--line); border-radius: .75rem; background: rgb(255 253 247 / 96%); box-shadow: var(--shadow); }
 .route-stop-pagination { display: flex; justify-content: space-between; gap: .5rem; margin-top: .65rem; }
 .route-stop-pagination .button { margin: 0; }
@@ -1494,6 +1496,59 @@ textarea { min-height: 6rem; resize: vertical; }
 .status-badge--retry-wait { color: #6f4400; background: #fff4d6; }
 .status-badge--sent { color: #175c34; background: #e3f3e8; }
 .status-badge--failed { color: #842d21; background: #fbe9e5; }
+
+/* Route endpoints are deliberately concrete: a saved place reads like a small
+   dispatch card, while an individual point remains visibly provisional until
+   it has been confirmed. */
+.route-location-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 1rem 0 1.25rem; }
+.route-location-picker { min-width: 0; margin: 0; padding: 1rem; border: 1px solid var(--line); border-radius: .8rem; background: linear-gradient(145deg, var(--surface), var(--paper)); }
+.route-location-picker > legend { padding: 0 .4rem; color: var(--moss); font: 800 1.12rem Georgia, serif; }
+.route-location-picker__choices { display: grid; gap: .5rem; }
+.route-location-choice { min-height: 44px; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .7rem; padding: .65rem .75rem; border: 1px solid var(--line); border-radius: .6rem; background: rgb(255 253 247 / 72%); cursor: pointer; }
+.route-location-choice:hover { border-color: var(--moss); background: var(--moss-light); }
+.route-location-choice:has(input:focus-visible) { outline: 3px solid rgb(216 149 47 / 45%); outline-offset: 2px; }
+.route-location-choice:has(input:checked) { border-color: var(--moss); box-shadow: inset .22rem 0 var(--moss); background: #e7efe7; }
+.route-location-choice input { width: 1.2rem; min-height: 1.2rem; margin: 0; }
+.route-location-choice span { min-width: 0; display: grid; gap: .12rem; }
+.route-location-choice small { color: var(--muted); line-height: 1.35; }
+.route-location-choice--custom { border-style: dashed; }
+.route-location-choice--last-stop { border-color: rgb(178 106 41 / 55%); background: #fff8e7; }
+.route-location-custom { display: grid; gap: .8rem; margin-top: .8rem; padding: .9rem; border: 1px solid rgb(33 79 58 / 40%); border-radius: .65rem; background: rgb(231 239 231 / 58%); }
+.route-location-custom[hidden] { display: none; }
+.route-location-custom__confirm { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
+.route-location-custom__confirm .button { min-height: 44px; margin: 0; }
+.route-location-picker__error { margin: .75rem 0 0; }
+.route-location-picker__error[hidden] { display: none; }
+
+.route-location-settings { display: grid; grid-template-columns: minmax(17rem, .75fr) minmax(0, 1.25fr); gap: 1.25rem; align-items: start; }
+.route-location-settings__form { position: sticky; top: 1rem; }
+.route-location-list { display: grid; gap: .75rem; }
+.route-location-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem 1rem; align-items: start; padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--surface); box-shadow: 0 .55rem 1.25rem rgb(29 40 31 / 5%); }
+.route-location-card h2 { margin: 0; font-size: 1.18rem; }
+.route-location-card p { margin: .3rem 0 0; color: var(--muted); }
+.route-location-card__facts { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .65rem; }
+.route-location-card__facts span { padding: .25rem .5rem; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--paper); font-size: .78rem; }
+.route-location-card__actions { display: flex; gap: .4rem; flex-wrap: wrap; justify-content: flex-end; }
+.route-location-card__actions .button { min-height: 44px; margin: 0; }
+.route-location-defaults { grid-column: 1 / -1; display: grid; gap: .8rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.route-location-defaults__choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.route-location-defaults label { min-height: 44px; display: flex; align-items: center; gap: .55rem; }
+
+@media (max-width: 800px) {
+  .route-location-grid,
+  .route-location-settings,
+  .route-location-defaults__choices { grid-template-columns: 1fr; }
+  .route-location-settings__form { position: static; }
+}
+
+@media (max-width: 520px) {
+  .route-location-picker { padding: .8rem; }
+  .route-location-custom { padding: .75rem; }
+  .route-location-custom__confirm .button { width: 100%; }
+  .route-location-card { grid-template-columns: 1fr; }
+  .route-location-card__actions { justify-content: flex-start; }
+  .route-location-card__actions .button { flex: 1 1 10rem; }
+}
 
 /* The onboarding reads like a field manual: a compact orientation panel leads
    into one clear route of numbered, directly actionable steps. */

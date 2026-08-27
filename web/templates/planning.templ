@@ -18,6 +18,8 @@ type PlanningData struct {
 	Candidates       []planning.RouteCandidate
 	MissingLocations []planning.RouteMissingLocation
 	ReturnTo         string
+	RadiusLatitude   string
+	RadiusLongitude  string
 }
 
 func (d PlanningData) WithError(value string) PlanningData {
@@ -31,7 +33,7 @@ templ Planning(data PlanningData) {
 		@documentHead(data.Shell.Page, "Planungsvorschläge – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page planning-page" data-planning-workbench>
+			<main id="hauptinhalt" class="page planning-page" data-planning-workbench data-planning-radius-latitude={ data.RadiusLatitude } data-planning-radius-longitude={ data.RadiusLongitude }>
 				<div class="page-heading"><div><p class="eyebrow">Disposition</p><h1>Planungswerkbank</h1><p>Aufträge auswählen, prüfen und als Einzelvorschlag oder Tagesroute bearbeiten. Jede Übernahme bleibt unverbindlich.</p></div><div class="action-row"><a class="button button--quiet" href={ data.ReturnTo }>Zurück zur Warteliste</a><span class="status-badge">Keine automatische Fixierung</span></div></div>
 				if data.Error != "" {
 					<div class="form-alert" role="alert">{ data.Error }</div>
@@ -53,7 +55,7 @@ templ Planning(data PlanningData) {
 									}
 								</select>
 							</label>
-							<label>Radius ab Depot (km)<input type="number" min="1" max="250" step="1" placeholder="Alle" data-planning-radius/></label><button type="button" class="button button--quiet" data-planning-select-visible>Sichtbare wählen</button><button type="button" class="button button--quiet" data-planning-reset>Zurücksetzen</button>
+							<label>Radius ab Standard-Start (km)<input type="number" min="1" max="250" step="1" placeholder="Alle" data-planning-radius/></label><button type="button" class="button button--quiet" data-planning-select-visible>Sichtbare wählen</button><button type="button" class="button button--quiet" data-planning-reset>Zurücksetzen</button>
 						</div>
 						<div class="route-candidate-list planning-order-list" data-planning-order-list>
 							for _, candidate := range data.Candidates {
@@ -85,7 +87,7 @@ templ Planning(data PlanningData) {
 						@mapAssetData(data.Shell.Page)
 						<div class="section-heading"><div><p class="eyebrow">Karte</p><h2>Standorte</h2></div><span class="status-badge" data-route-map-count></span></div>
 						<div class="route-map-toolbar" data-route-map-toolbar></div>
-						<div class="route-map planning-map" role="region" aria-label="Interaktive Karte der Planungsaufträge" data-route-map data-depot-latitude="48.200000" data-depot-longitude="14.200000"><div class="map-fallback" data-map-fallback>Die Karte wird geladen. Die Auftragsliste bleibt vollständig bedienbar.</div></div>
+						<div class="route-map planning-map" role="region" aria-label="Interaktive Karte der Planungsaufträge" data-route-map><div class="map-fallback" data-map-fallback>Die Karte wird geladen. Die Auftragsliste bleibt vollständig bedienbar.</div></div>
 					</div>
 					<aside class="planning-selection form-card" aria-live="polite">
 						<div class="section-heading"><div><p class="eyebrow">Aktuelle Auswahl</p><h2 data-planning-selection-title>Noch nichts gewählt</h2></div></div>

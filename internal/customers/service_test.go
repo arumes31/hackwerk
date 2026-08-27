@@ -16,6 +16,27 @@ type storeStub struct {
 	duplicates     []Duplicate
 	favoriteName   string
 	favoriteFilter WaitlistFilter
+	createJob      CreateJobInput
+	updateJob      UpdateJobInput
+	archiveJobID   string
+	archiveJobV    int32
+	customerFilter CustomerListFilter
+	draft          JobDraft
+	recentCustomer string
+	recentJob      string
+	recent         []RecentRecord
+	detail         CustomerDetail
+	updateCustomer UpdateCustomerInput
+	archiveCustID  string
+	archiveCustV   int32
+	waitlistFilter WaitlistFilter
+	priorityID     string
+	priority       int32
+	removeID       string
+	removeReason   string
+	noteJobID      string
+	noteBody       string
+	noteKey        string
 }
 
 func (store *storeStub) FindDuplicates(context.Context, CustomerInput) ([]Duplicate, error) {
@@ -25,37 +46,50 @@ func (store *storeStub) CreateIntake(context.Context, auth.Actor, IntakeInput, s
 	store.createCalls++
 	return store.created, nil
 }
-func (store *storeStub) CreateJob(context.Context, auth.Actor, CreateJobInput) (CreatedIntake, error) {
+func (store *storeStub) CreateJob(_ context.Context, _ auth.Actor, input CreateJobInput) (CreatedIntake, error) {
+	store.createJob = input
 	return store.created, nil
 }
-func (store *storeStub) UpdateJob(context.Context, auth.Actor, UpdateJobInput) error { return nil }
-func (store *storeStub) ArchiveJob(context.Context, auth.Actor, string, int32, string) error {
+func (store *storeStub) UpdateJob(_ context.Context, _ auth.Actor, input UpdateJobInput) error {
+	store.updateJob = input
 	return nil
 }
-func (store *storeStub) ListCustomers(context.Context, CustomerListFilter) (Page[CustomerSummary], error) {
+func (store *storeStub) ArchiveJob(_ context.Context, _ auth.Actor, id string, version int32, _ string) error {
+	store.archiveJobID, store.archiveJobV = id, version
+	return nil
+}
+func (store *storeStub) ListCustomers(_ context.Context, filter CustomerListFilter) (Page[CustomerSummary], error) {
 	store.listCalls++
+	store.customerFilter = filter
 	return Page[CustomerSummary]{}, nil
 }
 func (store *storeStub) CustomerDetail(context.Context, string) (CustomerDetail, error) {
-	return CustomerDetail{}, nil
+	return store.detail, nil
 }
 func (store *storeStub) DuplicateJobDraft(context.Context, string) (JobDraft, error) {
-	return JobDraft{}, nil
+	return store.draft, nil
 }
-func (store *storeStub) RecordRecentCustomer(context.Context, string, string) error { return nil }
-func (store *storeStub) RecordRecentJob(context.Context, string, string) (string, error) {
-	return "", nil
+func (store *storeStub) RecordRecentCustomer(_ context.Context, _ string, id string) error {
+	store.recentCustomer = id
+	return nil
+}
+func (store *storeStub) RecordRecentJob(_ context.Context, _ string, id string) (string, error) {
+	store.recentJob = id
+	return "recent-1", nil
 }
 func (store *storeStub) ListRecent(context.Context, string, int) ([]RecentRecord, error) {
-	return nil, nil
+	return store.recent, nil
 }
-func (store *storeStub) UpdateCustomer(context.Context, auth.Actor, UpdateCustomerInput) error {
+func (store *storeStub) UpdateCustomer(_ context.Context, _ auth.Actor, input UpdateCustomerInput) error {
+	store.updateCustomer = input
 	return nil
 }
-func (store *storeStub) ArchiveCustomer(context.Context, auth.Actor, string, int32, string) error {
+func (store *storeStub) ArchiveCustomer(_ context.Context, _ auth.Actor, id string, version int32, _ string) error {
+	store.archiveCustID, store.archiveCustV = id, version
 	return nil
 }
-func (store *storeStub) ListWaitlist(context.Context, WaitlistFilter) (Page[WaitlistItem], error) {
+func (store *storeStub) ListWaitlist(_ context.Context, filter WaitlistFilter) (Page[WaitlistItem], error) {
+	store.waitlistFilter = filter
 	return Page[WaitlistItem]{}, nil
 }
 func (store *storeStub) ListWaitlistFilterFavorites(context.Context, string) ([]WaitlistFilterFavorite, error) {
@@ -69,14 +103,17 @@ func (store *storeStub) SaveWaitlistFilterFavorite(_ context.Context, _ string, 
 func (store *storeStub) DeleteWaitlistFilterFavorite(context.Context, string, string) error {
 	return nil
 }
-func (store *storeStub) UpdateWaitlistPriority(context.Context, auth.Actor, string, int32, int32, string) error {
+func (store *storeStub) UpdateWaitlistPriority(_ context.Context, _ auth.Actor, id string, priority int32, _ int32, _ string) error {
 	store.priorityCalls++
+	store.priorityID, store.priority = id, priority
 	return nil
 }
-func (store *storeStub) RemoveWaitlist(context.Context, auth.Actor, string, int32, string, string) error {
+func (store *storeStub) RemoveWaitlist(_ context.Context, _ auth.Actor, id string, _ int32, reason string, _ string) error {
+	store.removeID, store.removeReason = id, reason
 	return nil
 }
-func (store *storeStub) AddNote(context.Context, auth.Actor, string, string, string, string, string) (string, error) {
+func (store *storeStub) AddNote(_ context.Context, _ auth.Actor, jobID, body, _ string, key, _ string) (string, error) {
+	store.noteJobID, store.noteBody, store.noteKey = jobID, body, key
 	return "note-1", nil
 }
 
@@ -159,6 +196,134 @@ func TestAddNoteRequiresStableIdempotencyKey(t *testing.T) {
 	_, err := service.AddNote(context.Background(), auth.Actor{UserID: "driver-1", Role: auth.RoleDriver}, "job-1", "Text", "", "", "request-1")
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("AddNote() error=%v, want validation", err)
+	}
+}
+
+func TestCustomerServiceDelegatesAuthorizedOperations(t *testing.T) {
+	t.Parallel()
+	store := &storeStub{
+		created:    CreatedIntake{JobID: "job-created", JobNumber: "HW-2026-000001"},
+		duplicates: []Duplicate{{ID: "self"}, {ID: "other", Locality: "Linz"}},
+		draft:      JobDraft{CustomerID: "customer-1", CustomerName: "Franz Huber"},
+		recent:     []RecentRecord{{CustomerID: "customer-1", JobID: "job-1"}},
+		detail:     CustomerDetail{Customer: Customer{ID: "customer-1"}},
+	}
+	service, err := NewService(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver := auth.Actor{UserID: "driver-1", Role: auth.RoleDriver}
+	admin := auth.Actor{UserID: "admin-1", Role: auth.RoleAdmin}
+
+	created, err := service.CreateJob(t.Context(), driver, CreateJobInput{
+		CustomerID: " customer-1 ", InitialNote: "  Einsatz aufnehmen ",
+		Job: validIntake().Job,
+	})
+	if err != nil || created.JobID != "job-created" || store.createJob.CustomerID != "customer-1" || store.createJob.InitialNote != "Einsatz aufnehmen" {
+		t.Fatalf("CreateJob result/input = %#v / %#v / %v", created, store.createJob, err)
+	}
+
+	updateJob := UpdateJobInput{ID: " job-1 ", ExpectedVersion: 2, Job: validIntake().Job}
+	updateJob.Job.VolumeM3 = " 80,5 "
+	updateJob.Job.PreferenceText = "  bald  "
+	if err := service.UpdateJob(t.Context(), driver, updateJob); err != nil || store.updateJob.ID != "job-1" || store.updateJob.Job.VolumeM3 != "80.50" || store.updateJob.Job.PreferenceText != "bald" {
+		t.Fatalf("UpdateJob input/error = %#v / %v", store.updateJob, err)
+	}
+	if err := service.ArchiveJob(t.Context(), admin, "job-1", 2, "request"); err != nil || store.archiveJobID != "job-1" || store.archiveJobV != 2 {
+		t.Fatalf("ArchiveJob input/error = %q/%d/%v", store.archiveJobID, store.archiveJobV, err)
+	}
+
+	if _, err := service.ListCustomers(t.Context(), driver, CustomerListFilter{Search: "  Huber ", Sort: "name", Page: -5, PageSize: 200}); err != nil || store.customerFilter.Search != "Huber" || store.customerFilter.Page != 1 || store.customerFilter.PageSize != 25 {
+		t.Fatalf("ListCustomers filter/error = %#v / %v", store.customerFilter, err)
+	}
+	if draft, err := service.DuplicateJobDraft(t.Context(), driver, " job-1 "); err != nil || draft.CustomerID != "customer-1" {
+		t.Fatalf("DuplicateJobDraft = %#v / %v", draft, err)
+	}
+	duplicates, err := service.FindDuplicatesForCustomer(t.Context(), driver, Customer{ID: "self", FirstName: "Franz", Locality: "Linz"})
+	if err != nil || len(duplicates) != 1 || duplicates[0].ID != "other" {
+		t.Fatalf("FindDuplicatesForCustomer = %#v / %v", duplicates, err)
+	}
+	if err := service.RecordRecentCustomer(t.Context(), driver, "customer-1"); err != nil || store.recentCustomer != "customer-1" {
+		t.Fatalf("RecordRecentCustomer = %q / %v", store.recentCustomer, err)
+	}
+	if recentID, err := service.RecordRecentJob(t.Context(), driver, "job-1"); err != nil || recentID != "recent-1" || store.recentJob != "job-1" {
+		t.Fatalf("RecordRecentJob = %q/%q/%v", recentID, store.recentJob, err)
+	}
+	if recent, err := service.ListRecent(t.Context(), driver); err != nil || len(recent) != 1 {
+		t.Fatalf("ListRecent = %#v / %v", recent, err)
+	}
+	if _, err := service.ListWaitlistFilterFavorites(t.Context(), driver); err != nil {
+		t.Fatalf("ListWaitlistFilterFavorites = %v", err)
+	}
+	if err := service.DeleteWaitlistFilterFavorite(t.Context(), driver, "favorite-1"); err != nil {
+		t.Fatalf("DeleteWaitlistFilterFavorite = %v", err)
+	}
+	if detail, err := service.CustomerDetail(t.Context(), driver, "customer-1"); err != nil || detail.Customer.ID != "customer-1" {
+		t.Fatalf("CustomerDetail = %#v / %v", detail, err)
+	}
+	if err := service.UpdateCustomer(t.Context(), driver, UpdateCustomerInput{
+		ID: "customer-1", ExpectedVersion: 3,
+		Customer: CustomerInput{FirstName: "  Franz ", CountryCode: " at ", NotificationPreference: NotifyNone},
+	}); err != nil || store.updateCustomer.Customer.FirstName != "Franz" || store.updateCustomer.Customer.CountryCode != "AT" {
+		t.Fatalf("UpdateCustomer input/error = %#v / %v", store.updateCustomer, err)
+	}
+	if err := service.ArchiveCustomer(t.Context(), admin, "customer-1", 4, "request"); err != nil || store.archiveCustID != "customer-1" || store.archiveCustV != 4 {
+		t.Fatalf("ArchiveCustomer input/error = %q/%d/%v", store.archiveCustID, store.archiveCustV, err)
+	}
+	if _, err := service.ListWaitlist(t.Context(), driver, WaitlistFilter{Sort: "volume", Direction: "desc"}); err != nil || store.waitlistFilter.Sort != "volume" {
+		t.Fatalf("ListWaitlist filter/error = %#v / %v", store.waitlistFilter, err)
+	}
+	if err := service.UpdateWaitlistPriority(t.Context(), admin, "entry-1", -10, 3, "request"); err != nil || store.priorityID != "entry-1" || store.priority != -10 {
+		t.Fatalf("UpdateWaitlistPriority input/error = %q/%d/%v", store.priorityID, store.priority, err)
+	}
+	if err := service.RemoveWaitlist(t.Context(), admin, "entry-1", 3, "scheduled", "request"); err != nil || store.removeID != "entry-1" || store.removeReason != "scheduled" {
+		t.Fatalf("RemoveWaitlist input/error = %q/%q/%v", store.removeID, store.removeReason, err)
+	}
+	if noteID, err := service.AddNote(t.Context(), driver, "job-1", "  Interne Notiz  ", "", " key-1 ", "request"); err != nil || noteID != "note-1" || store.noteBody != "Interne Notiz" || store.noteKey != "key-1" {
+		t.Fatalf("AddNote input/error = %q/%#v/%v", noteID, store, err)
+	}
+}
+
+func TestCustomerServiceRejectsInvalidArgumentsBeforeStore(t *testing.T) {
+	t.Parallel()
+	if _, err := NewService(nil); err == nil {
+		t.Fatal("NewService(nil) accepted a nil store")
+	}
+	service, _ := NewService(&storeStub{})
+	driver := auth.Actor{UserID: "driver-1", Role: auth.RoleDriver}
+	admin := auth.Actor{UserID: "admin-1", Role: auth.RoleAdmin}
+	for _, test := range []struct {
+		name string
+		call func() error
+	}{
+		{name: "empty duplicate source", call: func() error { _, err := service.DuplicateJobDraft(t.Context(), driver, " "); return err }},
+		{name: "empty recent customer", call: func() error { return service.RecordRecentCustomer(t.Context(), driver, " ") }},
+		{name: "empty recent job", call: func() error { _, err := service.RecordRecentJob(t.Context(), driver, " "); return err }},
+		{name: "empty favorite", call: func() error { return service.DeleteWaitlistFilterFavorite(t.Context(), driver, " ") }},
+		{name: "stale customer", call: func() error {
+			return service.UpdateCustomer(t.Context(), driver, UpdateCustomerInput{ID: "customer", Customer: validIntake().Customer})
+		}},
+		{name: "empty archive customer", call: func() error { return service.ArchiveCustomer(t.Context(), admin, " ", 1, "request") }},
+		{name: "invalid archive job", call: func() error { return service.ArchiveJob(t.Context(), admin, "job", 0, "request") }},
+		{name: "invalid waitlist priority", call: func() error { return service.UpdateWaitlistPriority(t.Context(), admin, "entry", 101, 1, "request") }},
+		{name: "invalid removal reason", call: func() error { return service.RemoveWaitlist(t.Context(), admin, "entry", 1, "untrusted", "request") }},
+		{name: "invalid create job", call: func() error {
+			_, err := service.CreateJob(t.Context(), driver, CreateJobInput{Job: validIntake().Job})
+			return err
+		}},
+		{name: "long note", call: func() error {
+			_, err := service.AddNote(t.Context(), driver, "job", string(make([]rune, 4001)), "", "key", "request")
+			return err
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.call(); !errors.Is(err, ErrValidation) {
+				t.Fatalf("error = %v, want validation error", err)
+			}
+		})
+	}
+	if err := PrepareIntake(nil); !errors.Is(err, ErrValidation) {
+		t.Fatalf("PrepareIntake(nil) = %v", err)
 	}
 }
 

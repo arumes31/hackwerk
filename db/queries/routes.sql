@@ -66,13 +66,13 @@ ORDER BY resource_type, lower(name), id;
 -- name: InsertRouteDraft :one
 INSERT INTO route_drafts (
     actor_user_id, driver_id, chipper_resource_id, transport_resource_id,
-    departure_at, start_latitude, start_longitude, end_latitude, end_longitude,
+    departure_at, start_label, start_latitude, start_longitude, end_label, end_latitude, end_longitude,
     routing_source, distance_meters, duration_seconds, route_geometry
 ) VALUES (
     sqlc.arg(actor_user_id)::uuid, sqlc.arg(driver_id)::uuid, sqlc.arg(chipper_resource_id)::uuid,
     NULLIF(sqlc.arg(transport_resource_id)::text, '')::uuid,
-    sqlc.arg(departure_at)::timestamptz, sqlc.arg(start_latitude)::numeric,
-    sqlc.arg(start_longitude)::numeric, sqlc.arg(end_latitude)::numeric,
+    sqlc.arg(departure_at)::timestamptz, sqlc.arg(start_label), sqlc.arg(start_latitude)::numeric,
+    sqlc.arg(start_longitude)::numeric, sqlc.arg(end_label), sqlc.arg(end_latitude)::numeric,
     sqlc.arg(end_longitude)::numeric, sqlc.arg(routing_source),
     sqlc.arg(distance_meters), sqlc.arg(duration_seconds), sqlc.arg(route_geometry)::jsonb
 )
@@ -96,8 +96,10 @@ SET actor_user_id=sqlc.arg(actor_user_id)::uuid,
     chipper_resource_id=sqlc.arg(chipper_resource_id)::uuid,
     transport_resource_id=NULLIF(sqlc.arg(transport_resource_id)::text, '')::uuid,
     departure_at=sqlc.arg(departure_at)::timestamptz,
+    start_label=sqlc.arg(start_label),
     start_latitude=sqlc.arg(start_latitude)::numeric,
     start_longitude=sqlc.arg(start_longitude)::numeric,
+    end_label=sqlc.arg(end_label),
     end_latitude=sqlc.arg(end_latitude)::numeric,
     end_longitude=sqlc.arg(end_longitude)::numeric,
     routing_source=sqlc.arg(routing_source),
@@ -117,8 +119,8 @@ SELECT rd.id::text, rd.actor_user_id::text, rd.driver_id::text, d.display_name A
        rd.chipper_resource_id::text, chipper.name AS chipper_name,
        COALESCE(rd.transport_resource_id::text, '')::text AS transport_resource_id,
        COALESCE(transport.name, '')::text AS transport_name,
-       rd.departure_at, rd.start_latitude::text, rd.start_longitude::text,
-       rd.end_latitude::text, rd.end_longitude::text, rd.status, rd.routing_source,
+       rd.departure_at, rd.start_label, rd.start_latitude::text, rd.start_longitude::text,
+       rd.end_label, rd.end_latitude::text, rd.end_longitude::text, rd.status, rd.routing_source,
        rd.distance_meters, rd.duration_seconds, rd.route_geometry, rd.assigned_at,
        rd.version, rd.created_at, rd.updated_at
 FROM route_drafts rd

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"net/url"
 	"strings"
 	"testing"
@@ -120,6 +121,114 @@ func TestSendberryUsesFormPostAndProviderMessageID(t *testing.T) {
 	}
 }
 
+func TestSendberryConfigurationAndSenderValidation(t *testing.T) {
+	valid := SendberryConfig{URL: "https://sms.example/send", APIKey: strings.Repeat("k", 16), AccessName: "access", AccessPassword: "password", Sender: "HackWerk", Timeout: time.Second}
+	provider, err := NewSendberryProvider(valid)
+	if err != nil || provider.client.Timeout != time.Second {
+		t.Fatalf("NewSendberryProvider(valid) = %#v, %v", provider, err)
+	}
+	tests := []struct {
+		name   string
+		change func(*SendberryConfig)
+	}{
+		{name: "HTTP endpoint", change: func(cfg *SendberryConfig) { cfg.URL = "http://sms.example/send" }},
+		{name: "loopback endpoint", change: func(cfg *SendberryConfig) { cfg.URL = "https://127.0.0.1/send" }},
+		{name: "short API key", change: func(cfg *SendberryConfig) { cfg.APIKey = "short" }},
+		{name: "missing access name", change: func(cfg *SendberryConfig) { cfg.AccessName = " " }},
+		{name: "missing password", change: func(cfg *SendberryConfig) { cfg.AccessPassword = " " }},
+		{name: "invalid sender", change: func(cfg *SendberryConfig) { cfg.Sender = "too-long-sender" }},
+		{name: "header sender", change: func(cfg *SendberryConfig) { cfg.Sender = "Hack\r\nWerk" }},
+		{name: "missing timeout", change: func(cfg *SendberryConfig) { cfg.Timeout = 0 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := valid
+			test.change(&cfg)
+			if _, err := NewSendberryProvider(cfg); err == nil {
+				t.Fatal("invalid Sendberry configuration accepted")
+			}
+		})
+	}
+	for _, test := range []struct {
+		value string
+		valid bool
+	}{
+		{value: "HackWerk", valid: true},
+		{value: "+436601234567", valid: true},
+		{value: "123", valid: true},
+		{value: "", valid: false},
+		{value: "abcdefghijkl", valid: false},
+		{value: "Hack\nWerk", valid: false},
+	} {
+		if got := validSendberrySender(test.value); got != test.valid {
+			t.Fatalf("validSendberrySender(%q) = %t, want %t", test.value, got, test.valid)
+		}
+	}
+}
+
+func TestSendberryClassifiesProviderResponses(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      int
+		contentType string
+		body        string
+		want        error
+	}{
+		{name: "timeout", status: http.StatusRequestTimeout, want: ErrTemporary},
+		{name: "rate limited", status: http.StatusTooManyRequests, want: ErrTemporary},
+		{name: "server error", status: http.StatusBadGateway, want: ErrTemporary},
+		{name: "rejected", status: http.StatusBadRequest, want: ErrPermanent},
+		{name: "invalid JSON", status: http.StatusOK, contentType: "text/html; charset=utf-8", body: "<html>", want: ErrTemporary},
+		{name: "negative response", status: http.StatusOK, contentType: "application/json", body: `{"status":"error","ID":"x"}`, want: ErrPermanent},
+		{name: "missing ID", status: http.StatusOK, contentType: "application/json", body: `{"status":"ok"}`, want: ErrPermanent},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+				response.Header().Set("Content-Type", test.contentType)
+				response.WriteHeader(test.status)
+				_, _ = io.WriteString(response, test.body)
+			}))
+			defer server.Close()
+			provider := &SendberryProvider{cfg: SendberryConfig{URL: server.URL, APIKey: strings.Repeat("k", 16), AccessName: "access", AccessPassword: "password", Sender: "HackWerk"}, client: server.Client()}
+			_, err := provider.Send(t.Context(), Message{NotificationID: "notification", Channel: ChannelSMS, Recipient: "+436601234567", Text: "Termin"})
+			if !errors.Is(err, test.want) {
+				t.Fatalf("Send() error = %v, want %v", err, test.want)
+			}
+		})
+	}
+
+	for value, want := range map[string]string{
+		"application/json; charset=utf-8": "application/json",
+		"TEXT/PLAIN":                      "text/plain",
+		"text/html":                       "text/html",
+		"image/svg+xml":                   "other",
+	} {
+		if got := safeMediaType(value); got != want {
+			t.Fatalf("safeMediaType(%q) = %q, want %q", value, got, want)
+		}
+	}
+}
+
+func TestSendberryRejectsInvalidMessages(t *testing.T) {
+	provider := &SendberryProvider{}
+	for _, test := range []struct {
+		name    string
+		message Message
+	}{
+		{name: "wrong channel", message: Message{Channel: ChannelEmail}},
+		{name: "invalid recipient", message: Message{Channel: ChannelSMS, Recipient: "0660", Text: "Termin"}},
+		{name: "empty text", message: Message{Channel: ChannelSMS, Recipient: "+436601234567"}},
+		{name: "long text", message: Message{Channel: ChannelSMS, Recipient: "+436601234567", Text: strings.Repeat("x", 1601)}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := provider.Send(t.Context(), test.message); !errors.Is(err, ErrPermanent) {
+				t.Fatalf("Send() error = %v, want permanent", err)
+			}
+		})
+	}
+}
+
 func TestProviderConfigurationAndSMTPMessageEncoding(t *testing.T) {
 	if _, err := NewSMSWebhookProvider(SMSWebhookConfig{URL: "https://127.0.0.1/send", Secret: strings.Repeat("x", 32), Timeout: time.Second}, nil); err == nil {
 		t.Fatal("loopback SMS webhook was accepted")
@@ -135,6 +244,83 @@ func TestProviderConfigurationAndSMTPMessageEncoding(t *testing.T) {
 	for _, wanted := range []string{"multipart/alternative", "quoted-printable", "Message-ID: <safe-id@smtp.example>", "Reply-To: office@example.test"} {
 		if !strings.Contains(encoded, wanted) {
 			t.Fatalf("SMTP message missing %q: %s", wanted, encoded)
+		}
+	}
+}
+
+func TestSMTPRejectsUnsafeMessagesAndClassifiesFailures(t *testing.T) {
+	t.Parallel()
+	config := SMTPConfig{Host: "smtp.example", Port: 587, TLSMode: "starttls", FromAddress: "mail@example.test", ConnectTimeout: time.Second, CommandTimeout: time.Second}
+	provider, err := NewSMTPProvider(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name    string
+		message Message
+		want    error
+	}{
+		{name: "wrong channel", message: Message{Channel: ChannelSMS}, want: ErrPermanent},
+		{name: "invalid recipient", message: Message{Channel: ChannelEmail, Recipient: "invalid", Subject: "Termin"}, want: ErrPermanent},
+		{name: "header injection", message: Message{Channel: ChannelEmail, Recipient: "kunde@example.test", Subject: "Termin\r\nBcc: attacker@example.test"}, want: ErrPermanent},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := provider.Send(t.Context(), test.message); !errors.Is(err, test.want) {
+				t.Fatalf("Send() error = %v, want %v", err, test.want)
+			}
+		})
+	}
+	provider.dial = func(context.Context, string, string) (net.Conn, error) { return nil, errors.New("network unavailable") }
+	if _, err := provider.Send(t.Context(), Message{Channel: ChannelEmail, Recipient: "kunde@example.test", Subject: "Termin", Text: "Text", HTML: "<p>Text</p>"}); !errors.Is(err, ErrTemporary) {
+		t.Fatalf("connection failure error = %v", err)
+	}
+	if !errors.Is(classifySMTP(&textproto.Error{Code: 550, Msg: "rejected"}), ErrPermanent) || !errors.Is(classifySMTP(errors.New("network unavailable")), ErrTemporary) {
+		t.Fatal("SMTP error classification is incorrect")
+	}
+	for _, invalid := range []SMTPConfig{
+		{Host: "", Port: 587, TLSMode: "starttls", FromAddress: "mail@example.test", ConnectTimeout: time.Second, CommandTimeout: time.Second},
+		{Host: "smtp.example", Port: 0, TLSMode: "starttls", FromAddress: "mail@example.test", ConnectTimeout: time.Second, CommandTimeout: time.Second},
+		{Host: "smtp.example", Port: 587, TLSMode: "starttls", FromAddress: "invalid", ConnectTimeout: time.Second, CommandTimeout: time.Second},
+		{Host: "smtp.example", Port: 587, TLSMode: "starttls", FromAddress: "mail@example.test", ReplyTo: "invalid", ConnectTimeout: time.Second, CommandTimeout: time.Second},
+	} {
+		if _, err := NewSMTPProvider(invalid); err == nil {
+			t.Fatalf("invalid SMTP config accepted: %#v", invalid)
+		}
+	}
+}
+
+func TestSMSWebhookConfigurationAndStatusClassification(t *testing.T) {
+	t.Parallel()
+	provider, err := NewSMSWebhookProvider(SMSWebhookConfig{URL: "https://sms.example/send", Secret: strings.Repeat("x", 32), Sender: "HackWerk", Timeout: time.Second}, nil)
+	if err != nil || provider.now == nil || provider.client.Timeout != time.Second {
+		t.Fatalf("NewSMSWebhookProvider(valid) = %#v / %v", provider, err)
+	}
+	for _, config := range []SMSWebhookConfig{
+		{URL: "http://sms.example/send", Secret: strings.Repeat("x", 32), Timeout: time.Second},
+		{URL: "https://localhost/send", Secret: strings.Repeat("x", 32), Timeout: time.Second},
+		{URL: "https://sms.example/send", Secret: "short", Timeout: time.Second},
+		{URL: "https://sms.example/send", Secret: strings.Repeat("x", 32)},
+	} {
+		if _, err := NewSMSWebhookProvider(config, time.Now); err == nil {
+			t.Fatalf("invalid SMS config accepted: %#v", config)
+		}
+	}
+	if !loopbackHost("localhost") || !loopbackHost("0.0.0.0") || loopbackHost("sms.example") {
+		t.Fatal("loopback host classification is incorrect")
+	}
+	for _, test := range []struct {
+		status int
+		want   error
+	}{
+		{status: http.StatusTooManyRequests, want: ErrTemporary},
+		{status: http.StatusBadRequest, want: ErrPermanent},
+	} {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) { response.WriteHeader(test.status) }))
+		provider := &SMSWebhookProvider{cfg: SMSWebhookConfig{URL: server.URL, Secret: strings.Repeat("x", 32), Timeout: time.Second}, client: server.Client(), now: time.Now}
+		_, err := provider.Send(t.Context(), Message{Channel: ChannelSMS, Recipient: "+43664123456", Text: "Termin"})
+		server.Close()
+		if !errors.Is(err, test.want) {
+			t.Fatalf("status %d error = %v, want %v", test.status, err, test.want)
 		}
 	}
 }

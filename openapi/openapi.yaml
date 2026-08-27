@@ -154,7 +154,7 @@ paths:
           application/x-www-form-urlencoded:
             schema:
               type: object
-              required: [job_id, driver_id, chipper_resource_id, departure_date, departure_time, csrf_token]
+              required: [job_id, driver_id, chipper_resource_id, departure_date, departure_time, start_selection, end_selection, csrf_token]
               properties:
                 job_id: { type: array, minItems: 1, maxItems: 23, items: { type: string, format: uuid } }
                 fixed_job_id: { type: array, maxItems: 23, items: { type: string, format: uuid }, description: Ausgewählte Stopps, deren relative Position bei Optimierung fixiert bleibt. }
@@ -164,13 +164,66 @@ paths:
                 departure_date: { type: string, format: date, description: Lokales Datum in Europe/Vienna. }
                 departure_time: { type: string, pattern: "^[0-2][0-9]:[0-5][0-9]$", description: Lokale Uhrzeit in Europe/Vienna. }
                 optimize: { type: boolean, default: true }
-                end_at_last_stop: { type: boolean, default: false, description: Route endet am letzten Stopp statt wieder am Depot. }
+                start_selection: { type: string, description: "Gespeicherter Ort als saved:<uuid> oder immer verfügbare individuelle Auswahl custom." }
+                end_selection: { type: string, description: "Gespeicherter Ort als saved:<uuid>, individuelle Auswahl custom oder last_stop." }
+                start_location_id: { type: string, format: uuid, description: Bei gespeicherter Auswahl serverseitig mit Auswahl und Version abgeglichen. }
+                start_location_version: { type: integer, minimum: 1 }
+                end_location_id: { type: string, format: uuid, description: Bei gespeicherter Auswahl serverseitig mit Auswahl und Version abgeglichen. }
+                end_location_version: { type: integer, minimum: 1 }
+                start_custom_label: { type: string, maxLength: 120 }
+                start_custom_address: { type: string, maxLength: 500 }
+                start_custom_confirmed: { type: boolean, description: Muss für einen individuellen Startort ausdrücklich true sein. }
+                end_custom_label: { type: string, maxLength: 120 }
+                end_custom_address: { type: string, maxLength: 500 }
+                end_custom_confirmed: { type: boolean, description: Muss für einen individuellen Endort ausdrücklich true sein. }
+                start_latitude: { type: number, minimum: -90, maximum: 90 }
+                start_longitude: { type: number, minimum: -180, maximum: 180 }
+                end_latitude: { type: number, minimum: -90, maximum: 90 }
+                end_longitude: { type: number, minimum: -180, maximum: 180 }
                 csrf_token: { type: string }
       responses:
         "303": { description: Routenentwurf berechnet. }
         "403": { description: Nur Administratoren dürfen Routen planen. }
         "409": { description: Auftrags- oder Wartelistendaten wurden parallel verändert. }
         "422": { description: Auswahl, Standort oder Routingdaten ungültig. }
+  /settings/route-locations:
+    get:
+      operationId: getRouteLocationSettings
+      description: Zeigt Administratoren aktive und deaktivierte Routenorte sowie die aktuellen Standard-Vorauswahlen.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Serverseitig gerenderte Routenort-Einstellungen. }
+        "403": { description: Nur Administratoren dürfen Routenorte verwalten. }
+    post:
+      operationId: createRouteLocation
+      description: Speichert einen ausdrücklich bestätigten Routenort und setzt optional atomar den Standard für Start und/oder Ende.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Routenort gespeichert. }
+        "403": { description: Nur Administratoren dürfen Routenorte verwalten. }
+        "422": { description: Bezeichnung, Adresse, Koordinaten oder Bestätigung ungültig. }
+  /settings/route-locations/{routeLocationID}:
+    post:
+      operationId: updateRouteLocation
+      description: Aktualisiert einen aktiven Routenort mit optimistischer Versionierung und optionaler Standard-Vorauswahl.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: routeLocationID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "303": { description: Routenort aktualisiert. }
+        "409": { description: Routenort wurde parallel geändert. }
+        "422": { description: Änderung wurde nicht ausdrücklich bestätigt oder ist ungültig. }
+  /settings/route-locations/{routeLocationID}/deactivate:
+    post:
+      operationId: deactivateRouteLocation
+      description: Deaktiviert einen Routenort. Das Entfernen eines aktuellen Standards verlangt eine zusätzliche Bestätigung.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: routeLocationID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "303": { description: Routenort deaktiviert. }
+        "409": { description: Routenort wurde parallel geändert. }
+        "422": { description: Bestätigung zum Entfernen des Standards fehlt. }
   /planning/routes/{routeID}/assign:
     post:
       operationId: assignRouteDraft

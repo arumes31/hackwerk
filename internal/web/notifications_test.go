@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,9 @@ type notificationHTTPStore struct {
 	statuses  []notification.Status
 	callbacks []notification.CallbackRequest
 	reviewed  bool
+	retryErr  error
+	reviewErr error
+	retried   bool
 }
 
 func (store *notificationHTTPStore) ListAppointment(context.Context, string) ([]notification.Status, error) {
@@ -31,12 +35,13 @@ func (store *notificationHTTPStore) ListFailed(context.Context, notification.Fai
 func (store *notificationHTTPStore) ListCallbacks(context.Context, int32) ([]notification.CallbackRequest, error) {
 	return append([]notification.CallbackRequest(nil), store.callbacks...), nil
 }
-func (*notificationHTTPStore) Retry(context.Context, auth.Actor, string, string, time.Time) error {
-	return nil
+func (store *notificationHTTPStore) Retry(context.Context, auth.Actor, string, string, time.Time) error {
+	store.retried = true
+	return store.retryErr
 }
 func (store *notificationHTTPStore) Review(context.Context, auth.Actor, string, string, time.Time) error {
 	store.reviewed = true
-	return nil
+	return store.reviewErr
 }
 func (*notificationHTTPStore) Reissue(context.Context, auth.Actor, string, int32, string, string, time.Time) error {
 	return nil
@@ -95,6 +100,46 @@ func TestNotificationReportAndReview(t *testing.T) {
 	router.ServeHTTP(review, notificationAdminRequest(t, http.MethodPost, "/admin/notifications/notification/review"))
 	if review.Code != http.StatusSeeOther || !store.reviewed {
 		t.Fatalf("review status=%d reviewed=%t body=%q", review.Code, store.reviewed, review.Body.String())
+	}
+}
+
+func TestNotificationRetryAndReviewMapActionOutcomes(t *testing.T) {
+	now := time.Now().UTC()
+	page := templates.PageData{AppName: "HackWerk"}
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	tests := []struct {
+		name        string
+		store       *notificationHTTPStore
+		path        string
+		want        int
+		wantBody    string
+		wasRetried  bool
+		wasReviewed bool
+	}{
+		{name: "retry redirects", store: &notificationHTTPStore{}, path: "/admin/notifications/notification/retry", want: http.StatusSeeOther, wasRetried: true},
+		{name: "retry unavailable conflicts", store: &notificationHTTPStore{retryErr: notification.ErrRetryUnavailable}, path: "/admin/notifications/notification/retry", want: http.StatusConflict, wantBody: "nicht mehr fehlgeschlagen", wasRetried: true},
+		{name: "retry internal failure", store: &notificationHTTPStore{retryErr: errors.New("database")}, path: "/admin/notifications/notification/retry", want: http.StatusInternalServerError, wantBody: "erneut eingereiht", wasRetried: true},
+		{name: "review conflict", store: &notificationHTTPStore{reviewErr: notification.ErrAdminActionUnavailable}, path: "/admin/notifications/notification/review", want: http.StatusConflict, wantBody: "nicht mehr offen", wasReviewed: true},
+		{name: "review internal failure", store: &notificationHTTPStore{reviewErr: errors.New("database")}, path: "/admin/notifications/notification/review", want: http.StatusInternalServerError, wantBody: "nicht als geprüft", wasReviewed: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			service, err := notification.NewAdminService(test.store, func() time.Time { return now })
+			if err != nil {
+				t.Fatal(err)
+			}
+			router := chi.NewRouter()
+			router.Post("/admin/notifications/{notificationID}/retry", retryNotification(service, page, logger))
+			router.Post("/admin/notifications/{notificationID}/review", reviewNotification(service, page, logger))
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, notificationAdminRequest(t, http.MethodPost, test.path))
+			if response.Code != test.want || (test.wantBody != "" && !strings.Contains(response.Body.String(), test.wantBody)) {
+				t.Fatalf("response=%d %s", response.Code, response.Body.String())
+			}
+			if test.store.retried != test.wasRetried || test.store.reviewed != test.wasReviewed {
+				t.Fatalf("actions retry=%t review=%t", test.store.retried, test.store.reviewed)
+			}
+		})
 	}
 }
 

@@ -49,6 +49,7 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 		t.Fatal("TEST_DATABASE_URL is required for browser tests")
 	}
 	pool, identity, drivers, resources, appointments, _, _, jobID, _, adminPassword, driverPassword := task04Application(t, databaseURL)
+	routeLocations, routeLocationStore := e2eRouteLocations(t, pool)
 	customerService, err := app.CustomerService(pool)
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +69,7 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 		t.Fatal(err)
 	}
 	planningConfig := planning.DefaultConfig(location)
-	planningService, err := planning.New(postgres.NewPlanningStore(pool), e2ePlanningAvailability{service: drivers}, routerAdapter, planningConfig, time.Now)
+	planningService, err := planning.New(postgres.NewPlanningStore(pool), e2ePlanningAvailability{service: drivers}, routerAdapter, planningConfig, time.Now, planning.WithDefaultStartProvider(e2eDefaultStart{store: routeLocationStore}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +116,7 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 		},
 		Confirmation: config.Confirmation{RateLimit: 30},
 		CalendarFeed: config.CalendarFeed{RateLimit: 120},
-		Planning:     config.Planning{BusinessOpen: "07:00", DepotLatitude: 48.2, DepotLongitude: 14.2},
+		Planning:     config.Planning{BusinessOpen: "07:00"},
 		Map:          config.Map{Attribution: "OpenStreetMap-Mitwirkende"},
 		Voice: config.Voice{
 			Enabled: true, Transcriber: "fake", MaxDuration: 90 * time.Second, MaxBytes: 15 << 20,
@@ -126,7 +127,7 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 		Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pool, Build: buildinfo.Info{Version: "e2e"},
 		Identity: identity, Customers: customerService, Drivers: drivers, Resources: resources, Appointments: appointments,
 		Dashboard: e2eDashboard(t, pool), Confirmations: confirmations, Notifications: notifications,
-		CalendarFeeds: feedService, Planning: planningService, Routes: routeService, Voice: voiceService,
+		CalendarFeeds: feedService, Planning: planningService, Routes: routeService, RouteLocations: routeLocations, Voice: voiceService,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -44,6 +44,7 @@ func TestTask08PlanningSuggestionsMobileJourney(t *testing.T) {
 		t.Fatal("TEST_DATABASE_URL is required for browser tests")
 	}
 	pool, identity, drivers, resources, appointments, _, _, jobID, _, adminPassword, _ := task04Application(t, databaseURL)
+	routeLocations, routeLocationStore := e2eRouteLocations(t, pool)
 	if _, err := pool.Exec(t.Context(), "UPDATE jobs SET pile_latitude=48.210000,pile_longitude=14.210000,pile_location_source='coordinates',pile_location_updated_at=now() WHERE id=$1", jobID); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +52,7 @@ func TestTask08PlanningSuggestionsMobileJourney(t *testing.T) {
 	planningConfig := planning.DefaultConfig(location)
 	planningConfig.HorizonDays = 56
 	planningConfig.CandidateLimit = 2000
-	planningService, err := planning.New(postgres.NewPlanningStore(pool), e2ePlanningAvailability{service: drivers}, planning.NewHaversineRouter(1.3, 55), planningConfig, func() time.Time { return time.Date(2026, 8, 31, 4, 0, 0, 0, time.UTC) })
+	planningService, err := planning.New(postgres.NewPlanningStore(pool), e2ePlanningAvailability{service: drivers}, planning.NewHaversineRouter(1.3, 55), planningConfig, func() time.Time { return time.Date(2026, 8, 31, 4, 0, 0, 0, time.UTC) }, planning.WithDefaultStartProvider(e2eDefaultStart{store: routeLocationStore}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,8 +66,8 @@ func TestTask08PlanningSuggestionsMobileJourney(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := httptest.NewUnstartedServer(nil)
-	cfg := config.Config{AppName: "HackWerk", BaseURL: "http://" + server.Listener.Addr().String(), Timezone: "Europe/Vienna", Database: config.Database{ReadinessTimeout: 2 * time.Second}, Auth: config.Auth{SessionCookieName: "hackplan_session", CSRFCookieName: "hackplan_csrf", SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour}, Planning: config.Planning{BusinessOpen: "07:00", DepotLatitude: 48.2, DepotLongitude: 14.2}}
-	router, err := web.NewRouter(web.Dependencies{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pool, Build: buildinfo.Info{Version: "e2e"}, Identity: identity, Customers: customerService, Drivers: drivers, Resources: resources, Appointments: appointments, Dashboard: e2eDashboard(t, pool), Planning: planningService, Routes: routeService})
+	cfg := config.Config{AppName: "HackWerk", BaseURL: "http://" + server.Listener.Addr().String(), Timezone: "Europe/Vienna", Database: config.Database{ReadinessTimeout: 2 * time.Second}, Auth: config.Auth{SessionCookieName: "hackplan_session", CSRFCookieName: "hackplan_csrf", SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour}, Planning: config.Planning{BusinessOpen: "07:00"}}
+	router, err := web.NewRouter(web.Dependencies{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pool, Build: buildinfo.Info{Version: "e2e"}, Identity: identity, Customers: customerService, Drivers: drivers, Resources: resources, Appointments: appointments, Dashboard: e2eDashboard(t, pool), Planning: planningService, Routes: routeService, RouteLocations: routeLocations})
 	if err != nil {
 		t.Fatal(err)
 	}

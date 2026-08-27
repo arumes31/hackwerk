@@ -30,6 +30,7 @@ import (
 	"example.invalid/hackplan/internal/observability"
 	"example.invalid/hackplan/internal/planning"
 	"example.invalid/hackplan/internal/resource"
+	"example.invalid/hackplan/internal/routelocation"
 	"example.invalid/hackplan/internal/voice"
 	"example.invalid/hackplan/web/assets"
 	"example.invalid/hackplan/web/templates"
@@ -52,25 +53,26 @@ type OperationsHealth interface {
 
 // Dependencies contains explicit HTTP dependencies.
 type Dependencies struct {
-	Config        config.Config
-	Logger        *slog.Logger
-	Database      DatabasePinger
-	Build         buildinfo.Info
-	Identity      *auth.Service
-	Customers     *customers.Service
-	Drivers       *driver.Service
-	Resources     *resource.Service
-	Appointments  *appointment.Service
-	Confirmations *notification.ConfirmationService
-	Notifications *notification.AdminService
-	Dashboard     *dashboard.Service
-	CalendarFeeds *calendarfeed.Service
-	Planning      *planning.Service
-	Routes        *planning.RouteService
-	Voice         *voice.Service
-	Metrics       *observability.Registry
-	MapTiles      *maptile.Client
-	Geocoder      geocode.Searcher
+	Config         config.Config
+	Logger         *slog.Logger
+	Database       DatabasePinger
+	Build          buildinfo.Info
+	Identity       *auth.Service
+	Customers      *customers.Service
+	Drivers        *driver.Service
+	Resources      *resource.Service
+	RouteLocations *routelocation.Service
+	Appointments   *appointment.Service
+	Confirmations  *notification.ConfirmationService
+	Notifications  *notification.AdminService
+	Dashboard      *dashboard.Service
+	CalendarFeeds  *calendarfeed.Service
+	Planning       *planning.Service
+	Routes         *planning.RouteService
+	Voice          *voice.Service
+	Metrics        *observability.Registry
+	MapTiles       *maptile.Client
+	Geocoder       geocode.Searcher
 }
 
 // NewRouter builds the complete Task-00 router without starting a listener.
@@ -95,6 +97,7 @@ func NewRouter(dependencies Dependencies) (http.Handler, error) {
 		CSSPath:                     assetPaths.CSS,
 		ControlFoundationCSSPath:    assetPaths.ControlFoundationCSS,
 		JSPath:                      assetPaths.JavaScript,
+		RouteLocationsJSPath:        assetPaths.RouteLocationsJavaScript,
 		ManifestPath:                assetPaths.Manifest,
 		IconPath:                    assetPaths.Icon,
 		LoginOriginalCSSPath:        assetPaths.LoginOriginalCSS,

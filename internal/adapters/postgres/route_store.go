@@ -7,6 +7,7 @@ import (
 	"math"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"example.invalid/hackplan/internal/adapters/postgres/dbgen"
@@ -223,7 +224,7 @@ func (s *RouteStore) SaveRouteDraft(ctx context.Context, actor auth.Actor, input
 			return err
 		}
 		return insertAudit(ctx, q, actor, action, "route_draft", route.ID, input.RequestID,
-			[]string{"driver_id", "resource_ids", "departure_at", "depot", "routing_metrics", "stops"})
+			[]string{"driver_id", "resource_ids", "departure_at", "route_endpoints", "routing_metrics", "stops"})
 	})
 	if resultErr != nil {
 		return planning.RouteDraft{}, resultErr
@@ -524,8 +525,10 @@ type routeDraftValues struct {
 	actorID, driverID, chipperID pgtype.UUID
 	transportID                  string
 	departure                    pgtype.Timestamptz
+	startLabel                   string
 	startLatitude                pgtype.Numeric
 	startLongitude               pgtype.Numeric
+	endLabel                     string
 	endLatitude                  pgtype.Numeric
 	endLongitude                 pgtype.Numeric
 	routingSource                string
@@ -582,6 +585,7 @@ func prepareRouteDraftValues(actor auth.Actor, route planning.RouteDraft) (route
 	return routeDraftValues{
 		actorID: actorID, driverID: driverID, chipperID: chipperID,
 		transportID: route.TransportResourceID, departure: timestamp(route.Departure.UTC()),
+		startLabel: strings.TrimSpace(route.StartLabel), endLabel: strings.TrimSpace(route.EndLabel),
 		startLatitude: startLatitude, startLongitude: startLongitude,
 		endLatitude: endLatitude, endLongitude: endLongitude,
 		routingSource: route.Directions.Source, distanceMeters: distance,
@@ -593,7 +597,9 @@ func (v routeDraftValues) insertParams() dbgen.InsertRouteDraftParams {
 	return dbgen.InsertRouteDraftParams{
 		ActorUserID: v.actorID, DriverID: v.driverID, ChipperResourceID: v.chipperID,
 		TransportResourceID: v.transportID, DepartureAt: v.departure,
+		StartLabel:    v.startLabel,
 		StartLatitude: v.startLatitude, StartLongitude: v.startLongitude,
+		EndLabel:    v.endLabel,
 		EndLatitude: v.endLatitude, EndLongitude: v.endLongitude,
 		RoutingSource: v.routingSource, DistanceMeters: v.distanceMeters,
 		DurationSeconds: v.durationSeconds, RouteGeometry: v.geometry,
@@ -604,7 +610,9 @@ func (v routeDraftValues) updateParams(id pgtype.UUID, version int32) dbgen.Upda
 	return dbgen.UpdateRouteDraftParams{
 		ActorUserID: v.actorID, DriverID: v.driverID, ChipperResourceID: v.chipperID,
 		TransportResourceID: v.transportID, DepartureAt: v.departure,
+		StartLabel:    v.startLabel,
 		StartLatitude: v.startLatitude, StartLongitude: v.startLongitude,
+		EndLabel:    v.endLabel,
 		EndLatitude: v.endLatitude, EndLongitude: v.endLongitude,
 		RoutingSource: v.routingSource, DistanceMeters: v.distanceMeters,
 		DurationSeconds: v.durationSeconds, RouteGeometry: v.geometry,
@@ -764,7 +772,7 @@ func getRoute(ctx context.Context, q *dbgen.Queries, id pgtype.UUID) (planning.R
 		ID: row.RdID, DriverID: row.RdDriverID, ChipperResourceID: row.RdChipperResourceID,
 		TransportResourceID: row.TransportResourceID,
 		DriverName:          row.DriverName, ChipperName: row.ChipperName, TransportName: row.TransportName,
-		Status:  planning.RouteStatus(row.Status),
+		Status: planning.RouteStatus(row.Status), StartLabel: row.StartLabel, EndLabel: row.EndLabel,
 		Version: row.Version, Departure: row.DepartureAt.Time.UTC(),
 		Start: planning.Point{Latitude: startLatitude, Longitude: startLongitude},
 		End:   planning.Point{Latitude: endLatitude, Longitude: endLongitude},

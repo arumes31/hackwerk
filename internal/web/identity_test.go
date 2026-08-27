@@ -301,6 +301,70 @@ func TestIdentityHTTPLastAdminErrorIsVisible(t *testing.T) {
 	}
 }
 
+func TestIdentityHTTPAccountMutationsClearSessionsAndCookies(t *testing.T) {
+	store := &identityTestStore{}
+	router := identityRouterForMutationTest(t, store, auth.RoleAdmin)
+	request := func(path string, form url.Values) *http.Request {
+		value := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.test"+path, strings.NewReader(form.Encode()))
+		value.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		value.Header.Set("Origin", "https://example.test")
+		// #nosec G124 -- request-only test fixture; no cookie is emitted to a browser.
+		value.AddCookie(&http.Cookie{Name: "hackplan_session", Value: "session"})
+		// #nosec G124 -- request-only test fixture; no cookie is emitted to a browser.
+		value.AddCookie(&http.Cookie{Name: "hackplan_csrf", Value: "csrf"})
+		return value
+	}
+
+	mismatch := httptest.NewRecorder()
+	router.ServeHTTP(mismatch, request("/password", url.Values{"csrf_token": {"csrf"}, "password": {"Sicheres Passwort 2026"}, "confirmation": {"anderes Passwort"}}))
+	if mismatch.Code != http.StatusUnprocessableEntity || !strings.Contains(mismatch.Body.String(), "Passwörter stimmen nicht") {
+		t.Fatalf("mismatch=%d %s", mismatch.Code, mismatch.Body.String())
+	}
+
+	changed := httptest.NewRecorder()
+	router.ServeHTTP(changed, request("/password", url.Values{"csrf_token": {"csrf"}, "password": {"Sicheres Passwort 2026"}, "confirmation": {"Sicheres Passwort 2026"}}))
+	if changed.Code != http.StatusSeeOther || changed.Header().Get("Location") != "/login" || len(changed.Result().Cookies()) != 2 {
+		t.Fatalf("changed=%d location=%q cookies=%#v", changed.Code, changed.Header().Get("Location"), changed.Result().Cookies())
+	}
+
+	logout := httptest.NewRecorder()
+	router.ServeHTTP(logout, request("/logout", url.Values{"csrf_token": {"csrf"}}))
+	if logout.Code != http.StatusSeeOther || logout.Header().Get("Location") != "/login" || !store.revoked {
+		t.Fatalf("logout=%d location=%q revoked=%t", logout.Code, logout.Header().Get("Location"), store.revoked)
+	}
+}
+
+func TestIdentityHTTPAdminCreateAndResetUser(t *testing.T) {
+	store := &identityTestStore{}
+	router := identityRouterForMutationTest(t, store, auth.RoleAdmin)
+	request := func(path string, form url.Values) *http.Request {
+		value := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.test"+path, strings.NewReader(form.Encode()))
+		value.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		value.Header.Set("Origin", "https://example.test")
+		// #nosec G124 -- request-only test fixture; no cookie is emitted to a browser.
+		value.AddCookie(&http.Cookie{Name: "hackplan_session", Value: "session"})
+		// #nosec G124 -- request-only test fixture; no cookie is emitted to a browser.
+		value.AddCookie(&http.Cookie{Name: "hackplan_csrf", Value: "csrf"})
+		return value
+	}
+	for _, test := range []struct {
+		name string
+		path string
+		form url.Values
+	}{
+		{name: "create", path: "/admin/users", form: url.Values{"csrf_token": {"csrf"}, "username": {"neu"}, "display_name": {"Neue Person"}, "email": {"neu@example.test"}, "role": {"driver"}, "password": {"Sicheres Passwort 2026"}, "create_driver": {"true"}}},
+		{name: "reset", path: "/admin/users/target/reset-password", form: url.Values{"csrf_token": {"csrf"}, "version": {"1"}, "password": {"Sicheres Passwort 2026"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request(test.path, test.form))
+			if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/admin/users" {
+				t.Fatalf("response=%d location=%q body=%s", response.Code, response.Header().Get("Location"), response.Body.String())
+			}
+		})
+	}
+}
+
 func identityRouterForMutationTest(t *testing.T, store *identityTestStore, role auth.Role) http.Handler {
 	t.Helper()
 	now := time.Now()

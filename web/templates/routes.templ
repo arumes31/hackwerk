@@ -20,13 +20,32 @@ type RoutePageData struct {
 	Route            *planning.RouteDraft
 	Error            string
 	Departure        string
-	DepotLat         string
-	DepotLon         string
 	Own              bool
 	SelectedDay      string
 	RetrievedAt      time.Time
 	SelectedJobIDs   []string
 	ParallelRoutes   []planning.RouteDraft
+	// RouteLocations contains active reusable locations. The route handler must
+	// provide only active records and resolve the selected ID/version again on
+	// submission; browser coordinates are merely a visible snapshot.
+	RouteLocations []RouteLocationOption
+	DefaultStartID string
+	DefaultEndID   string
+}
+
+// RouteLocationOption is the view model for a reusable route endpoint.
+// Coordinates are strings so the template never changes their server-side
+// representation before the route service validates them.
+type RouteLocationOption struct {
+	ID           string
+	Name         string
+	Address      string
+	Latitude     string
+	Longitude    string
+	Version      int32
+	Active       bool
+	DefaultStart bool
+	DefaultEnd   bool
 }
 
 templ Routes(data RoutePageData) {
@@ -56,6 +75,7 @@ templ Routes(data RoutePageData) {
 				}
 			</main>
 			@appFooter(data.Shell.Page)
+			<script type="module" src={ data.Shell.Page.RouteLocationsJSPath } defer></script>
 		</body>
 	</html>
 }
@@ -64,11 +84,13 @@ templ adminRoutePlanner(data RoutePageData) {
 	<section class="route-workspace" data-route-context data-route-admin="true">
 		<form method="post" action="/planning/routes" class="route-builder form-card">
 			<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
-			<input type="hidden" name="start_latitude" value={ data.DepotLat }/>
-			<input type="hidden" name="start_longitude" value={ data.DepotLon }/>
-			<input type="hidden" name="end_latitude" value={ data.DepotLat }/>
-			<input type="hidden" name="end_longitude" value={ data.DepotLon }/>
-			<div class="section-heading"><div><p class="eyebrow">Schritt 1</p><h2>Aufträge verbinden</h2></div><span class="status-badge" data-route-marker-count data-total={ fmt.Sprint(len(data.Candidates)) }>{ fmt.Sprint(len(data.Candidates)) } Standorte</span></div>
+			<div class="section-heading"><div><p class="eyebrow">Schritt 1</p><h2>Start und Ende festlegen</h2></div><a class="button button--quiet" href="/settings/route-locations">Orte verwalten</a></div>
+			<p class="form-hint">Wählen Sie einen gespeicherten Ort oder bestätigen Sie einen anderen Ort ausdrücklich. Die Route verwendet keinen stillen Ersatzstandort.</p>
+			<div class="route-location-grid">
+				@routeLocationChooser("start", "Startort", data.RouteLocations, data.DefaultStartID, false)
+				@routeLocationChooser("end", "Endort", data.RouteLocations, data.DefaultEndID, true)
+			</div>
+			<div class="section-heading"><div><p class="eyebrow">Schritt 2</p><h2>Aufträge verbinden</h2></div><span class="status-badge" data-route-marker-count data-total={ fmt.Sprint(len(data.Candidates)) }>{ fmt.Sprint(len(data.Candidates)) } Standorte</span></div>
 			<p>Alle offenen Aufträge mit gespeichertem Haufenstandort erscheinen auf der Karte. Bereits eingeplante Aufträge bleiben sichtbar, können aber nicht erneut ausgewählt werden.</p>
 			<div class="route-candidate-list">
 				for _, candidate := range data.Candidates {
@@ -115,23 +137,70 @@ templ adminRoutePlanner(data RoutePageData) {
 				<label>Abfahrtszeit<input name="departure_time" type="time" value={ routeDepartureTime(data.Departure) } required/></label>
 			</div>
 			<label class="check-label"><input type="checkbox" name="optimize" value="true" checked/> Reihenfolge nach Fahrzeit optimieren</label>
-			<label class="check-label"><input type="checkbox" name="end_at_last_stop" value="true"/> Route endet beim letzten Stopp (keine Rückfahrt zum Depot)</label>
 			<div class="action-row" data-route-date-presets><button type="button" class="button button--quiet" data-route-date-preset="today">Heute</button><button type="button" class="button button--quiet" data-route-date-preset="tomorrow">Morgen</button><button type="button" class="button button--quiet" data-route-date-preset="business-day">Nächster Werktag</button></div>
-			<p class="form-hint">Depot: { data.DepotLat }, { data.DepotLon }. Die Berechnung erzeugt noch keine Termine.</p>
+			<p class="form-hint">Die Berechnung erzeugt einen Entwurf, keine Termine. Gespeicherte Orte werden beim Absenden serverseitig erneut geprüft.</p>
 			<button class="button" type="submit" disabled?={ routeSelectableCandidateCount(data.Candidates) == 0 }>Route berechnen</button>
 		</form>
 		<div class="route-map-panel">
 			@mapAssetData(data.Shell.Page)
 			<div class="section-heading"><div><p class="eyebrow">Kartenansicht</p><h2>{ routeMapHeading(data.Route) }</h2></div><span class="status-badge">{ fmt.Sprint(len(data.Candidates)) } Standorte</span></div>
-			<div class="route-map-legend" aria-label="Kartenlegende"><span><i class="route-map-legend__depot" aria-hidden="true">H</i>Depot</span><span><i class="route-map-legend__candidate" aria-hidden="true"></i>Offener Auftrag</span><span><i class="route-map-legend__selected" aria-hidden="true">✓</i>Ausgewählt</span><span><i class="route-map-legend__unavailable" aria-hidden="true">–</i>Bereits eingeplant</span></div>
-			<div class="route-map-toolbar" data-route-map-toolbar aria-label="Kartenwerkzeuge"><button type="button" class="button button--quiet" data-route-map-depot>Depot</button><button type="button" class="button button--quiet" data-route-map-fit>Alle Punkte</button><button type="button" class="button button--quiet" data-route-map-labels aria-pressed="true">Beschriftungen</button><button type="button" class="button button--quiet" data-route-map-retry>Karte erneut laden</button><span class="status-badge" data-route-map-count></span></div>
-			<div class="route-map" role="region" aria-label="Interaktive Karte der offenen Aufträge" data-route-map data-depot-latitude={ data.DepotLat } data-depot-longitude={ data.DepotLon } data-route-geometry={ routeGeometry(data.Route) } data-route-arrows="true"><div class="map-fallback" data-map-fallback>Die Straßenkarte wird geladen. Die Auftragsliste bleibt nutzbar.</div></div>
+			<div class="route-map-legend" aria-label="Kartenlegende"><span><i class="route-map-legend__start" aria-hidden="true">S</i>Startort</span><span><i class="route-map-legend__end" aria-hidden="true">E</i>Endort</span><span><i class="route-map-legend__candidate" aria-hidden="true"></i>Offener Auftrag</span><span><i class="route-map-legend__selected" aria-hidden="true">✓</i>Ausgewählt</span><span><i class="route-map-legend__unavailable" aria-hidden="true">–</i>Bereits eingeplant</span></div>
+			<div class="route-map-toolbar" data-route-map-toolbar aria-label="Kartenwerkzeuge"><button type="button" class="button button--quiet" data-route-map-start>Startort</button><button type="button" class="button button--quiet" data-route-map-fit>Alle Punkte</button><button type="button" class="button button--quiet" data-route-map-labels aria-pressed="true">Beschriftungen</button><button type="button" class="button button--quiet" data-route-map-retry>Karte erneut laden</button><span class="status-badge" data-route-map-count></span></div>
+			<div class="route-map" role="region" aria-label="Interaktive Karte der offenen Aufträge" data-route-map data-route-start-label={ routeStartLabel(data.Route) } data-route-start-latitude={ routeStartLatitude(data.Route) } data-route-start-longitude={ routeStartLongitude(data.Route) } data-route-end-label={ routeEndLabel(data.Route) } data-route-end-latitude={ routeEndLatitude(data.Route) } data-route-end-longitude={ routeEndLongitude(data.Route) } data-route-geometry={ routeGeometry(data.Route) } data-route-arrows="true"><div class="map-fallback" data-map-fallback>Die Straßenkarte wird geladen. Die Auftragsliste bleibt nutzbar.</div></div>
 			if data.Route != nil {
 				@routeSummary(*data.Route, false, data.Shell.CSRFToken, time.Time{})
 			}
 		</div>
 	</section>
 	@parallelRouteBoard(data)
+}
+
+templ routeLocationChooser(prefix string, heading string, locations []RouteLocationOption, defaultID string, allowLastStop bool) {
+	<fieldset class="route-location-picker" data-route-location-picker data-route-location-prefix={ prefix }>
+		<legend>{ heading }</legend>
+		<input type="hidden" name={ prefix + "_location_id" } data-route-location-id-value/>
+		<input type="hidden" name={ prefix + "_location_version" } data-route-location-version-value/>
+		<input type="hidden" name={ prefix + "_latitude" } data-route-location-hidden-latitude/>
+		<input type="hidden" name={ prefix + "_longitude" } data-route-location-hidden-longitude/>
+		<input type="hidden" name={ prefix + "_custom_confirmed" } value="" data-route-location-confirmed/>
+		<input type="hidden" name={ prefix + "_at_last_stop" } value="" data-route-location-last-stop/>
+		<div class="route-location-picker__choices" role="radiogroup" aria-label={ heading + " auswählen" }>
+			for _, location := range locations {
+				<label class="route-location-choice">
+					<input type="radio" name={ prefix + "_selection" } value={ "saved:" + location.ID } checked?={ location.ID == defaultID } data-route-location-choice data-route-location-kind="saved" data-route-location-id={ location.ID } data-route-location-version={ strconv.Itoa(int(location.Version)) } data-route-location-label={ location.Name } data-route-location-latitude={ location.Latitude } data-route-location-longitude={ location.Longitude }/>
+					<span><strong>{ location.Name }</strong><small>{ location.Address }</small></span>
+				</label>
+			}
+			<label class="route-location-choice route-location-choice--custom">
+				<input type="radio" name={ prefix + "_selection" } value="custom" checked?={ defaultID == "" } data-route-location-choice data-route-location-kind="custom"/>
+				<span><strong>Anderen { heading } verwenden</strong><small>Adresse und Koordinaten werden erst nach Ihrer Bestätigung übernommen.</small></span>
+			</label>
+			if allowLastStop {
+				<label class="route-location-choice route-location-choice--last-stop">
+					<input type="radio" name={ prefix + "_selection" } value="last_stop" data-route-location-choice data-route-location-kind="last-stop"/>
+					<span><strong>Beim letzten Stopp</strong><small>Die Route endet beim letzten geordneten Auftrag.</small></span>
+				</label>
+			}
+		</div>
+		<div class="route-location-custom" data-route-location-custom hidden?={ defaultID != "" }>
+			<div class="form-grid">
+				<label>{ heading } bezeichnen<input type="text" name={ prefix + "_custom_label" } maxlength="120" autocomplete="off" placeholder="z. B. Lagerplatz Nord" data-route-location-label/></label>
+				<label>{ heading }-Adresse<input type="text" name={ prefix + "_custom_address" } maxlength="500" autocomplete="street-address" placeholder="Straße, Ort" data-route-location-address/></label>
+			</div>
+			<div class="location-search" data-route-location-editor>
+				<label for={ prefix + "-route-location-search" }>Adresse suchen</label>
+				<div class="location-search__bar"><input id={ prefix + "-route-location-search" } type="search" maxlength="200" autocomplete="off" placeholder="z. B. Waldstraße 9, Unterneukirchen" data-route-location-search-input/><button class="button button--quiet" type="button" data-route-location-search-submit>Adresse suchen</button></div>
+				<p class="form-hint location-search__status" data-route-location-search-status aria-live="polite"></p>
+				<ul class="location-search__results" data-route-location-search-results aria-label="Gefundene Adressen" hidden></ul>
+				<div class="coordinate-grid">
+					<label>Breitengrad<input type="text" inputmode="decimal" autocomplete="off" placeholder="48,208000" data-route-location-latitude aria-describedby={ prefix + "-custom-hint" }/></label>
+					<label>Längengrad<input type="text" inputmode="decimal" autocomplete="off" placeholder="16,373000" data-route-location-longitude aria-describedby={ prefix + "-custom-hint" }/></label>
+				</div>
+				<div class="route-location-custom__confirm"><button class="button button--quiet" type="button" data-route-location-confirm>Standort übernehmen</button><span id={ prefix + "-custom-hint" } class="form-hint" data-route-location-message aria-live="polite">Bitte Adresse oder Koordinaten prüfen und anschließend übernehmen.</span></div>
+			</div>
+		</div>
+		<p class="form-alert route-location-picker__error" data-route-location-error role="alert" hidden></p>
+	</fieldset>
 }
 
 templ parallelRouteBoard(data RoutePageData) {
@@ -197,7 +266,7 @@ templ ownRoute(data RoutePageData) {
 			<div class="route-map-panel">
 				@mapAssetData(data.Shell.Page)
 				<div class="section-heading"><div><p class="eyebrow">Ihre Fahrt</p><h2>{ planningDate(data.Route.Departure) }</h2></div><span class="status-badge">Zugewiesen</span></div>
-				<div class="route-map" role="region" aria-label="Interaktive Karte der eigenen Route" data-route-map data-depot-latitude={ routeCoordinate(data.Route.Start.Latitude) } data-depot-longitude={ routeCoordinate(data.Route.Start.Longitude) } data-route-geometry={ routeGeometry(data.Route) }><div class="map-fallback" data-map-fallback>Die Straßenkarte wird geladen. Die Stoppliste bleibt nutzbar.</div></div>
+				<div class="route-map" role="region" aria-label="Interaktive Karte der eigenen Route" data-route-map data-route-start-label={ data.Route.StartLabel } data-route-start-latitude={ routeCoordinate(data.Route.Start.Latitude) } data-route-start-longitude={ routeCoordinate(data.Route.Start.Longitude) } data-route-end-label={ data.Route.EndLabel } data-route-end-latitude={ routeCoordinate(data.Route.End.Latitude) } data-route-end-longitude={ routeCoordinate(data.Route.End.Longitude) } data-route-geometry={ routeGeometry(data.Route) }><div class="map-fallback" data-map-fallback>Die Straßenkarte wird geladen. Die Stoppliste bleibt nutzbar.</div></div>
 			</div>
 			@routeSummary(*data.Route, true, data.Shell.CSRFToken, data.RetrievedAt)
 		</section>
@@ -207,7 +276,7 @@ templ ownRoute(data RoutePageData) {
 templ routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, now time.Time) {
 	<section class="route-summary">
 		<div class="section-heading"><div><p class="eyebrow">{ route.DriverName }</p><h2>{ fmt.Sprint(len(route.Stops)) } Stopps</h2></div><span class="status-badge">{ routeSource(route.Directions) }</span></div>
-		<dl class="suggestion-facts"><div><dt>Abfahrt</dt><dd>{ planningClock(route.Departure) } Uhr</dd></div><div><dt>Strecke</dt><dd>{ routeDistance(route.Directions.DistanceMeters) }</dd></div><div><dt>Fahrzeit</dt><dd>{ routeDuration(route.Directions.Duration) }</dd></div><div><dt>Arbeitszeit</dt><dd>{ routeDuration(routeWorkDuration(route)) }</dd></div><div><dt>Gesamtzeit</dt><dd>{ routeDuration(route.EstimatedEndAt.Sub(route.Departure)) }</dd></div><div><dt>Voraussichtliches Ende</dt><dd>{ planningClock(route.EstimatedEndAt) } Uhr</dd></div><div><dt>Hackmaschine</dt><dd>{ route.ChipperName }</dd></div><div><dt>Transport</dt><dd>{ routeOptional(route.TransportName) }</dd></div></dl>
+		<dl class="suggestion-facts"><div><dt>Abfahrt</dt><dd>{ planningClock(route.Departure) } Uhr</dd></div><div><dt>Startort</dt><dd>{ routeOptional(route.StartLabel) }</dd></div><div><dt>Endort</dt><dd>{ routeOptional(route.EndLabel) }</dd></div><div><dt>Strecke</dt><dd>{ routeDistance(route.Directions.DistanceMeters) }</dd></div><div><dt>Fahrzeit</dt><dd>{ routeDuration(route.Directions.Duration) }</dd></div><div><dt>Arbeitszeit</dt><dd>{ routeDuration(routeWorkDuration(route)) }</dd></div><div><dt>Gesamtzeit</dt><dd>{ routeDuration(route.EstimatedEndAt.Sub(route.Departure)) }</dd></div><div><dt>Voraussichtliches Ende</dt><dd>{ planningClock(route.EstimatedEndAt) } Uhr</dd></div><div><dt>Hackmaschine</dt><dd>{ route.ChipperName }</dd></div><div><dt>Transport</dt><dd>{ routeOptional(route.TransportName) }</dd></div></dl>
 		if route.Comparison.ManualDuration > 0 {
 			<p class="route-comparison" data-route-comparison>Optimierung: { routeDistance(routeComparisonDistanceSaving(route.Comparison)) } und { routeDuration(routeComparisonDurationSaving(route.Comparison)) } gegenüber der manuellen Reihenfolge gespart.</p>
 		}
@@ -235,7 +304,7 @@ templ routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, no
 				}
 			</ol>
 			if leg, ok := routeReturnLeg(route); ok {
-				<p class="form-hint">Rückfahrt zum Depot: { routeDistance(leg.DistanceMeters) } · { routeDuration(leg.Duration) }</p>
+				<p class="form-hint">Letzter Fahrabschnitt zum Endort: { routeDistance(leg.DistanceMeters) } · { routeDuration(leg.Duration) }</p>
 			}
 			<div class="visually-hidden" aria-live="polite" data-route-order-status></div>
 			if reorder {
@@ -301,6 +370,42 @@ func routeFormAction(route planning.RouteDraft, reorder bool) string {
 }
 func routeCoordinate(value float64) string {
 	return strconv.FormatFloat(value, 'f', 6, 64)
+}
+func routeStartLabel(route *planning.RouteDraft) string {
+	if route == nil {
+		return ""
+	}
+	return route.StartLabel
+}
+func routeStartLatitude(route *planning.RouteDraft) string {
+	if route == nil {
+		return ""
+	}
+	return routeCoordinate(route.Start.Latitude)
+}
+func routeStartLongitude(route *planning.RouteDraft) string {
+	if route == nil {
+		return ""
+	}
+	return routeCoordinate(route.Start.Longitude)
+}
+func routeEndLabel(route *planning.RouteDraft) string {
+	if route == nil {
+		return ""
+	}
+	return route.EndLabel
+}
+func routeEndLatitude(route *planning.RouteDraft) string {
+	if route == nil {
+		return ""
+	}
+	return routeCoordinate(route.End.Latitude)
+}
+func routeEndLongitude(route *planning.RouteDraft) string {
+	if route == nil {
+		return ""
+	}
+	return routeCoordinate(route.End.Longitude)
 }
 func planningClock(value time.Time) string {
 	if value.IsZero() {

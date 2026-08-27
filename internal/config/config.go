@@ -21,7 +21,7 @@ const (
 	EnvironmentDevelopment = "development"
 	EnvironmentTest        = "test"
 	EnvironmentProduction  = "production"
-	CurrentSchemaVersion   = int64(12)
+	CurrentSchemaVersion   = int64(13)
 )
 
 // Config contains the startup settings shared by serve, worker, and CLI modes.
@@ -179,8 +179,6 @@ type Planning struct {
 	SuggestionTTL           time.Duration
 	BusinessOpen            string
 	BusinessClose           string
-	DepotLatitude           float64
-	DepotLongitude          float64
 	HaversineRoadFactor     float64
 	HaversineSpeedKMH       float64
 	WeightPreference        float64
@@ -395,7 +393,7 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 			RoutingTimeout: 5 * time.Second, RoutingMaxResponseBytes: 1 << 20, RoutingBackoff: 30 * time.Second, RoutingCacheTTL: time.Hour, RoutingCacheEntries: 512,
 			HorizonDays: 56, SlotMinutes: 15, BufferMinutes: 15, CandidateLimit: 2500, SuggestionTTL: 30 * time.Minute,
 			BusinessOpen: valueOrDefault(getenv("PLANNING_BUSINESS_OPEN"), "07:00"), BusinessClose: valueOrDefault(getenv("PLANNING_BUSINESS_CLOSE"), "17:00"),
-			DepotLatitude: 48.2, DepotLongitude: 14.2, HaversineRoadFactor: 1.3, HaversineSpeedKMH: 55,
+			HaversineRoadFactor: 1.3, HaversineSpeedKMH: 55,
 			WeightPreference: 25, WeightTravel: 25, WeightDriver: 15, WeightResource: 10, WeightUtilization: 10, WeightUrgency: 10, WeightRegion: 5,
 		},
 		Map: Map{
@@ -598,7 +596,6 @@ func applyOverrides(cfg *Config, getenv func(string) string) error {
 		}
 	}
 	for name, target := range map[string]*float64{
-		"PLANNING_DEPOT_LATITUDE": &cfg.Planning.DepotLatitude, "PLANNING_DEPOT_LONGITUDE": &cfg.Planning.DepotLongitude,
 		"PLANNING_HAVERSINE_ROAD_FACTOR": &cfg.Planning.HaversineRoadFactor, "PLANNING_HAVERSINE_SPEED_KMH": &cfg.Planning.HaversineSpeedKMH,
 		"PLANNING_WEIGHT_PREFERENCE": &cfg.Planning.WeightPreference, "PLANNING_WEIGHT_TRAVEL": &cfg.Planning.WeightTravel,
 		"PLANNING_WEIGHT_DRIVER": &cfg.Planning.WeightDriver, "PLANNING_WEIGHT_RESOURCE": &cfg.Planning.WeightResource,
@@ -775,8 +772,7 @@ func (cfg Config) Validate() error {
 	if openPlanningErr != nil || closePlanningErr != nil || !closePlanning.After(openPlanning) || cfg.Planning.HorizonDays < 1 || cfg.Planning.HorizonDays > 90 ||
 		cfg.Planning.SlotMinutes < 5 || cfg.Planning.SlotMinutes > 60 || 60%cfg.Planning.SlotMinutes != 0 || cfg.Planning.BufferMinutes < 0 || cfg.Planning.BufferMinutes > 240 ||
 		cfg.Planning.CandidateLimit < 10 || cfg.Planning.CandidateLimit > 10000 || cfg.Planning.SuggestionTTL < time.Minute || cfg.Planning.SuggestionTTL > 24*time.Hour ||
-		cfg.Planning.RoutingMaxResponseBytes < 1024 || cfg.Planning.RoutingMaxResponseBytes > 8<<20 || cfg.Planning.RoutingCacheEntries < 1 || cfg.Planning.RoutingCacheEntries > 10000 || cfg.Planning.RoutingCacheTTL < time.Minute || cfg.Planning.RoutingCacheTTL > 30*24*time.Hour || cfg.Planning.DepotLatitude < -90 || cfg.Planning.DepotLatitude > 90 ||
-		cfg.Planning.DepotLongitude < -180 || cfg.Planning.DepotLongitude > 180 || cfg.Planning.HaversineRoadFactor < 1 || cfg.Planning.HaversineRoadFactor > 3 ||
+		cfg.Planning.RoutingMaxResponseBytes < 1024 || cfg.Planning.RoutingMaxResponseBytes > 8<<20 || cfg.Planning.RoutingCacheEntries < 1 || cfg.Planning.RoutingCacheEntries > 10000 || cfg.Planning.RoutingCacheTTL < time.Minute || cfg.Planning.RoutingCacheTTL > 30*24*time.Hour || cfg.Planning.HaversineRoadFactor < 1 || cfg.Planning.HaversineRoadFactor > 3 ||
 		cfg.Planning.HaversineSpeedKMH < 5 || cfg.Planning.HaversineSpeedKMH > 150 || weightTotal <= 0 {
 		return errors.New("config: invalid planning settings")
 	}

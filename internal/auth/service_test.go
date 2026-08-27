@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -15,8 +16,26 @@ type fakeStore struct {
 	rotated          NewSession
 	session          Session
 	touched          bool
+	touchError       error
+	revokedToken     []byte
+	revokeError      error
+	users            []UserSummary
+	listUsersError   error
+	createdInput     CreateUserInput
+	createdHash      string
+	createUserID     string
+	createUserError  error
 	updatedDetails   UpdateUserDetailsInput
 	updateDetailsErr error
+	updatedAccess    UpdateAccessInput
+	updateAccessErr  error
+	resetInput       ResetPasswordInput
+	resetHash        string
+	resetError       error
+	changedActor     Actor
+	changedHash      string
+	changedVersion   int32
+	changeError      error
 }
 
 func (store *fakeStore) FindUserByUsername(context.Context, string) (User, error) {
@@ -34,27 +53,43 @@ func (store *fakeStore) FindSession(context.Context, []byte) (Session, error) {
 }
 func (store *fakeStore) TouchSession(context.Context, string, time.Time) error {
 	store.touched = true
-	return nil
+	return store.touchError
 }
-func (store *fakeStore) RevokeSession(context.Context, []byte) error          { return nil }
+func (store *fakeStore) RevokeSession(_ context.Context, token []byte) error {
+	store.revokedToken = append([]byte(nil), token...)
+	return store.revokeError
+}
 func (store *fakeStore) LoginRate(context.Context, []byte) (RateLimit, error) { return store.rate, nil }
 func (store *fakeStore) RecordLoginFailure(context.Context, []byte) error {
 	store.recordedFailures++
 	return nil
 }
-func (store *fakeStore) ListUsers(context.Context) ([]UserSummary, error) { return nil, nil }
-func (store *fakeStore) CreateUser(context.Context, Actor, CreateUserInput, string) (string, error) {
-	return "user", nil
+func (store *fakeStore) ListUsers(context.Context) ([]UserSummary, error) {
+	return store.users, store.listUsersError
+}
+func (store *fakeStore) CreateUser(_ context.Context, _ Actor, input CreateUserInput, hash string) (string, error) {
+	store.createdInput, store.createdHash = input, hash
+	if store.createUserID == "" {
+		store.createUserID = "user"
+	}
+	return store.createUserID, store.createUserError
 }
 func (store *fakeStore) UpdateUserDetails(_ context.Context, _ Actor, input UpdateUserDetailsInput) error {
 	store.updatedDetails = input
 	return store.updateDetailsErr
 }
-func (store *fakeStore) UpdateUserAccess(context.Context, Actor, UpdateAccessInput) error { return nil }
-func (store *fakeStore) ResetPassword(context.Context, Actor, ResetPasswordInput, string) error {
-	return nil
+func (store *fakeStore) UpdateUserAccess(_ context.Context, _ Actor, input UpdateAccessInput) error {
+	store.updatedAccess = input
+	return store.updateAccessErr
 }
-func (store *fakeStore) ChangeOwnPassword(context.Context, Actor, string, int32) error { return nil }
+func (store *fakeStore) ResetPassword(_ context.Context, _ Actor, input ResetPasswordInput, hash string) error {
+	store.resetInput, store.resetHash = input, hash
+	return store.resetError
+}
+func (store *fakeStore) ChangeOwnPassword(_ context.Context, actor Actor, hash string, version int32) error {
+	store.changedActor, store.changedHash, store.changedVersion = actor, hash, version
+	return store.changeError
+}
 
 func testService(t *testing.T, store *fakeStore, now time.Time) (*Service, PasswordHasher) {
 	t.Helper()
@@ -184,5 +219,151 @@ func TestUpdateUserDetailsRejectsForbiddenAndInvalidInput(t *testing.T) {
 				t.Fatalf("invalid update reached store: %#v", store.updatedDetails)
 			}
 		})
+	}
+}
+
+func TestLogoutHashesTokenAndWrapsStoreError(t *testing.T) {
+	t.Parallel()
+	store := &fakeStore{}
+	service, _ := testService(t, store, time.Now())
+	if err := service.Logout(t.Context(), ""); err != nil || store.revokedToken != nil {
+		t.Fatalf("empty Logout() = %v, token = %x", err, store.revokedToken)
+	}
+	if err := service.Logout(t.Context(), "opaque-session-token"); err != nil {
+		t.Fatal(err)
+	}
+	if string(store.revokedToken) != string(TokenHash("opaque-session-token")) {
+		t.Fatal("Logout() did not pass the token hash to the store")
+	}
+	store.revokeError = errors.New("store down")
+	if err := service.Logout(t.Context(), "other-token"); err == nil || !strings.Contains(err.Error(), "auth: revoking session") {
+		t.Fatalf("Logout() error = %v", err)
+	}
+}
+
+func TestAuthenticateRejectsInvalidStatesAndStoreFailures(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	valid := Session{ID: "session", Actor: Actor{UserID: "user", Role: RoleDriver}, UserActive: true, IdleExpiresAt: now.Add(time.Hour), AbsoluteExpiresAt: now.Add(2 * time.Hour)}
+	tests := []struct {
+		name   string
+		mutate func(*fakeStore)
+		want   error
+	}{
+		{name: "empty token", mutate: func(*fakeStore) {}, want: ErrInvalidSession},
+		{name: "revoked", mutate: func(store *fakeStore) { revoked := now; store.session.RevokedAt = &revoked }, want: ErrInvalidSession},
+		{name: "inactive user", mutate: func(store *fakeStore) { store.session.UserActive = false }, want: ErrInvalidSession},
+		{name: "invalid role", mutate: func(store *fakeStore) { store.session.Actor.Role = "unknown" }, want: ErrInvalidSession},
+		{name: "absolute expiry", mutate: func(store *fakeStore) { store.session.AbsoluteExpiresAt = now }, want: ErrInvalidSession},
+		{name: "touch failure", mutate: func(store *fakeStore) { store.touchError = errors.New("write failed") }, want: nil},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeStore{session: valid}
+			test.mutate(store)
+			service, _ := testService(t, store, now)
+			token := "token"
+			if test.name == "empty token" {
+				token = ""
+			}
+			_, err := service.Authenticate(t.Context(), token)
+			if test.want != nil {
+				if !errors.Is(err, test.want) {
+					t.Fatalf("Authenticate() error = %v, want %v", err, test.want)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "auth: extending session") {
+				t.Fatalf("Authenticate() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestUserAdministrationLifecycle(t *testing.T) {
+	t.Parallel()
+	store := &fakeStore{user: User{ID: "u-1", Username: "maria", DisplayName: "Maria Muster", Email: "maria@example.test", Role: RoleDriver, MustChangePassword: true, Active: true, Version: 4, DriverID: "d-1"}, users: []UserSummary{{ID: "u-2", Username: "anna"}}}
+	service, hasher := testService(t, store, time.Now())
+	admin := Actor{UserID: "admin", Role: RoleAdmin}
+
+	users, err := service.ListUsers(t.Context(), admin)
+	if err != nil || len(users) != 1 || users[0].ID != "u-2" {
+		t.Fatalf("ListUsers() = %#v, %v", users, err)
+	}
+	found, err := service.FindUserForAdministration(t.Context(), admin, " maria ")
+	if err != nil || found.ID != "u-1" || found.DriverID != "d-1" || found.MustChangePassword != true {
+		t.Fatalf("FindUserForAdministration() = %#v, %v", found, err)
+	}
+	// #nosec G101 -- deterministic non-secret test fixture password.
+	id, err := service.CreateUser(t.Context(), admin, CreateUserInput{Username: "  neu  ", DisplayName: " Neue Person ", Email: " neu@example.test ", Role: RoleDriver, Password: "Ein gutes Testpasswort 2026"})
+	if err != nil || id != "user" || store.createdInput.Username != "neu" || store.createdInput.DisplayName != "Neue Person" {
+		t.Fatalf("CreateUser() = %q, %v; input = %#v", id, err, store.createdInput)
+	}
+	if valid, _, err := hasher.Verify("Ein gutes Testpasswort 2026", store.createdHash); err != nil || !valid {
+		t.Fatalf("CreateUser() stored hash validation = %v, %v", valid, err)
+	}
+	if err := service.UpdateUserAccess(t.Context(), admin, UpdateAccessInput{UserID: "u-1", Role: RoleAdmin, Active: true, ExpectedVersion: 4}); err != nil || store.updatedAccess.UserID != "u-1" {
+		t.Fatalf("UpdateUserAccess() = %v, %#v", err, store.updatedAccess)
+	}
+	// #nosec G101 -- deterministic non-secret test fixture password.
+	if err := service.ResetPassword(t.Context(), admin, ResetPasswordInput{UserID: "u-1", Password: "Ein weiteres Testpasswort 2026", ExpectedVersion: 4}); err != nil {
+		t.Fatal(err)
+	}
+	if valid, _, err := hasher.Verify("Ein weiteres Testpasswort 2026", store.resetHash); err != nil || !valid || store.resetInput.UserID != "u-1" {
+		t.Fatalf("ResetPassword() stored hash/input = %v, %v, %#v", valid, err, store.resetInput)
+	}
+	if err := service.ChangeOwnPassword(t.Context(), Actor{UserID: "u-1", Role: RoleDriver}, "Ein drittes Testpasswort 2026", 4); err != nil {
+		t.Fatal(err)
+	}
+	if valid, _, err := hasher.Verify("Ein drittes Testpasswort 2026", store.changedHash); err != nil || !valid || store.changedVersion != 4 {
+		t.Fatalf("ChangeOwnPassword() stored hash/version = %v, %v, %d", valid, err, store.changedVersion)
+	}
+}
+
+func TestUserAdministrationRejectsUnauthorizedInvalidAndStoreErrors(t *testing.T) {
+	t.Parallel()
+	store := &fakeStore{listUsersError: errors.New("list failed"), findUserError: errors.New("find failed"), createUserError: errors.New("create failed"), updateAccessErr: errors.New("update failed"), resetError: errors.New("reset failed"), changeError: errors.New("change failed")}
+	service, _ := testService(t, store, time.Now())
+	driver := Actor{UserID: "driver", Role: RoleDriver}
+	admin := Actor{UserID: "admin", Role: RoleAdmin}
+	if _, err := service.ListUsers(t.Context(), driver); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("driver ListUsers() error = %v", err)
+	}
+	if _, err := service.ListUsers(t.Context(), admin); err == nil {
+		t.Fatal("ListUsers() accepted store failure")
+	}
+	if _, err := service.FindUserForAdministration(t.Context(), admin, "user"); err == nil {
+		t.Fatal("FindUserForAdministration() accepted store failure")
+	}
+	if _, err := service.CreateUser(t.Context(), driver, CreateUserInput{}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("driver CreateUser() error = %v", err)
+	}
+	// #nosec G101 -- deterministic non-secret test fixture password.
+	if _, err := service.CreateUser(t.Context(), admin, CreateUserInput{Username: "name", DisplayName: "Name", Role: Role("invalid"), Password: "Ein gutes Testpasswort 2026"}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("invalid CreateUser() error = %v", err)
+	}
+	// #nosec G101 -- deterministic non-secret test fixture password.
+	if _, err := service.CreateUser(t.Context(), admin, CreateUserInput{Username: "name", DisplayName: "Name", Role: RoleDriver, Password: "Ein gutes Testpasswort 2026"}); err == nil {
+		t.Fatal("CreateUser() accepted store failure")
+	}
+	if err := service.UpdateUserAccess(t.Context(), driver, UpdateAccessInput{}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("driver UpdateUserAccess() error = %v", err)
+	}
+	if err := service.UpdateUserAccess(t.Context(), admin, UpdateAccessInput{Role: Role("invalid"), ExpectedVersion: 1}); err == nil {
+		t.Fatal("UpdateUserAccess() accepted invalid role")
+	}
+	if err := service.UpdateUserAccess(t.Context(), admin, UpdateAccessInput{Role: RoleDriver, ExpectedVersion: 1}); err == nil {
+		t.Fatal("UpdateUserAccess() accepted store failure")
+	}
+	if err := service.ResetPassword(t.Context(), driver, ResetPasswordInput{}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("driver ResetPassword() error = %v", err)
+	}
+	// #nosec G101 -- deterministic non-secret test fixture password.
+	if err := service.ResetPassword(t.Context(), admin, ResetPasswordInput{Password: "Ein gutes Testpasswort 2026"}); err == nil {
+		t.Fatal("ResetPassword() accepted store failure")
+	}
+	if err := service.ChangeOwnPassword(t.Context(), Actor{}, "Ein gutes Testpasswort 2026", 1); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("anonymous ChangeOwnPassword() error = %v", err)
+	}
+	if err := service.ChangeOwnPassword(t.Context(), driver, "Ein gutes Testpasswort 2026", 1); err == nil {
+		t.Fatal("ChangeOwnPassword() accepted store failure")
 	}
 }

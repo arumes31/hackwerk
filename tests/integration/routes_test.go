@@ -28,7 +28,7 @@ func TestRouteStoreAssignsEveryStopAsProposalWithoutOutbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveRouteDraft() error = %v", err)
 	}
-	if draft.Status != planning.RouteStatusDraft || draft.Version != 1 || len(draft.Stops) != 1 || draft.Stops[0].ID == "" {
+	if draft.Status != planning.RouteStatusDraft || draft.Version != 1 || draft.StartLabel != "Betriebshof" || draft.EndLabel != "Betriebshof" || len(draft.Stops) != 1 || draft.Stops[0].ID == "" {
 		t.Fatalf("saved route = %#v", draft)
 	}
 
@@ -198,7 +198,7 @@ func routeDraftForCandidates(fixture calendarFixture, departure time.Time, candi
 	legs = append(legs, returnLeg)
 	return planning.RouteDraft{
 		DriverID: fixture.driver1, ChipperResourceID: fixture.chipper1,
-		Status: planning.RouteStatusDraft, Departure: departure, Start: start, End: start, Stops: stops,
+		Status: planning.RouteStatusDraft, Departure: departure, StartLabel: "Betriebshof", EndLabel: "Betriebshof", Start: start, End: start, Stops: stops,
 		Directions: planning.RouteDirections{
 			Geometry: geometry, Legs: legs, DistanceMeters: 1000 * len(legs),
 			Duration: 15 * time.Minute * time.Duration(len(legs)), Source: "haversine", Estimated: true,

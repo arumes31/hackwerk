@@ -286,6 +286,347 @@ func TestReopenAppointmentRevalidatesAssignmentsAndAvailability(t *testing.T) {
 	}
 }
 
+func TestPlanFromWaitlistBuildsCompleteProposal(t *testing.T) {
+	current := testAppointment()
+	options := testOptions()
+	options.Waitlist = []WaitlistItem{{
+		JobID: "job-1", JobNumber: "HA-100", JobType: "chipping_only",
+		EstimatedHackMinutes: 90,
+	}}
+	store := &fakeStore{current: current, options: options}
+	service, err := New(store, fakeAvailability{status: driver.StatusAvailable}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := PlanInput{
+		CreateDraftInput: CreateDraftInput{
+			JobID: " job-1 ",
+			Time:  TimeInput{StartsAt: testStart(), EndsAt: testStart().Add(2 * time.Hour)},
+		},
+		Assignments: AssignmentInput{
+			DriverIDs:       []string{" driver-1 "},
+			PrimaryDriverID: " driver-1 ",
+			Resources:       []ResourceAssignment{{ID: " chipper-1 ", Purpose: PurposeChipping}},
+		},
+	}
+	if _, err := service.PlanFromWaitlist(t.Context(), testAdmin(), input); err != nil {
+		t.Fatalf("PlanFromWaitlist() error = %v", err)
+	}
+	if !store.planCalled {
+		t.Fatal("PlanFromWaitlist() did not persist a validated plan")
+	}
+	if store.lastPlan.JobID != "job-1" || store.lastPlan.Assignments.PrimaryDriverID != "driver-1" ||
+		store.lastPlan.Assignments.Resources[0].ID != "chipper-1" {
+		t.Fatalf("PlanFromWaitlist() did not normalize plan input: %#v", store.lastPlan)
+	}
+}
+
+func TestPlanFromWaitlistRejectsMissingWaitlistItemAndShortDuration(t *testing.T) {
+	options := testOptions()
+	options.Waitlist = []WaitlistItem{{JobID: "other-job", EstimatedHackMinutes: 30}}
+	store := &fakeStore{current: testAppointment(), options: options}
+	service, err := New(store, fakeAvailability{status: driver.StatusAvailable}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validAssignments := AssignmentInput{
+		DriverIDs: []string{"driver-1"}, PrimaryDriverID: "driver-1",
+		Resources: []ResourceAssignment{{ID: "chipper-1", Purpose: PurposeChipping}},
+	}
+	_, err = service.PlanFromWaitlist(t.Context(), testAdmin(), PlanInput{
+		CreateDraftInput: CreateDraftInput{JobID: "job-1", Time: TimeInput{StartsAt: testStart(), EndsAt: testStart().Add(time.Hour)}},
+		Assignments:      validAssignments,
+	})
+	if !errors.Is(err, ErrNotFound) || store.planCalled {
+		t.Fatalf("missing waitlist item error/persisted = %v/%v, want not found/no persistence", err, store.planCalled)
+	}
+
+	options.Waitlist = []WaitlistItem{{JobID: "job-1", EstimatedHackMinutes: 121}}
+	store = &fakeStore{current: testAppointment(), options: options}
+	service, err = New(store, fakeAvailability{status: driver.StatusAvailable}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.PlanFromWaitlist(t.Context(), testAdmin(), PlanInput{
+		CreateDraftInput: CreateDraftInput{JobID: "job-1", Time: TimeInput{StartsAt: testStart(), EndsAt: testStart().Add(2 * time.Hour)}},
+		Assignments:      validAssignments,
+	})
+	if !errors.Is(err, ErrValidation) || store.planCalled {
+		t.Fatalf("short duration error/persisted = %v/%v, want validation/no persistence", err, store.planCalled)
+	}
+}
+
+func TestAppointmentMutationsPersistValidTransitions(t *testing.T) {
+	assignments := AssignmentInput{
+		DriverIDs: []string{"driver-1"}, PrimaryDriverID: "driver-1",
+		Resources: []ResourceAssignment{{ID: "chipper-1", Purpose: PurposeChipping}},
+	}
+	tests := []struct {
+		name string
+		run  func(*Service, *fakeStore) error
+	}{
+		{
+			name: "create draft",
+			run: func(service *Service, store *fakeStore) error {
+				_, err := service.CreateDraftFromWaitlist(t.Context(), testAdmin(), CreateDraftInput{
+					JobID: " job-1 ", Time: TimeInput{StartsAt: testStart(), EndsAt: testStart().Add(time.Hour)},
+				})
+				if err == nil && (!store.createCalled || store.lastCreate.JobID != "job-1") {
+					t.Fatal("CreateDraftFromWaitlist() did not persist normalized input")
+				}
+				return err
+			},
+		},
+		{
+			name: "assign drivers and resources",
+			run: func(service *Service, store *fakeStore) error {
+				_, err := service.AssignDriversAndResources(t.Context(), testAdmin(), AssignInput{
+					MutateInput: MutateInput{ID: store.current.ID, ExpectedVersion: store.current.Version}, Assignments: assignments,
+				})
+				if err == nil && !store.assignCalled {
+					t.Fatal("AssignDriversAndResources() did not persist assignment")
+				}
+				return err
+			},
+		},
+		{
+			name: "propose draft",
+			run: func(service *Service, store *fakeStore) error {
+				_, err := service.ProposeAppointment(t.Context(), testAdmin(), MutateInput{ID: store.current.ID, ExpectedVersion: store.current.Version}, "  approved  ")
+				if err == nil && !store.proposeCalled {
+					t.Fatal("ProposeAppointment() did not persist proposal")
+				}
+				return err
+			},
+		},
+		{
+			name: "move appointment",
+			run: func(service *Service, store *fakeStore) error {
+				_, err := service.MoveAppointment(t.Context(), testAdmin(), MoveInput{
+					MutateInput: MutateInput{ID: store.current.ID, ExpectedVersion: store.current.Version},
+					StartsAt:    testStart().Add(time.Hour), EndsAt: testStart().Add(4 * time.Hour),
+					WithoutNotificationReason: "  customer requested it  ",
+				})
+				if err == nil && (!store.rescheduleCalled || store.lastReschedule.WithoutNotificationReason != "customer requested it") {
+					t.Fatal("MoveAppointment() did not persist normalized change")
+				}
+				return err
+			},
+		},
+		{
+			name: "resize appointment",
+			run: func(service *Service, store *fakeStore) error {
+				_, err := service.ResizeAppointment(t.Context(), testAdmin(), ResizeInput{
+					MutateInput: MutateInput{ID: store.current.ID, ExpectedVersion: store.current.Version},
+					StartsAt:    store.current.StartsAt, EndsAt: store.current.EndsAt.Add(time.Hour),
+				})
+				if err == nil && !store.rescheduleCalled {
+					t.Fatal("ResizeAppointment() did not persist change")
+				}
+				return err
+			},
+		},
+		{
+			name: "fix proposal",
+			run: func(service *Service, store *fakeStore) error {
+				_, err := service.FixAppointment(t.Context(), testAdmin(), FixInput{MutateInput: MutateInput{ID: store.current.ID, ExpectedVersion: store.current.Version}})
+				if err == nil && !store.fixCalled {
+					t.Fatal("FixAppointment() did not persist transition")
+				}
+				return err
+			},
+		},
+		{
+			name: "cancel fixed with reason",
+			run: func(service *Service, store *fakeStore) error {
+				_, err := service.CancelAppointment(t.Context(), testAdmin(), CancelInput{
+					MutateInput: MutateInput{ID: store.current.ID, ExpectedVersion: store.current.Version}, Reason: "  customer cancelled  ",
+				})
+				if err == nil && (!store.cancelCalled || store.lastCancel.Reason != "customer cancelled") {
+					t.Fatal("CancelAppointment() did not persist normalized reason")
+				}
+				return err
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			current := assignedAppointment(LifecycleDraft, 3)
+			if test.name == "fix proposal" {
+				current.Lifecycle = LifecycleProposal
+			}
+			if test.name == "cancel fixed with reason" {
+				current.Lifecycle = LifecycleFixed
+			}
+			store := &fakeStore{current: current, options: testOptions()}
+			service, err := New(store, fakeAvailability{status: driver.StatusAvailable}, time.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := test.run(service, store); err != nil {
+				t.Fatalf("valid mutation error = %v", err)
+			}
+		})
+	}
+}
+
+func TestAppointmentQueryOperationsAcceptAuthorizedValidRequests(t *testing.T) {
+	current := assignedAppointment(LifecycleFixed, 3)
+	store := &fakeStore{current: current, options: testOptions()}
+	service, err := New(store, fakeAvailability{status: driver.StatusAvailable}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := testStart()
+	to := from.Add(24 * time.Hour)
+	if _, err := service.ListCalendarRange(t.Context(), testAdmin(), from, to); err != nil {
+		t.Fatalf("ListCalendarRange() error = %v", err)
+	}
+	if _, err := service.PlanningOptions(t.Context(), testAdmin()); err != nil {
+		t.Fatalf("PlanningOptions() error = %v", err)
+	}
+	if _, err := service.ListConflictsAndCapacity(t.Context(), testAdmin(), from, to, []string{"driver-1"}, []string{"chipper-1"}, current.ID); err != nil {
+		t.Fatalf("ListConflictsAndCapacity() error = %v", err)
+	}
+}
+
+func TestServiceConstructionAndMutationGuardsRejectUnsafeRequests(t *testing.T) {
+	if _, err := New(nil, fakeAvailability{status: driver.StatusAvailable}, nil); err == nil {
+		t.Fatal("New() accepted a nil store")
+	}
+	if _, err := New(&fakeStore{}, nil, nil); err == nil {
+		t.Fatal("New() accepted a nil availability service")
+	}
+
+	current := assignedAppointment(LifecycleDraft, 3)
+	store := &fakeStore{current: current, options: testOptions()}
+	service, err := New(store, fakeAvailability{status: driver.StatusAvailable}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ProposeAppointment(t.Context(), testAdmin(), MutateInput{ID: current.ID, ExpectedVersion: current.Version}, strings.Repeat("x", 1001)); !errors.Is(err, ErrValidation) {
+		t.Fatalf("ProposeAppointment() oversized override error = %v, want validation", err)
+	}
+	if _, err := service.MoveAppointment(t.Context(), testAdmin(), MoveInput{
+		MutateInput: MutateInput{ID: current.ID, ExpectedVersion: current.Version},
+		StartsAt:    current.StartsAt, EndsAt: current.EndsAt,
+		WithoutNotificationReason: strings.Repeat("x", 1001),
+	}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("MoveAppointment() oversized notification reason error = %v, want validation", err)
+	}
+	if _, err := service.CancelAppointment(t.Context(), testAdmin(), CancelInput{
+		MutateInput: MutateInput{ID: current.ID, ExpectedVersion: current.Version}, Reason: strings.Repeat("x", 1001),
+	}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("CancelAppointment() oversized reason error = %v, want validation", err)
+	}
+}
+
+func TestConflictAndSwapValidationStopsBeforePersistence(t *testing.T) {
+	current := assignedAppointment(LifecycleProposal, 3)
+	store := &fakeStore{current: current, currents: map[string]Appointment{current.ID: current}}
+	service, err := New(store, fakeAvailability{status: driver.StatusAvailable}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := testStart()
+	if _, err := service.ConflictAlternatives(t.Context(), testAdmin(), " ", start, start.Add(time.Hour)); !errors.Is(err, ErrValidation) {
+		t.Fatalf("ConflictAlternatives() blank appointment error = %v, want validation", err)
+	}
+	if _, err := service.ConflictAlternatives(t.Context(), testAdmin(), current.ID, start.In(time.FixedZone("local", 3600)), start.Add(time.Hour).In(time.FixedZone("local", 3600))); !errors.Is(err, ErrValidation) {
+		t.Fatalf("ConflictAlternatives() non-UTC error = %v, want validation", err)
+	}
+	if _, err := service.SwapAppointments(t.Context(), testAdmin(), SwapInput{FirstID: current.ID, SecondID: current.ID, FirstVersion: 3, SecondVersion: 3}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("SwapAppointments() same appointment error = %v, want validation", err)
+	}
+	if _, err := service.SwapAppointments(t.Context(), testAdmin(), SwapInput{FirstID: current.ID, SecondID: "missing", FirstVersion: 2, SecondVersion: 3}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("SwapAppointments() stale version error = %v, want conflict", err)
+	}
+	if store.lastSwap.FirstID != "" {
+		t.Fatalf("SwapAppointments() persisted invalid request: %#v", store.lastSwap)
+	}
+}
+
+func TestAppointmentTransitionsRejectStaleOrInvalidStates(t *testing.T) {
+	tests := []struct {
+		name    string
+		current Appointment
+		run     func(*Service, Appointment) error
+		wantErr error
+	}{
+		{
+			name:    "proposal requires draft",
+			current: assignedAppointment(LifecycleProposal, 3),
+			run: func(service *Service, current Appointment) error {
+				_, err := service.ProposeAppointment(t.Context(), testAdmin(), MutateInput{ID: current.ID, ExpectedVersion: current.Version}, "")
+				return err
+			},
+			wantErr: ErrConflict,
+		},
+		{
+			name:    "fix requires proposal",
+			current: assignedAppointment(LifecycleDraft, 3),
+			run: func(service *Service, current Appointment) error {
+				_, err := service.FixAppointment(t.Context(), testAdmin(), FixInput{MutateInput: MutateInput{ID: current.ID, ExpectedVersion: current.Version}})
+				return err
+			},
+			wantErr: ErrConflict,
+		},
+		{
+			name:    "cancel cannot repeat",
+			current: assignedAppointment(LifecycleCancelled, 3),
+			run: func(service *Service, current Appointment) error {
+				_, err := service.CancelAppointment(t.Context(), testAdmin(), CancelInput{MutateInput: MutateInput{ID: current.ID, ExpectedVersion: current.Version}, Reason: "duplicate"})
+				return err
+			},
+			wantErr: ErrTransition,
+		},
+		{
+			name:    "reschedule needs current version",
+			current: assignedAppointment(LifecycleDraft, 3),
+			run: func(service *Service, current Appointment) error {
+				_, err := service.MoveAppointment(t.Context(), testAdmin(), MoveInput{
+					MutateInput: MutateInput{ID: current.ID, ExpectedVersion: current.Version - 1},
+					StartsAt:    current.StartsAt, EndsAt: current.EndsAt,
+				})
+				return err
+			},
+			wantErr: ErrConflict,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeStore{current: test.current, options: testOptions()}
+			service, err := New(store, fakeAvailability{status: driver.StatusAvailable}, time.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := test.run(service, test.current); !errors.Is(err, test.wantErr) {
+				t.Fatalf("transition error = %v, want %v", err, test.wantErr)
+			}
+			if store.proposeCalled || store.fixCalled || store.cancelCalled || store.rescheduleCalled {
+				t.Fatal("invalid transition reached persistence")
+			}
+		})
+	}
+}
+
+func TestAppointmentQueryOperationsEnforcePermissionAndRange(t *testing.T) {
+	service := testService(t, assignedAppointment(LifecycleFixed, 3), driver.StatusAvailable)
+	from := testStart()
+	to := from.Add(time.Hour)
+	if _, err := service.PlanningOptions(t.Context(), auth.Actor{Role: auth.RoleDriver}); !errors.Is(err, auth.ErrForbidden) {
+		t.Fatalf("PlanningOptions() driver error = %v, want forbidden", err)
+	}
+	if _, err := service.ListConflictsAndCapacity(t.Context(), testAdmin(), from, from, nil, nil, ""); !errors.Is(err, ErrValidation) {
+		t.Fatalf("ListConflictsAndCapacity() empty range error = %v, want validation", err)
+	}
+	if _, err := service.ListConflictsAndCapacity(t.Context(), auth.Actor{Role: auth.RoleDriver}, from, to, nil, nil, ""); !errors.Is(err, auth.ErrForbidden) {
+		t.Fatalf("ListConflictsAndCapacity() driver error = %v, want forbidden", err)
+	}
+}
+
 func testService(t *testing.T, current Appointment, status driver.Status) *Service {
 	t.Helper()
 	service, err := New(&fakeStore{current: current, options: testOptions()}, fakeAvailability{status: status}, time.Now)
@@ -355,6 +696,18 @@ type fakeStore struct {
 	options           PlanningOptions
 	conflictUntil     time.Time
 	lastSwap          SwapInput
+	lastPlan          PlanInput
+	lastCreate        CreateDraftInput
+	lastPropose       MutateInput
+	lastReschedule    MoveInput
+	lastFix           FixInput
+	lastCancel        CancelInput
+	planCalled        bool
+	createCalled      bool
+	proposeCalled     bool
+	rescheduleCalled  bool
+	fixCalled         bool
+	cancelCalled      bool
 	assignCalled      bool
 	reopenCalled      bool
 	lastReopen        ReopenInput
@@ -362,11 +715,15 @@ type fakeStore struct {
 	completeCalled    bool
 }
 
-func (fake *fakeStore) Plan(context.Context, auth.Actor, PlanInput, string) (Appointment, error) {
+func (fake *fakeStore) Plan(_ context.Context, _ auth.Actor, input PlanInput, _ string) (Appointment, error) {
+	fake.planCalled = true
+	fake.lastPlan = input
 	return fake.current, nil
 }
 
-func (fake *fakeStore) CreateDraft(context.Context, auth.Actor, CreateDraftInput) (Appointment, error) {
+func (fake *fakeStore) CreateDraft(_ context.Context, _ auth.Actor, input CreateDraftInput) (Appointment, error) {
+	fake.createCalled = true
+	fake.lastCreate = input
 	return fake.current, nil
 }
 func (fake *fakeStore) Get(_ context.Context, id string) (Appointment, error) {
@@ -380,16 +737,24 @@ func (fake *fakeStore) Assign(_ context.Context, _ auth.Actor, _ AssignInput) (A
 	fake.current.Version++
 	return fake.current, nil
 }
-func (fake *fakeStore) Propose(context.Context, auth.Actor, MutateInput, string) (Appointment, error) {
+func (fake *fakeStore) Propose(_ context.Context, _ auth.Actor, input MutateInput, _ string) (Appointment, error) {
+	fake.proposeCalled = true
+	fake.lastPropose = input
 	return fake.current, nil
 }
-func (fake *fakeStore) Reschedule(context.Context, auth.Actor, MoveInput, string) (Appointment, error) {
+func (fake *fakeStore) Reschedule(_ context.Context, _ auth.Actor, input MoveInput, _ string) (Appointment, error) {
+	fake.rescheduleCalled = true
+	fake.lastReschedule = input
 	return fake.current, nil
 }
-func (fake *fakeStore) Fix(context.Context, auth.Actor, FixInput) (Appointment, error) {
+func (fake *fakeStore) Fix(_ context.Context, _ auth.Actor, input FixInput) (Appointment, error) {
+	fake.fixCalled = true
+	fake.lastFix = input
 	return fake.current, nil
 }
-func (fake *fakeStore) Cancel(context.Context, auth.Actor, CancelInput) (Appointment, error) {
+func (fake *fakeStore) Cancel(_ context.Context, _ auth.Actor, input CancelInput) (Appointment, error) {
+	fake.cancelCalled = true
+	fake.lastCancel = input
 	return fake.current, nil
 }
 func (fake *fakeStore) Reopen(_ context.Context, _ auth.Actor, input ReopenInput) (Appointment, error) {

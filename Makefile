@@ -26,10 +26,10 @@ ENSURE_DIST := mkdir -p dist
 BINARY := bin/hackwerk
 endif
 
-.PHONY: help version assets assets-check workflow-lint dev up down logs clean generate generate-check format format-check lint test test-integration test-migrations test-e2e test-race build build-image image-archive check scan scan-code scan-license scan-image sbom backup-restore-smoke container-smoke release-check
+.PHONY: help version assets assets-check workflow-lint dev up down logs clean generate generate-check format format-check lint test coverage coverage-check test-integration test-migrations test-e2e test-race build build-image image-archive check scan scan-code scan-license scan-image sbom backup-restore-smoke container-smoke release-check
 
 help:
-	@printf '%s\n' 'HackWerk: version assets assets-check workflow-lint dev up down logs clean generate generate-check format format-check lint test test-integration test-migrations test-e2e test-race build check scan scan-license backup-restore-smoke container-smoke release-check'
+	@printf '%s\n' 'HackWerk: version assets assets-check workflow-lint dev up down logs clean generate generate-check format format-check lint test coverage coverage-check test-integration test-migrations test-e2e test-race build check scan scan-license backup-restore-smoke container-smoke release-check'
 
 version:
 	@printf '%s\n' '$(VERSION)'
@@ -81,6 +81,12 @@ lint:
 test:
 	go test ./...
 
+coverage:
+	COVERAGE_MIN=0 sh scripts/coverage-check.sh
+
+coverage-check:
+	sh scripts/coverage-check.sh
+
 test-integration:
 	go test -tags=integration ./tests/integration/...
 
@@ -98,7 +104,7 @@ build:
 	mkdir -p bin
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/hackwerk
 
-check: generate-check format-check workflow-lint lint test test-integration build
+check: generate-check format-check workflow-lint lint test coverage-check test-integration build
 
 scan-license:
 	go tool go-licenses check --ignore example.invalid/hackplan ./cmd/hackwerk

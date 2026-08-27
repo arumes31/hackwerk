@@ -64,6 +64,43 @@ func TestOSRMMatrixContainsCoordinatesOnly(t *testing.T) {
 	}
 }
 
+func TestOSRMMatrixRejectsInvalidMetrics(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+	}{
+		{
+			name:    "negative distance",
+			payload: `{"code":"Ok","distances":[[0,-1],[1,0]],"durations":[[0,1],[1,0]]}`,
+		},
+		{
+			name:    "negative duration",
+			payload: `{"code":"Ok","distances":[[0,1],[1,0]],"durations":[[0,-1],[1,0]]}`,
+		},
+		{
+			name:    "distance overflow",
+			payload: `{"code":"Ok","distances":[[0,1e20],[1,0]],"durations":[[0,1],[1,0]]}`,
+		},
+		{
+			name:    "duration overflow",
+			payload: `{"code":"Ok","distances":[[0,1],[1,0]],"durations":[[0,1e20],[1,0]]}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(test.payload))
+			}))
+			defer server.Close()
+			base, _ := url.Parse(server.URL)
+			router := &OSRMRouter{base: base, client: server.Client(), max: 1 << 20, backoff: time.Minute, now: time.Now}
+			if _, err := router.Matrix(t.Context(), []Point{{48.2, 14.2}, {48.3, 14.3}}); err == nil {
+				t.Fatal("invalid matrix metric accepted")
+			}
+		})
+	}
+}
+
 func TestOSRMDirectionsContainValidatedGeometryAndNoPII(t *testing.T) {
 	var path string
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -1465,20 +1465,31 @@ document.querySelectorAll("[data-planning-workbench]").forEach((workbench) => {
   const single = workbench.querySelector("[data-planning-single]");
   const routeButton = workbench.querySelector("[data-planning-route]");
   const detail = workbench.querySelector("[data-planning-detail-panel]");
-  const depot = { latitude: 48.2, longitude: 14.2 };
+  const radiusOrigin = mapPoint(workbench.dataset.planningRadiusLatitude, workbench.dataset.planningRadiusLongitude);
+  if (radius && !radiusOrigin) {
+    radius.value = "";
+    radius.disabled = true;
+    radius.setAttribute("aria-describedby", "planning-radius-unavailable");
+    const hint = document.createElement("small");
+    hint.id = "planning-radius-unavailable";
+    hint.className = "form-hint";
+    hint.textContent = "Radiusfilter ist ohne konfigurierten Standard-Startort nicht verfügbar.";
+    radius.closest("label")?.append(hint);
+  }
   const radians = (value) => value * Math.PI / 180;
   const distanceKM = (row) => {
     const latitude = Number(row.dataset.latitude); const longitude = Number(row.dataset.longitude);
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return Number.POSITIVE_INFINITY;
-    const dLat = radians(latitude - depot.latitude); const dLon = radians(longitude - depot.longitude);
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(radians(depot.latitude)) * Math.cos(radians(latitude)) * Math.sin(dLon / 2) ** 2;
+    if (!radiusOrigin) return Number.POSITIVE_INFINITY;
+    const dLat = radians(latitude - radiusOrigin.latitude); const dLon = radians(longitude - radiusOrigin.longitude);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(radians(radiusOrigin.latitude)) * Math.cos(radians(latitude)) * Math.sin(dLon / 2) ** 2;
     return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
   const visible = (row) => {
     const query = String(search?.value || "").trim().toLocaleLowerCase("de-AT");
     const maximum = Number(radius?.value || 0);
 	const selectedRegion = String(region?.value || "");
-    return (!query || String(row.dataset.search || "").includes(query)) && (!selectedRegion || row.dataset.region === selectedRegion) && (!maximum || distanceKM(row) <= maximum);
+    return (!query || String(row.dataset.search || "").includes(query)) && (!selectedRegion || row.dataset.region === selectedRegion) && (!maximum || (radiusOrigin && distanceKM(row) <= maximum));
   };
   const renderFilters = () => rows.forEach((row) => { row.hidden = !visible(row); });
   const checkedRows = () => rows.filter((row) => row.querySelector('input[name="job_id"]')?.checked);
@@ -1786,8 +1797,10 @@ function createJobLocationMap(maplibregl, canvas, point, interactive) {
   const map = new maplibregl.Map({
     container: canvas,
     style: hackWerkRasterStyle(),
-    center: hasPoint ? [point.longitude, point.latitude] : [14.2, 48.2],
-    zoom: hasPoint ? 16 : 7,
+    ...(hasPoint ? { center: [point.longitude, point.latitude], zoom: 16 } : {
+      bounds: [[9.5, 46.3], [17.3, 49.2]],
+      fitBoundsOptions: { padding: 36, maxZoom: 7 },
+    }),
     interactive,
     dragRotate: false,
     pitchWithRotate: false,
@@ -2154,13 +2167,23 @@ function routeMarkerElement(stop, kind = "stop") {
   return marker;
 }
 
-function depotMarkerElement() {
+function startMarkerElement() {
   const marker = document.createElement("button");
   marker.type = "button";
-  marker.className = "route-map-marker route-map-marker--depot";
-  marker.textContent = "H";
-  marker.title = "HackWerk Depot";
-  marker.setAttribute("aria-label", "HackWerk Depot auf der Karte öffnen");
+  marker.className = "route-map-marker route-map-marker--start";
+  marker.textContent = "S";
+  marker.title = "Startort";
+  marker.setAttribute("aria-label", "Startort auf der Karte öffnen");
+  return marker;
+}
+
+function endMarkerElement() {
+  const marker = document.createElement("button");
+  marker.type = "button";
+  marker.className = "route-map-marker route-map-marker--end";
+  marker.textContent = "E";
+  marker.title = "Endort";
+  marker.setAttribute("aria-label", "Endort auf der Karte öffnen");
   return marker;
 }
 
@@ -2226,8 +2249,13 @@ function initializeRouteMap(canvas, maplibregl) {
   const candidates = routeCandidates(context);
   const geometry = routeLineFeature(canvas.dataset.routeGeometry);
   const geometryCoordinates = geometry?.geometry.coordinates || [];
-  const depot = mapPoint(canvas.dataset.depotLatitude, canvas.dataset.depotLongitude)
-    || { latitude: 48.2, longitude: 14.2 };
+  const selectedStart = context.querySelector('[data-route-location-prefix="start"] [data-route-location-choice]:checked');
+  const selectedEnd = context.querySelector('[data-route-location-prefix="end"] [data-route-location-choice]:checked');
+  const routeStart = mapPoint(canvas.dataset.routeStartLatitude, canvas.dataset.routeStartLongitude);
+  const routeEnd = mapPoint(canvas.dataset.routeEndLatitude, canvas.dataset.routeEndLongitude);
+  const start = routeStart || mapPoint(selectedStart?.dataset.routeLocationLatitude, selectedStart?.dataset.routeLocationLongitude);
+  const end = routeEnd || mapPoint(selectedEnd?.dataset.routeLocationLatitude, selectedEnd?.dataset.routeLocationLongitude);
+  const sameEndpoint = start && end && Math.abs(start.latitude - end.latitude) < 1e-7 && Math.abs(start.longitude - end.longitude) < 1e-7;
   const stopJobIDs = new Set(stops.map((stop) => stop.jobID).filter(Boolean));
   const visibleCandidates = candidates.filter((candidate) => !stopJobIDs.has(candidate.jobID));
   candidates.forEach((candidate) => {
@@ -2236,7 +2264,8 @@ function initializeRouteMap(canvas, maplibregl) {
     syncRow();
   });
   const allCoordinates = [
-    [depot.longitude, depot.latitude],
+    ...(start ? [[start.longitude, start.latitude]] : []),
+    ...(end && !sameEndpoint ? [[end.longitude, end.latitude]] : []),
     ...geometryCoordinates,
     ...stops.map((stop) => [stop.point.longitude, stop.point.latitude]),
     ...visibleCandidates.map((candidate) => [candidate.point.longitude, candidate.point.latitude]),
@@ -2246,8 +2275,10 @@ function initializeRouteMap(canvas, maplibregl) {
   const map = new maplibregl.Map({
     container: canvas,
     style: hackWerkRasterStyle(),
-    center: first,
-    zoom: 10,
+    ...(first ? { center: first, zoom: 10 } : {
+      bounds: [[9.5, 46.3], [17.3, 49.2]],
+      fitBoundsOptions: { padding: 36, maxZoom: 7 },
+    }),
     interactive: true,
     dragRotate: false,
     pitchWithRotate: false,
@@ -2255,6 +2286,10 @@ function initializeRouteMap(canvas, maplibregl) {
   });
   let ready = false;
   const fitAll = () => {
+    if (allCoordinates.length === 0) {
+      map.fitBounds([[9.5, 46.3], [17.3, 49.2]], { padding: 36, maxZoom: 7, duration: 0 });
+      return;
+    }
     if (allCoordinates.length === 1) {
       map.easeTo({ center: allCoordinates[0], zoom: 11, duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300 });
       return;
@@ -2273,10 +2308,14 @@ function initializeRouteMap(canvas, maplibregl) {
     toolbar.className = "route-map-toolbar";
     toolbar.dataset.routeMapToolbar = "true";
     toolbar.setAttribute("aria-label", "Kartenwerkzeuge");
-    toolbar.innerHTML = '<button class="button button--quiet" type="button" data-route-map-depot>Depot</button><button class="button button--quiet" type="button" data-route-map-fit>Alle Punkte</button><button class="button button--quiet" type="button" data-route-map-labels aria-pressed="true">Beschriftungen</button><button class="button button--quiet" type="button" data-route-map-retry>Karte erneut laden</button><span class="status-badge" data-route-map-count></span>';
+    toolbar.innerHTML = '<button class="button button--quiet" type="button" data-route-map-start>Startort</button><button class="button button--quiet" type="button" data-route-map-fit>Alle Punkte</button><button class="button button--quiet" type="button" data-route-map-labels aria-pressed="true">Beschriftungen</button><button class="button button--quiet" type="button" data-route-map-retry>Karte erneut laden</button><span class="status-badge" data-route-map-count></span>';
     canvas.insertAdjacentElement("beforebegin", toolbar);
   }
-  toolbar.querySelector("[data-route-map-depot]")?.addEventListener("click", () => map.easeTo({ center: [depot.longitude, depot.latitude], zoom: 13 }));
+  const startButton = toolbar.querySelector("[data-route-map-start]");
+  if (!start) {
+    startButton?.setAttribute("disabled", "");
+    startButton?.setAttribute("title", "Wählen Sie zuerst einen Startort.");
+  } else startButton?.addEventListener("click", () => map.easeTo({ center: [start.longitude, start.latitude], zoom: 13 }));
   toolbar.querySelector("[data-route-map-fit]")?.addEventListener("click", fitAll);
   toolbar.querySelector("[data-route-map-labels]")?.addEventListener("click", (event) => {
     const visible = !context.classList.toggle("route-map-labels-hidden");
@@ -2330,7 +2369,7 @@ function initializeRouteMap(canvas, maplibregl) {
   }
   map.on("error", (event) => {
     if (event?.sourceId === "hackwerk-streets") {
-      routeMapNotice(context, "Die Kartenkacheln sind vorübergehend nicht verfügbar. Depot, Auftrags-Pins und Auswahl bleiben bedienbar.");
+      routeMapNotice(context, "Die Kartenkacheln sind vorübergehend nicht verfügbar. Startort, Auftrags-Pins und Auswahl bleiben bedienbar.");
       return;
     }
     if (!ready) markRouteMapUnavailable(canvas);
@@ -2378,11 +2417,22 @@ function initializeRouteMap(canvas, maplibregl) {
       routeMapNotice(context, "Die Grundkarte ist aktiv. Noch kein offener Auftrag besitzt einen gespeicherten Haufenstandort.");
     }
 
-    const depotPopup = routePopupContent({ label: "HackWerk Depot", customer: "Start und Ziel der Route" });
-    new maplibregl.Marker({ element: depotMarkerElement(), anchor: "center" })
-      .setLngLat([depot.longitude, depot.latitude])
-      .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(depotPopup.content))
-      .addTo(map);
+    if (start) {
+      const startLabel = String(canvas.dataset.routeStartLabel || selectedStart?.dataset.routeLocationLabel || "Startort").trim() || "Startort";
+      const startPopup = routePopupContent({ label: startLabel, customer: sameEndpoint ? "Start und Ende der Route" : "Start der Route" });
+      new maplibregl.Marker({ element: startMarkerElement(), anchor: "center" })
+        .setLngLat([start.longitude, start.latitude])
+        .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(startPopup.content))
+        .addTo(map);
+    }
+    if (end && !sameEndpoint) {
+      const endLabel = String(canvas.dataset.routeEndLabel || selectedEnd?.dataset.routeLocationLabel || "Endort").trim() || "Endort";
+      const endPopup = routePopupContent({ label: endLabel, customer: "Ende der Route" });
+      new maplibregl.Marker({ element: endMarkerElement(), anchor: "center" })
+        .setLngLat([end.longitude, end.latitude])
+        .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(endPopup.content))
+        .addTo(map);
+    }
 
     const stopMarkers = new Map();
     stops.forEach((stop) => {

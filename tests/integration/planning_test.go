@@ -14,9 +14,20 @@ import (
 	"example.invalid/hackplan/internal/customers"
 	"example.invalid/hackplan/internal/driver"
 	"example.invalid/hackplan/internal/planning"
+	"example.invalid/hackplan/internal/routelocation"
 )
 
 type integrationPlanningAvailability struct{ service *driver.Service }
+
+type integrationPlanningStart struct{ store *postgres.RouteLocationStore }
+
+func (s integrationPlanningStart) DefaultStart(ctx context.Context) (planning.Point, error) {
+	location, err := s.store.DefaultStart(ctx)
+	if err != nil {
+		return planning.Point{}, err
+	}
+	return planning.Point{Latitude: location.Latitude, Longitude: location.Longitude}, nil
+}
 
 func (a integrationPlanningAvailability) Resolve(ctx context.Context, actor auth.Actor, driverID string, from, to time.Time) ([]planning.Interval, error) {
 	values, err := a.service.ResolveAvailability(ctx, actor, driverID, from, to)
@@ -43,8 +54,13 @@ func planningFixtureService(t *testing.T, fixture calendarFixture, now time.Time
 	cfg := planning.DefaultConfig(location)
 	cfg.HorizonDays = 56
 	cfg.CandidateLimit = 2000
-	cfg.Depot = planning.Point{Latitude: 48.2, Longitude: 14.2}
-	service, err := planning.New(postgres.NewPlanningStore(fixture.pool), integrationPlanningAvailability{service: drivers}, planning.NewHaversineRouter(1.3, 55), cfg, func() time.Time { return now })
+	starts := postgres.NewRouteLocationStore(fixture.pool)
+	if _, err := starts.Create(fixture.ctx, fixture.admin, routelocation.Input{
+		Label: "Betriebshof", Address: "Teststraße 1", Latitude: 48.2, Longitude: 14.2, DefaultStart: true,
+	}, "planning-fixture"); err != nil {
+		t.Fatal(err)
+	}
+	service, err := planning.New(postgres.NewPlanningStore(fixture.pool), integrationPlanningAvailability{service: drivers}, planning.NewHaversineRouter(1.3, 55), cfg, func() time.Time { return now }, planning.WithDefaultStartProvider(integrationPlanningStart{store: starts}))
 	if err != nil {
 		t.Fatal(err)
 	}
