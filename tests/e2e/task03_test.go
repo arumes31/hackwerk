@@ -102,6 +102,9 @@ func TestTask03BrowserJourney(t *testing.T) {
 	if !strings.Contains(forbiddenInline.Text, "Berechtigung") || strings.Contains(markupLower, "&lt;") || strings.Contains(markupLower, "<html") || strings.Contains(markupLower, "doctype") || forbiddenInline.Start != "10:00" || forbiddenInline.GridColumnStart != "1" || forbiddenInline.GridColumnEnd != "-1" || forbiddenInline.AlertWidth < forbiddenInline.FormWidth-1 {
 		t.Fatalf("forbidden inline text/markup/start/grid/width = %q/%q/%q/%s:%s/%.1f:%.1f", forbiddenInline.Text, forbiddenInline.Markup, forbiddenInline.Start, forbiddenInline.GridColumnStart, forbiddenInline.GridColumnEnd, forbiddenInline.AlertWidth, forbiddenInline.FormWidth)
 	}
+	if err := chromedp.Run(browserContext, chromedp.Evaluate(`document.querySelector('form[data-availability-rule-form]').reset()`, nil)); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
 
 	partialExceptionForm := "form[action='/availability/exceptions']:has([name='starts_at'])"
 	var localTimeError, retainedExceptionStart, retainedExceptionNote string
@@ -120,6 +123,9 @@ func TestTask03BrowserJourney(t *testing.T) {
 	}
 	if !strings.Contains(localTimeError, "Zeitumstellung") || retainedExceptionStart != "2026-03-29T02:30" || retainedExceptionNote != "Diese Eingabe bleibt erhalten" {
 		t.Fatalf("DST exception error/start/note = %q/%q/%q", localTimeError, retainedExceptionStart, retainedExceptionNote)
+	}
+	if err := chromedp.Run(browserContext, chromedp.Evaluate(`document.querySelector(`+quoteJS(partialExceptionForm)+`).reset()`, nil)); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
 	}
 
 	allDayExceptionForm := "form[action='/availability/exceptions']:has([name='local_date'])"

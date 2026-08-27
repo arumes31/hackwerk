@@ -118,6 +118,7 @@ document.addEventListener("submit", async (event) => {
       alert.focus();
       return;
     }
+    dirtyForms.delete(form);
     window.location.reload();
   } catch {
     alert.textContent = "Die Änderung konnte wegen eines Verbindungsfehlers nicht gespeichert werden. Ihre Eingaben bleiben erhalten.";
@@ -139,9 +140,6 @@ document.querySelectorAll("form").forEach((form) => {
   };
   form.addEventListener("input", markDirty);
   form.addEventListener("change", markDirty);
-  form.addEventListener("submit", (event) => {
-    queueMicrotask(() => { if (!event.defaultPrevented) dirtyForms.delete(form); });
-  });
   form.addEventListener("reset", () => dirtyForms.delete(form));
 });
 window.addEventListener("beforeunload", (event) => {
@@ -187,6 +185,12 @@ document.addEventListener("submit", (event) => {
       }
     });
   }, 0);
+});
+
+document.addEventListener("submit", (event) => {
+  const form = event.target;
+  if (!(form instanceof HTMLFormElement) || event.defaultPrevented) return;
+  dirtyForms.delete(form);
 });
 
 window.addEventListener("pageshow", () => {
@@ -576,6 +580,7 @@ if (planningForm) {
     clearPlanningError(planningForm);
     try {
       await calendarRequest("/api/v1/calendar/plan", new FormData(planningForm), planningForm.elements.csrf_token.value);
+      dirtyForms.delete(planningForm);
       const jobID = planningForm.elements.job_id.value;
       document.querySelector(`[data-calendar-job="${CSS.escape(jobID)}"]`)?.remove();
       planningForm.closest("dialog")?.close();
@@ -1552,6 +1557,7 @@ if (voiceCapture) {
     const response = await fetch("/api/v1/voice/drafts", { method: "POST", headers: { "X-CSRF-Token": voiceCapture.dataset.csrf, Accept: "application/json" }, credentials: "same-origin", body: form });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload?.error?.message || "Die Aufnahme konnte nicht verarbeitet werden.");
+    dirtyForms.delete(uploadForm);
     window.location.assign(payload.location);
   };
   const supportedType = () => ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find((type) => window.MediaRecorder?.isTypeSupported(type));
