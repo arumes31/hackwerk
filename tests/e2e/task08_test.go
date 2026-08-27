@@ -87,6 +87,24 @@ func TestTask08PlanningSuggestionsMobileJourney(t *testing.T) {
 	if err := chromedp.Run(browser, chromedp.Navigate(server.URL+"/login"), chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery), chromedp.SetValue("#username", "admin-task04", chromedp.ByQuery), chromedp.SetValue("#password", adminPassword, chromedp.ByQuery), chromedp.Click("form[action='/login'] button", chromedp.ByQuery), chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery)); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
+	var desktopWorkbench bool
+	if err := runBrowserStep(browser, "compact planning desktop",
+		chromedp.EmulateViewport(1440, 900),
+		chromedp.Navigate(server.URL+"/planning"),
+		chromedp.WaitVisible(".planning-workspace", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const workspace=document.querySelector('.planning-workspace');
+			const style=getComputedStyle(workspace);
+			const children=Array.from(workspace.children).map(child=>child.getBoundingClientRect());
+			return style.display==='grid'&&style.gridTemplateColumns.trim().split(/\s+/).length===3&&children.every(rect=>rect.width>0)&&document.documentElement.scrollWidth<=window.innerWidth;
+		})()`, &desktopWorkbench),
+		chromedp.EmulateViewport(360, 800),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if !desktopWorkbench {
+		t.Fatal("planning workbench is not a compact three-column desktop layout")
+	}
 	var fallbackSourceSelected, fallbackSelected bool
 	var fallbackLocation string
 	if err := runBrowserStep(browser, "select route without JavaScript",

@@ -40,6 +40,14 @@ function initializeRouteLocationEditor(editor) {
     const lon = routeLocationCoordinate(longitude.value, -180, 180);
     return lat === null || lon === null ? null : { lat, lon };
   };
+  const setCoordinateDraft = (lat, lon) => {
+    latitude.value = routeLocationFormatCoordinate(lat);
+    longitude.value = routeLocationFormatCoordinate(lon);
+    latitude.dispatchEvent(new Event("input", { bubbles: true }));
+    longitude.dispatchEvent(new Event("input", { bubbles: true }));
+    latitude.dispatchEvent(new Event("change", { bubbles: true }));
+    longitude.dispatchEvent(new Event("change", { bubbles: true }));
+  };
   const confirmLocation = () => {
     const location = point();
     if (!String(label.value || "").trim()) {
@@ -120,9 +128,7 @@ function initializeRouteLocationEditor(editor) {
         button.addEventListener("click", () => {
           label.value = text;
           address.value = text;
-          latitude.value = routeLocationFormatCoordinate(lat);
-          longitude.value = routeLocationFormatCoordinate(lon);
-          invalidate();
+          setCoordinateDraft(lat, lon);
           clearResults();
           showSearchStatus(`„${text}“ vorbereitet. Bitte prüfen und Standort übernehmen.`);
           if (message) message.textContent = "Adresse und Koordinaten vorbereitet; noch nicht übernommen.";

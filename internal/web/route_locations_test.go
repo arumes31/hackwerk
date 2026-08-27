@@ -88,7 +88,7 @@ func TestRouteLocationSettingsAdminCanManageAndDriverCannotOpen(t *testing.T) {
 
 	page := httptest.NewRecorder()
 	router.ServeHTTP(page, authenticatedCustomerRequest(t, http.MethodGet, "/settings/route-locations", nil, session, csrf))
-	if page.Code != http.StatusOK || !containsAll(page.Body.String(), "Routenorte", "Betriebshof", "Standard-Start", "Standard-Ende") {
+	if page.Code != http.StatusOK || !containsAll(page.Body.String(), "Routenorte", "Betriebshof", "Standard-Start", "Standard-Ende", "Position anklicken", "data-route-location-map", "data-map-assets", "data-route-location-confirm", "class=\"check-label\"") {
 		t.Fatalf("settings page=%d %s", page.Code, page.Body.String())
 	}
 

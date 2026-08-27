@@ -19,7 +19,7 @@ templ RouteLocationsSettings(data RouteLocationsSettingsData) {
 		@documentHead(data.Shell.Page, "Routenorte – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page route-page">
+			<main id="hauptinhalt" class="page route-page compact-page route-location-page">
 				<div class="page-heading">
 					<div><p class="eyebrow">Einstellungen</p><h1>Routenorte</h1><p>Start und Ende werden aus klar benannten, geprüften Orten gewählt. Standards sind nur Vorauswahlen.</p></div>
 					<a class="button button--quiet" href="/planning/routes">Routenplanung öffnen</a>
@@ -31,23 +31,33 @@ templ RouteLocationsSettings(data RouteLocationsSettingsData) {
 					<form method="post" action="/settings/route-locations" class="form-card route-location-settings__form" data-route-location-editor>
 						<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
 						<input type="hidden" name="confirmed" value="" data-route-location-confirmed/>
+						@mapAssetData(data.Shell.Page)
 						<div class="section-heading"><div><p class="eyebrow">Neuer Ort</p><h2>Ort prüfen und speichern</h2></div></div>
-						<label>Bezeichnung<input type="text" name="name" maxlength="120" autocomplete="off" placeholder="z. B. Lagerplatz Nord" data-route-location-label required/></label>
-						<label>Geprüfte Adresse<input type="text" name="address" maxlength="500" autocomplete="street-address" placeholder="Straße, Ort" data-route-location-address required/></label>
-						<div class="location-search">
-							<label for="route-location-address-search">Adresse suchen</label>
-							<div class="location-search__bar"><input id="route-location-address-search" type="search" maxlength="200" autocomplete="off" placeholder="z. B. Waldstraße 9, Unterneukirchen" data-route-location-search-input/><button class="button button--quiet" type="button" data-route-location-search-submit>Adresse suchen</button></div>
-							<p class="form-hint location-search__status" data-route-location-search-status aria-live="polite"></p>
-							<ul class="location-search__results" data-route-location-search-results aria-label="Gefundene Adressen" hidden></ul>
+						<div class="route-location-create-grid">
+							<div class="route-location-form-fields">
+								<label>Bezeichnung<input type="text" name="name" maxlength="120" autocomplete="off" placeholder="z. B. Lagerplatz Nord" data-route-location-label required/></label>
+								<label>Geprüfte Adresse<input type="text" name="address" maxlength="500" autocomplete="street-address" placeholder="Straße, Ort" data-route-location-address required/></label>
+								<div class="location-search">
+									<label for="route-location-address-search">Adresse suchen</label>
+									<div class="location-search__bar"><input id="route-location-address-search" type="search" maxlength="200" autocomplete="off" placeholder="z. B. Waldstraße 9, Unterneukirchen" data-route-location-search-input/><button class="button button--quiet" type="button" data-route-location-search-submit>Adresse suchen</button></div>
+									<p class="form-hint location-search__status" data-route-location-search-status aria-live="polite"></p>
+									<ul class="location-search__results" data-route-location-search-results aria-label="Gefundene Adressen" hidden></ul>
+								</div>
+								<div class="coordinate-grid">
+									<label>Breitengrad<input type="text" name="latitude" inputmode="decimal" autocomplete="off" placeholder="48,208000" data-route-location-latitude required/></label>
+									<label>Längengrad<input type="text" name="longitude" inputmode="decimal" autocomplete="off" placeholder="16,373000" data-route-location-longitude required/></label>
+								</div>
+								<div class="route-location-defaults__choices"><label class="check-label"><input type="checkbox" name="default_start" value="true"/>Als Standard-Start verwenden</label><label class="check-label"><input type="checkbox" name="default_end" value="true"/>Als Standard-Ende verwenden</label></div>
+								<div class="route-location-editor-actions"><button class="button button--quiet" type="button" data-route-location-confirm>Standort übernehmen</button><button class="button" type="submit">Ort speichern</button></div>
+								<span class="form-hint" data-route-location-message aria-live="polite">Adresse oder Koordinaten prüfen und anschließend übernehmen.</span>
+								<p class="form-alert route-location-picker__error" data-route-location-error role="alert" hidden></p>
+							</div>
+							<section class="route-location-map-panel" aria-labelledby="route-location-map-title">
+								<div class="section-heading"><div><p class="eyebrow">Kartenwahl</p><h3 id="route-location-map-title">Position anklicken</h3></div><span class="status-badge">Entwurf</span></div>
+								<p class="form-hint" id="route-location-map-hint">Klicken Sie auf die tatsächliche Position oder ziehen Sie den Marker. Die geprüfte Adresse bleibt separat erforderlich.</p>
+								<div class="job-location-map route-location-map" data-route-location-map aria-labelledby="route-location-map-title" aria-describedby="route-location-map-hint"><div class="map-fallback" data-map-fallback>Die Straßenkarte wird geladen. Koordinaten können weiterhin direkt eingegeben werden.</div></div>
+							</section>
 						</div>
-						<div class="coordinate-grid">
-							<label>Breitengrad<input type="text" name="latitude" inputmode="decimal" autocomplete="off" placeholder="48,208000" data-route-location-latitude required/></label>
-							<label>Längengrad<input type="text" name="longitude" inputmode="decimal" autocomplete="off" placeholder="16,373000" data-route-location-longitude required/></label>
-						</div>
-						<div class="route-location-defaults__choices"><label><input type="checkbox" name="default_start" value="true"/>Als Standard-Start verwenden</label><label><input type="checkbox" name="default_end" value="true"/>Als Standard-Ende verwenden</label></div>
-						<div class="route-location-custom__confirm"><button class="button button--quiet" type="button" data-route-location-confirm>Standort übernehmen</button><span class="form-hint" data-route-location-message aria-live="polite">Adresse oder Koordinaten prüfen und anschließend übernehmen.</span></div>
-						<p class="form-alert route-location-picker__error" data-route-location-error role="alert" hidden></p>
-						<button class="button" type="submit">Ort speichern</button>
 					</form>
 					<div class="route-location-list">
 						<div class="section-heading"><div><p class="eyebrow">Gespeicherte Orte</p><h2>{ strconv.Itoa(len(data.Locations)) } Orte</h2></div></div>
@@ -67,8 +77,8 @@ templ RouteLocationsSettings(data RouteLocationsSettingsData) {
 										<label>Adresse<input type="text" name="address" maxlength="500" value={ location.Address } data-route-location-address required/></label>
 										<label>Breitengrad<input type="text" name="latitude" inputmode="decimal" value={ location.Latitude } data-route-location-latitude required/></label>
 										<label>Längengrad<input type="text" name="longitude" inputmode="decimal" value={ location.Longitude } data-route-location-longitude required/></label>
-										<label><input type="checkbox" name="default_start" value="true" checked?={ location.DefaultStart }/>Standard-Start</label>
-										<label><input type="checkbox" name="default_end" value="true" checked?={ location.DefaultEnd }/>Standard-Ende</label>
+										<label class="check-label"><input type="checkbox" name="default_start" value="true" checked?={ location.DefaultStart }/>Standard-Start</label>
+										<label class="check-label"><input type="checkbox" name="default_end" value="true" checked?={ location.DefaultEnd }/>Standard-Ende</label>
 										<div class="route-location-card__facts"><span>Version { strconv.Itoa(int(location.Version)) }</span></div>
 										<div class="route-location-custom__confirm"><button class="button button--quiet" type="button" data-route-location-confirm>Geänderten Standort übernehmen</button><span class="form-hint" data-route-location-message aria-live="polite">Gespeicherter Standort ist bestätigt.</span></div>
 										<p class="form-alert route-location-picker__error" data-route-location-error role="alert" hidden></p>

@@ -58,7 +58,7 @@ func RouteLocationsSettings(data RouteLocationsSettingsData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<main id=\"hauptinhalt\" class=\"page route-page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">Einstellungen</p><h1>Routenorte</h1><p>Start und Ende werden aus klar benannten, geprüften Orten gewählt. Standards sind nur Vorauswahlen.</p></div><a class=\"button button--quiet\" href=\"/planning/routes\">Routenplanung öffnen</a></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<main id=\"hauptinhalt\" class=\"page route-page compact-page route-location-page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">Einstellungen</p><h1>Routenorte</h1><p>Start und Ende werden aus klar benannten, geprüften Orten gewählt. Standards sind nur Vorauswahlen.</p></div><a class=\"button button--quiet\" href=\"/planning/routes\">Routenplanung öffnen</a></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -94,289 +94,297 @@ func RouteLocationsSettings(data RouteLocationsSettingsData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\"> <input type=\"hidden\" name=\"confirmed\" value=\"\" data-route-location-confirmed><div class=\"section-heading\"><div><p class=\"eyebrow\">Neuer Ort</p><h2>Ort prüfen und speichern</h2></div></div><label>Bezeichnung<input type=\"text\" name=\"name\" maxlength=\"120\" autocomplete=\"off\" placeholder=\"z. B. Lagerplatz Nord\" data-route-location-label required></label> <label>Geprüfte Adresse<input type=\"text\" name=\"address\" maxlength=\"500\" autocomplete=\"street-address\" placeholder=\"Straße, Ort\" data-route-location-address required></label><div class=\"location-search\"><label for=\"route-location-address-search\">Adresse suchen</label><div class=\"location-search__bar\"><input id=\"route-location-address-search\" type=\"search\" maxlength=\"200\" autocomplete=\"off\" placeholder=\"z. B. Waldstraße 9, Unterneukirchen\" data-route-location-search-input><button class=\"button button--quiet\" type=\"button\" data-route-location-search-submit>Adresse suchen</button></div><p class=\"form-hint location-search__status\" data-route-location-search-status aria-live=\"polite\"></p><ul class=\"location-search__results\" data-route-location-search-results aria-label=\"Gefundene Adressen\" hidden></ul></div><div class=\"coordinate-grid\"><label>Breitengrad<input type=\"text\" name=\"latitude\" inputmode=\"decimal\" autocomplete=\"off\" placeholder=\"48,208000\" data-route-location-latitude required></label> <label>Längengrad<input type=\"text\" name=\"longitude\" inputmode=\"decimal\" autocomplete=\"off\" placeholder=\"16,373000\" data-route-location-longitude required></label></div><div class=\"route-location-defaults__choices\"><label><input type=\"checkbox\" name=\"default_start\" value=\"true\">Als Standard-Start verwenden</label><label><input type=\"checkbox\" name=\"default_end\" value=\"true\">Als Standard-Ende verwenden</label></div><div class=\"route-location-custom__confirm\"><button class=\"button button--quiet\" type=\"button\" data-route-location-confirm>Standort übernehmen</button><span class=\"form-hint\" data-route-location-message aria-live=\"polite\">Adresse oder Koordinaten prüfen und anschließend übernehmen.</span></div><p class=\"form-alert route-location-picker__error\" data-route-location-error role=\"alert\" hidden></p><button class=\"button\" type=\"submit\">Ort speichern</button></form><div class=\"route-location-list\"><div class=\"section-heading\"><div><p class=\"eyebrow\">Gespeicherte Orte</p><h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\"> <input type=\"hidden\" name=\"confirmed\" value=\"\" data-route-location-confirmed>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = mapAssetData(data.Shell.Page).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"section-heading\"><div><p class=\"eyebrow\">Neuer Ort</p><h2>Ort prüfen und speichern</h2></div></div><div class=\"route-location-create-grid\"><div class=\"route-location-form-fields\"><label>Bezeichnung<input type=\"text\" name=\"name\" maxlength=\"120\" autocomplete=\"off\" placeholder=\"z. B. Lagerplatz Nord\" data-route-location-label required></label> <label>Geprüfte Adresse<input type=\"text\" name=\"address\" maxlength=\"500\" autocomplete=\"street-address\" placeholder=\"Straße, Ort\" data-route-location-address required></label><div class=\"location-search\"><label for=\"route-location-address-search\">Adresse suchen</label><div class=\"location-search__bar\"><input id=\"route-location-address-search\" type=\"search\" maxlength=\"200\" autocomplete=\"off\" placeholder=\"z. B. Waldstraße 9, Unterneukirchen\" data-route-location-search-input><button class=\"button button--quiet\" type=\"button\" data-route-location-search-submit>Adresse suchen</button></div><p class=\"form-hint location-search__status\" data-route-location-search-status aria-live=\"polite\"></p><ul class=\"location-search__results\" data-route-location-search-results aria-label=\"Gefundene Adressen\" hidden></ul></div><div class=\"coordinate-grid\"><label>Breitengrad<input type=\"text\" name=\"latitude\" inputmode=\"decimal\" autocomplete=\"off\" placeholder=\"48,208000\" data-route-location-latitude required></label> <label>Längengrad<input type=\"text\" name=\"longitude\" inputmode=\"decimal\" autocomplete=\"off\" placeholder=\"16,373000\" data-route-location-longitude required></label></div><div class=\"route-location-defaults__choices\"><label class=\"check-label\"><input type=\"checkbox\" name=\"default_start\" value=\"true\">Als Standard-Start verwenden</label><label class=\"check-label\"><input type=\"checkbox\" name=\"default_end\" value=\"true\">Als Standard-Ende verwenden</label></div><div class=\"route-location-editor-actions\"><button class=\"button button--quiet\" type=\"button\" data-route-location-confirm>Standort übernehmen</button><button class=\"button\" type=\"submit\">Ort speichern</button></div><span class=\"form-hint\" data-route-location-message aria-live=\"polite\">Adresse oder Koordinaten prüfen und anschließend übernehmen.</span><p class=\"form-alert route-location-picker__error\" data-route-location-error role=\"alert\" hidden></p></div><section class=\"route-location-map-panel\" aria-labelledby=\"route-location-map-title\"><div class=\"section-heading\"><div><p class=\"eyebrow\">Kartenwahl</p><h3 id=\"route-location-map-title\">Position anklicken</h3></div><span class=\"status-badge\">Entwurf</span></div><p class=\"form-hint\" id=\"route-location-map-hint\">Klicken Sie auf die tatsächliche Position oder ziehen Sie den Marker. Die geprüfte Adresse bleibt separat erforderlich.</p><div class=\"job-location-map route-location-map\" data-route-location-map aria-labelledby=\"route-location-map-title\" aria-describedby=\"route-location-map-hint\"><div class=\"map-fallback\" data-map-fallback>Die Straßenkarte wird geladen. Koordinaten können weiterhin direkt eingegeben werden.</div></div></section></div></form><div class=\"route-location-list\"><div class=\"section-heading\"><div><p class=\"eyebrow\">Gespeicherte Orte</p><h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(len(data.Locations)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 53, Col: 119}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 63, Col: 119}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, " Orte</h2></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, " Orte</h2></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(data.Locations) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div class=\"empty-state\"><h2>Noch kein Routenort</h2><p>Legen Sie zuerst mindestens einen geprüften Ort an. Ohne Standard bleibt die individuelle Auswahl in der Routenplanung verfügbar.</p></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<div class=\"empty-state\"><h2>Noch kein Routenort</h2><p>Legen Sie zuerst mindestens einen geprüften Ort an. Ohne Standard bleibt die individuelle Auswahl in der Routenplanung verfügbar.</p></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		for _, location := range data.Locations {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<article class=\"route-location-card\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<article class=\"route-location-card\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if !location.Active {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div><h2>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<div><h2>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(location.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 60, Col: 33}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 70, Col: 33}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</h2><p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</h2><p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(location.Address)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 60, Col: 61}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 70, Col: 61}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</p><div class=\"route-location-card__facts\"><span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</p><div class=\"route-location-card__facts\"><span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(location.Latitude)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 60, Col: 132}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 70, Col: 132}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, ", ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, ", ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(location.Longitude)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 60, Col: 156}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 70, Col: 156}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</span><span>Deaktiviert</span><span>Version ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</span><span>Deaktiviert</span><span>Version ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var9 string
 				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(int(location.Version)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 60, Col: 240}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 70, Col: 240}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</span></div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</span></div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<form method=\"post\" action=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<form method=\"post\" action=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var10 templ.SafeURL
 				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinURLErrs("/settings/route-locations/" + location.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 62, Col: 80}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 72, Col: 80}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\" class=\"form-grid\" data-route-location-editor><input type=\"hidden\" name=\"csrf_token\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" class=\"form-grid\" data-route-location-editor><input type=\"hidden\" name=\"csrf_token\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var11 string
 				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 63, Col: 77}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 73, Col: 77}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\"> <input type=\"hidden\" name=\"version\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\"> <input type=\"hidden\" name=\"version\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var12 string
 				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.Itoa(int(location.Version)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 64, Col: 89}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 74, Col: 89}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\"> <input type=\"hidden\" name=\"confirmed\" value=\"true\" data-route-location-confirmed> <label>Bezeichnung<input type=\"text\" name=\"name\" maxlength=\"120\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\"> <input type=\"hidden\" name=\"confirmed\" value=\"true\" data-route-location-confirmed> <label>Bezeichnung<input type=\"text\" name=\"name\" maxlength=\"120\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var13 string
 				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(location.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 66, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 76, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" data-route-location-label required></label> <label>Adresse<input type=\"text\" name=\"address\" maxlength=\"500\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" data-route-location-label required></label> <label>Adresse<input type=\"text\" name=\"address\" maxlength=\"500\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var14 string
 				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(location.Address)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 67, Col: 98}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 77, Col: 98}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" data-route-location-address required></label> <label>Breitengrad<input type=\"text\" name=\"latitude\" inputmode=\"decimal\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" data-route-location-address required></label> <label>Breitengrad<input type=\"text\" name=\"latitude\" inputmode=\"decimal\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var15 string
 				templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(location.Latitude)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 68, Col: 108}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 78, Col: 108}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" data-route-location-latitude required></label> <label>Längengrad<input type=\"text\" name=\"longitude\" inputmode=\"decimal\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" data-route-location-latitude required></label> <label>Längengrad<input type=\"text\" name=\"longitude\" inputmode=\"decimal\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var16 string
 				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(location.Longitude)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 69, Col: 110}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 79, Col: 110}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" data-route-location-longitude required></label> <label><input type=\"checkbox\" name=\"default_start\" value=\"true\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" data-route-location-longitude required></label> <label class=\"check-label\"><input type=\"checkbox\" name=\"default_start\" value=\"true\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if location.DefaultStart {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, " checked")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, " checked")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, ">Standard-Start</label> <label><input type=\"checkbox\" name=\"default_end\" value=\"true\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, ">Standard-Start</label> <label class=\"check-label\"><input type=\"checkbox\" name=\"default_end\" value=\"true\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if location.DefaultEnd {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, " checked")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, " checked")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, ">Standard-Ende</label><div class=\"route-location-card__facts\"><span>Version ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, ">Standard-Ende</label><div class=\"route-location-card__facts\"><span>Version ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var17 string
 				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(int(location.Version)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 72, Col: 101}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 82, Col: 101}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "</span></div><div class=\"route-location-custom__confirm\"><button class=\"button button--quiet\" type=\"button\" data-route-location-confirm>Geänderten Standort übernehmen</button><span class=\"form-hint\" data-route-location-message aria-live=\"polite\">Gespeicherter Standort ist bestätigt.</span></div><p class=\"form-alert route-location-picker__error\" data-route-location-error role=\"alert\" hidden></p><button class=\"button\" type=\"submit\">Speichern</button></form><form method=\"post\" action=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</span></div><div class=\"route-location-custom__confirm\"><button class=\"button button--quiet\" type=\"button\" data-route-location-confirm>Geänderten Standort übernehmen</button><span class=\"form-hint\" data-route-location-message aria-live=\"polite\">Gespeicherter Standort ist bestätigt.</span></div><p class=\"form-alert route-location-picker__error\" data-route-location-error role=\"alert\" hidden></p><button class=\"button\" type=\"submit\">Speichern</button></form><form method=\"post\" action=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var18 templ.SafeURL
 				templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinURLErrs("/settings/route-locations/" + location.ID + "/deactivate")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 77, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 87, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" class=\"route-location-card__actions\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "\" class=\"route-location-card__actions\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var19 string
 				templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 78, Col: 77}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 88, Col: 77}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "\"> <input type=\"hidden\" name=\"version\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\"> <input type=\"hidden\" name=\"version\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var20 string
 				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.Itoa(int(location.Version)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 79, Col: 89}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 89, Col: 89}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\"> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\"> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if location.DefaultStart || location.DefaultEnd {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<label class=\"check-label\"><input type=\"checkbox\" name=\"confirm_without_default\" value=\"true\" required>Ohne diesen Standard fortfahren</label> ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<label class=\"check-label\"><input type=\"checkbox\" name=\"confirm_without_default\" value=\"true\" required>Ohne diesen Standard fortfahren</label> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<button class=\"button button--quiet\" type=\"submit\">Deaktivieren</button></form>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<button class=\"button button--quiet\" type=\"submit\">Deaktivieren</button></form>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</article>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</article>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</div></section></main>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</div></section></main>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -384,20 +392,20 @@ func RouteLocationsSettings(data RouteLocationsSettingsData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<script type=\"module\" src=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<script type=\"module\" src=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var21 string
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.Page.RouteLocationsJSPath)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 92, Col: 67}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/route_locations.templ`, Line: 102, Col: 67}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\" defer></script></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "\" defer></script></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -87,6 +87,28 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
 
+	var routeLocationMapReady, routeLocationConfirmed, routeLocationInvalidated, routeLocationLayout bool
+	if err := runBrowserStep(browser, "select route location on map",
+		chromedp.Navigate(server.URL+"/settings/route-locations"),
+		chromedp.WaitVisible("[data-route-location-map]", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('[data-route-location-map]')?.dataset.mapSelectionEnabled==='true'&&document.querySelector('[data-route-location-map]')?.dataset.mapReady==='true'`, nil),
+		chromedp.SetValue("[data-route-location-label]", "Kartenort", chromedp.ByQuery),
+		chromedp.SetValue("[data-route-location-address]", "Geprüfte Adresse", chromedp.ByQuery),
+		chromedp.Click("[data-route-location-map]", chromedp.ByQuery),
+		chromedp.Poll(`Boolean(document.querySelector('[data-route-location-latitude]').value&&document.querySelector('[data-route-location-longitude]').value)`, nil),
+		chromedp.Evaluate(`document.querySelector('[data-route-location-map]').dataset.mapSelectionEnabled==='true'`, &routeLocationMapReady),
+		chromedp.Click("[data-route-location-confirm]", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('[data-route-location-confirmed]').value==='true'`, &routeLocationConfirmed),
+		chromedp.Evaluate(`(() => { const input=document.querySelector('[data-route-location-latitude]'); input.value=String(Number(input.value)+0.001); input.dispatchEvent(new Event('input',{bubbles:true})); return document.querySelector('[data-route-location-confirmed]').value===''; })()`, &routeLocationInvalidated),
+		chromedp.Evaluate(`(() => { const checks=Array.from(document.querySelectorAll('.route-location-defaults__choices input[type="checkbox"]')); return document.documentElement.scrollWidth<=window.innerWidth&&checks.length===2&&checks.every(input=>{const box=input.getBoundingClientRect();const label=input.closest('label').getBoundingClientRect();return box.width<=24&&box.height<=24&&label.height>=44;}); })()`, &routeLocationLayout),
+		chromedp.Evaluate(`document.querySelector('form[data-route-location-editor]').reset()`, nil),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if !routeLocationMapReady || !routeLocationConfirmed || !routeLocationInvalidated || !routeLocationLayout {
+		t.Fatalf("route-location map/confirm/invalidate/layout=%v/%v/%v/%v", routeLocationMapReady, routeLocationConfirmed, routeLocationInvalidated, routeLocationLayout)
+	}
+
 	var compactDesktopOverflow, compactMobileOverflow bool
 	var driverCreateOpen bool
 	if err := runBrowserStep(browser, "compact driver list",
@@ -119,7 +141,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 
 	var desktopOverflow, smallDesktopTarget, selectedByMap, mapReady bool
 	var desktopLayout struct {
-		TwoColumns, MapAboveFold, CompactCandidate bool
+		TwoColumns, MapAboveFold, CompactCandidate, BuilderWide, EndpointCardsReadable bool
 	}
 	var adminRouteContext, mapToolbar, routeDatePresets bool
 	var routePresetAudit struct {
@@ -150,9 +172,12 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 			const builder=workspace.querySelector('.route-builder').getBoundingClientRect();
 			const panel=workspace.querySelector('.route-map-panel').getBoundingClientRect();
 			const checkbox=workspace.querySelector('.route-candidate > input[type="checkbox"]').getBoundingClientRect();
+			const endpointCards=Array.from(workspace.querySelectorAll('.route-location-picker')).map(card=>card.getBoundingClientRect());
 			return {TwoColumns:builder.right<panel.left&&Math.abs(builder.top-panel.top)<4,
 				MapAboveFold:panel.top<window.innerHeight&&panel.height>300,
-				CompactCandidate:checkbox.width<=24&&checkbox.height<=24};
+				CompactCandidate:checkbox.width<=24&&checkbox.height<=24,
+				BuilderWide:builder.width>=560,
+				EndpointCardsReadable:endpointCards.length===2&&endpointCards.every(card=>card.width>=250)};
 		})()`, &desktopLayout),
 		chromedp.Click(".route-map-marker--candidate[data-job-id='"+jobID+"']", chromedp.ByQuery),
 		chromedp.WaitVisible(".route-map-popup__action", chromedp.ByQuery),

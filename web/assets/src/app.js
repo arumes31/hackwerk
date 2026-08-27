@@ -2045,6 +2045,65 @@ function initializeJobLocationEditor(editor, maplibregl) {
   if (!map) markMapUnavailable(canvas);
 }
 
+function markRouteLocationMapUnavailable(canvas) {
+  if (!canvas) return;
+  const fallback = canvas.querySelector("[data-map-fallback]");
+  if (!fallback) return;
+  fallback.hidden = false;
+  fallback.textContent = "Die Straßenkarte ist derzeit nicht verfügbar. Koordinaten können weiterhin direkt eingegeben werden.";
+}
+
+function initializeRouteLocationCoordinateMap(canvas, maplibregl) {
+  const editor = canvas.closest("[data-route-location-editor]");
+  const latitudeInput = editor?.querySelector("[data-route-location-latitude]");
+  const longitudeInput = editor?.querySelector("[data-route-location-longitude]");
+  const confirmedInput = editor?.querySelector("[data-route-location-confirmed]");
+  const message = editor?.querySelector("[data-route-location-message]");
+  if (!editor || !latitudeInput || !longitudeInput || !confirmedInput) return;
+
+  const initialPoint = mapPoint(latitudeInput.value, longitudeInput.value);
+  const map = createJobLocationMap(maplibregl, canvas, initialPoint, true);
+  let marker = null;
+
+  const setMarker = (point, center = false) => {
+    if (!marker) {
+      marker = new maplibregl.Marker({ element: pileMarkerElement(), draggable: true, anchor: "bottom" })
+        .setLngLat([point.longitude, point.latitude])
+        .addTo(map);
+      marker.on("dragend", () => {
+        const next = marker.getLngLat();
+        setDraft({ latitude: next.lat, longitude: next.lng }, "Marker verschoben. Bitte Adresse prüfen und Standort übernehmen.");
+      });
+    } else {
+      marker.setLngLat([point.longitude, point.latitude]);
+    }
+    if (center) map.easeTo({ center: [point.longitude, point.latitude], zoom: Math.max(map.getZoom(), 14) });
+  };
+  const setDraft = (point, text) => {
+    latitudeInput.value = displayCoordinate(point.latitude);
+    longitudeInput.value = displayCoordinate(point.longitude);
+    confirmedInput.value = "";
+    latitudeInput.dispatchEvent(new Event("input", { bubbles: true }));
+    longitudeInput.dispatchEvent(new Event("input", { bubbles: true }));
+    setMarker(point);
+    if (message) message.textContent = text;
+  };
+  const syncInputsToMap = () => {
+    const point = mapPoint(latitudeInput.value, longitudeInput.value);
+    if (!point) return;
+    setMarker(point, true);
+  };
+
+  if (initialPoint) setMarker(initialPoint);
+  map.on("click", event => setDraft(
+    { latitude: event.lngLat.lat, longitude: event.lngLat.lng },
+    "Kartenposition vorbereitet. Bitte Adresse prüfen und Standort übernehmen.",
+  ));
+  latitudeInput.addEventListener("change", syncInputsToMap);
+  longitudeInput.addEventListener("change", syncInputsToMap);
+  canvas.dataset.mapSelectionEnabled = "true";
+}
+
 function initializeJobLocationPreview(canvas, maplibregl) {
   const point = mapPoint(canvas.dataset.latitude, canvas.dataset.longitude);
   if (!point) {
@@ -2758,7 +2817,8 @@ document.querySelectorAll('[data-route-context][data-route-own="true"]').forEach
 const jobLocationEditors = Array.from(document.querySelectorAll("[data-job-location-editor]"));
 const jobLocationPreviews = Array.from(document.querySelectorAll("[data-map-preview]"));
 const routeMapCanvases = Array.from(document.querySelectorAll("[data-route-map]"));
-if (jobLocationEditors.length || jobLocationPreviews.length || routeMapCanvases.length) {
+const routeLocationMapCanvases = Array.from(document.querySelectorAll("[data-route-location-map]"));
+if (jobLocationEditors.length || jobLocationPreviews.length || routeMapCanvases.length || routeLocationMapCanvases.length) {
   const initializeEditorFallback = (editor) => {
     if (editor.dataset.mapInitialized) return;
     editor.dataset.mapInitialized = "fallback";
@@ -2789,6 +2849,11 @@ if (jobLocationEditors.length || jobLocationPreviews.length || routeMapCanvases.
       canvas.dataset.mapInitialized = "true";
       try { initializeRouteMap(canvas, maplibregl); } catch { markRouteMapUnavailable(canvas); }
     });
+    routeLocationMapCanvases.forEach((canvas) => {
+      if (canvas.dataset.mapInitialized) return;
+      canvas.dataset.mapInitialized = "true";
+      try { initializeRouteLocationCoordinateMap(canvas, maplibregl); } catch { markRouteLocationMapUnavailable(canvas); }
+    });
     const initializePreview = (preview) => {
       if (preview.dataset.mapInitialized) return;
       preview.dataset.mapInitialized = "true";
@@ -2809,5 +2874,6 @@ if (jobLocationEditors.length || jobLocationPreviews.length || routeMapCanvases.
     jobLocationEditors.forEach(initializeEditorFallback);
     document.querySelectorAll("[data-map-canvas], [data-map-preview]").forEach(markMapUnavailable);
     routeMapCanvases.forEach((canvas) => markRouteMapUnavailable(canvas));
+    routeLocationMapCanvases.forEach((canvas) => markRouteLocationMapUnavailable(canvas));
   });
 }
