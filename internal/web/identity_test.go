@@ -173,7 +173,7 @@ func TestIdentityHTTPGenericLoginError(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := configForWebTest()
-	router, err := NewRouter(Dependencies{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pinger{}, Build: buildinfo.Info{Version: "test"}, Identity: identity})
+	router, err := NewRouter(Dependencies{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pinger{}, Build: buildinfo.Info{Version: "0.1.23", Commit: "11f91120aeba15b59f7c99d805a4ba08a8906672"}, Identity: identity})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,8 @@ func TestIdentityHTTPGenericLoginError(t *testing.T) {
 		!strings.Contains(loginBody, `href="/assets/login-original.css?v=`) ||
 		!strings.Contains(loginBody, `src="/assets/login-background-loader.js?v=`) ||
 		!strings.Contains(loginBody, `class="scene"`) ||
-		!strings.Contains(loginBody, `class="card form-card login-card"`) {
+		!strings.Contains(loginBody, `class="card form-card login-card"`) ||
+		!strings.Contains(loginBody, `class="login-card__version">Version 0.1.23 · 11f9112</p>`) {
 		t.Fatalf("login page response = %d %q", loginResponse.Code, loginBody)
 	}
 	form := url.Values{"username": {"nicht-vorhanden"}, "password": {"Falsches Passwort 2026"}}

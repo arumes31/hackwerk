@@ -91,6 +91,7 @@ func NewRouter(dependencies Dependencies) (http.Handler, error) {
 	pageData := templates.PageData{
 		AppName:                     dependencies.Config.AppName,
 		Version:                     dependencies.Build.Version,
+		BuildVersion:                dependencies.Build.DisplayVersion(),
 		CSSPath:                     assetPaths.CSS,
 		ControlFoundationCSSPath:    assetPaths.ControlFoundationCSS,
 		JSPath:                      assetPaths.JavaScript,

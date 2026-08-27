@@ -1,6 +1,8 @@
 // Package buildinfo exposes immutable build metadata injected by the linker.
 package buildinfo
 
+import "strings"
+
 // These values are replaced with -ldflags for release builds.
 var (
 	Version   = "dev"
@@ -25,4 +27,21 @@ func Current() Info {
 		Commit:    Commit,
 		BuildTime: BuildTime,
 	}
+}
+
+// DisplayVersion returns a concise build identity for user-facing diagnostics.
+func (info Info) DisplayVersion() string {
+	version := strings.TrimSpace(info.Version)
+	if version == "" {
+		version = "dev"
+	}
+
+	commit := strings.TrimSpace(info.Commit)
+	if commit == "" || commit == "unknown" {
+		return version
+	}
+	if len(commit) > 7 {
+		commit = commit[:7]
+	}
+	return version + " · " + commit
 }
