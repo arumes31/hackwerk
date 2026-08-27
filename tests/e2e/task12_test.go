@@ -18,6 +18,7 @@ import (
 	"example.invalid/hackplan/internal/config"
 	"example.invalid/hackplan/internal/planning"
 	"example.invalid/hackplan/internal/web"
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
 )
 
@@ -71,7 +72,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	t.Cleanup(cancelAllocator)
 	browser, cancelBrowser := chromedp.NewContext(allocator)
 	t.Cleanup(cancelBrowser)
-	browser, cancelTimeout := context.WithTimeout(browser, 180*time.Second)
+	browser, cancelTimeout := context.WithTimeout(browser, 300*time.Second)
 	t.Cleanup(cancelTimeout)
 	t.Cleanup(func() { _ = chromedp.Cancel(browser) })
 
@@ -250,39 +251,91 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
 
-	var orderBefore, orderAfter []string
+	var initialOrder, enhancedDOMOrder, enhancedStoredOrder []string
 	var mobileOverflow, smallMobileTarget bool
 	var ownRouteContext, wakeLock, navigationLink, callLink, printButton bool
+	var routeOrderEnhanced, reorderFocused bool
 	var liveText string
 	if err := runBrowserStep(browser, "reorder own route with buttons",
-		chromedp.Evaluate(`Array.from(document.querySelectorAll("[data-route-order-item] input[name='stop_id']"), e=>e.value)`, &orderBefore),
+		chromedp.Poll(`(() => {
+			const buttons=Array.from(document.querySelectorAll("form[data-route-order] [data-route-move]"));
+			const stops=document.querySelectorAll("form[data-route-order] [data-route-order-item]");
+			return stops.length===2&&buttons.length===stops.length*2&&buttons.every(button=>button.type==="button")&&Boolean(document.querySelector("[data-route-order-live]"));
+		})()`, nil),
+		chromedp.Evaluate(`Array.from(document.querySelectorAll("form[data-route-order] [data-route-move]")).every(button=>button.type==="button")`, &routeOrderEnhanced),
+		chromedp.Evaluate(`Array.from(document.querySelectorAll("[data-route-order-item] input[name='stop_id']"), e=>e.value)`, &initialOrder),
 		chromedp.Evaluate(`Boolean(document.querySelector('[data-route-context][data-route-own="true"]'))`, &ownRouteContext),
 		chromedp.Evaluate(`Boolean(document.querySelector('[data-wake-lock]'))`, &wakeLock),
 		chromedp.Evaluate(`Boolean(document.querySelector('[data-route-navigation]'))`, &navigationLink),
 		chromedp.Evaluate(`Boolean(document.querySelector('[data-route-call]'))`, &callLink),
 		chromedp.Evaluate(`Boolean(document.querySelector('[data-print]'))`, &printButton),
 		chromedp.Click("[data-route-order-item]:nth-child(2) [data-route-move='up']", chromedp.ByQuery),
-		chromedp.Evaluate(`Array.from(document.querySelectorAll("[data-route-order-item] input[name='stop_id']"), e=>e.value)`, &orderAfter),
+		chromedp.Poll(`(() => {
+			const moved=document.querySelector("[data-route-order-item]:first-child");
+			const focusTarget=moved?.querySelector("[data-route-move='down']");
+			return Boolean(document.querySelector("[data-route-order-live]")?.textContent.trim())&&document.activeElement===focusTarget;
+		})()`, nil),
+		chromedp.Evaluate(`Array.from(document.querySelectorAll("[data-route-order-item] input[name='stop_id']"), e=>e.value)`, &enhancedDOMOrder),
 		chromedp.Text("[data-route-order-live]", &liveText, chromedp.ByQuery),
+		chromedp.Evaluate(`document.activeElement===document.querySelector("[data-route-order-item]:first-child [data-route-move='down']")`, &reorderFocused),
 		chromedp.Evaluate(`document.documentElement.scrollWidth > window.innerWidth`, &mobileOverflow),
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('[data-route-move],form[data-route-order] button[type=submit]')).some(e=>{const r=e.getBoundingClientRect();return r.height>0&&(r.height<44||r.width<44)})`, &smallMobileTarget),
 		chromedp.Evaluate(`document.querySelector('form[data-route-order]').requestSubmit()`, nil),
 		chromedp.Sleep(750*time.Millisecond),
 		chromedp.Navigate(server.URL+"/my-route?date=2026-09-01"),
 		chromedp.WaitVisible("[data-route-order-item]", chromedp.ByQuery),
+		chromedp.Evaluate(`Array.from(document.querySelectorAll("[data-route-order-item] input[name='stop_id']"), e=>e.value)`, &enhancedStoredOrder),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
-	if !ownRouteContext || !wakeLock || !navigationLink || !callLink || !printButton || len(orderBefore) != 2 || len(orderAfter) != 2 || orderAfter[0] != orderBefore[1] || liveText == "" || mobileOverflow || smallMobileTarget {
-		t.Fatalf("mobile hooks/reorder before/after/live/overflow/small=%v/%v/%v/%v/%v/%v/%v/%q/%v/%v", ownRouteContext, wakeLock, navigationLink, callLink, printButton, orderBefore, orderAfter, liveText, mobileOverflow, smallMobileTarget)
+	enhancedPersisted := len(initialOrder) == 2 && len(enhancedDOMOrder) == 2 && len(enhancedStoredOrder) == 2 &&
+		enhancedDOMOrder[0] == initialOrder[1] && enhancedDOMOrder[1] == initialOrder[0] &&
+		enhancedStoredOrder[0] == enhancedDOMOrder[0] && enhancedStoredOrder[1] == enhancedDOMOrder[1]
+	if !routeOrderEnhanced || !reorderFocused || !ownRouteContext || !wakeLock || !navigationLink || !callLink || !printButton || !enhancedPersisted || liveText == "" || mobileOverflow || smallMobileTarget {
+		t.Fatalf("mobile enhanced/focused/hooks/persisted/orders initial/dom/stored/live/overflow/small=%v/%v/%v/%v/%v/%v/%v/%v/%v/%v/%v/%q/%v/%v", routeOrderEnhanced, reorderFocused, ownRouteContext, wakeLock, navigationLink, callLink, printButton, enhancedPersisted, initialOrder, enhancedDOMOrder, enhancedStoredOrder, liveText, mobileOverflow, smallMobileTarget)
+	}
+	var nativeStartOrder, nativeStoredOrder []string
+	if err := runBrowserStep(browser, "reorder own route without JavaScript",
+		chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetScriptExecutionDisabled(true).Do(ctx) }),
+		chromedp.Reload(),
+		chromedp.WaitVisible("[data-route-order-item]:first-child button[name='move_down']", chromedp.ByQuery),
+		chromedp.Evaluate(`Array.from(document.querySelectorAll("[data-route-order-item] input[name='stop_id']"), e=>e.value)`, &nativeStartOrder),
+		chromedp.Evaluate(`document.documentElement.dataset.e2eNavigationMarker='pending'`, nil),
+		chromedp.Focus("[data-route-order-item]:first-child button[name='move_down']", chromedp.ByQuery),
+		chromedp.KeyEvent("\r"),
+		chromedp.WaitNotPresent("html[data-e2e-navigation-marker='pending']", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-route-order-item]", chromedp.ByQuery),
+		chromedp.Evaluate(`Array.from(document.querySelectorAll("[data-route-order-item] input[name='stop_id']"), e=>e.value)`, &nativeStoredOrder),
+		chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetScriptExecutionDisabled(false).Do(ctx) }),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	nativePersisted := len(nativeStartOrder) == 2 && len(nativeStoredOrder) == 2 && len(enhancedStoredOrder) == 2 &&
+		nativeStartOrder[0] == enhancedStoredOrder[0] && nativeStartOrder[1] == enhancedStoredOrder[1] &&
+		nativeStoredOrder[0] == nativeStartOrder[1] && nativeStoredOrder[1] == nativeStartOrder[0]
+	if !nativePersisted {
+		t.Fatalf("no-JavaScript reorder persisted=%v enhanced/start/stored=%v/%v/%v", nativePersisted, enhancedStoredOrder, nativeStartOrder, nativeStoredOrder)
 	}
 
-	var firstStopID string
-	if err := pool.QueryRow(t.Context(), "SELECT id::text FROM route_stops WHERE route_draft_id=$1 ORDER BY position LIMIT 1", routeID).Scan(&firstStopID); err != nil {
+	rows, err = pool.Query(t.Context(), "SELECT id::text FROM route_stops WHERE route_draft_id=$1 ORDER BY position", routeID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if firstStopID != orderBefore[1] {
-		t.Fatalf("stored first stop=%s want %s", firstStopID, orderBefore[1])
+	var databaseOrder []string
+	for rows.Next() {
+		var stopID string
+		if err = rows.Scan(&stopID); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		databaseOrder = append(databaseOrder, stopID)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(databaseOrder, "|") != strings.Join(nativeStoredOrder, "|") {
+		t.Fatalf("database/native route order=%v/%v", databaseOrder, nativeStoredOrder)
 	}
 	for appointmentID, expected := range appointmentTimes {
 		var startsAt, endsAt time.Time

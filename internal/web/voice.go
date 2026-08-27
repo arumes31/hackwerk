@@ -70,15 +70,12 @@ func uploadVoice(service *voice.Service, cfg config.Voice, logger *slog.Logger) 
 				logger.WarnContext(request.Context(), "temporary voice audio cleanup failed", slog.String("error_code", "voice_temp_cleanup_failed"))
 			}
 		}()
-		if _, err = file.Seek(0, io.SeekStart); err != nil {
-			writeVoiceError(response, request, http.StatusInternalServerError, "audio_unavailable", "Die Aufnahme konnte nicht verarbeitet werden.")
-			return
-		}
-		session, _ := sessionFromContext(request.Context())
-		ctx, cancel := context.WithTimeout(request.Context(), cfg.ProviderTimeout+5*time.Second)
-		defer cancel()
-		draft, err := service.Process(ctx, session.Actor, voice.Audio{Reader: file, Filename: "aufnahme" + mediaExtension(mediaType), ContentType: mediaType, Size: fileSize(file)}, voice.Metadata{RecordedAt: time.Now(), Duration: duration})
+		draft, err := processVoiceUpload(request, service, cfg, file, duration, mediaType)
 		if err != nil {
+			if errors.Is(err, errVoiceType) || errors.Is(err, errVoiceDuration) {
+				writeVoiceUploadError(response, request, err)
+				return
+			}
 			status, code, message := mapVoiceError(err)
 			logger.WarnContext(request.Context(), "voice upload rejected", slog.String("error_code", code))
 			writeVoiceError(response, request, status, code, message)
@@ -103,15 +100,24 @@ func cleanupVoiceFile(ctx context.Context, file *os.File, logger *slog.Logger) {
 }
 
 func processVoiceUpload(request *http.Request, service *voice.Service, cfg config.Voice, file *os.File, duration time.Duration, mediaType string) (voice.Draft, error) {
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return voice.Draft{}, err
-	}
 	session, _ := sessionFromContext(request.Context())
 	ctx, cancel := context.WithTimeout(request.Context(), cfg.ProviderTimeout+5*time.Second)
 	defer cancel()
-	return service.Process(ctx, session.Actor, voice.Audio{
-		Reader: file, Filename: "aufnahme" + mediaExtension(mediaType), ContentType: mediaType, Size: fileSize(file),
-	}, voice.Metadata{RecordedAt: time.Now(), Duration: duration})
+	return service.ProcessPrepared(ctx, session.Actor, func() (voice.Audio, voice.Metadata, error) {
+		actualDuration, err := inspectAudioDuration(file, mediaType)
+		if err != nil {
+			return voice.Audio{}, voice.Metadata{}, errVoiceType
+		}
+		if actualDuration > cfg.MaxDuration || !voiceDurationsMatch(duration, actualDuration) {
+			return voice.Audio{}, voice.Metadata{}, errVoiceDuration
+		}
+		if _, err = file.Seek(0, io.SeekStart); err != nil {
+			return voice.Audio{}, voice.Metadata{}, err
+		}
+		return voice.Audio{
+			Reader: file, Filename: "aufnahme" + mediaExtension(mediaType), ContentType: mediaType, Size: fileSize(file),
+		}, voice.Metadata{RecordedAt: time.Now(), Duration: actualDuration}, nil
+	})
 }
 
 func uploadVoiceNative(dependencies Dependencies, page templates.PageData) http.HandlerFunc {
@@ -147,6 +153,11 @@ func uploadVoiceNative(dependencies Dependencies, page templates.PageData) http.
 		defer cleanupVoiceFile(request.Context(), received.file, dependencies.Logger)
 		draft, err := processVoiceUpload(request, service, cfg.Voice, received.file, received.duration, received.mediaType)
 		if err != nil {
+			if errors.Is(err, errVoiceType) || errors.Is(err, errVoiceDuration) {
+				status, _, message := voiceUploadError(err)
+				renderNativeVoiceError(response, request, service, cfg, page, status, message, dependencies.Logger)
+				return
+			}
 			status, _, message := mapVoiceError(err)
 			dependencies.Logger.WarnContext(request.Context(), "native voice upload rejected", slog.String("error_code", "voice_native_rejected"))
 			renderNativeVoiceError(response, request, service, cfg, page, status, message, dependencies.Logger)
@@ -345,19 +356,17 @@ func validateAudioFile(file *os.File, declared string) (string, error) {
 		detected = "audio/wav"
 	case len(buffer) >= 4 && buffer[0] == 0x1a && buffer[1] == 0x45 && buffer[2] == 0xdf && buffer[3] == 0xa3:
 		detected = "audio/webm"
-	case len(buffer) >= 12 && string(buffer[4:8]) == "ftyp":
-		detected = "audio/mp4"
 	default:
 		return "", errVoiceType
 	}
-	allowedDeclared := map[string]bool{"audio/webm": true, "video/webm": true, "audio/ogg": true, "application/ogg": true, "audio/wav": true, "audio/x-wav": true, "audio/mp4": true, "video/mp4": true, "audio/m4a": true}
+	allowedDeclared := map[string]bool{"audio/webm": true, "video/webm": true, "audio/ogg": true, "application/ogg": true, "audio/wav": true, "audio/x-wav": true}
 	if !allowedDeclared[strings.Split(declared, ";")[0]] {
 		return "", errVoiceType
 	}
 	return detected, nil
 }
 func mediaExtension(mediaType string) string {
-	return map[string]string{"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/wav": ".wav", "audio/mp4": ".mp4"}[mediaType]
+	return map[string]string{"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/wav": ".wav"}[mediaType]
 }
 func fileSize(file *os.File) int64 {
 	info, err := file.Stat()

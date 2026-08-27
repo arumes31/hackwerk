@@ -27,6 +27,15 @@ type webVoiceStore struct {
 	creates int
 }
 
+type webVoiceTranscriber struct {
+	calls int
+}
+
+func (transcriber *webVoiceTranscriber) Transcribe(context.Context, voice.Audio, string, voice.Metadata) (voice.Transcript, error) {
+	transcriber.calls++
+	return voice.Transcript{Text: "fixture"}, nil
+}
+
 func (store *webVoiceStore) Create(_ context.Context, actor auth.Actor, expires time.Time) (voice.Draft, error) {
 	store.creates++
 	store.draft = voice.Draft{ID: "voice-draft", OwnerUserID: actor.UserID, Status: voice.StatusTranscribing, Version: 1, ExpiresAt: expires}
@@ -56,8 +65,8 @@ func (store *webVoiceStore) Discard(context.Context, auth.Actor, string) error {
 func (store *webVoiceStore) Cleanup(context.Context) (int64, error)            { return 0, nil }
 
 func TestReceiveVoiceUploadValidWebMUsesRestrictiveTempFile(t *testing.T) {
-	cfg := config.Voice{TempDir: t.TempDir(), MaxBytes: 1024, MaxDuration: 90 * time.Second}
-	reader := voiceMultipart(t, []byte{0x1a, 0x45, 0xdf, 0xa3, 0, 0, 0, 0}, "audio/webm", "1000")
+	cfg := config.Voice{TempDir: t.TempDir(), MaxBytes: 64 << 10, MaxDuration: 90 * time.Second}
+	reader := voiceMultipart(t, webMOpusFixture(time.Second), "audio/webm", "1000")
 	file, duration, mediaType, err := receiveVoiceUpload(reader, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -70,6 +79,53 @@ func TestReceiveVoiceUploadValidWebMUsesRestrictiveTempFile(t *testing.T) {
 		t.Fatalf("mode/duration/type = %v/%v/%s", info.Mode().Perm(), duration, mediaType)
 	}
 }
+
+func TestVoiceUploadRejectsActualOverLimitBeforeCreatingDraft(t *testing.T) {
+	store := &webVoiceStore{}
+	transcriber := &webVoiceTranscriber{}
+	router, tempDir := voiceHTTPRouterWithTranscriber(t, store, transcriber)
+	body, contentType := voiceRequestBodyWithAudio(t, "csrf-token", "1", "audio/wav", wavFixture(91*time.Second))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.test/voice/upload", body)
+	request.Header.Set("Content-Type", contentType)
+	request.Header.Set("Origin", "https://example.test")
+	request.AddCookie(secureVoiceTestCookie("hackplan_session", "session-token"))
+	request.AddCookie(secureVoiceTestCookie("hackplan_csrf", "csrf-token"))
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnprocessableEntity || store.creates != 0 || transcriber.calls != 0 || !strings.Contains(response.Body.String(), "Aufnahmedauer") {
+		t.Fatalf("response/creates/provider-calls = %d/%d/%d body=%q, want %d/0/0 with duration error", response.Code, store.creates, transcriber.calls, response.Body.String(), http.StatusUnprocessableEntity)
+	}
+	entries, err := os.ReadDir(tempDir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("temporary upload files remain: %v, err=%v", entries, err)
+	}
+}
+
+func TestVoiceUploadRejectsUnverifiableMP4BeforeCreatingDraft(t *testing.T) {
+	store := &webVoiceStore{}
+	transcriber := &webVoiceTranscriber{}
+	router, tempDir := voiceHTTPRouterWithTranscriber(t, store, transcriber)
+	body, contentType := voiceRequestBodyWithAudio(t, "csrf-token", "1", "audio/mp4", mp4AACFixture(time.Second))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.test/voice/upload", body)
+	request.Header.Set("Content-Type", contentType)
+	request.Header.Set("Origin", "https://example.test")
+	request.AddCookie(secureVoiceTestCookie("hackplan_session", "session-token"))
+	request.AddCookie(secureVoiceTestCookie("hackplan_csrf", "csrf-token"))
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnsupportedMediaType || store.creates != 0 || transcriber.calls != 0 || !strings.Contains(response.Body.String(), "Audioformat") {
+		t.Fatalf("response/creates/provider-calls = %d/%d/%d body=%q, want %d/0/0 with format error", response.Code, store.creates, transcriber.calls, response.Body.String(), http.StatusUnsupportedMediaType)
+	}
+	entries, err := os.ReadDir(tempDir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("temporary upload files remain: %v, err=%v", entries, err)
+	}
+}
+
 func TestReceiveVoiceUploadRejectsEmptyWrongTypeLargeAndDuration(t *testing.T) {
 	cfg := config.Voice{TempDir: t.TempDir(), MaxBytes: 8, MaxDuration: 2 * time.Second}
 	tests := []struct {
@@ -180,6 +236,10 @@ func secureVoiceTestCookie(name, value string) *http.Cookie {
 }
 
 func voiceHTTPRouter(t *testing.T, store *webVoiceStore) (http.Handler, string) {
+	return voiceHTTPRouterWithTranscriber(t, store, voice.FakeTranscriber{Text: "Franz Huber, 80 m³, drei Stunden"})
+}
+
+func voiceHTTPRouterWithTranscriber(t *testing.T, store *webVoiceStore, transcriber voice.Transcriber) (http.Handler, string) {
 	t.Helper()
 	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
 	identityStore := &identityTestStore{session: auth.Session{
@@ -195,13 +255,13 @@ func voiceHTTPRouter(t *testing.T, store *webVoiceStore) (http.Handler, string) 
 		t.Fatal(err)
 	}
 	location, _ := time.LoadLocation("Europe/Vienna")
-	voiceService, err := voice.New(store, voice.FakeTranscriber{Text: "Franz Huber, 80 m³, drei Stunden"}, voice.RuleExtractor{}, voice.Config{Enabled: true, Retention: time.Hour, RateLimitPerMinute: 10, ConcurrentPerUser: 1, Timezone: location}, func() time.Time { return now })
+	voiceService, err := voice.New(store, transcriber, voice.RuleExtractor{}, voice.Config{Enabled: true, Retention: time.Hour, RateLimitPerMinute: 10, ConcurrentPerUser: 1, Timezone: location}, func() time.Time { return now })
 	if err != nil {
 		t.Fatal(err)
 	}
 	tempDir := t.TempDir()
 	cfg := configForWebTest()
-	cfg.Voice = config.Voice{Enabled: true, Transcriber: "fake", MaxDuration: 90 * time.Second, MaxBytes: 1024, ProviderTimeout: time.Second, TempDir: tempDir}
+	cfg.Voice = config.Voice{Enabled: true, Transcriber: "fake", MaxDuration: 90 * time.Second, MaxBytes: 1 << 20, ProviderTimeout: time.Second, TempDir: tempDir}
 	router, err := NewRouter(Dependencies{
 		Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pinger{},
 		Build: buildinfo.Info{Version: "test"}, Identity: identity, Voice: voiceService,
@@ -213,6 +273,10 @@ func voiceHTTPRouter(t *testing.T, store *webVoiceStore) (http.Handler, string) 
 }
 
 func voiceRequestBody(t *testing.T, csrfToken, duration, audioType string) (*bytes.Reader, string) {
+	return voiceRequestBodyWithAudio(t, csrfToken, duration, audioType, wavFixture(3*time.Second))
+}
+
+func voiceRequestBodyWithAudio(t *testing.T, csrfToken, duration, audioType string, audio []byte) (*bytes.Reader, string) {
 	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -235,7 +299,7 @@ func voiceRequestBody(t *testing.T, csrfToken, duration, audioType string) (*byt
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = part.Write([]byte{'R', 'I', 'F', 'F', 36, 0, 0, 0, 'W', 'A', 'V', 'E'}); err != nil {
+	if _, err = part.Write(audio); err != nil {
 		t.Fatal(err)
 	}
 	if err = writer.Close(); err != nil {

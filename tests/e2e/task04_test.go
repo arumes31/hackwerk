@@ -357,7 +357,9 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		chromedp.Poll(`Boolean(window.__alternativeURL)`, nil),
 		chromedp.Evaluate(`new URL(window.__alternativeURL,location.origin).searchParams.get('starts_at')`, &alternativeStart),
 		chromedp.Evaluate(`window.fetch=window.__timeFetch;delete window.__timeFetch;delete window.__alternativeURL`, nil),
+		chromedp.Evaluate(`window.__conflictNativeConfirm=window.confirm;window.confirm=()=>true`, nil),
 		chromedp.Click("[data-appointment-close]", chromedp.ByQuery),
+		chromedp.Evaluate(`window.confirm=window.__conflictNativeConfirm;delete window.__conflictNativeConfirm`, nil),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
@@ -377,8 +379,10 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		t.Fatalf("calendar resize enabled/visible = %v/%v; handles=%s", resizeEnabled, resizeHandleVisible, resizeDebug)
 	}
 
+	var dirtyAppointmentOpen, dirtyAppointmentValue, dirtyAppointmentFocus bool
+	var dirtyAppointmentConfirmCalls, cleanAppointmentConfirmCalls int
 	var staleReasonValues []string
-	if err := runBrowserStep(browserContext, "appointment dialog clears prior reasons",
+	if err := runBrowserStep(browserContext, "appointment dialog protects and resets unsaved controls",
 		clickCurrent(appointmentEventSelector),
 		chromedp.WaitVisible("[data-appointment-dialog]", chromedp.ByQuery),
 		chromedp.SetValue("[data-appointment-move-override]", "Nur für Termin A", chromedp.ByQuery),
@@ -388,17 +392,36 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		chromedp.SetValue("[data-appointment-reopen-reason]", "Nicht wiederverwenden", chromedp.ByQuery),
 		chromedp.SetValue("[data-appointment-reopen-override]", "Nicht freigeben", chromedp.ByQuery),
 		chromedp.SetValue("[data-appointment-complete-override-reason]", "Nicht erledigen", chromedp.ByQuery),
+		chromedp.Focus("[data-appointment-cancel-reason]", chromedp.ByQuery),
+		chromedp.Evaluate(`window.__appointmentNativeConfirm=window.confirm;window.__appointmentConfirmCalls=0;window.confirm=()=>{window.__appointmentConfirmCalls++;return false}`, nil),
+		chromedp.KeyEvent("\x1b"),
+		chromedp.Evaluate(`document.querySelector('[data-appointment-dialog]').open`, &dirtyAppointmentOpen),
+		chromedp.Evaluate(`document.querySelector('[data-appointment-cancel-reason]').value === 'Nicht übernehmen'`, &dirtyAppointmentValue),
+		chromedp.Evaluate(`document.activeElement === document.querySelector('[data-appointment-cancel-reason]')`, &dirtyAppointmentFocus),
+		chromedp.Click("[data-appointment-close]", chromedp.ByQuery),
+		chromedp.Evaluate(`window.__appointmentConfirmCalls`, &dirtyAppointmentConfirmCalls),
+		chromedp.Evaluate(`window.confirm=()=>true`, nil),
 		chromedp.Click("[data-appointment-close]", chromedp.ByQuery),
 		chromedp.WaitNotVisible("[data-appointment-dialog]", chromedp.ByQuery),
 		clickCurrent(appointmentEventSelector),
 		chromedp.WaitVisible("[data-appointment-dialog]", chromedp.ByQuery),
 		chromedp.Evaluate(`['[data-appointment-move-override]','[data-without-notification-reason]','[data-confirmation-admin-reason]','[data-appointment-cancel-reason]','[data-appointment-reopen-reason]','[data-appointment-reopen-override]','[data-appointment-complete-override-reason]'].map(selector=>document.querySelector(selector).value)`, &staleReasonValues),
+		chromedp.Evaluate(`window.__cleanAppointmentConfirmCalls=0;window.confirm=()=>{window.__cleanAppointmentConfirmCalls++;return false}`, nil),
 		chromedp.Click("[data-appointment-close]", chromedp.ByQuery),
+		chromedp.WaitNotVisible("[data-appointment-dialog]", chromedp.ByQuery),
+		chromedp.Evaluate(`window.__cleanAppointmentConfirmCalls`, &cleanAppointmentConfirmCalls),
+		chromedp.Evaluate(`window.confirm=window.__appointmentNativeConfirm;delete window.__appointmentNativeConfirm;delete window.__appointmentConfirmCalls;delete window.__cleanAppointmentConfirmCalls`, nil),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
+	if !dirtyAppointmentOpen || !dirtyAppointmentValue || !dirtyAppointmentFocus || dirtyAppointmentConfirmCalls != 2 {
+		t.Fatalf("dirty appointment dialog open/value/focus/prompts = %v/%v/%v/%d", dirtyAppointmentOpen, dirtyAppointmentValue, dirtyAppointmentFocus, dirtyAppointmentConfirmCalls)
+	}
 	if strings.Join(staleReasonValues, "") != "" {
 		t.Fatalf("appointment dialog retained reasons: %v", staleReasonValues)
+	}
+	if cleanAppointmentConfirmCalls != 0 {
+		t.Fatalf("clean reopened appointment dialog prompted %d times", cleanAppointmentConfirmCalls)
 	}
 
 	if err := runBrowserStep(browserContext, "extend duration from appointment dialog",
@@ -418,10 +441,15 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	if extendedEnd.Sub(extendedStart) != 195*time.Minute {
 		t.Fatalf("extended duration=%s want 195m", extendedEnd.Sub(extendedStart))
 	}
+	var dirtyAfterSuccessfulAppointmentAction bool
 	if err := chromedp.Run(browserContext,
 		chromedp.Poll(fmt.Sprintf(`Number(window.hackWerkCalendar.getEventById(%q)?.extendedProps.version) === %d && document.querySelector(%q) !== null`, appointmentID, extendedVersion, appointmentEventSelector), nil),
+		chromedp.Evaluate(`(()=>{const event=new Event('beforeunload',{cancelable:true});window.dispatchEvent(event);return event.defaultPrevented})()`, &dirtyAfterSuccessfulAppointmentAction),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if dirtyAfterSuccessfulAppointmentAction {
+		t.Fatal("successful appointment action left a stale dirty-dialog warning")
 	}
 
 	if err := runBrowserStep(browserContext, "local-time reschedule on UTC device",

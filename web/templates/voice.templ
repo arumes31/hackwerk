@@ -57,7 +57,7 @@ templ VoiceCapture(data VoiceCaptureData) {
 						<p data-voice-status role="status">Das Mikrofon wird erst nach „Aufnahme starten“ angefragt.</p>
 						<form method="post" action="/voice/upload" enctype="multipart/form-data" data-voice-upload>
 							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
-							<label>Oder vorhandene Audiodatei prüfen und hochladen<input type="file" name="audio" accept="audio/webm,audio/ogg,audio/wav,audio/mp4,video/webm,video/mp4" required/></label>
+							<label>Oder vorhandene Audiodatei prüfen und hochladen<input type="file" name="audio" accept="audio/webm,audio/ogg,audio/wav,video/webm" required/></label>
 							<label>Dauer in Sekunden<input name="duration_seconds" type="number" min="1" max={ fmt.Sprint(data.MaxSeconds) } required/></label>
 							<button class="button button--quiet" type="submit">Datei als Entwurf verarbeiten</button>
 						</form>

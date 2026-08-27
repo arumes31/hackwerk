@@ -3,11 +3,12 @@
 package e2e_test
 
 import (
-	"bytes"
 	"context"
+	"encoding/binary"
 	"io"
 	"log/slog"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,8 @@ import (
 	"example.invalid/hackplan/internal/voice"
 	"example.invalid/hackplan/internal/web"
 	"github.com/chromedp/cdproto/emulation"
+	"github.com/chromedp/cdproto/network"
+	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -52,7 +55,7 @@ func TestTask09VoiceReviewMobileJourney(t *testing.T) {
 	if err = os.WriteFile(audioPath, minimalWAV(), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	options := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(browserExecutable(t)), chromedp.Headless, chromedp.DisableGPU, chromedp.NoSandbox, chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck, chromedp.UserDataDir(browserProfileDir(t)), chromedp.WindowSize(360, 800))
+	options := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(browserExecutable(t)), chromedp.Headless, chromedp.DisableGPU, chromedp.NoSandbox, chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck, chromedp.Flag("autoplay-policy", "no-user-gesture-required"), chromedp.UserDataDir(browserProfileDir(t)), chromedp.WindowSize(360, 800))
 	allocator, cancelAllocator := chromedp.NewExecAllocator(context.Background(), options...)
 	t.Cleanup(cancelAllocator)
 	browser, cancelBrowser := chromedp.NewContext(allocator)
@@ -84,8 +87,79 @@ func TestTask09VoiceReviewMobileJourney(t *testing.T) {
 	if !nativeFallbackConfigured {
 		t.Fatal("native multipart fallback is not fully configured")
 	}
-	if err = runBrowserStep(browser, "upload fixture", chromedp.SetUploadFiles("[data-voice-upload] input[type=file]", []string{audioPath}, chromedp.ByQuery), chromedp.SetValue("[data-voice-upload] input[name=duration_seconds]", "3", chromedp.ByQuery), chromedp.Click("[data-voice-upload] button[type=submit]", chromedp.ByQuery), chromedp.WaitVisible("form[action$='/commit']", chromedp.ByQuery)); err != nil {
+	uploadRequests := make(chan observedVoiceUploadRequest, 8)
+	chromedp.ListenTarget(browser, func(event any) {
+		requestEvent, ok := event.(*network.EventRequestWillBeSent)
+		if !ok || requestEvent.Request.Method != "POST" {
+			return
+		}
+		requestURL, err := url.Parse(requestEvent.Request.URL)
+		if err != nil || (requestURL.Path != "/api/v1/voice/drafts" && requestURL.Path != "/voice/upload") {
+			return
+		}
+		observation := observedVoiceUploadRequest{Path: requestURL.Path}
+		for name, value := range requestEvent.Request.Headers {
+			headerValue, ok := value.(string)
+			if !ok {
+				continue
+			}
+			switch {
+			case strings.EqualFold(name, "X-CSRF-Token"):
+				observation.HasCSRF = strings.TrimSpace(headerValue) != ""
+			case strings.EqualFold(name, "Content-Type"):
+				observation.Multipart = strings.HasPrefix(strings.ToLower(strings.TrimSpace(headerValue)), "multipart/form-data;")
+			}
+		}
+		select {
+		case uploadRequests <- observation:
+		default:
+		}
+	})
+	if err = chromedp.Run(browser, network.Enable()); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
+	}
+	var recorded mediaRecorderFixture
+	if err = runBrowserStep(browser, "generate Edge MediaRecorder fixture", chromedp.Evaluate(mediaRecorderFixtureScript, &recorded, awaitJavaScriptPromise)); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if !recorded.Supported || recorded.Size < 64 || recorded.FileCount != 1 {
+		t.Fatalf("Edge MediaRecorder support/size/files=%v/%d/%d mime=%q capabilities recorder/webm-opus/webm/ogg-opus/audio-context/data-transfer/file=%v/%v/%v/%v/%v/%v/%v",
+			recorded.Supported, recorded.Size, recorded.FileCount, recorded.MIMEType,
+			recorded.MediaRecorder, recorded.AudioWebMOpus, recorded.AudioWebM, recorded.AudioOggOpus,
+			recorded.AudioContext, recorded.DataTransfer, recorded.File)
+	}
+	if err = runBrowserStep(browser, "upload Edge MediaRecorder fixture through enhanced API", chromedp.Click("[data-voice-upload] button[type=submit]", chromedp.ByQuery), chromedp.WaitVisible("form[action$='/commit']", chromedp.ByQuery)); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	observedRequests := make([]observedVoiceUploadRequest, 0, 2)
+	select {
+	case request := <-uploadRequests:
+		observedRequests = append(observedRequests, request)
+	case <-time.After(5 * time.Second):
+		t.Fatal("no voice upload POST was observed")
+	}
+drainUploadRequests:
+	for {
+		select {
+		case request := <-uploadRequests:
+			observedRequests = append(observedRequests, request)
+		default:
+			break drainUploadRequests
+		}
+	}
+	var enhancedPosts, nativePosts int
+	var enhancedRequestValid bool
+	for _, request := range observedRequests {
+		switch request.Path {
+		case "/api/v1/voice/drafts":
+			enhancedPosts++
+			enhancedRequestValid = enhancedRequestValid || (request.Multipart && request.HasCSRF)
+		case "/voice/upload":
+			nativePosts++
+		}
+	}
+	if enhancedPosts != 1 || nativePosts != 0 || !enhancedRequestValid {
+		t.Fatalf("enhanced/native voice POSTs=%d/%d valid multipart+CSRF=%v", enhancedPosts, nativePosts, enhancedRequestValid)
 	}
 	var reviewText string
 	var fieldValues []string
@@ -146,7 +220,106 @@ func TestTask09VoiceReviewMobileJourney(t *testing.T) {
 	}
 }
 
+type mediaRecorderFixture struct {
+	Supported     bool   `json:"supported"`
+	MediaRecorder bool   `json:"mediaRecorder"`
+	AudioWebMOpus bool   `json:"audioWebMOpus"`
+	AudioWebM     bool   `json:"audioWebM"`
+	AudioOggOpus  bool   `json:"audioOggOpus"`
+	AudioContext  bool   `json:"audioContext"`
+	DataTransfer  bool   `json:"dataTransfer"`
+	File          bool   `json:"file"`
+	MIMEType      string `json:"mimeType"`
+	Size          int64  `json:"size"`
+	FileCount     int    `json:"fileCount"`
+}
+
+func awaitJavaScriptPromise(parameters *cdpruntime.EvaluateParams) *cdpruntime.EvaluateParams {
+	return parameters.WithAwaitPromise(true)
+}
+
+type observedVoiceUploadRequest struct {
+	Path      string
+	Multipart bool
+	HasCSRF   bool
+}
+
+// The automated runtime-media matrix covers Chromium/Edge. Safari/WebKit
+// MediaRecorder output requires a separate Apple-browser release check.
+const mediaRecorderFixtureScript = `(async () => {
+	const capabilities = {
+		mediaRecorder: Boolean(window.MediaRecorder),
+		audioWebMOpus: Boolean(window.MediaRecorder?.isTypeSupported("audio/webm;codecs=opus")),
+		audioWebM: Boolean(window.MediaRecorder?.isTypeSupported("audio/webm")),
+		audioOggOpus: Boolean(window.MediaRecorder?.isTypeSupported("audio/ogg;codecs=opus")),
+		audioContext: Boolean(window.AudioContext || window.webkitAudioContext),
+		dataTransfer: Boolean(window.DataTransfer),
+		file: Boolean(window.File),
+	};
+	const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"]
+		.find((candidate) => window.MediaRecorder?.isTypeSupported(candidate));
+	const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+	if (!mimeType || !AudioContextClass || !window.DataTransfer || !window.File) {
+		return {...capabilities, supported: false, mimeType: mimeType || "", size: 0, fileCount: 0};
+	}
+	const context = new AudioContextClass();
+	await context.resume();
+	const oscillator = context.createOscillator();
+	const gain = context.createGain();
+	const destination = context.createMediaStreamDestination();
+	gain.gain.value = 0.02;
+	oscillator.frequency.value = 440;
+	oscillator.connect(gain);
+	gain.connect(destination);
+	const chunks = [];
+	const recorder = new MediaRecorder(destination.stream, {mimeType});
+	recorder.addEventListener("dataavailable", (event) => {
+		if (event.data.size > 0) chunks.push(event.data);
+	});
+	const stopped = new Promise((resolve, reject) => {
+		recorder.addEventListener("stop", resolve, {once: true});
+		recorder.addEventListener("error", () => reject(new Error("MediaRecorder failed")), {once: true});
+	});
+	recorder.start(250);
+	oscillator.start();
+	await new Promise((resolve) => window.setTimeout(resolve, 2200));
+	oscillator.stop();
+	recorder.stop();
+	await stopped;
+	await context.close();
+	const blob = new Blob(chunks, {type: recorder.mimeType || mimeType});
+	const extension = mimeType.includes("ogg") ? "ogg" : "webm";
+	const file = new File([blob], "edge-media-recorder." + extension, {type: blob.type});
+	const transfer = new DataTransfer();
+	transfer.items.add(file);
+	const form = document.querySelector("[data-voice-upload]");
+	form.elements.audio.files = transfer.files;
+	form.elements.duration_seconds.value = "2";
+	form.elements.audio.dispatchEvent(new Event("change", {bubbles: true}));
+	form.elements.duration_seconds.dispatchEvent(new Event("input", {bubbles: true}));
+	return {...capabilities, supported: true, mimeType: file.type, size: file.size, fileCount: form.elements.audio.files.length};
+})()`
+
 func minimalWAV() []byte {
-	header := []byte{'R', 'I', 'F', 'F', 36, 0, 0, 0, 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ', 16, 0, 0, 0, 1, 0, 1, 0, 0x40, 0x1f, 0, 0, 0x80, 0x3e, 0, 0, 2, 0, 16, 0, 'd', 'a', 't', 'a', 0, 0, 0, 0}
-	return bytes.Clone(header)
+	const (
+		sampleRate     = uint32(8000)
+		bytesPerSample = uint32(2)
+		duration       = 3 * time.Second
+	)
+	audioBytes := uint32(duration/time.Second) * sampleRate * bytesPerSample
+	data := make([]byte, 44+audioBytes)
+	copy(data[:4], "RIFF")
+	binary.LittleEndian.PutUint32(data[4:8], uint32(len(data)-8))
+	copy(data[8:12], "WAVE")
+	copy(data[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(data[16:20], 16)
+	binary.LittleEndian.PutUint16(data[20:22], 1)
+	binary.LittleEndian.PutUint16(data[22:24], 1)
+	binary.LittleEndian.PutUint32(data[24:28], sampleRate)
+	binary.LittleEndian.PutUint32(data[28:32], sampleRate*bytesPerSample)
+	binary.LittleEndian.PutUint16(data[32:34], uint16(bytesPerSample))
+	binary.LittleEndian.PutUint16(data[34:36], 16)
+	copy(data[36:40], "data")
+	binary.LittleEndian.PutUint32(data[40:44], audioBytes)
+	return data
 }

@@ -692,7 +692,7 @@ func Planning(data PlanningData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "</select></label><button class=\"button\" type=\"submit\">Top-3 berechnen</button></form><button form=\"planning-route-selection\" class=\"button button--quiet\" type=\"submit\" data-planning-route disabled>Auswahl als Tagesroute planen</button><p class=\"form-hint\">Die Berechnung legt keinen Termin an und versendet keine Nachricht.</p></aside></section>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "</select></label><button class=\"button\" type=\"submit\">Top-3 berechnen</button></form><button form=\"planning-route-selection\" class=\"button button--quiet\" type=\"submit\" data-planning-route>Auswahl als Tagesroute planen</button><p class=\"form-hint\">Die Berechnung legt keinen Termin an und versendet keine Nachricht.</p></aside></section>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

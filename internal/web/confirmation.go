@@ -47,24 +47,45 @@ func confirmationResponse(service *notification.ConfirmationService, limiter *co
 			render(response, request, templates.ConfirmationPage(templates.ConfirmationData{Page: page, Invalid: true}), http.StatusOK, logger)
 			return
 		}
-		value, err := service.Respond(request.Context(), chi.URLParam(request, "confirmationToken"), request.Form.Get("form_nonce"), notification.Response(request.Form.Get("action")), middleware.GetReqID(request.Context()))
+		token := chi.URLParam(request, "confirmationToken")
+		value, err := service.Respond(request.Context(), token, request.Form.Get("form_nonce"), notification.Response(request.Form.Get("action")), middleware.GetReqID(request.Context()))
 		if err != nil {
-			if !errors.Is(err, notification.ErrConfirmationUnavailable) && !errors.Is(err, notification.ErrResponseLocked) {
+			switch {
+			case errors.Is(err, notification.ErrConfirmationUnavailable):
+				render(response, request, templates.ConfirmationPage(templates.ConfirmationData{Page: page, Invalid: true}), http.StatusOK, logger)
+			case errors.Is(err, notification.ErrResponseLocked):
+				stored, viewErr := service.View(request.Context(), token)
+				if viewErr != nil {
+					logger.WarnContext(request.Context(), "stored confirmation response unavailable", slog.String("error_code", "confirmation_locked_view_failed"))
+					render(response, request, templates.ConfirmationPage(templates.ConfirmationData{Page: page, AlreadyStored: true}), http.StatusOK, logger)
+					return
+				}
+				render(response, request, templates.ConfirmationPage(templates.ConfirmationData{Page: page, AlreadyStored: true, Result: confirmationResult(stored.Response)}), http.StatusOK, logger)
+			default:
 				logger.WarnContext(request.Context(), "confirmation response rejected", slog.String("error_code", "confirmation_response_failed"))
+				response.Header().Set("Retry-After", "5")
+				render(response, request, templates.ConfirmationPage(templates.ConfirmationData{Page: page, Token: token, Retryable: true}), http.StatusServiceUnavailable, logger)
 			}
-			render(response, request, templates.ConfirmationPage(templates.ConfirmationData{Page: page, Invalid: true}), http.StatusOK, logger)
 			return
 		}
-		result := "Ihre Rückmeldung wurde gespeichert."
-		switch value.Response {
-		case notification.ResponseConfirmed:
-			result = "Sie haben den Termin bestätigt."
-		case notification.ResponseDeclined:
-			result = "Sie haben den Termin abgelehnt. Der Betrieb meldet sich bei Bedarf bei Ihnen."
-		case notification.ResponseCallback:
-			result = "Ihr Rückrufwunsch wurde gespeichert."
+		result := confirmationResult(value.Response)
+		if result == "" {
+			result = "Ihre Rückmeldung wurde gespeichert."
 		}
 		render(response, request, templates.ConfirmationPage(templates.ConfirmationData{Page: page, Result: result}), http.StatusOK, logger)
+	}
+}
+
+func confirmationResult(response notification.Response) string {
+	switch response {
+	case notification.ResponseConfirmed:
+		return "Sie haben den Termin bestätigt."
+	case notification.ResponseDeclined:
+		return "Sie haben den Termin abgelehnt. Der Betrieb meldet sich bei Bedarf bei Ihnen."
+	case notification.ResponseCallback:
+		return "Ihr Rückrufwunsch wurde gespeichert."
+	default:
+		return ""
 	}
 }
 

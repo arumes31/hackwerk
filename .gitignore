@@ -18,7 +18,7 @@
 /temp/
 /test-artifacts/
 /graphify-out/
-/.tmp/
+.tmp*/
 /test-results/
 /playwright-report/
 *.local

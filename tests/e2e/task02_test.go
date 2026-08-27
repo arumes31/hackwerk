@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -434,21 +436,65 @@ func browserProfileDir(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			err = os.RemoveAll(directory)
-			if err == nil {
-				return
-			}
-			if time.Now().After(deadline) {
-				t.Errorf("remove browser profile %s: %v", directory, err)
-				return
-			}
-			time.Sleep(25 * time.Millisecond)
-		}
-	})
+	// Every caller obtains the profile while constructing allocator options and
+	// registers its browser/allocator cancellations afterwards. Cleanup is LIFO,
+	// so those cancellations are invoked before profile removal starts here.
+	t.Cleanup(func() { removeBrowserProfile(t, directory) })
 	return directory
+}
+
+func removeBrowserProfile(t *testing.T, directory string) {
+	t.Helper()
+	const (
+		removalTimeout = 20 * time.Second
+		maximumBackoff = 500 * time.Millisecond
+	)
+	backoff := 25 * time.Millisecond
+	deadline := time.Now().Add(removalTimeout)
+	for {
+		err := os.RemoveAll(directory)
+		if err == nil {
+			return
+		}
+		if !isTransientWindowsProfileLock(err) {
+			t.Errorf("remove browser profile %s: %v", directory, err)
+			return
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			t.Errorf("remove browser profile %s after %s: %v", directory, removalTimeout, err)
+			return
+		}
+		if backoff > remaining {
+			backoff = remaining
+		}
+		time.Sleep(backoff)
+		if backoff < maximumBackoff {
+			backoff = min(backoff*2, maximumBackoff)
+		}
+	}
+}
+
+func isTransientWindowsProfileLock(err error) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	const (
+		windowsSharingViolation syscall.Errno = 32
+		windowsLockViolation    syscall.Errno = 33
+	)
+	return errors.Is(err, windowsSharingViolation) || errors.Is(err, windowsLockViolation)
+}
+
+func TestBrowserProfileRemovalRetriesOnlyWindowsLockErrors(t *testing.T) {
+	sharingViolation := &os.PathError{Op: "remove", Path: "browser-profile", Err: syscall.Errno(32)}
+	if got, want := isTransientWindowsProfileLock(sharingViolation), runtime.GOOS == "windows"; got != want {
+		t.Fatalf("sharing violation retryable=%v want %v", got, want)
+	}
+	permissionDenied := &os.PathError{Op: "remove", Path: "browser-profile", Err: syscall.Errno(5)}
+	if isTransientWindowsProfileLock(permissionDenied) {
+		t.Fatal("non-transient permission error must not be retried")
+	}
 }
 
 func task02Application(t *testing.T, ctx context.Context, databaseURL string) (*pgxpool.Pool, *auth.Service, *customers.Service, string, string) {

@@ -6,11 +6,13 @@ import (
 )
 
 type ConfirmationData struct {
-	Page    PageData
-	Token   string
-	Value   notification.Confirmation
-	Invalid bool
-	Result  string
+	Page          PageData
+	Token         string
+	Value         notification.Confirmation
+	Invalid       bool
+	Retryable     bool
+	AlreadyStored bool
+	Result        string
 }
 
 templ ConfirmationPage(data ConfirmationData) {
@@ -30,6 +32,18 @@ templ ConfirmationPage(data ConfirmationData) {
 					if data.Invalid {
 						<h1 id="confirmation-title">Link nicht verfügbar</h1>
 						<p>Dieser Bestätigungslink ist nicht mehr gültig. Bitte kontaktieren Sie den Betrieb, wenn Sie Ihren Termin abstimmen möchten.</p>
+					} else if data.Retryable {
+						<h1 id="confirmation-title">Rückmeldung derzeit nicht möglich</h1>
+						<p>Die Rückmeldung konnte gerade nicht verarbeitet werden. Bitte öffnen Sie die Terminseite erneut und versuchen Sie es noch einmal.</p>
+						<a class="button" href={ "/termin/" + data.Token }>Termin erneut öffnen</a>
+					} else if data.AlreadyStored {
+						<h1 id="confirmation-title">Antwort bereits gespeichert</h1>
+						if data.Result != "" {
+							<p>{ data.Result }</p>
+						} else {
+							<p>Für diesen Link wurde bereits eine Rückmeldung gespeichert. Bitte kontaktieren Sie den Betrieb, wenn Sie Ihre Antwort abstimmen möchten.</p>
+						}
+						<p>Der Betrieb sieht die gespeicherte Rückmeldung unmittelbar in der Terminplanung.</p>
 					} else if data.Result != "" {
 						<h1 id="confirmation-title">Antwort gespeichert</h1>
 						<p>{ data.Result }</p>

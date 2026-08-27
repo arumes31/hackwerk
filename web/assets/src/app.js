@@ -131,6 +131,7 @@ document.addEventListener("submit", async (event) => {
 });
 
 const dirtyForms = new Set();
+const dirtyDialogs = new Set();
 document.querySelectorAll("form").forEach((form) => {
   const method = String(form.method || "get").toLowerCase();
   if (method === "get" || form.hasAttribute("data-no-dirty-warning")) return;
@@ -143,7 +144,7 @@ document.querySelectorAll("form").forEach((form) => {
   form.addEventListener("reset", () => dirtyForms.delete(form));
 });
 window.addEventListener("beforeunload", (event) => {
-  if (dirtyForms.size === 0) return;
+  if (dirtyForms.size === 0 && dirtyDialogs.size === 0) return;
   event.preventDefault();
   event.returnValue = "";
 });
@@ -153,18 +154,36 @@ function dirtyDialogForms(dialog) {
   return Array.from(dialog.querySelectorAll("form")).filter((form) => dirtyForms.has(form));
 }
 
+function clearDialogDirtyState(dialog) {
+  dirtyDialogForms(dialog).forEach((form) => dirtyForms.delete(form));
+  dirtyDialogs.delete(dialog);
+}
+
 function closeDialogWithDirtyCheck(dialog) {
-  const dirty = dirtyDialogForms(dialog);
-  if (dirty.length > 0 && !window.confirm("Ungespeicherte Änderungen verwerfen und Dialog schließen?")) {
+  const hadFocus = document.activeElement;
+  const dirty = dirtyDialogForms(dialog).length > 0 || dirtyDialogs.has(dialog);
+  if (dirty && !window.confirm("Ungespeicherte Änderungen verwerfen und Dialog schließen?")) {
     announce("Dialog bleibt geöffnet. Ihre Eingaben wurden nicht verworfen.");
+    queueMicrotask(() => {
+      if (dialog?.open && hadFocus instanceof HTMLElement) hadFocus.focus();
+    });
     return false;
   }
-  dirty.forEach((form) => dirtyForms.delete(form));
+  clearDialogDirtyState(dialog);
   dialog?.close();
   return true;
 }
 
 document.querySelectorAll("dialog").forEach((dialog) => {
+  const markDirty = (event) => {
+    const control = event.target;
+    if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement)) return;
+    if (control.closest("form")) return;
+    if (control instanceof HTMLInputElement && ["hidden", "submit", "button"].includes(control.type)) return;
+    dirtyDialogs.add(dialog);
+  };
+  dialog.addEventListener("input", markDirty);
+  dialog.addEventListener("change", markDirty);
   dialog.addEventListener("cancel", (event) => {
     event.preventDefault();
     closeDialogWithDirtyCheck(dialog);
@@ -497,7 +516,19 @@ async function showConflictAlternatives(appointmentID, startsAt, endsAt) {
     alternatives.forEach((item) => {
       const start = new Date(item.StartsAt || item.starts_at); const end = new Date(item.EndsAt || item.ends_at);
       const button = document.createElement("button"); button.type = "button"; button.className = "button button--quiet"; button.textContent = formatter.format(start);
-      button.addEventListener("click", () => { const input = document.querySelector("[data-appointment-start]"); const duration = document.querySelector("[data-appointment-duration]"); if (input) input.value = localInputValue(start); if (duration) duration.value = String(Math.round((end-start)/60000)); input?.focus(); });
+      button.addEventListener("click", () => {
+        const input = document.querySelector("[data-appointment-start]");
+        const duration = document.querySelector("[data-appointment-duration]");
+        if (input) {
+          input.value = localInputValue(start);
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        if (duration) {
+          duration.value = String(Math.round((end-start)/60000));
+          duration.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        input?.focus();
+      });
       actions.append(button);
     });
     block.append(actions);
@@ -698,6 +729,7 @@ async function appointmentDetail(event, loadedProps) {
     }
   }
   if (requestSequence !== appointmentDetailSequence) return;
+  clearDialogDirtyState(dialog);
   dialog.dataset.appointmentId = event.id;
   dialog.dataset.version = props.version;
   dialog.dataset.lifecycle = props.lifecycle;
@@ -836,6 +868,7 @@ async function appointmentAction(action, extra = {}) {
   form.set("csrf_token", csrf); form.set("version", dialog.dataset.version);
   Object.entries(extra).forEach(([key, value]) => form.set(key, value));
   const result = await calendarRequest(`/api/v1/appointments/${encodeURIComponent(dialog.dataset.appointmentId)}/${action}`, form, csrf);
+  clearDialogDirtyState(dialog);
   dialog.close(); window.hackWerkCalendar?.refetchEvents();
   const message = action === "fix"
     ? "Termin wurde ausdrücklich fixiert; der Versand erfolgt später über die Outbox."
@@ -1584,7 +1617,7 @@ if (voiceCapture) {
     dirtyForms.delete(uploadForm);
     window.location.assign(payload.location);
   };
-  const supportedType = () => ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find((type) => window.MediaRecorder?.isTypeSupported(type));
+  const supportedType = () => ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"].find((type) => window.MediaRecorder?.isTypeSupported(type));
 
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder || !supportedType()) {
     startButton.disabled = true;

@@ -188,7 +188,7 @@ func VoiceCapture(data VoiceCaptureData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\"> <label>Oder vorhandene Audiodatei prüfen und hochladen<input type=\"file\" name=\"audio\" accept=\"audio/webm,audio/ogg,audio/wav,audio/mp4,video/webm,video/mp4\" required></label> <label>Dauer in Sekunden<input name=\"duration_seconds\" type=\"number\" min=\"1\" max=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\"> <label>Oder vorhandene Audiodatei prüfen und hochladen<input type=\"file\" name=\"audio\" accept=\"audio/webm,audio/ogg,audio/wav,video/webm\" required></label> <label>Dauer in Sekunden<input name=\"duration_seconds\" type=\"number\" min=\"1\" max=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

@@ -84,6 +84,9 @@ type Metadata struct {
 	Duration   time.Duration
 }
 
+// AudioPreparation performs bounded validation after service admission.
+type AudioPreparation func() (Audio, Metadata, error)
+
 type Transcript struct {
 	Text, Provider, Version string
 	Confidence              float64
@@ -159,6 +162,13 @@ func New(store Store, transcriber Transcriber, extractor Extractor, cfg Config, 
 func (service *Service) Enabled() bool { return service.config.Enabled }
 
 func (service *Service) Process(ctx context.Context, actor auth.Actor, audio Audio, metadata Metadata) (result Draft, resultErr error) {
+	return service.ProcessPrepared(ctx, actor, func() (Audio, Metadata, error) {
+		return audio, metadata, nil
+	})
+}
+
+// ProcessPrepared admits the actor before running bounded audio preparation.
+func (service *Service) ProcessPrepared(ctx context.Context, actor auth.Actor, prepare AudioPreparation) (result Draft, resultErr error) {
 	startedAt := time.Now()
 	defer func() {
 		if service.observer == nil {
@@ -182,11 +192,18 @@ func (service *Service) Process(ctx context.Context, actor auth.Actor, audio Aud
 	if !service.config.Enabled {
 		return Draft{}, ErrDisabled
 	}
+	if prepare == nil {
+		return Draft{}, fmt.Errorf("%w: missing audio preparation", ErrValidation)
+	}
 	release, ok := service.limiter.acquire(actor.UserID, service.now())
 	if !ok {
 		return Draft{}, ErrRateLimit
 	}
 	defer release()
+	audio, metadata, err := prepare()
+	if err != nil {
+		return Draft{}, err
+	}
 	if audio.Reader == nil || audio.Size <= 0 {
 		return Draft{}, fmt.Errorf("%w: empty audio", ErrValidation)
 	}

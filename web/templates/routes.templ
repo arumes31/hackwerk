@@ -229,7 +229,7 @@ templ routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, no
 							<a href={ routePhoneURL(stop.CustomerPhone) } data-route-call>Anrufen</a>
 						}
 						if reorder {
-							<div class="route-order-actions"><button class="button button--quiet" type="button" data-route-move="up" aria-label={ stop.JobNumber + " nach oben verschieben" }>↑</button><button class="button button--quiet" type="button" data-route-move="down" aria-label={ stop.JobNumber + " nach unten verschieben" }>↓</button></div>
+							<div class="route-order-actions"><button class="button button--quiet" type="submit" name="move_up" value={ stop.ID } data-route-move="up" aria-label={ stop.JobNumber + " nach oben verschieben" } disabled?={ stop.Position == 1 }>↑</button><button class="button button--quiet" type="submit" name="move_down" value={ stop.ID } data-route-move="down" aria-label={ stop.JobNumber + " nach unten verschieben" } disabled?={ stop.Position == len(route.Stops) }>↓</button></div>
 						}
 					</li>
 				}

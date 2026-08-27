@@ -60,6 +60,24 @@ func (a planningHTTPAvailability) Resolve(context.Context, auth.Actor, string, t
 	return []planning.Interval{{StartsAt: a.now.Add(-time.Hour), EndsAt: a.now.AddDate(0, 0, 10), Status: "available"}}, nil
 }
 
+func TestPlanningHTTPRouteSelectionWorksWithoutEnhancement(t *testing.T) {
+	store := &planningHTTPStore{now: time.Date(2026, 8, 31, 4, 0, 0, 0, time.UTC)}
+	router, session, csrf := planningTestRouter(t, auth.RoleAdmin, store)
+	page := httptest.NewRecorder()
+	router.ServeHTTP(page, authenticatedCustomerRequest(t, http.MethodGet, "/planning", nil, session, csrf))
+	body := page.Body.String()
+	if page.Code != http.StatusOK || !strings.Contains(body, `form="planning-route-selection" type="checkbox" name="job_id" value="job-1"`) ||
+		!strings.Contains(body, `type="submit" data-planning-route>Auswahl als Tagesroute planen`) {
+		t.Fatalf("planning route fallback=%d %s", page.Code, body)
+	}
+
+	routePage := httptest.NewRecorder()
+	router.ServeHTTP(routePage, authenticatedCustomerRequest(t, http.MethodGet, "/planning/routes?job_id=job-1", nil, session, csrf))
+	if routePage.Code != http.StatusOK || !strings.Contains(routePage.Body.String(), `value="job-1" aria-label="HA-2026-0042 für die Route auswählen" checked`) {
+		t.Fatalf("selected route fallback=%d %s", routePage.Code, routePage.Body.String())
+	}
+}
+
 func TestPlanningHTTPAdminCreatesSuggestionsWithoutAppointmentMutation(t *testing.T) {
 	store := &planningHTTPStore{now: time.Date(2026, 8, 31, 4, 0, 0, 0, time.UTC)}
 	router, session, csrf := planningTestRouter(t, auth.RoleAdmin, store)
@@ -162,8 +180,13 @@ func planningTestRouter(t *testing.T, role auth.Role, store *planningHTTPStore) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	haversine := planning.NewHaversineRouter(1.3, 55)
+	routeService, err := planning.NewRouteService(routeHTTPFixture(), haversine, haversine, planning.DefaultRouteConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 	webCfg := configForWebTest()
-	router, err := NewRouter(Dependencies{Config: webCfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pinger{}, Build: buildinfo.Info{Version: "test"}, Identity: identity, Planning: service})
+	router, err := NewRouter(Dependencies{Config: webCfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pinger{}, Build: buildinfo.Info{Version: "test"}, Identity: identity, Planning: service, Routes: routeService})
 	if err != nil {
 		t.Fatal(err)
 	}

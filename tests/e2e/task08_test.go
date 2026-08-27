@@ -20,6 +20,7 @@ import (
 	"example.invalid/hackplan/internal/driver"
 	"example.invalid/hackplan/internal/planning"
 	"example.invalid/hackplan/internal/web"
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
 )
 
@@ -54,13 +55,18 @@ func TestTask08PlanningSuggestionsMobileJourney(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	routeAdapter := planning.NewHaversineRouter(1.3, 55)
+	routeService, err := planning.NewRouteService(postgres.NewRouteStore(pool), routeAdapter, routeAdapter, planning.DefaultRouteConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 	customerService, err := app.CustomerService(pool)
 	if err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewUnstartedServer(nil)
-	cfg := config.Config{AppName: "HackWerk", BaseURL: "http://" + server.Listener.Addr().String(), Timezone: "Europe/Vienna", Database: config.Database{ReadinessTimeout: 2 * time.Second}, Auth: config.Auth{SessionCookieName: "hackplan_session", CSRFCookieName: "hackplan_csrf", SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour}}
-	router, err := web.NewRouter(web.Dependencies{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pool, Build: buildinfo.Info{Version: "e2e"}, Identity: identity, Customers: customerService, Drivers: drivers, Resources: resources, Appointments: appointments, Dashboard: e2eDashboard(t, pool), Planning: planningService})
+	cfg := config.Config{AppName: "HackWerk", BaseURL: "http://" + server.Listener.Addr().String(), Timezone: "Europe/Vienna", Database: config.Database{ReadinessTimeout: 2 * time.Second}, Auth: config.Auth{SessionCookieName: "hackplan_session", CSRFCookieName: "hackplan_csrf", SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour}, Planning: config.Planning{BusinessOpen: "07:00", DepotLatitude: 48.2, DepotLongitude: 14.2}}
+	router, err := web.NewRouter(web.Dependencies{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pool, Build: buildinfo.Info{Version: "e2e"}, Identity: identity, Customers: customerService, Drivers: drivers, Resources: resources, Appointments: appointments, Dashboard: e2eDashboard(t, pool), Planning: planningService, Routes: routeService})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,13 +78,36 @@ func TestTask08PlanningSuggestionsMobileJourney(t *testing.T) {
 	t.Cleanup(cancelAllocator)
 	browser, cancelBrowser := chromedp.NewContext(allocator)
 	t.Cleanup(cancelBrowser)
-	browser, cancelTimeout := context.WithTimeout(browser, 180*time.Second)
+	browser, cancelTimeout := context.WithTimeout(browser, 300*time.Second)
 	t.Cleanup(cancelTimeout)
 	t.Cleanup(func() { _ = chromedp.Cancel(browser) })
 	var text string
 	var overflow, smallTarget bool
 	if err := chromedp.Run(browser, chromedp.Navigate(server.URL+"/login"), chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery), chromedp.SetValue("#username", "admin-task04", chromedp.ByQuery), chromedp.SetValue("#password", adminPassword, chromedp.ByQuery), chromedp.Click("form[action='/login'] button", chromedp.ByQuery), chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery)); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
+	}
+	var fallbackSourceSelected, fallbackSelected bool
+	var fallbackLocation string
+	if err := runBrowserStep(browser, "select route without JavaScript",
+		chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetScriptExecutionDisabled(true).Do(ctx) }),
+		chromedp.Navigate(server.URL+"/planning"),
+		chromedp.WaitVisible("input[form='planning-route-selection'][value='"+jobID+"']", chromedp.ByQuery),
+		chromedp.Focus("input[form='planning-route-selection'][value='"+jobID+"']", chromedp.ByQuery),
+		chromedp.KeyEvent(" "),
+		chromedp.Poll(`document.querySelector("input[form='planning-route-selection'][value='`+jobID+`']").checked`, nil),
+		chromedp.Evaluate(`document.querySelector("input[form='planning-route-selection'][value='`+jobID+`']").checked`, &fallbackSourceSelected),
+		chromedp.Focus("[data-planning-route]", chromedp.ByQuery),
+		chromedp.KeyEvent("\r"),
+		chromedp.WaitVisible("main.route-page [data-route-context][data-route-admin='true']", chromedp.ByQuery),
+		chromedp.WaitVisible("form.route-builder[action='/planning/routes'] input[name='job_id'][value='"+jobID+"']", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector("form.route-builder[action='/planning/routes'] input[name='job_id'][value='`+jobID+`']").checked`, &fallbackSelected),
+		chromedp.Location(&fallbackLocation),
+		chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetScriptExecutionDisabled(false).Do(ctx) }),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if !fallbackSourceSelected || !fallbackSelected || !strings.Contains(fallbackLocation, "/planning/routes?job_id="+jobID) {
+		t.Fatalf("no-JavaScript route selection source/target/location=%v/%v/%q", fallbackSourceSelected, fallbackSelected, fallbackLocation)
 	}
 	planningLink := "a[href^='/planning?job_id=" + jobID + "']"
 	if err := runBrowserStep(browser, "open planning", chromedp.Navigate(server.URL+"/waitlist"), chromedp.WaitVisible("tr[data-job-id='"+jobID+"'] .row-actions > summary", chromedp.ByQuery), chromedp.Click("tr[data-job-id='"+jobID+"'] .row-actions > summary", chromedp.ByQuery), chromedp.WaitVisible(planningLink, chromedp.ByQuery), chromedp.Click(planningLink, chromedp.ByQuery), chromedp.WaitVisible("form[action='/planning/suggestions']", chromedp.ByQuery)); err != nil {

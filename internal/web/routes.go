@@ -225,10 +225,14 @@ func reorderOwnRoute(service *planning.RouteService, logger *slog.Logger) http.H
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
 		version, err := parseVersion(request.Form.Get("version"))
+		stopIDs := append([]string(nil), request.Form["stop_id"]...)
+		if err == nil {
+			stopIDs, err = applyOwnRouteStep(stopIDs, request.Form.Get("move_up"), request.Form.Get("move_down"))
+		}
 		var route planning.RouteDraft
 		if err == nil {
 			route, err = service.ReorderOwn(request.Context(), session.Actor, planning.ReorderOwnRouteInput{
-				ID: chi.URLParam(request, "routeID"), ExpectedVersion: version, StopIDs: request.Form["stop_id"], RequestID: middleware.GetReqID(request.Context()),
+				ID: chi.URLParam(request, "routeID"), ExpectedVersion: version, StopIDs: stopIDs, RequestID: middleware.GetReqID(request.Context()),
 			})
 		}
 		if err != nil {
@@ -240,6 +244,36 @@ func reorderOwnRoute(service *planning.RouteService, logger *slog.Logger) http.H
 		day := route.Departure.In(routeLocation()).Format(time.DateOnly)
 		http.Redirect(response, request, "/my-route?date="+url.QueryEscape(day), http.StatusSeeOther)
 	}
+}
+
+func applyOwnRouteStep(stopIDs []string, moveUp, moveDown string) ([]string, error) {
+	moveUp = strings.TrimSpace(moveUp)
+	moveDown = strings.TrimSpace(moveDown)
+	if moveUp == "" && moveDown == "" {
+		return stopIDs, nil
+	}
+	if moveUp != "" && moveDown != "" {
+		return nil, planning.ErrValidation
+	}
+	targetID := moveUp
+	offset := -1
+	if moveDown != "" {
+		targetID = moveDown
+		offset = 1
+	}
+	for index, stopID := range stopIDs {
+		if strings.TrimSpace(stopID) != targetID {
+			continue
+		}
+		other := index + offset
+		if other < 0 || other >= len(stopIDs) {
+			return nil, planning.ErrValidation
+		}
+		result := append([]string(nil), stopIDs...)
+		result[index], result[other] = result[other], result[index]
+		return result, nil
+	}
+	return nil, planning.ErrValidation
 }
 
 func routePoint(latitude, longitude string) (planning.Point, error) {

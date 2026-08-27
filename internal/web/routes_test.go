@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -127,15 +128,36 @@ func TestRouteHTTPDriverCanReorderOnlyOwnAssignedRoute(t *testing.T) {
 	page := httptest.NewRecorder()
 	router.ServeHTTP(page, authenticatedCustomerRequest(t, http.MethodGet, "/my-route?date=2026-08-27", nil, session, csrf))
 	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Meine Route") || !strings.Contains(page.Body.String(), "Nur Fahrreihenfolge") ||
-		!strings.Contains(page.Body.String(), `data-route-own="true"`) || !strings.Contains(page.Body.String(), "data-wake-lock") ||
+		!strings.Contains(page.Body.String(), `data-route-own="true"`) || !strings.Contains(page.Body.String(), `type="submit" name="move_up" value="stop-2"`) ||
+		!strings.Contains(page.Body.String(), "data-wake-lock") ||
 		!strings.Contains(page.Body.String(), "data-route-navigation") || !strings.Contains(page.Body.String(), "data-route-call") {
 		t.Fatalf("own route page=%d %s", page.Code, page.Body.String())
 	}
-	form := url.Values{"csrf_token": {csrf}, "version": {"1"}, "stop_id": {"stop-2", "stop-1"}}
+	form := url.Values{"csrf_token": {csrf}, "version": {"1"}, "stop_id": {"stop-1", "stop-2"}, "move_up": {"stop-2"}}
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/my-route/route-1/reorder", form, session, csrf))
 	if response.Code != http.StatusSeeOther || strings.Join(store.savedOrder, ",") != "stop-2,stop-1" {
 		t.Fatalf("reorder=%d order=%v body=%s", response.Code, store.savedOrder, response.Body.String())
+	}
+}
+
+func TestApplyOwnRouteStepRejectsAmbiguousOrInvalidMove(t *testing.T) {
+	tests := []struct {
+		name     string
+		moveUp   string
+		moveDown string
+	}{
+		{name: "both directions", moveUp: "stop-2", moveDown: "stop-1"},
+		{name: "unknown stop", moveUp: "stop-3"},
+		{name: "past first stop", moveUp: "stop-1"},
+		{name: "past last stop", moveDown: "stop-2"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := applyOwnRouteStep([]string{"stop-1", "stop-2"}, test.moveUp, test.moveDown); !errors.Is(err, planning.ErrValidation) {
+				t.Fatalf("applyOwnRouteStep() error = %v, want validation", err)
+			}
+		})
 	}
 }
 

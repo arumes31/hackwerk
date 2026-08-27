@@ -78,6 +78,26 @@ func TestProcessOnlyCreatesDraft(t *testing.T) {
 		t.Fatalf("draft/store/err = %#v/%#v/%v", draft, store, err)
 	}
 }
+
+func TestProcessPreparedRunsPreparationOnlyAfterAdmission(t *testing.T) {
+	store := &voiceStoreStub{}
+	service := testVoiceService(t, store, FakeTranscriber{Text: "fixture"})
+	actor := voiceActor(auth.RoleDriver)
+	release, ok := service.limiter.acquire(actor.UserID, service.now())
+	if !ok {
+		t.Fatal("failed to reserve the fixture admission slot")
+	}
+	defer release()
+	preparations := 0
+	_, err := service.ProcessPrepared(context.Background(), actor, func() (Audio, Metadata, error) {
+		preparations++
+		return Audio{Reader: bytes.NewReader([]byte("audio")), Size: 5}, Metadata{}, nil
+	})
+	if !errors.Is(err, ErrRateLimit) || preparations != 0 || store.creates != 0 {
+		t.Fatalf("error/preparations/creates = %v/%d/%d", err, preparations, store.creates)
+	}
+}
+
 func TestProviderFailureIsRedactedStatus(t *testing.T) {
 	store := &voiceStoreStub{}
 	service := testVoiceService(t, store, DisabledTranscriber{})
