@@ -68,9 +68,9 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 		CardRight     float64 `json:"cardRight"`
 		ViewportWidth float64 `json:"viewportWidth"`
 		SmallTargets  int     `json:"smallTargets"`
-		SceneDisplay  string  `json:"sceneDisplay"`
-		Animations    int     `json:"animations"`
-		Vehicles      int     `json:"vehicles"`
+		Grid          bool    `json:"grid"`
+		InsetBorder   bool    `json:"insetBorder"`
+		LegacyScene   bool    `json:"legacyScene"`
 	}
 	var loginMobileScreenshot []byte
 	if err := chromedp.Run(
@@ -82,28 +82,29 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 		chromedp.Navigate(server.URL+"/login"),
 		chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery),
 		chromedp.Evaluate(`(()=>{
-			const card=document.querySelector('.login-card').getBoundingClientRect();
-			const targets=[...document.querySelectorAll('.login-access input,.login-access button')];
+			const panel=document.querySelector('.login-panel');
+			const card=panel.getBoundingClientRect();
+			const targets=[...document.querySelectorAll('.login-page input,.login-page button')];
 			return {overflow:document.documentElement.scrollWidth>window.innerWidth,
 				cardLeft:card.left,cardRight:card.right,viewportWidth:window.innerWidth,
 				smallTargets:targets.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<44||rect.height<44}).length,
-				sceneDisplay:getComputedStyle(document.querySelector('.scene')).display,
-				animations:[...document.querySelectorAll('.login-body *')].filter(node=>getComputedStyle(node).animationName!=='none').length,
-				vehicles:document.querySelectorAll('#vehicles .vehicle').length};
+				grid:getComputedStyle(document.body).backgroundImage.includes('linear-gradient'),
+				insetBorder:getComputedStyle(panel,'::before').borderTopStyle==='solid',
+				legacyScene:!!document.querySelector('.scene,#vehicles')};
 		})()`, &mobileLayout),
 		chromedp.FullScreenshot(&loginMobileScreenshot, 90),
 	); err != nil {
 		t.Fatalf("mobile login layout: %s", browserDiagnostics(browserContext, err))
 	}
 	cardOutsideViewport := mobileLayout.CardLeft < 0 || mobileLayout.CardRight > mobileLayout.ViewportWidth
-	if mobileLayout.Overflow || cardOutsideViewport || mobileLayout.SmallTargets != 0 || mobileLayout.SceneDisplay != "none" || mobileLayout.Animations != 0 || mobileLayout.Vehicles != 0 {
-		t.Fatalf("mobile login overflow/card/small targets/scene/animations/vehicles = %v/%v/%d/%s/%d/%d: %+v",
+	if mobileLayout.Overflow || cardOutsideViewport || mobileLayout.SmallTargets != 0 || !mobileLayout.Grid || !mobileLayout.InsetBorder || mobileLayout.LegacyScene {
+		t.Fatalf("mobile login overflow/card/small targets/grid/inset/legacy = %v/%v/%d/%v/%v/%v: %+v",
 			mobileLayout.Overflow,
 			cardOutsideViewport,
 			mobileLayout.SmallTargets,
-			mobileLayout.SceneDisplay,
-			mobileLayout.Animations,
-			mobileLayout.Vehicles,
+			mobileLayout.Grid,
+			mobileLayout.InsetBorder,
+			mobileLayout.LegacyScene,
 			mobileLayout,
 		)
 	}
@@ -111,26 +112,29 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 	var usersDesktopScreenshot []byte
 	var loginDesktopScreenshot []byte
 	var desktopLogin struct {
-		SceneDisplay  string `json:"sceneDisplay"`
-		HasStyles     bool   `json:"hasStyles"`
-		HasLoader     bool   `json:"hasLoader"`
-		OriginalScene bool   `json:"originalScene"`
-		Vehicles      int    `json:"vehicles"`
-		ReducedMotion bool   `json:"reducedMotion"`
+		HasStyles      bool    `json:"hasStyles"`
+		HasLegacyAsset bool    `json:"hasLegacyAsset"`
+		Grid           bool    `json:"grid"`
+		PanelWidth     float64 `json:"panelWidth"`
+		CenterDelta    float64 `json:"centerDelta"`
+		HasBuildMeta   bool    `json:"hasBuildMeta"`
 	}
 	if err := chromedp.Run(browserContext,
 		chromedp.EmulateViewport(1280, 900),
 		chromedp.Navigate(server.URL+"/login"),
-		chromedp.WaitVisible(".scene", chromedp.ByQuery),
-		chromedp.WaitReady("#vehicles .vehicle", chromedp.ByQuery),
-		chromedp.Evaluate(`(()=>({
-			sceneDisplay:getComputedStyle(document.querySelector('.scene')).display,
-			hasStyles:!!document.querySelector('link[href^="/assets/login-original.css?v="]')&&!!document.querySelector('link[href^="/assets/login.css?v="]'),
-			hasLoader:!!document.querySelector('script[src^="/assets/login-background-loader.js?v="]'),
-			originalScene:!!document.querySelector('#forestDynamic')&&!!document.querySelector('#vehicles'),
-			vehicles:document.querySelectorAll('#vehicles .vehicle').length,
-			reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches
-		}))()`, &desktopLogin),
+		chromedp.WaitVisible(".login-panel", chromedp.ByQuery),
+		chromedp.Evaluate(`(()=>{
+			const panel=document.querySelector('.login-panel').getBoundingClientRect();
+			const meta=document.querySelector('.login-meta').textContent;
+			return {
+				hasStyles:!!document.querySelector('link[href^="/assets/login.css?v="]'),
+				hasLegacyAsset:!!document.querySelector('link[href^="/assets/login-original.css?v="],script[src^="/assets/login-background-loader.js?v="],.scene,#vehicles'),
+				grid:getComputedStyle(document.body).backgroundImage.includes('linear-gradient'),
+				panelWidth:panel.width,
+				centerDelta:Math.abs(panel.left+panel.width/2-window.innerWidth/2),
+				hasBuildMeta:meta.includes('HWK-SYS // V')&&meta.includes('ID:')
+			};
+		})()`, &desktopLogin),
 		chromedp.FullScreenshot(&loginDesktopScreenshot, 90),
 		chromedp.SetValue("#username", "admin-task01", chromedp.ByQuery),
 		chromedp.SetValue("#password", adminPassword, chromedp.ByQuery),
@@ -144,8 +148,8 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 	); err != nil {
 		t.Fatalf("admin login: %s", browserDiagnostics(browserContext, err))
 	}
-	if desktopLogin.SceneDisplay == "none" || !desktopLogin.HasStyles || !desktopLogin.HasLoader || !desktopLogin.OriginalScene || desktopLogin.ReducedMotion || desktopLogin.Vehicles == 0 {
-		t.Fatalf("desktop login scene/style = %+v", desktopLogin)
+	if !desktopLogin.HasStyles || desktopLogin.HasLegacyAsset || !desktopLogin.Grid || desktopLogin.PanelWidth < 400 || desktopLogin.PanelWidth > 440 || desktopLogin.CenterDelta > 2 || !desktopLogin.HasBuildMeta {
+		t.Fatalf("desktop login field-manual layout = %+v", desktopLogin)
 	}
 	detailsForm := "form[action='/admin/users/" + driverUserID + "/details']"
 	if err := runBrowserStep(browserContext, "submit user details",

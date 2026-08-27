@@ -182,6 +182,7 @@ func TestCustomerHTTPNewJobOffersExistingCustomerWithoutLeakingSearchInURL(t *te
 	for _, expected := range []string{
 		`action="/customers/new/search"`, `data-existing-customer-job`,
 		`href="/customers/` + testCustomerID + `/jobs/new"`, `data-new-customer-panel`,
+		`data-date-range-preset data-start-offset="7" data-day-span="7">Nächste Woche`,
 	} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("new job customer picker is missing %q: %s", expected, body)

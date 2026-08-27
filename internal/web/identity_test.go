@@ -183,11 +183,12 @@ func TestIdentityHTTPGenericLoginError(t *testing.T) {
 	loginBody := loginResponse.Body.String()
 	if loginResponse.Code != http.StatusOK ||
 		!strings.Contains(loginBody, `href="/assets/login.css?v=`) ||
-		!strings.Contains(loginBody, `href="/assets/login-original.css?v=`) ||
-		!strings.Contains(loginBody, `src="/assets/login-background-loader.js?v=`) ||
-		!strings.Contains(loginBody, `class="scene"`) ||
-		!strings.Contains(loginBody, `class="card form-card login-card"`) ||
-		!strings.Contains(loginBody, `class="login-card__version">Version 0.1.23 · 11f9112</p>`) {
+		strings.Contains(loginBody, `href="/assets/login-original.css?v=`) ||
+		strings.Contains(loginBody, `src="/assets/login-background-loader.js?v=`) ||
+		strings.Contains(loginBody, `class="scene"`) ||
+		!strings.Contains(loginBody, `class="login-panel"`) ||
+		!strings.Contains(loginBody, `HWK-SYS // V 0.1.23`) ||
+		!strings.Contains(loginBody, `ID: 11f9112`) {
 		t.Fatalf("login page response = %d %q", loginResponse.Code, loginBody)
 	}
 	form := url.Values{"username": {"nicht-vorhanden"}, "password": {"Falsches Passwort 2026"}}

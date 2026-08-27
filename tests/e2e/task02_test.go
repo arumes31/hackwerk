@@ -89,6 +89,11 @@ func TestTask02BrowserJourney(t *testing.T) {
 
 	var rootLocation string
 	var transportInitiallyHidden bool
+	var nextWeekPreset struct {
+		Today string `json:"today"`
+		Start string `json:"start"`
+		End   string `json:"end"`
+	}
 	if err := chromedp.Run(browserContext,
 		chromedp.Navigate(server.URL+"/"),
 		chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery),
@@ -113,8 +118,27 @@ func TestTask02BrowserJourney(t *testing.T) {
 		chromedp.Click("[data-new-customer-panel] summary", chromedp.ByQuery),
 		chromedp.WaitVisible("form[action='/customers']", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector('[data-transport-field]').hidden`, &transportInitiallyHidden),
+		chromedp.Evaluate(`(() => {
+			const parts = new Intl.DateTimeFormat('sv-SE', {timeZone:'Europe/Vienna',year:'numeric',month:'2-digit',day:'2-digit'})
+				.formatToParts(new Date()).reduce((values, part) => ({...values, [part.type]:part.value}), {});
+			document.querySelector('[data-date-range-preset][data-start-offset="7"]').click();
+			return {
+				today: parts.year+'-'+parts.month+'-'+parts.day,
+				start: document.querySelector('[name="preferred_start"]').value,
+				end: document.querySelector('[name="preferred_end"]').value,
+			};
+		})()`, &nextWeekPreset),
 	); err != nil {
 		t.Fatalf("open customer intake: %s", browserDiagnostics(browserContext, err))
+	}
+	today, err := time.Parse(time.DateOnly, nextWeekPreset.Today)
+	if err != nil {
+		t.Fatalf("parse browser date %q: %v", nextWeekPreset.Today, err)
+	}
+	start, startErr := time.Parse(time.DateOnly, nextWeekPreset.Start)
+	end, endErr := time.Parse(time.DateOnly, nextWeekPreset.End)
+	if startErr != nil || endErr != nil || start.Sub(today) != 7*24*time.Hour || end.Sub(today) != 14*24*time.Hour {
+		t.Fatalf("next-week preset = %+v, parse errors = %v/%v", nextWeekPreset, startErr, endErr)
 	}
 	var locationFieldsUnchanged bool
 	if err := runBrowserStep(browserContext, "search address without taking location",
