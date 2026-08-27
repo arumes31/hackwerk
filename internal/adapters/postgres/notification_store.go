@@ -49,13 +49,17 @@ func (store *NotificationStore) Reissue(ctx context.Context, actor auth.Actor, a
 		if current.LifecycleStatus != "fixed" || current.Version != expectedVersion {
 			return notification.ErrAdminActionUnavailable
 		}
+		rows, err := queries.BumpAppointmentVersion(ctx, dbgen.BumpAppointmentVersionParams{ID: id, ExpectedVersion: expectedVersion})
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return notification.ErrAdminActionUnavailable
+		}
 		if err := store.planner.planConfirmationAt(ctx, queries, id, "", "admin reissued confirmation", now); err != nil {
 			if errors.Is(err, appointment.ErrNotification) {
 				return notification.ErrAdminActionUnavailable
 			}
-			return err
-		}
-		if err := queries.SetAppointmentConfirmation(ctx, dbgen.SetAppointmentConfirmationParams{ConfirmationStatus: "pending", AppointmentID: id}); err != nil {
 			return err
 		}
 		metadata, _ := json.Marshal(map[string]any{

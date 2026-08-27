@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"io"
 	"log/slog"
@@ -32,7 +33,15 @@ func registerVoiceRoutes(router chi.Router, dependencies Dependencies, page temp
 
 func voicePage(service *voice.Service, cfg config.Config, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
-		render(response, request, templates.VoiceCapture(templates.VoiceCaptureData{Shell: shell(request, page, csrfCookie), Enabled: service.Enabled(), MaxBytes: cfg.Voice.MaxBytes, MaxSeconds: int(cfg.Voice.MaxDuration.Seconds()), ExternalProvider: cfg.Voice.Transcriber == "openai" || cfg.Voice.Extractor == "openai", ProviderNotice: cfg.Voice.ExternalProviderNote}), http.StatusOK, logger)
+		render(response, request, templates.VoiceCapture(voiceCaptureData(request, service, cfg, page, csrfCookie, "")), http.StatusOK, logger)
+	}
+}
+
+func voiceCaptureData(request *http.Request, service *voice.Service, cfg config.Config, page templates.PageData, csrfCookie, message string) templates.VoiceCaptureData {
+	return templates.VoiceCaptureData{
+		Shell: shell(request, page, csrfCookie), Enabled: service.Enabled(), MaxBytes: cfg.Voice.MaxBytes,
+		MaxSeconds: int(cfg.Voice.MaxDuration.Seconds()), ExternalProvider: cfg.Voice.Transcriber == "openai" || cfg.Voice.Extractor == "openai",
+		ProviderNotice: cfg.Voice.ExternalProviderNote, Error: message,
 	}
 }
 
@@ -81,22 +90,126 @@ func uploadVoice(service *voice.Service, cfg config.Voice, logger *slog.Logger) 
 	}
 }
 
+func cleanupVoiceFile(ctx context.Context, file *os.File, logger *slog.Logger) {
+	if file == nil {
+		return
+	}
+	name := file.Name()
+	_ = file.Close()
+	// #nosec G703 -- name comes only from os.CreateTemp in the configured private temp directory.
+	if removeErr := os.Remove(name); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		logger.WarnContext(ctx, "temporary voice audio cleanup failed", slog.String("error_code", "voice_temp_cleanup_failed"))
+	}
+}
+
+func processVoiceUpload(request *http.Request, service *voice.Service, cfg config.Voice, file *os.File, duration time.Duration, mediaType string) (voice.Draft, error) {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return voice.Draft{}, err
+	}
+	session, _ := sessionFromContext(request.Context())
+	ctx, cancel := context.WithTimeout(request.Context(), cfg.ProviderTimeout+5*time.Second)
+	defer cancel()
+	return service.Process(ctx, session.Actor, voice.Audio{
+		Reader: file, Filename: "aufnahme" + mediaExtension(mediaType), ContentType: mediaType, Size: fileSize(file),
+	}, voice.Metadata{RecordedAt: time.Now(), Duration: duration})
+}
+
+func uploadVoiceNative(dependencies Dependencies, page templates.PageData) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		service := dependencies.Voice
+		cfg := dependencies.Config
+		if !service.Enabled() {
+			renderNativeVoiceError(response, request, service, cfg, page, http.StatusServiceUnavailable, "Die Spracheingabe ist deaktiviert. Das manuelle Formular bleibt verfügbar.", dependencies.Logger)
+			return
+		}
+		if !sameOrigin(request) {
+			renderNativeVoiceError(response, request, service, cfg, page, http.StatusForbidden, "Das Sicherheitsmerkmal ist ungültig oder abgelaufen. Bitte laden Sie die Seite neu und wählen Sie die Datei erneut.", dependencies.Logger)
+			return
+		}
+		request.Body = http.MaxBytesReader(response, request.Body, int64(cfg.Voice.MaxBytes)+(128<<10))
+		reader, err := request.MultipartReader()
+		if err != nil {
+			renderNativeVoiceError(response, request, service, cfg, page, http.StatusBadRequest, "Die Audiodatei ist ungültig. Bitte wählen Sie eine unterstützte Datei oder erfassen Sie den Auftrag manuell.", dependencies.Logger)
+			return
+		}
+		received, err := receiveNativeVoiceUpload(reader, cfg.Voice, func(presented string) bool {
+			return validNativeVoiceCSRF(request, dependencies.Identity, cfg.Auth.CSRFCookieName, presented)
+		})
+		if err != nil {
+			if errors.Is(err, errVoiceCSRF) {
+				renderNativeVoiceError(response, request, service, cfg, page, http.StatusForbidden, "Das Sicherheitsmerkmal ist ungültig oder abgelaufen. Bitte laden Sie die Seite neu und wählen Sie die Datei erneut.", dependencies.Logger)
+				return
+			}
+			status, _, message := voiceUploadError(err)
+			renderNativeVoiceError(response, request, service, cfg, page, status, message, dependencies.Logger)
+			return
+		}
+		defer cleanupVoiceFile(request.Context(), received.file, dependencies.Logger)
+		draft, err := processVoiceUpload(request, service, cfg.Voice, received.file, received.duration, received.mediaType)
+		if err != nil {
+			status, _, message := mapVoiceError(err)
+			dependencies.Logger.WarnContext(request.Context(), "native voice upload rejected", slog.String("error_code", "voice_native_rejected"))
+			renderNativeVoiceError(response, request, service, cfg, page, status, message, dependencies.Logger)
+			return
+		}
+		http.Redirect(response, request, "/voice/drafts/"+draft.ID, http.StatusSeeOther)
+	}
+}
+
+func validNativeVoiceCSRF(request *http.Request, identity *auth.Service, csrfCookieName, presented string) bool {
+	if identity == nil || !sameOrigin(request) || presented == "" {
+		return false
+	}
+	csrfCookie, err := request.Cookie(csrfCookieName)
+	if err != nil || subtle.ConstantTimeCompare(auth.TokenHash(csrfCookie.Value), auth.TokenHash(presented)) != 1 {
+		return false
+	}
+	session, ok := sessionFromContext(request.Context())
+	return ok && identity.ValidateCSRF(session, presented)
+}
+
+func renderNativeVoiceError(response http.ResponseWriter, request *http.Request, service *voice.Service, cfg config.Config, page templates.PageData, status int, message string, logger *slog.Logger) {
+	render(response, request, templates.VoiceCapture(voiceCaptureData(request, service, cfg, page, cfg.Auth.CSRFCookieName, message)), status, logger)
+}
+
+type receivedVoiceUpload struct {
+	file      *os.File
+	duration  time.Duration
+	mediaType string
+	csrfToken string
+}
+
 var errVoiceTooLarge = errors.New("voice upload too large")
 var errVoiceEmpty = errors.New("voice upload empty")
 var errVoiceType = errors.New("voice upload type")
 var errVoiceDuration = errors.New("voice upload duration")
+var errVoiceCSRF = errors.New("voice upload csrf")
 
 func receiveVoiceUpload(reader *multipart.Reader, cfg config.Voice) (*os.File, time.Duration, string, error) {
-	if err := os.MkdirAll(cfg.TempDir, 0o700); err != nil {
+	received, err := receiveVoiceUploadFields(reader, cfg)
+	if err != nil {
 		return nil, 0, "", err
 	}
-	// #nosec G302 -- this is a directory; 0700 is the required owner-only directory mode.
-	if err := os.Chmod(cfg.TempDir, 0o700); err != nil {
-		return nil, 0, "", err
+	return received.file, received.duration, received.mediaType, nil
+}
+
+func receiveVoiceUploadFields(reader *multipart.Reader, cfg config.Voice) (receivedVoiceUpload, error) {
+	return receiveVoiceUploadFieldsVerified(reader, cfg, nil)
+}
+
+func receiveNativeVoiceUpload(reader *multipart.Reader, cfg config.Voice, verifyCSRF func(string) bool) (receivedVoiceUpload, error) {
+	if verifyCSRF == nil {
+		return receivedVoiceUpload{}, errVoiceCSRF
 	}
+	return receiveVoiceUploadFieldsVerified(reader, cfg, verifyCSRF)
+}
+
+func receiveVoiceUploadFieldsVerified(reader *multipart.Reader, cfg config.Voice, verifyCSRF func(string) bool) (receivedVoiceUpload, error) {
 	var file *os.File
 	var duration time.Duration
 	var declared string
+	var csrfToken string
+	csrfVerified := verifyCSRF == nil
 	cleanup := func() {
 		if file != nil {
 			name := file.Name()
@@ -111,49 +224,90 @@ func receiveVoiceUpload(reader *multipart.Reader, cfg config.Voice) (*os.File, t
 		}
 		if err != nil {
 			cleanup()
-			return nil, 0, "", err
+			return receivedVoiceUpload{}, err
 		}
 		name := part.FormName()
 		switch name {
+		case "csrf_token":
+			if csrfToken != "" {
+				cleanup()
+				return receivedVoiceUpload{}, errVoiceType
+			}
+			data, readErr := io.ReadAll(io.LimitReader(part, 257))
+			if readErr != nil || len(data) > 256 {
+				cleanup()
+				return receivedVoiceUpload{}, errVoiceType
+			}
+			csrfToken = strings.TrimSpace(string(data))
+			if verifyCSRF != nil && !verifyCSRF(csrfToken) {
+				cleanup()
+				return receivedVoiceUpload{}, errVoiceCSRF
+			}
+			csrfVerified = true
 		case "duration_ms":
 			data, readErr := io.ReadAll(io.LimitReader(part, 32))
 			if readErr != nil {
 				cleanup()
-				return nil, 0, "", readErr
+				return receivedVoiceUpload{}, readErr
 			}
 			millis, parseErr := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
 			if parseErr != nil || millis <= 0 {
 				cleanup()
-				return nil, 0, "", errVoiceDuration
+				return receivedVoiceUpload{}, errVoiceDuration
 			}
 			duration = time.Duration(millis) * time.Millisecond
+		case "duration_seconds":
+			data, readErr := io.ReadAll(io.LimitReader(part, 32))
+			if readErr != nil {
+				cleanup()
+				return receivedVoiceUpload{}, readErr
+			}
+			seconds, parseErr := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+			if parseErr != nil || seconds <= 0 {
+				cleanup()
+				return receivedVoiceUpload{}, errVoiceDuration
+			}
+			duration = time.Duration(seconds) * time.Second
 		case "audio":
+			if !csrfVerified {
+				cleanup()
+				return receivedVoiceUpload{}, errVoiceCSRF
+			}
 			if file != nil {
 				cleanup()
-				return nil, 0, "", errVoiceType
+				return receivedVoiceUpload{}, errVoiceType
 			}
 			declared = strings.ToLower(strings.TrimSpace(part.Header.Get("Content-Type")))
+			if err = os.MkdirAll(cfg.TempDir, 0o700); err != nil {
+				cleanup()
+				return receivedVoiceUpload{}, err
+			}
+			// #nosec G302 -- this is a directory; 0700 is the required owner-only directory mode.
+			if err = os.Chmod(cfg.TempDir, 0o700); err != nil {
+				cleanup()
+				return receivedVoiceUpload{}, err
+			}
 			file, err = os.CreateTemp(cfg.TempDir, "voice-*.audio")
 			if err != nil {
 				cleanup()
-				return nil, 0, "", err
+				return receivedVoiceUpload{}, err
 			}
 			if err = os.Chmod(file.Name(), 0o600); err != nil {
 				cleanup()
-				return nil, 0, "", err
+				return receivedVoiceUpload{}, err
 			}
 			written, copyErr := io.Copy(file, io.LimitReader(part, int64(cfg.MaxBytes)+1))
 			if copyErr != nil {
 				cleanup()
-				return nil, 0, "", copyErr
+				return receivedVoiceUpload{}, copyErr
 			}
 			if written == 0 {
 				cleanup()
-				return nil, 0, "", errVoiceEmpty
+				return receivedVoiceUpload{}, errVoiceEmpty
 			}
 			if written > int64(cfg.MaxBytes) {
 				cleanup()
-				return nil, 0, "", errVoiceTooLarge
+				return receivedVoiceUpload{}, errVoiceTooLarge
 			}
 		default:
 			_, _ = io.Copy(io.Discard, io.LimitReader(part, 1024))
@@ -162,18 +316,18 @@ func receiveVoiceUpload(reader *multipart.Reader, cfg config.Voice) (*os.File, t
 	}
 	if file == nil {
 		cleanup()
-		return nil, 0, "", errVoiceEmpty
+		return receivedVoiceUpload{}, errVoiceEmpty
 	}
 	if duration <= 0 || duration > cfg.MaxDuration {
 		cleanup()
-		return nil, 0, "", errVoiceDuration
+		return receivedVoiceUpload{}, errVoiceDuration
 	}
 	mediaType, err := validateAudioFile(file, declared)
 	if err != nil {
 		cleanup()
-		return nil, 0, "", err
+		return receivedVoiceUpload{}, err
 	}
-	return file, duration, mediaType, nil
+	return receivedVoiceUpload{file: file, duration: duration, mediaType: mediaType, csrfToken: csrfToken}, nil
 }
 
 func validateAudioFile(file *os.File, declared string) (string, error) {
@@ -213,17 +367,22 @@ func fileSize(file *os.File) int64 {
 	return info.Size()
 }
 func writeVoiceUploadError(response http.ResponseWriter, request *http.Request, err error) {
+	status, code, message := voiceUploadError(err)
+	writeVoiceError(response, request, status, code, message)
+}
+
+func voiceUploadError(err error) (int, string, string) {
 	switch {
 	case errors.Is(err, errVoiceTooLarge):
-		writeVoiceError(response, request, http.StatusRequestEntityTooLarge, "audio_too_large", "Die Aufnahme überschreitet das erlaubte Größenlimit. Bitte kürzer aufnehmen oder manuell erfassen.")
+		return http.StatusRequestEntityTooLarge, "audio_too_large", "Die Aufnahme überschreitet das erlaubte Größenlimit. Bitte kürzer aufnehmen oder manuell erfassen."
 	case errors.Is(err, errVoiceType):
-		writeVoiceError(response, request, http.StatusUnsupportedMediaType, "unsupported_audio", "Dieses Audioformat wird nicht unterstützt. Bitte neu aufnehmen oder manuell erfassen.")
+		return http.StatusUnsupportedMediaType, "unsupported_audio", "Dieses Audioformat wird nicht unterstützt. Bitte neu aufnehmen oder manuell erfassen."
 	case errors.Is(err, errVoiceEmpty):
-		writeVoiceError(response, request, http.StatusUnprocessableEntity, "empty_audio", "Die Aufnahme ist leer. Bitte neu aufnehmen oder manuell erfassen.")
+		return http.StatusUnprocessableEntity, "empty_audio", "Die Aufnahme ist leer. Bitte neu aufnehmen oder manuell erfassen."
 	case errors.Is(err, errVoiceDuration):
-		writeVoiceError(response, request, http.StatusUnprocessableEntity, "invalid_duration", "Die Aufnahmedauer fehlt oder überschreitet das erlaubte Limit.")
+		return http.StatusUnprocessableEntity, "invalid_duration", "Die Aufnahmedauer fehlt oder überschreitet das erlaubte Limit."
 	default:
-		writeVoiceError(response, request, http.StatusInternalServerError, "upload_failed", "Die Aufnahme konnte nicht sicher zwischengespeichert werden.")
+		return http.StatusInternalServerError, "upload_failed", "Die Aufnahme konnte nicht sicher zwischengespeichert werden."
 	}
 }
 

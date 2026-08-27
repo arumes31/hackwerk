@@ -111,6 +111,10 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 		Columns, AccessibleName, Title                     string
 		IconCount                                          int
 	}
+	var presentationToggleAudit struct {
+		Comfortable, Outdoor, DensityPressed, OutdoorPressed bool
+		DensityStored, OutdoorStored                         string
+	}
 	if err := chromedp.Run(browserContext,
 		chromedp.Click("[data-quick-menu] summary", chromedp.ByQuery),
 		chromedp.WaitVisible("[data-quick-menu] .nav-menu__panel", chromedp.ByQuery),
@@ -127,6 +131,18 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 				AccessibleName:trigger.getAttribute('aria-label')||'',Title:trigger.getAttribute('title')||'',
 				IconCount:trigger.querySelectorAll('svg.nav-menu__icon[aria-hidden=true]').length};
 		})()`, &quickMenuAudit),
+		chromedp.Click("[data-quick-menu] [data-density-toggle]", chromedp.ByQuery),
+		chromedp.Click("[data-quick-menu] [data-outdoor-toggle]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => ({
+			Comfortable:document.documentElement.classList.contains('density-comfortable'),
+			Outdoor:document.documentElement.classList.contains('outdoor-contrast'),
+			DensityPressed:document.querySelector('[data-quick-menu] [data-density-toggle]').getAttribute('aria-pressed')==='true',
+			OutdoorPressed:document.querySelector('[data-quick-menu] [data-outdoor-toggle]').getAttribute('aria-pressed')==='true',
+			DensityStored:localStorage.getItem('hackwerk:density')||'',
+			OutdoorStored:localStorage.getItem('hackwerk:outdoor')||''
+		}))()`, &presentationToggleAudit),
+		chromedp.Click("[data-quick-menu] [data-density-toggle]", chromedp.ByQuery),
+		chromedp.Click("[data-quick-menu] [data-outdoor-toggle]", chromedp.ByQuery),
 		chromedp.Click("[data-quick-menu] summary", chromedp.ByQuery),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
@@ -135,6 +151,10 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 		quickMenuAudit.AccessibleName != "Schnellzugriff" || quickMenuAudit.Title != "Schnellzugriff" || quickMenuAudit.IconCount != 1 ||
 		!strings.Contains(quickMenuAudit.Columns, " ") {
 		t.Fatalf("quick menu CSS audit = %+v", quickMenuAudit)
+	}
+	if !presentationToggleAudit.Comfortable || !presentationToggleAudit.Outdoor || !presentationToggleAudit.DensityPressed ||
+		!presentationToggleAudit.OutdoorPressed || presentationToggleAudit.DensityStored != "comfortable" || presentationToggleAudit.OutdoorStored != "true" {
+		t.Fatalf("presentation toggle audit = %+v", presentationToggleAudit)
 	}
 	var adminMenuAudit struct {
 		VisibleText           bool

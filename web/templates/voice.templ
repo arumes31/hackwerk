@@ -11,6 +11,7 @@ type VoiceCaptureData struct {
 	Enabled, ExternalProvider bool
 	MaxBytes, MaxSeconds      int
 	ProviderNotice            string
+	Error                     string
 }
 
 type VoiceReviewData struct {
@@ -36,6 +37,9 @@ templ VoiceCapture(data VoiceCaptureData) {
 					<div class="form-alert" role="status"><strong>Spracheingabe ist deaktiviert.</strong> Die vollständige manuelle Erfassung steht weiterhin zur Verfügung.</div>
 				} else {
 					<section class="voice-capture" data-voice-capture data-max-seconds={ fmt.Sprint(data.MaxSeconds) } data-csrf={ data.Shell.CSRFToken }>
+						if data.Error != "" {
+							<div class="form-alert" role="alert" tabindex="-1" autofocus>{ data.Error }</div>
+						}
 						<div class="privacy-notice">
 							<h2>Vor der Aufnahme</h2>
 							<p>Maximal { fmt.Sprint(data.MaxSeconds) } Sekunden und { fmt.Sprint(data.MaxBytes / (1 << 20)) } MiB. Audio liegt nur im begrenzten temporären Speicher und wird nach dem Transkriptionsversuch gelöscht.</p>
@@ -51,7 +55,8 @@ templ VoiceCapture(data VoiceCaptureData) {
 							<span class="status-badge" data-voice-timer>00:00</span>
 						</div>
 						<p data-voice-status role="status">Das Mikrofon wird erst nach „Aufnahme starten“ angefragt.</p>
-						<form data-voice-upload>
+						<form method="post" action="/voice/upload" enctype="multipart/form-data" data-voice-upload>
+							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
 							<label>Oder vorhandene Audiodatei prüfen und hochladen<input type="file" name="audio" accept="audio/webm,audio/ogg,audio/wav,audio/mp4,video/webm,video/mp4" required/></label>
 							<label>Dauer in Sekunden<input name="duration_seconds" type="number" min="1" max={ fmt.Sprint(data.MaxSeconds) } required/></label>
 							<button class="button button--quiet" type="submit">Datei als Entwurf verarbeiten</button>

@@ -252,21 +252,47 @@ func TestAdminCanResetResponseAndReissueTokenWithReason(t *testing.T) {
 		t.Fatalf("reset status/response = %s/%v", confirmationStatus, responseValue)
 	}
 	reissueReason := "Neuer Link für second-canary@example.test"
+	var requestsBefore, notificationsBefore, outboxBefore int
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM confirmation_requests WHERE appointment_id=$1", fixed.ID).Scan(&requestsBefore); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM notifications WHERE appointment_id=$1", fixed.ID).Scan(&notificationsBefore); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM outbox_events WHERE event_type='notification.requested' AND aggregate_id IN (SELECT id FROM notifications WHERE appointment_id=$1)", fixed.ID).Scan(&outboxBefore); err != nil {
+		t.Fatal(err)
+	}
 	if err := adminService.Reissue(fixture.ctx, fixture.admin, fixed.ID, version, reissueReason, "reissue"); err != nil {
 		t.Fatal(err)
+	}
+	if err := adminService.Reissue(fixture.ctx, fixture.admin, fixed.ID, version, reissueReason, "reissue-replay"); !errors.Is(err, notification.ErrAdminActionUnavailable) {
+		t.Fatalf("same-version reissue replay error = %v", err)
 	}
 	if _, err := confirmationService.View(fixture.ctx, oldMaterial.Raw); !errors.Is(err, notification.ErrConfirmationUnavailable) {
 		t.Fatalf("reissued old token remains valid: %v", err)
 	}
-	var activeCount, revokedCount, auditCount int
+	var activeCount, revokedCount, auditCount, currentVersion, requestCount, notificationCount, outboxCount int
 	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FILTER (WHERE status='active'), count(*) FILTER (WHERE status='revoked') FROM confirmation_requests WHERE appointment_id=$1", fixed.ID).Scan(&activeCount, &revokedCount); err != nil {
 		t.Fatal(err)
 	}
 	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM audit_events WHERE object_id=$1 AND action IN ('confirmation.response_reset','confirmation.reissued')", fixed.ID).Scan(&auditCount); err != nil {
 		t.Fatal(err)
 	}
-	if activeCount != 1 || revokedCount != 1 || auditCount != 2 {
-		t.Fatalf("admin lifecycle active/revoked/audit = %d/%d/%d", activeCount, revokedCount, auditCount)
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT version FROM appointments WHERE id=$1", fixed.ID).Scan(&currentVersion); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM confirmation_requests WHERE appointment_id=$1", fixed.ID).Scan(&requestCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM notifications WHERE appointment_id=$1", fixed.ID).Scan(&notificationCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM outbox_events WHERE event_type='notification.requested' AND aggregate_id IN (SELECT id FROM notifications WHERE appointment_id=$1)", fixed.ID).Scan(&outboxCount); err != nil {
+		t.Fatal(err)
+	}
+	if activeCount != 1 || revokedCount != 1 || auditCount != 2 || currentVersion != int(version)+1 ||
+		requestCount != requestsBefore+1 || notificationCount != notificationsBefore+1 || outboxCount != outboxBefore+1 {
+		t.Fatalf("admin lifecycle active/revoked/audit/version/requests/notifications/outbox = %d/%d/%d/%d/%d/%d/%d", activeCount, revokedCount, auditCount, currentVersion, requestCount, notificationCount, outboxCount)
 	}
 	var leakedReasons int
 	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT count(*) FROM audit_events

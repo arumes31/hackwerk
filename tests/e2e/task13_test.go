@@ -108,6 +108,7 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 	cfg := config.Config{
 		AppName: "HackWerk", BaseURL: "http://" + server.Listener.Addr().String(), Timezone: "Europe/Vienna",
 		Database: config.Database{ReadinessTimeout: 2 * time.Second},
+		HTTP:     config.HTTP{InternalRateLimit: 10000},
 		Auth: config.Auth{
 			SessionCookieName: "hackplan_session", CSRFCookieName: "hackplan_csrf",
 			SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour,
@@ -142,7 +143,7 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 	t.Cleanup(cancelAllocator)
 	browser, cancelBrowser := chromedp.NewContext(allocator)
 	t.Cleanup(cancelBrowser)
-	browser, cancelTimeout := context.WithTimeout(browser, 5*time.Minute)
+	browser, cancelTimeout := context.WithTimeout(browser, 10*time.Minute)
 	t.Cleanup(cancelTimeout)
 	t.Cleanup(func() { _ = chromedp.Cancel(browser) })
 
@@ -167,8 +168,19 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 		"/admin/drivers", "/admin/resources", "/planning", "/planning/routes",
 		"/admin/notifications", "/admin/users", "/profile", "/password", "/voice",
 	}
-	auditPagesAtViewport(t, browser, server.URL, "admin-desktop", 1440, 900, adminPages)
-	auditPagesAtViewport(t, browser, server.URL, "admin-mobile", 360, 800, adminPages)
+	viewports := []struct {
+		name          string
+		width, height int64
+	}{
+		{name: "desktop-720p", width: 1280, height: 720},
+		{name: "desktop-1080p", width: 1920, height: 1080},
+		{name: "mobile-360", width: 360, height: 800},
+		{name: "mobile-390", width: 390, height: 844},
+		{name: "mobile-412", width: 412, height: 915},
+	}
+	for _, viewport := range viewports {
+		auditPagesAtViewport(t, browser, server.URL, "admin-"+viewport.name, viewport.width, viewport.height, adminPages)
+	}
 
 	if err := runBrowserStep(browser, "logout admin",
 		chromedp.Evaluate(`document.querySelector("header form[action='/logout']").requestSubmit()`, nil),
@@ -184,8 +196,9 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 		"/customers/new", "/customers/" + customerID, "/customers/" + customerID + "/jobs/new",
 		"/availability", "/my-route?date=2026-08-25", "/profile", "/password", "/voice",
 	}
-	auditPagesAtViewport(t, browser, server.URL, "driver-desktop", 1440, 900, driverPages)
-	auditPagesAtViewport(t, browser, server.URL, "driver-mobile", 360, 800, driverPages)
+	for _, viewport := range viewports {
+		auditPagesAtViewport(t, browser, server.URL, "driver-"+viewport.name, viewport.width, viewport.height, driverPages)
+	}
 
 	exceptionLock.Lock()
 	defer exceptionLock.Unlock()

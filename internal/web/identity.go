@@ -92,6 +92,13 @@ func registerIdentityRoutes(router chi.Router, dependencies Dependencies, page t
 			adminRouter.Post("/{userID}/reset-password", resetPassword(identity, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 		})
 	})
+	if dependencies.Voice != nil {
+		router.Group(func(nativeVoice chi.Router) {
+			nativeVoice.Use(requireAuthentication(page, dependencies.Logger))
+			nativeVoice.Use(requirePasswordChange(page, dependencies.Logger))
+			nativeVoice.Post("/voice/upload", uploadVoiceNative(dependencies, page))
+		})
+	}
 }
 
 func optionalAuthentication(identity *auth.Service, cookieName string) func(http.Handler) http.Handler {

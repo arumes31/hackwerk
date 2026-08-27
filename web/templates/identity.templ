@@ -112,18 +112,21 @@ templ appHeader(shell ShellData) {
 			<summary aria-label="Weitere Bereiche">Mehr</summary>
 			<div class="mobile-more__panel">
 				<span class="mobile-more__label">Erfassen</span>
-				<a href="/customers/new">Auftrag erfassen</a>
-				<a href="/voice">Auftrag per Sprache</a>
+				@navLink(shell, "/customers/new", "Auftrag erfassen")
+				@navLink(shell, "/voice", "Auftrag per Sprache")
 				if shell.Actor.Role == auth.RoleDriver && shell.Actor.DriverID != "" {
-					<a href="/my-route">Meine Route</a>
-					<a href="/availability">Meine Verfügbarkeit</a>
+					@navLink(shell, "/my-route", "Meine Route")
+					@navLink(shell, "/availability", "Meine Verfügbarkeit")
 				}
-				<a href="/profile">Profil</a>
+				@navLink(shell, "/profile", "Profil")
 				if shell.Actor.Role == auth.RoleAdmin {
 					<span class="mobile-more__label">Administration</span>
-					<a href="/planning">Planung</a>
-					<a href="/planning/routes">Karte &amp; Routen</a>
-					<a href="/admin/drivers">Fahrer</a><a href="/admin/resources">Ressourcen</a><a href="/admin/notifications">Versand</a><a href="/admin/users">Benutzer</a>
+					@navLink(shell, "/planning", "Planung")
+					@navLink(shell, "/planning/routes", "Karte & Routen")
+					@navLink(shell, "/admin/drivers", "Fahrer")
+					@navLink(shell, "/admin/resources", "Ressourcen")
+					@navLink(shell, "/admin/notifications", "Versand")
+					@navLink(shell, "/admin/users", "Benutzer")
 				}
 				<span class="mobile-more__label">Darstellung</span>
 				<button class="button button--quiet" type="button" data-density-toggle>Komfortable Dichte</button>

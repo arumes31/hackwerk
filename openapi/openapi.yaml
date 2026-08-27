@@ -79,6 +79,31 @@ paths:
         "422": { description: Datei ist leer oder die angegebene Dauer ungültig. }
         "429": { description: Benutzerbezogenes Rate- oder Parallelitätslimit erreicht. }
         "503": { description: Spracheingabe administrativ deaktiviert. }
+  /voice/upload:
+    post:
+      operationId: createVoiceDraftNative
+      description: JavaScript-freier, serverseitig begrenzter Datei-Upload. Prüft Same-Origin sowie den sessiongebundenen CSRF-Formwert und leitet ausschließlich zu einem Review-Entwurf weiter.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [csrf_token, audio, duration_seconds]
+              properties:
+                csrf_token: { type: string }
+                audio: { type: string, format: binary, description: WebM, Ogg, WAV oder MP4; serverseitig auf Container und Größe geprüft. }
+                duration_seconds: { type: integer, minimum: 1, maximum: 90 }
+      responses:
+        "303": { description: Audio gelöscht; Weiterleitung zur menschlichen Entwurfsprüfung. }
+        "403": { description: Session, Same-Origin oder CSRF ungültig. }
+        "413": { description: Upload überschreitet das konfigurierte Limit. }
+        "415": { description: Container oder MIME-Typ wird nicht unterstützt; Formular bleibt nutzbar. }
+        "422": { description: Datei ist leer oder die angegebene Dauer ungültig; Formular bleibt nutzbar. }
+        "429": { description: Benutzerbezogenes Rate- oder Parallelitätslimit erreicht. }
+        "503": { description: Spracheingabe administrativ deaktiviert. }
   /api/v1/planning/suggestions:
     post:
       operationId: createPlanningSuggestions

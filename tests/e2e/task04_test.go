@@ -176,6 +176,27 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	if defaultPlanningStart != wantDefaultStart {
 		t.Fatalf("UTC-device Vienna default = %q, want %q", defaultPlanningStart, wantDefaultStart)
 	}
+	var dirtyDialogOpen, dirtyValuePreserved, dirtyFocusPreserved bool
+	if err := runBrowserStep(browserContext, "dirty planning dialog protects escape and close",
+		chromedp.SetValue("[data-planning-duration]", "195", chromedp.ByQuery),
+		chromedp.Focus("[data-planning-duration]", chromedp.ByQuery),
+		chromedp.Evaluate(`window.__nativeConfirm=window.confirm;window.confirm=()=>false`, nil),
+		chromedp.KeyEvent("\x1b"),
+		chromedp.Evaluate(`document.querySelector('[data-planning-dialog]').open`, &dirtyDialogOpen),
+		chromedp.Evaluate(`document.querySelector('[data-planning-duration]').value === '195'`, &dirtyValuePreserved),
+		chromedp.Evaluate(`document.activeElement === document.querySelector('[data-planning-duration]')`, &dirtyFocusPreserved),
+		chromedp.Evaluate(`window.confirm=()=>true`, nil),
+		chromedp.Click("[data-planning-dialog] [data-dialog-close]", chromedp.ByQuery),
+		chromedp.WaitNotVisible("[data-planning-dialog]", chromedp.ByQuery),
+		chromedp.Evaluate(`window.confirm=window.__nativeConfirm;delete window.__nativeConfirm`, nil),
+		chromedp.Click("[data-plan-job='"+jobID+"']", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-planning-dialog]", chromedp.ByQuery),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if !dirtyDialogOpen || !dirtyValuePreserved || !dirtyFocusPreserved {
+		t.Fatalf("dirty planning dialog open/value/focus = %v/%v/%v", dirtyDialogOpen, dirtyValuePreserved, dirtyFocusPreserved)
+	}
 	var submittedForm string
 	if err := runBrowserStep(browserContext, "fill mobile proposal form",
 		chromedp.SetValue("[data-planning-start]", "2026-08-25T08:00", chromedp.ByQuery),

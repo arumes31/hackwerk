@@ -148,6 +148,29 @@ window.addEventListener("beforeunload", (event) => {
   event.returnValue = "";
 });
 
+function dirtyDialogForms(dialog) {
+  if (!(dialog instanceof HTMLDialogElement)) return [];
+  return Array.from(dialog.querySelectorAll("form")).filter((form) => dirtyForms.has(form));
+}
+
+function closeDialogWithDirtyCheck(dialog) {
+  const dirty = dirtyDialogForms(dialog);
+  if (dirty.length > 0 && !window.confirm("Ungespeicherte Änderungen verwerfen und Dialog schließen?")) {
+    announce("Dialog bleibt geöffnet. Ihre Eingaben wurden nicht verworfen.");
+    return false;
+  }
+  dirty.forEach((form) => dirtyForms.delete(form));
+  dialog?.close();
+  return true;
+}
+
+document.querySelectorAll("dialog").forEach((dialog) => {
+  dialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeDialogWithDirtyCheck(dialog);
+  });
+});
+
 document.addEventListener("submit", (event) => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement) || String(form.method).toLowerCase() === "get" || form.dataset.allowMultipleSubmit === "true") return;
@@ -189,8 +212,10 @@ document.addEventListener("submit", (event) => {
 
 document.addEventListener("submit", (event) => {
   const form = event.target;
-  if (!(form instanceof HTMLFormElement) || event.defaultPrevented) return;
-  dirtyForms.delete(form);
+  if (!(form instanceof HTMLFormElement)) return;
+  queueMicrotask(() => {
+    if (!event.defaultPrevented) dirtyForms.delete(form);
+  });
 });
 
 window.addEventListener("pageshow", () => {
@@ -567,7 +592,7 @@ if (requestedPlanningJob) {
 }
 
 document.querySelectorAll("[data-dialog-close]").forEach((button) => {
-  button.addEventListener("click", () => button.closest("dialog")?.close());
+  button.addEventListener("click", () => closeDialogWithDirtyCheck(button.closest("dialog")));
 });
 
 const planningForm = document.querySelector("[data-planning-form]");
@@ -800,8 +825,7 @@ async function appointmentDetail(event, loadedProps) {
 
 document.querySelectorAll("[data-appointment-close]").forEach((button) => {
   button.addEventListener("click", () => {
-    appointmentDetailSequence += 1;
-    button.closest("dialog")?.close();
+    if (closeDialogWithDirtyCheck(button.closest("dialog"))) appointmentDetailSequence += 1;
   });
 });
 

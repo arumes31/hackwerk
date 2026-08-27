@@ -120,6 +120,9 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		TwoColumns, MapAboveFold, CompactCandidate bool
 	}
 	var adminRouteContext, mapToolbar, routeDatePresets bool
+	var routePresetAudit struct {
+		Actual, Expected []string
+	}
 	var candidateMarkerCount, depotMarkerCount int
 	var smallDesktopTargets []string
 	if err := runBrowserStep(browser, "plan desktop route",
@@ -129,6 +132,15 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		chromedp.Evaluate(`Boolean(document.querySelector('[data-route-context][data-route-admin="true"]'))`, &adminRouteContext),
 		chromedp.Evaluate(`Boolean(document.querySelector('[data-route-map-toolbar]'))`, &mapToolbar),
 		chromedp.Evaluate(`document.querySelectorAll('[data-route-date-preset]').length === 3`, &routeDatePresets),
+		chromedp.Evaluate(`(() => {
+			const input=document.querySelector('[data-route-day-filter]');
+			const format=date=>[date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0')].join('-');
+			const today=new Date(), tomorrow=new Date(today), business=new Date(today);
+			tomorrow.setDate(tomorrow.getDate()+1);
+			do { business.setDate(business.getDate()+1); } while ([0,6].includes(business.getDay()));
+			const actual=['today','tomorrow','business-day'].map(preset=>{document.querySelector('[data-route-date-preset="'+preset+'"]').click();return input.value});
+			return {Actual:actual,Expected:[format(today),format(tomorrow),format(business)]};
+		})()`, &routePresetAudit),
 		chromedp.Evaluate(`document.querySelectorAll('.route-map-marker--candidate').length`, &candidateMarkerCount),
 		chromedp.Evaluate(`document.querySelectorAll('.route-map-marker--depot').length`, &depotMarkerCount),
 		chromedp.Evaluate(`(() => {
@@ -157,7 +169,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
-	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || candidateMarkerCount != 2 || depotMarkerCount != 1 || !selectedByMap || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate {
+	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || depotMarkerCount != 1 || !selectedByMap || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate {
 		t.Fatalf("desktop route map-ready/admin/toolbar/presets/candidates/depot/selected/overflow/small-target/layout=%v/%v/%v/%v/%d/%d/%v/%v/%v/%+v targets=%v", mapReady, adminRouteContext, mapToolbar, routeDatePresets, candidateMarkerCount, depotMarkerCount, selectedByMap, desktopOverflow, smallDesktopTarget, desktopLayout, smallDesktopTargets)
 	}
 

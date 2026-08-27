@@ -5,6 +5,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"example.invalid/hackplan/internal/auth"
 )
 
 func TestFullCalendarAssetsArePageSpecific(t *testing.T) {
@@ -47,5 +49,38 @@ func TestFullCalendarAssetsArePageSpecific(t *testing.T) {
 	}
 	if strings.Index(calendar, "control-foundation.css") > strings.Index(calendar, "app.css") {
 		t.Fatal("control foundation must load before application CSS")
+	}
+}
+
+func TestMobileMoreUsesCurrentPageSemantics(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, path, href, label string
+		role                    auth.Role
+		driverID                string
+	}{
+		{name: "admin subpage", path: "/admin/resources", href: "/admin/resources", label: "Ressourcen", role: auth.RoleAdmin},
+		{name: "driver subpage", path: "/availability", href: "/availability", label: "Meine Verfügbarkeit", role: auth.RoleDriver, driverID: "driver-1"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			shell := ShellData{
+				Page: PageData{AppName: "HackWerk"}, ActivePath: test.path,
+				Actor: auth.Actor{Role: test.role, DriverID: test.driverID, DisplayName: "Test"},
+			}
+			if err := appHeader(shell).Render(context.Background(), &output); err != nil {
+				t.Fatal(err)
+			}
+			panelAt := strings.Index(output.String(), `class="mobile-more__panel"`)
+			if panelAt < 0 {
+				t.Fatal("mobile more panel missing")
+			}
+			panel := output.String()[panelAt:]
+			want := `href="` + test.href + `" class="nav-link nav-link--active" aria-current="page">` + test.label
+			if !strings.Contains(panel, want) {
+				t.Fatalf("mobile more current link missing %q: %s", want, panel)
+			}
+		})
 	}
 }

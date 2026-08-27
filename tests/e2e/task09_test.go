@@ -20,6 +20,7 @@ import (
 	"example.invalid/hackplan/internal/config"
 	"example.invalid/hackplan/internal/voice"
 	"example.invalid/hackplan/internal/web"
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
 )
 
@@ -61,6 +62,27 @@ func TestTask09VoiceReviewMobileJourney(t *testing.T) {
 	t.Cleanup(func() { _ = chromedp.Cancel(browser) })
 	if err = chromedp.Run(browser, chromedp.Navigate(server.URL+"/login"), chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery), chromedp.SetValue("#username", "driver-task04", chromedp.ByQuery), chromedp.SetValue("#password", driverPassword, chromedp.ByQuery), chromedp.Click("form[action='/login'] button", chromedp.ByQuery), chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery), chromedp.Navigate(server.URL+"/voice"), chromedp.WaitVisible("[data-voice-upload]", chromedp.ByQuery)); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
+	}
+	var nativeFallbackConfigured bool
+	if err = runBrowserStep(browser, "native upload without JavaScript",
+		chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetScriptExecutionDisabled(true).Do(ctx) }),
+		chromedp.Reload(),
+		chromedp.WaitVisible("[data-voice-upload]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {const form=document.querySelector('[data-voice-upload]');return form.method==='post'&&new URL(form.action).pathname==='/voice/upload'&&form.enctype==='multipart/form-data'&&Boolean(form.elements.csrf_token.value)})()`, &nativeFallbackConfigured),
+		chromedp.SetUploadFiles("[data-voice-upload] input[type=file]", []string{audioPath}, chromedp.ByQuery),
+		chromedp.SetValue("[data-voice-upload] input[name=duration_seconds]", "3", chromedp.ByQuery),
+		chromedp.Click("[data-voice-upload] button[type=submit]", chromedp.ByQuery),
+		chromedp.WaitVisible("form[action$='/commit']", chromedp.ByQuery),
+		chromedp.Click("form[action$='/discard'] button[type=submit]", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-voice-upload]", chromedp.ByQuery),
+		chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetScriptExecutionDisabled(false).Do(ctx) }),
+		chromedp.Reload(),
+		chromedp.WaitVisible("[data-voice-upload]", chromedp.ByQuery),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if !nativeFallbackConfigured {
+		t.Fatal("native multipart fallback is not fully configured")
 	}
 	if err = runBrowserStep(browser, "upload fixture", chromedp.SetUploadFiles("[data-voice-upload] input[type=file]", []string{audioPath}, chromedp.ByQuery), chromedp.SetValue("[data-voice-upload] input[name=duration_seconds]", "3", chromedp.ByQuery), chromedp.Click("[data-voice-upload] button[type=submit]", chromedp.ByQuery), chromedp.WaitVisible("form[action$='/commit']", chromedp.ByQuery)); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
