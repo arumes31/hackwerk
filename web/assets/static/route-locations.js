@@ -52,8 +52,14 @@ function initializeRouteLocationEditor(editor) {
   };
   const confirmLocation = () => {
     const location = point();
-    if (!String(label.value || "").trim()) {
+    const locationLabel = String(label.value || "").trim();
+    if (!locationLabel) {
       setError("Bitte eine verständliche Bezeichnung für den Ort eingeben.");
+      label.focus();
+      return false;
+    }
+    if (Array.from(locationLabel).length > 120) {
+      setError("Die Bezeichnung darf höchstens 120 Zeichen lang sein.");
       label.focus();
       return false;
     }
@@ -129,7 +135,6 @@ function initializeRouteLocationEditor(editor) {
         button.className = "location-search__result";
         button.textContent = text;
         button.addEventListener("click", () => {
-          label.value = text;
           address.value = text;
           setCoordinateDraft(lat, lon);
           clearResults();

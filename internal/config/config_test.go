@@ -27,6 +27,9 @@ func TestLoad(t *testing.T) {
 		{name: "invalid planning horizon", values: map[string]string{"PLANNING_HORIZON_DAYS": "91"}, expectError: "planning settings"},
 		{name: "enabled voice needs transcriber", values: map[string]string{"VOICE_ENABLED": "true"}, expectError: "active transcriber"},
 		{name: "OpenAI voice needs secret", values: map[string]string{"VOICE_ENABLED": "true", "VOICE_TRANSCRIBER": "openai"}, expectError: "API key"},
+		{name: "local whisper accepts small", values: map[string]string{"VOICE_ENABLED": "true", "VOICE_TRANSCRIBER": "whisper-local"}, expectedEnv: EnvironmentDevelopment},
+		{name: "local whisper rejects other model", values: map[string]string{"VOICE_TRANSCRIBER": "whisper-local", "VOICE_WHISPER_MODEL": "large"}, expectError: "small model"},
+		{name: "voice timeout remains bounded", values: map[string]string{"VOICE_PROVIDER_TIMEOUT": "16m"}, expectError: "voice limits"},
 		{name: "production rejects fake voice", values: map[string]string{"APP_ENV": "production", "APP_BASE_URL": "https://hackwerk.example", "SESSION_COOKIE_SECURE": "true", "DATABASE_URL": "postgres://secure@example/hackwerk", "CONFIRMATION_TOKEN_KEY_ID": "production", "CONFIRMATION_TOKEN_KEYS": `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`, "VOICE_TRANSCRIBER": "fake"}, expectError: "fake voice"},
 		{name: "OSRM rejects request-controlled query", values: map[string]string{"PLANNING_ROUTER": "osrm", "PLANNING_ROUTING_URL": "https://router.example/table?target=internal"}, expectError: "static non-loopback HTTPS"},
 		{name: "internal OSRM requires exact endpoint", values: map[string]string{"PLANNING_ROUTER": "osrm-internal", "PLANNING_ROUTING_URL": "http://router:5000"}, expectError: "exactly http://osrm:5000"},
@@ -78,6 +81,9 @@ func TestLoad(t *testing.T) {
 			if tt.name == "development defaults" && (cfg.SMS.Provider != "sendberry" || cfg.SMS.SendberryURL != "" || cfg.SMS.Sender != "") {
 				t.Fatalf("default SMS provider and environment-only URL/sender = %q/%q/%q", cfg.SMS.Provider, cfg.SMS.SendberryURL, cfg.SMS.Sender)
 			}
+			if tt.name == "local whisper accepts small" && cfg.Voice.ProviderTimeout != 10*time.Minute {
+				t.Fatalf("local whisper ProviderTimeout = %s, want 10m", cfg.Voice.ProviderTimeout)
+			}
 		})
 	}
 }
@@ -91,6 +97,38 @@ func TestLoadVoiceConfigurationFromEnvironment(t *testing.T) {
 	}
 	if !cfg.Voice.Enabled || cfg.Voice.Transcriber != "openai" || cfg.Voice.Extractor != "openai" || cfg.Voice.OpenAIAPIKey != values["VOICE_OPENAI_API_KEY"] || cfg.Voice.OpenAIModel != "speech-model" || cfg.Voice.OpenAIExtractionModel != "extract-model" || cfg.Voice.MaxDuration != 75*time.Second || cfg.Voice.MaxBytes != 1048576 || cfg.Voice.DraftRetention != 12*time.Hour || cfg.Voice.ProviderTimeout != 20*time.Second || cfg.Voice.MaxResponseBytes != 65536 || cfg.Voice.TempDir != "/tmp/voice-test" || cfg.Voice.RateLimitPerMinute != 7 || cfg.Voice.ConcurrentPerUser != 1 {
 		t.Fatalf("voice config=%+v", cfg.Voice)
+	}
+}
+
+func TestLoadPublicBusinessInformationFromEnvironment(t *testing.T) {
+	t.Parallel()
+	values := map[string]string{
+		"BUSINESS_NAME":                    "HackWerk Testbetrieb",
+		"BUSINESS_ADDRESS":                 "Testweg 1, 4020 Linz",
+		"BUSINESS_EMAIL":                   "datenschutz@example.test",
+		"BUSINESS_PHONE":                   "+43 1 234567",
+		"BUSINESS_LEGAL_FORM":              "Einzelunternehmen",
+		"BUSINESS_REGISTRY_NUMBER":         "FN 123456a",
+		"BUSINESS_REGISTRY_COURT":          "Landesgericht Linz",
+		"BUSINESS_VAT_ID":                  "ATU12345678",
+		"BUSINESS_SUPERVISORY_AUTHORITY":   "Bezirkshauptmannschaft Test",
+		"BUSINESS_CHAMBER":                 "Wirtschaftskammer Test",
+		"BUSINESS_TRADE_RULES":             "Gewerbeordnung",
+		"BUSINESS_DATA_PROTECTION_OFFICER": "Datenschutz Testkontakt",
+	}
+	cfg, err := load(func(name string) string { return values[name] }, func(string) ([]byte, error) {
+		return nil, errors.New("unexpected read")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Business.Name != values["BUSINESS_NAME"] || cfg.Business.Address != values["BUSINESS_ADDRESS"] ||
+		cfg.Business.Email != values["BUSINESS_EMAIL"] || cfg.Business.Phone != values["BUSINESS_PHONE"] ||
+		cfg.Business.LegalForm != values["BUSINESS_LEGAL_FORM"] || cfg.Business.RegistryNumber != values["BUSINESS_REGISTRY_NUMBER"] ||
+		cfg.Business.RegistryCourt != values["BUSINESS_REGISTRY_COURT"] || cfg.Business.VATID != values["BUSINESS_VAT_ID"] ||
+		cfg.Business.SupervisoryAuthority != values["BUSINESS_SUPERVISORY_AUTHORITY"] || cfg.Business.Chamber != values["BUSINESS_CHAMBER"] ||
+		cfg.Business.TradeRules != values["BUSINESS_TRADE_RULES"] || cfg.Business.DataProtectionOfficer != values["BUSINESS_DATA_PROTECTION_OFFICER"] {
+		t.Fatalf("business config=%+v", cfg.Business)
 	}
 }
 

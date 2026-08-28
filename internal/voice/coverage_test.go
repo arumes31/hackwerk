@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -174,6 +175,17 @@ func TestVoiceExtractorAndProviderConstructors(t *testing.T) {
 	transcriber, err := NewOpenAITranscriber("key", "model", time.Second, 1024)
 	if err != nil || transcriber.model != "model" {
 		t.Fatalf("NewOpenAITranscriber() = %#v, %v", transcriber, err)
+	}
+	if _, err := NewWhisperCPPTranscriber("base", time.Second, 1024); err == nil {
+		t.Fatal("NewWhisperCPPTranscriber() accepted a model other than small")
+	}
+	localTranscriber, err := NewWhisperCPPTranscriber("small", 10*time.Minute, 1024)
+	if err != nil || localTranscriber.endpoint != whisperCPPInferenceURL {
+		t.Fatalf("NewWhisperCPPTranscriber() = %#v, %v", localTranscriber, err)
+	}
+	transport, ok := localTranscriber.client.Transport.(*http.Transport)
+	if !ok || transport.Proxy != nil || localTranscriber.client.CheckRedirect == nil {
+		t.Fatalf("local whisper client is not proxy-free and redirect-rejecting: %#v", localTranscriber.client)
 	}
 	if _, err := NewOpenAIStructuredProvider("key", "model", 0, 1024); err == nil {
 		t.Fatal("NewOpenAIStructuredProvider() accepted zero timeout")

@@ -199,6 +199,57 @@ func TestHomeAndNotFound(t *testing.T) {
 	}
 }
 
+func TestLegalPagesArePublicAndDoNotSetCookies(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	cfg.Business = config.Business{
+		Name: "HackWerk Testbetrieb", Address: "Testweg 1, 4020 Linz", Email: "datenschutz@example.test", Phone: "+43 1 234567",
+		LegalForm: "Einzelunternehmen", RegistryNumber: "FN 123456a", RegistryCourt: "Landesgericht Linz", VATID: "ATU12345678",
+		SupervisoryAuthority: "Bezirkshauptmannschaft Test", Chamber: "Wirtschaftskammer Test", TradeRules: "Gewerbeordnung",
+		DataProtectionOfficer: "Kein Datenschutzbeauftragter bestellt",
+	}
+	cfg.Auth = config.Auth{SessionCookieName: "test_session", CSRFCookieName: "test_csrf", SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour}
+	router, err := NewRouter(Dependencies{
+		Config: cfg, Logger: slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), Database: pinger{}, Build: buildinfo.Current(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name     string
+		path     string
+		contents []string
+	}{
+		{name: "imprint", path: "/impressum", contents: []string{"HackWerk Testbetrieb", "FN 123456a", "Impressum"}},
+		{name: "privacy", path: "/datenschutz", contents: []string{"Datenschutzinformation", "Automatisierte Entscheidungen", "Österreichischen Datenschutzbehörde"}},
+		{name: "cookies", path: "/cookies", contents: []string{"test_session", "test_csrf", "hackwerk:privacy-notice:v1", "keine Analyse-"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, tt.path, nil))
+			if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-cache" {
+				t.Fatalf("status/cache = %d/%q", response.Code, response.Header().Get("Cache-Control"))
+			}
+			if response.Header().Get("Set-Cookie") != "" {
+				t.Fatalf("public legal page set a cookie: %q", response.Header().Get("Set-Cookie"))
+			}
+			for _, content := range tt.contents {
+				if !strings.Contains(response.Body.String(), content) {
+					t.Errorf("body does not contain %q", content)
+				}
+			}
+			for _, link := range []string{"/impressum", "/datenschutz", "/cookies", "data-privacy-notice"} {
+				if !strings.Contains(response.Body.String(), link) {
+					t.Errorf("body does not contain footer contract %q", link)
+				}
+			}
+		})
+	}
+}
+
 func TestEmbeddedAssets(t *testing.T) {
 	t.Parallel()
 

@@ -52,3 +52,30 @@ func TestOpenAITranscriberRejectsErrorAndOversizedResponseWithoutLeakingPayload(
 		})
 	}
 }
+
+func TestWhisperCPPTranscriberUsesGermanLocalInferenceRequest(t *testing.T) {
+	var body string
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "" {
+			t.Error("local transcriber sent authorization")
+		}
+		data, _ := io.ReadAll(request.Body)
+		body = string(data)
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"text":"Servus, das ist eine deutsche Aufnahme."}`))
+	}))
+	defer server.Close()
+	provider := &WhisperCPPTranscriber{model: "small", endpoint: server.URL, client: &http.Client{Timeout: time.Second}, maxResponse: 1024}
+	result, err := provider.Transcribe(context.Background(), Audio{Reader: bytes.NewReader([]byte("audio")), Filename: "kundin-private-name.webm"}, "de", Metadata{})
+	if err != nil || result.Provider != "whisper.cpp" || result.Version != "small" || result.Text == "" {
+		t.Fatalf("Transcribe() = %#v, %v", result, err)
+	}
+	for _, expected := range []string{`name="language"`, "de", `name="temperature"`, "0.0", `name="response_format"`, "json", `filename="aufnahme.webm"`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("multipart body missing %q: %q", expected, body)
+		}
+	}
+	if strings.Contains(body, "private-name") || strings.Contains(body, `name="model"`) {
+		t.Fatalf("multipart body contains unexpected data: %q", body)
+	}
+}

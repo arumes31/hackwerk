@@ -14,6 +14,33 @@ function safePreferenceSet(key, value) {
   try { window.localStorage.setItem(key, value); } catch { /* Presentation preference stays optional. */ }
 }
 
+function safePreferenceRemove(key) {
+  try { window.localStorage.removeItem(key); } catch { /* Privacy notice remains usable without storage. */ }
+}
+
+function initializePrivacyNotice() {
+  const notice = document.querySelector("[data-privacy-notice]");
+  if (!notice) return;
+  const preferenceKey = "hackwerk:privacy-notice:v1";
+  const open = ({ reset = false, focus = false } = {}) => {
+    if (reset) safePreferenceRemove(preferenceKey);
+    notice.hidden = false;
+    if (focus) window.requestAnimationFrame(() => notice.focus({ preventScroll: true }));
+  };
+  const dismiss = () => {
+    safePreferenceSet(preferenceKey, "read");
+    notice.hidden = true;
+    announce("Cookie-Hinweis geschlossen. Er kann im Footer erneut geöffnet werden.");
+  };
+  document.querySelectorAll("[data-privacy-notice-open]").forEach((button) => {
+    button.addEventListener("click", () => open({ reset: true, focus: true }));
+  });
+  notice.querySelector("[data-privacy-notice-dismiss]")?.addEventListener("click", dismiss);
+  if (safePreferenceGet(preferenceKey) !== "read") open();
+}
+
+initializePrivacyNotice();
+
 function applyPresentationPreferences() {
   const comfortable = safePreferenceGet("hackwerk:density") === "comfortable";
   const outdoor = safePreferenceGet("hackwerk:outdoor") === "true";

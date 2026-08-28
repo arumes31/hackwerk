@@ -17,6 +17,51 @@ services:
       - ./scripts/postgres/init.sql:/docker-entrypoint-initdb.d/10-hackplan.sql:ro
     networks: [backend]
 
+  whisper:
+    build:
+      context: .
+      dockerfile: Dockerfile.whisper
+    image: ${WHISPER_IMAGE:-hackwerk-whisper:small}
+    entrypoint: ["/app/build/bin/whisper-server"]
+    command:
+      - --model
+      - /app/models/ggml-small.bin
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --threads
+      - "${WHISPER_THREADS:-2}"
+      - --processors
+      - "1"
+      - --language
+      - de
+      - --convert
+      - --tmp-dir
+      - /tmp
+      - --no-gpu
+      - --suppress-nst
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    read_only: true
+    user: "65532:65532"
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    pids_limit: 128
+    networks: [voice]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: {cpus: "2.00", memory: 2G, pids: 128}
+        reservations: {memory: 768M}
+
   migrate:
     build: &hackwerk-build
       context: .
@@ -52,9 +97,23 @@ services:
       APP_BASE_URL: http://localhost:18533
       APP_LISTEN_ADDR: :18533
       APP_ALLOWED_HOSTS: ${APP_ALLOWED_HOSTS:-*}
+      HTTP_READ_TIMEOUT: ${HTTP_READ_TIMEOUT:-2m}
+      HTTP_WRITE_TIMEOUT: ${HTTP_WRITE_TIMEOUT:-11m}
       DATABASE_URL: postgres://hackplan_app:development-only@postgres:5432/hackplan?sslmode=disable
       MAIL_ENABLED: ${MAIL_ENABLED:-false}
       SMS_ENABLED: ${SMS_ENABLED:-false}
+      BUSINESS_NAME: ${BUSINESS_NAME:-HackWerk – Betreiber noch nicht hinterlegt}
+      BUSINESS_ADDRESS: ${BUSINESS_ADDRESS:-Ladungsfähige Anschrift noch nicht hinterlegt}
+      BUSINESS_EMAIL: ${BUSINESS_EMAIL:-E-Mail-Adresse noch nicht hinterlegt}
+      BUSINESS_PHONE: ${BUSINESS_PHONE:-Telefonnummer noch nicht hinterlegt}
+      BUSINESS_LEGAL_FORM: ${BUSINESS_LEGAL_FORM:-Rechtsform noch nicht hinterlegt}
+      BUSINESS_REGISTRY_NUMBER: ${BUSINESS_REGISTRY_NUMBER:-Nicht vorhanden oder noch nicht hinterlegt}
+      BUSINESS_REGISTRY_COURT: ${BUSINESS_REGISTRY_COURT:-Nicht vorhanden oder noch nicht hinterlegt}
+      BUSINESS_VAT_ID: ${BUSINESS_VAT_ID:-Nicht vorhanden oder noch nicht hinterlegt}
+      BUSINESS_SUPERVISORY_AUTHORITY: ${BUSINESS_SUPERVISORY_AUTHORITY:-Zuständige Behörde noch nicht hinterlegt}
+      BUSINESS_CHAMBER: ${BUSINESS_CHAMBER:-Kammer/Fachgruppe noch nicht hinterlegt}
+      BUSINESS_TRADE_RULES: ${BUSINESS_TRADE_RULES:-Anwendbare gewerbe- oder berufsrechtliche Vorschriften noch nicht hinterlegt}
+      BUSINESS_DATA_PROTECTION_OFFICER: ${BUSINESS_DATA_PROTECTION_OFFICER:-Kein Datenschutzbeauftragter hinterlegt}
       DASHBOARD_HORIZON_DAYS: ${DASHBOARD_HORIZON_DAYS:-14}
       DASHBOARD_PENDING_AFTER: ${DASHBOARD_PENDING_AFTER:-15m}
       DASHBOARD_BUSINESS_OPEN: ${DASHBOARD_BUSINESS_OPEN:-07:00}
@@ -106,9 +165,10 @@ services:
       GEOCODING_MIN_INTERVAL: ${GEOCODING_MIN_INTERVAL:-1s}
       GEOCODING_CACHE_TTL: ${GEOCODING_CACHE_TTL:-24h}
       GEOCODING_CACHE_ENTRIES: ${GEOCODING_CACHE_ENTRIES:-512}
-      VOICE_ENABLED: ${VOICE_ENABLED:-false}
-      VOICE_TRANSCRIBER: ${VOICE_TRANSCRIBER:-disabled}
+      VOICE_ENABLED: ${VOICE_ENABLED:-true}
+      VOICE_TRANSCRIBER: ${VOICE_TRANSCRIBER:-whisper-local}
       VOICE_EXTRACTOR: ${VOICE_EXTRACTOR:-rules}
+      VOICE_WHISPER_MODEL: ${VOICE_WHISPER_MODEL:-small}
       VOICE_OPENAI_API_KEY: ${VOICE_OPENAI_API_KEY:-}
       VOICE_OPENAI_MODEL: ${VOICE_OPENAI_MODEL:-gpt-4o-mini-transcribe}
       VOICE_OPENAI_EXTRACTION_MODEL: ${VOICE_OPENAI_EXTRACTION_MODEL:-gpt-5-mini}
@@ -116,15 +176,17 @@ services:
       VOICE_MAX_DURATION: ${VOICE_MAX_DURATION:-90s}
       VOICE_MAX_BYTES: ${VOICE_MAX_BYTES:-15728640}
       VOICE_DRAFT_RETENTION: ${VOICE_DRAFT_RETENTION:-24h}
-      VOICE_PROVIDER_TIMEOUT: ${VOICE_PROVIDER_TIMEOUT:-30s}
+      VOICE_PROVIDER_TIMEOUT: ${VOICE_PROVIDER_TIMEOUT:-10m}
       VOICE_MAX_RESPONSE_BYTES: ${VOICE_MAX_RESPONSE_BYTES:-1048576}
       VOICE_TEMP_DIR: ${VOICE_TEMP_DIR:-/tmp/hackwerk-voice}
       VOICE_RATE_LIMIT_PER_MINUTE: ${VOICE_RATE_LIMIT_PER_MINUTE:-10}
-      VOICE_CONCURRENT_PER_USER: ${VOICE_CONCURRENT_PER_USER:-2}
+      VOICE_CONCURRENT_PER_USER: ${VOICE_CONCURRENT_PER_USER:-1}
       VOICE_EXTERNAL_PROVIDER_NOTICE: ${VOICE_EXTERNAL_PROVIDER_NOTICE:-Bei aktivem externem Sprachdienst verlassen Audio und/oder Transkript zur Verarbeitung die HackWerk-Infrastruktur.}
     depends_on:
       migrate:
         condition: service_completed_successfully
+      whisper:
+        condition: service_healthy
     ports:
       - "18533:18533"
     healthcheck:
@@ -139,7 +201,7 @@ services:
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
-    networks: [backend, public]
+    networks: [backend, public, voice]
     restart: unless-stopped
 
   worker:
@@ -196,3 +258,5 @@ networks:
     internal: true
   public:
   egress:
+  voice:
+    internal: true

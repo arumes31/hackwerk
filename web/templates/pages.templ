@@ -26,6 +26,7 @@ type PageData struct {
 	FullCalendarSkeletonCSSPath string
 	FullCalendarThemeCSSPath    string
 	FullCalendarPaletteCSSPath  string
+	Legal                       LegalData
 }
 
 templ documentHead(data PageData, title string) {
@@ -124,7 +125,7 @@ templ Home(data PageData) {
 					</article>
 				</section>
 			</main>
-			<footer class="site-footer"><div class="site-footer__inner">{ data.AppName } · Europe/Vienna · de-AT</div></footer>
+			@siteFooter(data)
 			<div class="visually-hidden" aria-live="polite" data-live-status></div>
 		</body>
 	</html>
@@ -143,6 +144,8 @@ templ Error(data PageData, status int, heading string, message string) {
 				<p>{ message }</p>
 				<a class="button" href="/">Zur Startseite</a>
 			</main>
+			@siteFooter(data)
+			<div class="visually-hidden" aria-live="polite" data-live-status></div>
 		</body>
 	</html>
 }

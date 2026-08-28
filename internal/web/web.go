@@ -114,6 +114,30 @@ func NewRouter(dependencies Dependencies) (http.Handler, error) {
 		FullCalendarThemeCSSPath:    assetPaths.FullCalendarThemeCSS,
 		FullCalendarPaletteCSSPath:  assetPaths.FullCalendarPaletteCSS,
 		FullCalendarJSPath:          assetPaths.FullCalendarJavaScript,
+		Legal: templates.LegalData{
+			OperatorName:          dependencies.Config.Business.Name,
+			Address:               dependencies.Config.Business.Address,
+			Email:                 dependencies.Config.Business.Email,
+			Phone:                 dependencies.Config.Business.Phone,
+			LegalForm:             dependencies.Config.Business.LegalForm,
+			RegistryNumber:        dependencies.Config.Business.RegistryNumber,
+			RegistryCourt:         dependencies.Config.Business.RegistryCourt,
+			VATID:                 dependencies.Config.Business.VATID,
+			SupervisoryAuthority:  dependencies.Config.Business.SupervisoryAuthority,
+			Chamber:               dependencies.Config.Business.Chamber,
+			TradeRules:            dependencies.Config.Business.TradeRules,
+			DataProtectionOfficer: dependencies.Config.Business.DataProtectionOfficer,
+			SessionCookieName:     dependencies.Config.Auth.SessionCookieName,
+			CSRFCookieName:        dependencies.Config.Auth.CSRFCookieName,
+			SessionIdleTTL:        dependencies.Config.Auth.SessionIdleTTL,
+			SessionAbsoluteTTL:    dependencies.Config.Auth.SessionAbsoluteTTL,
+			MailEnabled:           dependencies.Config.Mail.Enabled,
+			SMSEnabled:            dependencies.Config.SMS.Enabled,
+			GeocodingEnabled:      dependencies.Geocoder != nil,
+			RoutingMode:           dependencies.Config.Planning.Router,
+			ExternalVoiceEnabled:  dependencies.Config.Voice.Transcriber == "openai" || dependencies.Config.Voice.Extractor == "openai",
+			LocalVoiceEnabled:     dependencies.Config.Voice.Transcriber == "whisper-local",
+		},
 	}
 
 	router := chi.NewRouter()
@@ -133,6 +157,7 @@ func NewRouter(dependencies Dependencies) (http.Handler, error) {
 	router.Get("/health/live", liveHandler(dependencies.Build))
 	router.Get("/health/ready", readyHandler(dependencies.Database, dependencies.Config.Database.ReadinessTimeout, dependencies.Config.Database.ExpectedSchema))
 	router.Get("/health/worker", workerHealthHandler(dependencies.Database, dependencies.Config.Database.ReadinessTimeout, dependencies.Config.Metrics.WorkerStaleAfter))
+	registerLegalRoutes(router, pageData, dependencies.Logger)
 	if dependencies.Identity == nil {
 		router.Get("/", componentHandler(templates.Home(pageData), dependencies.Logger))
 	} else {

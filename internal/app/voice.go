@@ -23,6 +23,12 @@ func VoiceService(cfg config.Config, pool *pgxpool.Pool, observers ...voice.Obse
 			return nil, err
 		}
 		transcriber = provider
+	case "whisper-local":
+		provider, err := voice.NewWhisperCPPTranscriber(cfg.Voice.WhisperModel, cfg.Voice.ProviderTimeout, int64(cfg.Voice.MaxResponseBytes))
+		if err != nil {
+			return nil, err
+		}
+		transcriber = provider
 	default:
 		return nil, errors.New("app: unsupported voice transcriber")
 	}

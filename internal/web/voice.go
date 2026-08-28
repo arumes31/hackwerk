@@ -41,6 +41,7 @@ func voiceCaptureData(request *http.Request, service *voice.Service, cfg config.
 	return templates.VoiceCaptureData{
 		Shell: shell(request, page, csrfCookie), Enabled: service.Enabled(), MaxBytes: cfg.Voice.MaxBytes,
 		MaxSeconds: int(cfg.Voice.MaxDuration.Seconds()), ExternalProvider: cfg.Voice.Transcriber == "openai" || cfg.Voice.Extractor == "openai",
+		LocalProvider: cfg.Voice.Transcriber == "whisper-local", ProcessingMinutes: int(cfg.Voice.ProviderTimeout.Minutes()),
 		ProviderNotice: cfg.Voice.ExternalProviderNote, Error: message,
 	}
 }

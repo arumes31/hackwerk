@@ -66,9 +66,15 @@ templ Login(data LoginData) {
 				</section>
 			</main>
 			<footer class="login-meta" aria-label="Buildinformationen">
-				<span>HWK-SYS // V { loginBuildVersion(data.Page.BuildVersion) }</span>
-				<span>ID: { loginBuildID(data.Page.BuildVersion) }</span>
+				<span>HWK-SYS // V { loginBuildVersion(data.Page.BuildVersion) } · ID: { loginBuildID(data.Page.BuildVersion) }</span>
+				<nav aria-label="Rechtliche Informationen">
+					<a href="/impressum">Impressum</a>
+					<a href="/datenschutz">Datenschutz</a>
+					<a href="/cookies">Cookies</a>
+					<button type="button" data-privacy-notice-open>Cookie-Hinweis</button>
+				</nav>
 			</footer>
+			@privacyNotice(data.Page)
 			<div class="visually-hidden" aria-live="polite" data-live-status></div>
 		</body>
 	</html>

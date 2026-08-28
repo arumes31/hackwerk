@@ -36,6 +36,28 @@ type OpenAITranscriber struct {
 	maxResponse             int64
 }
 
+const whisperCPPInferenceURL = "http://whisper:8080/inference"
+
+type WhisperCPPTranscriber struct {
+	model, endpoint string
+	client          *http.Client
+	maxResponse     int64
+}
+
+func NewWhisperCPPTranscriber(model string, timeout time.Duration, maxResponse int64) (*WhisperCPPTranscriber, error) {
+	if model != "small" || timeout <= 0 || maxResponse < 1024 || maxResponse > 4<<20 {
+		return nil, errors.New("voice: invalid local whisper transcriber configuration")
+	}
+	return &WhisperCPPTranscriber{
+		model: model, endpoint: whisperCPPInferenceURL,
+		client: &http.Client{
+			Transport: outbound.InternalServiceTransport("whisper", "8080"), Timeout: timeout,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
+		maxResponse: maxResponse,
+	}, nil
+}
+
 func NewOpenAITranscriber(apiKey, model string, timeout time.Duration, maxResponse int64) (*OpenAITranscriber, error) {
 	if strings.TrimSpace(apiKey) == "" || strings.TrimSpace(model) == "" || timeout <= 0 || maxResponse < 1024 || maxResponse > 4<<20 {
 		return nil, errors.New("voice: invalid OpenAI transcriber configuration")
@@ -86,6 +108,49 @@ func (provider *OpenAITranscriber) Transcribe(ctx context.Context, audio Audio, 
 		return Transcript{}, ErrProvider
 	}
 	return Transcript{Text: parsed.Text, Provider: "openai", Version: provider.model, Confidence: .8}, nil
+}
+
+func (provider *WhisperCPPTranscriber) Transcribe(ctx context.Context, audio Audio, language string, _ Metadata) (result Transcript, resultErr error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", safeAudioName(audio.Filename))
+	if err != nil {
+		return Transcript{}, ErrProvider
+	}
+	if _, err = io.Copy(part, audio.Reader); err != nil {
+		return Transcript{}, ErrProvider
+	}
+	_ = writer.WriteField("language", language)
+	_ = writer.WriteField("temperature", "0.0")
+	_ = writer.WriteField("response_format", "json")
+	if err = writer.Close(); err != nil {
+		return Transcript{}, ErrProvider
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, provider.endpoint, &body)
+	if err != nil {
+		return Transcript{}, ErrProvider
+	}
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("Accept", "application/json")
+	response, err := provider.client.Do(request)
+	if err != nil {
+		return Transcript{}, ErrProvider
+	}
+	defer func() { resultErr = errors.Join(resultErr, response.Body.Close()) }()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return Transcript{}, ErrProvider
+	}
+	payload, err := io.ReadAll(io.LimitReader(response.Body, provider.maxResponse+1))
+	if err != nil || int64(len(payload)) > provider.maxResponse {
+		return Transcript{}, ErrProvider
+	}
+	var parsed struct {
+		Text string `json:"text"`
+	}
+	if err = json.Unmarshal(payload, &parsed); err != nil || strings.TrimSpace(parsed.Text) == "" {
+		return Transcript{}, ErrProvider
+	}
+	return Transcript{Text: parsed.Text, Provider: "whisper.cpp", Version: provider.model, Confidence: .75}, nil
 }
 
 func safeAudioName(value string) string {

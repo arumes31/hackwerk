@@ -118,3 +118,24 @@ func TestMobileMoreUsesCurrentPageSemantics(t *testing.T) {
 		})
 	}
 }
+
+func TestVoiceCaptureExplainsLocalGermanProcessing(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	data := VoiceCaptureData{
+		Shell: ShellData{Page: PageData{AppName: "HackWerk"}}, Enabled: true, LocalProvider: true,
+		MaxBytes: 15 << 20, MaxSeconds: 90, ProcessingMinutes: 10,
+	}
+	if err := VoiceCapture(data).Render(context.Background(), &output); err != nil {
+		t.Fatal(err)
+	}
+	markup := output.String()
+	for _, expected := range []string{"voice-info__icon", "primär als deutsche Sprache", "internen CPU-Dienst", "bis zu 10 Minuten", "immer nur ein Entwurf"} {
+		if !strings.Contains(markup, expected) {
+			t.Errorf("voice page missing %q", expected)
+		}
+	}
+	if strings.Contains(markup, "Externer Anbieter:") {
+		t.Fatal("local voice page claims an external provider")
+	}
+}

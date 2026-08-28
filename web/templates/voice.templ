@@ -7,11 +7,11 @@ import (
 )
 
 type VoiceCaptureData struct {
-	Shell                     ShellData
-	Enabled, ExternalProvider bool
-	MaxBytes, MaxSeconds      int
-	ProviderNotice            string
-	Error                     string
+	Shell                                    ShellData
+	Enabled, ExternalProvider, LocalProvider bool
+	MaxBytes, MaxSeconds, ProcessingMinutes  int
+	ProviderNotice                           string
+	Error                                    string
 }
 
 type VoiceReviewData struct {
@@ -47,6 +47,18 @@ templ VoiceCapture(data VoiceCaptureData) {
 								<p><strong>Externer Anbieter:</strong> { data.ProviderNotice }</p>
 							}
 						</div>
+						<details class="voice-info">
+							<summary><span class="voice-info__icon" aria-hidden="true">i</span><span>Wie funktioniert die Spracheingabe?</span></summary>
+							<div class="voice-info__body">
+								if data.LocalProvider {
+									<p>Die Aufnahme wird primär als deutsche Sprache im internen CPU-Dienst mit dem multilingualen Modell „small“ verarbeitet. Sie wird nicht an einen externen KI-Anbieter übertragen.</p>
+									<p>Je nach Aufnahmelänge und Serverauslastung kann die Verarbeitung bis zu { fmt.Sprint(data.ProcessingMinutes) } Minuten dauern. Lassen Sie diese Seite währenddessen geöffnet.</p>
+								} else if data.ExternalProvider {
+									<p>{ data.ProviderNotice }</p>
+								}
+								<p>Das Ergebnis ist immer nur ein Entwurf. Prüfen und korrigieren Sie Transkript und Felder, bevor Sie Daten bewusst übernehmen.</p>
+							</div>
+						</details>
 						<div class="voice-controls">
 							<button class="button" type="button" data-voice-start>Aufnahme starten</button>
 							<button class="button button--quiet" type="button" data-voice-pause disabled>Pause</button>

@@ -135,9 +135,18 @@ type SMS struct {
 }
 
 type Business struct {
-	Name    string
-	Address string
-	Phone   string
+	Name                  string
+	Address               string
+	Email                 string
+	Phone                 string
+	LegalForm             string
+	RegistryNumber        string
+	RegistryCourt         string
+	VATID                 string
+	SupervisoryAuthority  string
+	Chamber               string
+	TradeRules            string
+	DataProtectionOfficer string
 }
 
 type Dashboard struct {
@@ -221,6 +230,7 @@ type Voice struct {
 	Enabled               bool
 	Transcriber           string
 	Extractor             string
+	WhisperModel          string
 	OpenAIAPIKey          string
 	OpenAIModel           string
 	OpenAIExtractionModel string
@@ -382,7 +392,20 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 			SendberryKey: sendberryKey, SendberryName: sendberryName, SendberryPassword: sendberryPassword,
 			WebhookURL: strings.TrimSpace(getenv("SMS_WEBHOOK_URL")), HMACSecret: smsSecret,
 		},
-		Business:  Business{Name: valueOrDefault(getenv("BUSINESS_NAME"), "HackWerk"), Address: valueOrDefault(getenv("BUSINESS_ADDRESS"), "Betriebsadresse laut Vereinbarung"), Phone: valueOrDefault(getenv("BUSINESS_PHONE"), "Betriebskontakt laut Vereinbarung")},
+		Business: Business{
+			Name:                  valueOrDefault(getenv("BUSINESS_NAME"), "HackWerk – Betreiber noch nicht hinterlegt"),
+			Address:               valueOrDefault(getenv("BUSINESS_ADDRESS"), "Ladungsfähige Anschrift noch nicht hinterlegt"),
+			Email:                 valueOrDefault(getenv("BUSINESS_EMAIL"), "E-Mail-Adresse noch nicht hinterlegt"),
+			Phone:                 valueOrDefault(getenv("BUSINESS_PHONE"), "Telefonnummer noch nicht hinterlegt"),
+			LegalForm:             valueOrDefault(getenv("BUSINESS_LEGAL_FORM"), "Rechtsform noch nicht hinterlegt"),
+			RegistryNumber:        valueOrDefault(getenv("BUSINESS_REGISTRY_NUMBER"), "Nicht vorhanden oder noch nicht hinterlegt"),
+			RegistryCourt:         valueOrDefault(getenv("BUSINESS_REGISTRY_COURT"), "Nicht vorhanden oder noch nicht hinterlegt"),
+			VATID:                 valueOrDefault(getenv("BUSINESS_VAT_ID"), "Nicht vorhanden oder noch nicht hinterlegt"),
+			SupervisoryAuthority:  valueOrDefault(getenv("BUSINESS_SUPERVISORY_AUTHORITY"), "Zuständige Behörde noch nicht hinterlegt"),
+			Chamber:               valueOrDefault(getenv("BUSINESS_CHAMBER"), "Kammer/Fachgruppe noch nicht hinterlegt"),
+			TradeRules:            valueOrDefault(getenv("BUSINESS_TRADE_RULES"), "Anwendbare gewerbe- oder berufsrechtliche Vorschriften noch nicht hinterlegt"),
+			DataProtectionOfficer: valueOrDefault(getenv("BUSINESS_DATA_PROTECTION_OFFICER"), "Kein Datenschutzbeauftragter hinterlegt"),
+		},
 		Dashboard: Dashboard{HorizonDays: 14, PendingAfter: 15 * time.Minute, BusinessOpen: valueOrDefault(getenv("DASHBOARD_BUSINESS_OPEN"), "07:00"), BusinessClose: valueOrDefault(getenv("DASHBOARD_BUSINESS_CLOSE"), "17:00")},
 		CalendarFeed: CalendarFeed{
 			Enabled:   true,
@@ -409,6 +432,7 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 		},
 		Voice: Voice{
 			Transcriber: valueOrDefault(getenv("VOICE_TRANSCRIBER"), "disabled"), Extractor: valueOrDefault(getenv("VOICE_EXTRACTOR"), "rules"),
+			WhisperModel: valueOrDefault(getenv("VOICE_WHISPER_MODEL"), "small"),
 			OpenAIAPIKey: openAIKey, OpenAIModel: valueOrDefault(getenv("VOICE_OPENAI_MODEL"), "gpt-4o-mini-transcribe"), OpenAIExtractionModel: valueOrDefault(getenv("VOICE_OPENAI_EXTRACTION_MODEL"), "gpt-5-mini"), FakeTranscript: strings.TrimSpace(getenv("VOICE_FAKE_TRANSCRIPT")),
 			MaxDuration: 90 * time.Second, MaxBytes: 15 << 20, DraftRetention: 24 * time.Hour, ProviderTimeout: 30 * time.Second, MaxResponseBytes: 1 << 20,
 			TempDir: valueOrDefault(getenv("VOICE_TEMP_DIR"), "/tmp/hackwerk-voice"), RateLimitPerMinute: 10, ConcurrentPerUser: 2,
@@ -426,6 +450,9 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 
 	if err := applyOverrides(&cfg, getenv); err != nil {
 		return Config{}, err
+	}
+	if cfg.Voice.Transcriber == "whisper-local" && strings.TrimSpace(getenv("VOICE_PROVIDER_TIMEOUT")) == "" {
+		cfg.Voice.ProviderTimeout = 10 * time.Minute
 	}
 	if validate {
 		if err := cfg.Validate(); err != nil {
@@ -788,13 +815,13 @@ func (cfg Config) Validate() error {
 			return errors.New("config: invalid planning weights")
 		}
 	}
-	if cfg.Voice.Transcriber != "disabled" && cfg.Voice.Transcriber != "fake" && cfg.Voice.Transcriber != "openai" {
-		return errors.New("config: voice transcriber must be disabled, fake or openai")
+	if cfg.Voice.Transcriber != "disabled" && cfg.Voice.Transcriber != "fake" && cfg.Voice.Transcriber != "openai" && cfg.Voice.Transcriber != "whisper-local" {
+		return errors.New("config: voice transcriber must be disabled, fake, openai or whisper-local")
 	}
 	if cfg.Voice.Extractor != "rules" && cfg.Voice.Extractor != "openai" {
 		return errors.New("config: voice extractor must be rules or openai")
 	}
-	if cfg.Voice.MaxDuration < time.Second || cfg.Voice.MaxDuration > 5*time.Minute || cfg.Voice.MaxBytes < 1024 || cfg.Voice.MaxBytes > 50<<20 || cfg.Voice.DraftRetention < 5*time.Minute || cfg.Voice.DraftRetention > 7*24*time.Hour || cfg.Voice.ProviderTimeout < time.Second || cfg.Voice.ProviderTimeout > 2*time.Minute || cfg.Voice.MaxResponseBytes < 1024 || cfg.Voice.MaxResponseBytes > 4<<20 || strings.TrimSpace(cfg.Voice.TempDir) == "" || cfg.Voice.RateLimitPerMinute < 1 || cfg.Voice.RateLimitPerMinute > 100 || cfg.Voice.ConcurrentPerUser < 1 || cfg.Voice.ConcurrentPerUser > 5 {
+	if cfg.Voice.MaxDuration < time.Second || cfg.Voice.MaxDuration > 5*time.Minute || cfg.Voice.MaxBytes < 1024 || cfg.Voice.MaxBytes > 50<<20 || cfg.Voice.DraftRetention < 5*time.Minute || cfg.Voice.DraftRetention > 7*24*time.Hour || cfg.Voice.ProviderTimeout < time.Second || cfg.Voice.ProviderTimeout > 15*time.Minute || cfg.Voice.MaxResponseBytes < 1024 || cfg.Voice.MaxResponseBytes > 4<<20 || strings.TrimSpace(cfg.Voice.TempDir) == "" || cfg.Voice.RateLimitPerMinute < 1 || cfg.Voice.RateLimitPerMinute > 100 || cfg.Voice.ConcurrentPerUser < 1 || cfg.Voice.ConcurrentPerUser > 5 {
 		return errors.New("config: invalid voice limits")
 	}
 	if cfg.Voice.Enabled && cfg.Voice.Transcriber == "disabled" {
@@ -802,6 +829,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Voice.Transcriber == "openai" && (len(cfg.Voice.OpenAIAPIKey) < 16 || strings.TrimSpace(cfg.Voice.OpenAIModel) == "") {
 		return errors.New("config: OpenAI voice transcriber requires API key and model")
+	}
+	if cfg.Voice.Transcriber == "whisper-local" && cfg.Voice.WhisperModel != "small" {
+		return errors.New("config: local whisper transcriber requires the small model")
 	}
 	if cfg.Voice.Extractor == "openai" && (len(cfg.Voice.OpenAIAPIKey) < 16 || strings.TrimSpace(cfg.Voice.OpenAIExtractionModel) == "") {
 		return errors.New("config: OpenAI voice extractor requires API key and model")

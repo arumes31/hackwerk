@@ -169,7 +169,7 @@ templ navLink(shell ShellData, path string, label string) {
 }
 
 templ appFooter(page PageData) {
-	<footer class="site-footer"><div class="site-footer__inner">{ page.AppName } · Europe/Vienna · de-AT · Version { page.Version }</div></footer>
+	@siteFooter(page)
 	<div class="visually-hidden" aria-live="polite" data-live-status></div>
 }
 

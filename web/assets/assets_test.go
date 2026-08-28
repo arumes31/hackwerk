@@ -139,9 +139,14 @@ func TestRouteLocationSaveConfirmsValidDraftAndKeepsNativeFallback(t *testing.T)
 	for _, expected := range []string{
 		`editor.querySelector("[data-route-location-native-confirmed]")`,
 		`if (confirmLocation()) return;`,
+		`address.value = text;`,
+		`Die Bezeichnung darf höchstens 120 Zeichen lang sein.`,
 	} {
 		if !strings.Contains(javascript, expected) {
 			t.Fatalf("route-location save script missing %q", expected)
 		}
+	}
+	if strings.Contains(javascript, `label.value = text;`) {
+		t.Fatal("address search overwrites the editable route-location label")
 	}
 }

@@ -316,6 +316,64 @@ h1 {
 
 .site-footer { flex: 0 0 auto; border-top: 1px solid var(--line); }
 .site-footer__inner { padding-block: 1.4rem; color: var(--muted); font-size: .9rem; }
+.site-footer__inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem 2rem; }
+.site-footer__meta { display: grid; gap: .15rem; margin: 0; }
+.site-footer__meta strong { color: var(--ink); }
+.site-footer__links { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .4rem 1rem; }
+.site-footer__links a,
+.site-footer__links button { min-height: 44px; color: var(--moss); font: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: .2em; }
+.site-footer__links button { border: 0; padding: 0; background: transparent; cursor: pointer; }
+.site-footer__links a:hover,
+.site-footer__links button:hover { color: var(--rust); }
+
+.cookie-notice { position: fixed; z-index: 1200; right: clamp(1rem, 3vw, 2rem); bottom: clamp(1rem, 3vw, 2rem); left: clamp(1rem, 3vw, 2rem); display: flex; align-items: center; justify-content: space-between; gap: 1.25rem 2rem; max-width: 76rem; margin-inline: auto; padding: 1.1rem 1.25rem; border: 1px solid var(--moss); border-left: 5px solid var(--rust); border-radius: 14px; background: var(--surface); box-shadow: 0 18px 50px rgb(20 45 33 / 22%); }
+.cookie-notice[hidden] { display: none; }
+.cookie-notice h2 { margin: .1rem 0 .35rem; font-size: clamp(1.25rem, 2vw, 1.6rem); }
+.cookie-notice p { max-width: 64rem; margin: 0; }
+.cookie-notice .eyebrow { margin-bottom: .15rem; }
+.cookie-notice__actions { display: flex; flex: 0 0 auto; gap: .6rem; }
+
+.legal-header__nav { display: flex; align-items: center; gap: .35rem; }
+.legal-header__nav a { min-height: 44px; padding: .72rem .85rem; border-radius: 8px; color: var(--ink); font-weight: 700; text-decoration: none; }
+.legal-header__nav a[aria-current="page"] { background: var(--moss-light); color: var(--moss); box-shadow: inset 0 -2px 0 var(--moss); }
+.legal-page { width: min(100% - 2rem, 72rem); padding-block: clamp(2rem, 5vw, 4.5rem); }
+.legal-page__intro { max-width: 58rem; margin-bottom: 1.5rem; }
+.legal-page__intro h1 { margin: .15rem 0 .65rem; font-size: clamp(2.4rem, 6vw, 5rem); line-height: .98; }
+.legal-page__intro > p:not(.eyebrow) { max-width: 48rem; font-size: 1.05rem; }
+.legal-page__updated { color: var(--muted); font-size: .9rem !important; }
+.legal-toc { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 1rem; margin-block: 1.5rem; padding: .75rem 1rem; border-block: 1px solid var(--line); }
+.legal-toc a { min-height: 44px; display: inline-flex; align-items: center; color: var(--moss); font-weight: 700; }
+.legal-sections { display: grid; gap: 1rem; }
+.legal-sections > section { scroll-margin-top: 5rem; padding: clamp(1.1rem, 3vw, 1.7rem); border: 1px solid var(--line); border-radius: 14px; background: rgb(255 253 247 / 82%); }
+.legal-sections h2 { margin-top: 0; font-size: clamp(1.45rem, 3vw, 2rem); }
+.legal-sections h3 { font-size: 1.1rem; }
+.legal-sections li + li { margin-top: .45rem; }
+.legal-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem 1.25rem; margin: 0; }
+.legal-facts div { padding-left: .8rem; border-left: 3px solid var(--ochre); }
+.legal-facts dt { color: var(--muted); font-size: .78rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.legal-facts dd { margin: .2rem 0 0; font-weight: 700; overflow-wrap: anywhere; }
+.legal-preline { white-space: pre-line; }
+.legal-purpose-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+.legal-purpose-grid article { padding: 1rem; border-left: 3px solid var(--moss); background: var(--paper); }
+.legal-purpose-grid article > :first-child { margin-top: 0; }
+.legal-purpose-grid article > :last-child { margin-bottom: 0; }
+.legal-table { width: 100%; min-width: 46rem; border-collapse: collapse; }
+.legal-table th,
+.legal-table td { padding: .8rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.legal-table th { background: var(--paper); color: var(--moss); }
+.legal-table code { white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .site-footer__inner,
+  .cookie-notice { align-items: stretch; flex-direction: column; }
+  .site-footer__links { justify-content: flex-start; }
+  .cookie-notice { bottom: calc(1rem + env(safe-area-inset-bottom)); max-height: calc(100dvh - 2rem); overflow-y: auto; }
+  .cookie-notice__actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .legal-header .site-header__inner { align-items: flex-start; flex-direction: column; padding-block: .6rem; }
+  .legal-header__nav { width: 100%; overflow-x: auto; }
+  .legal-facts,
+  .legal-purpose-grid { grid-template-columns: 1fr; }
+}
 
 .error-page { max-width: 720px; }
 .error-code { color: var(--rust); font: 700 clamp(4rem, 20vw, 10rem)/.8 Georgia, serif; }
@@ -347,6 +405,13 @@ h1 {
 
 .voice-capture, .transcript-card, .privacy-notice, .duplicate-review { padding: 1rem; border: 1px solid var(--line); border-radius: .8rem; background: var(--surface); }
 .voice-capture { display: grid; gap: 1rem; }
+.voice-info { border: 1px solid var(--line); border-radius: .8rem; background: var(--surface); }
+.voice-info summary { display: flex; min-height: 44px; align-items: center; gap: .65rem; padding: .65rem .8rem; color: var(--ink); font-weight: 700; cursor: pointer; list-style: none; }
+.voice-info summary::-webkit-details-marker { display: none; }
+.voice-info__icon { display: inline-grid; width: 1.65rem; height: 1.65rem; flex: 0 0 1.65rem; place-items: center; border: 1px solid currentColor; border-radius: 50%; font-family: Georgia, serif; font-style: italic; }
+.voice-info__body { padding: 0 .8rem .8rem 3.1rem; }
+.voice-info__body p { margin: 0 0 .55rem; }
+.voice-info__body p:last-child { margin-bottom: 0; }
 .voice-controls { display: flex; align-items: center; gap: .65rem; flex-wrap: wrap; }
 .voice-controls .button { margin: 0; }
 .voice-review-grid { display: grid; grid-template-columns: minmax(16rem, .75fr) minmax(0, 1.6fr); gap: 1rem; align-items: start; margin-bottom: 1rem; }

@@ -9,15 +9,32 @@ x-runtime-environment: &runtime-environment
   APP_TRUSTED_PROXY_CIDRS: ${APP_TRUSTED_PROXY_CIDRS:-172.30.0.0/24}
   APP_LOG_FORMAT: json
   APP_LOG_LEVEL: ${APP_LOG_LEVEL:-info}
+  HTTP_READ_TIMEOUT: ${HTTP_READ_TIMEOUT:-2m}
+  HTTP_WRITE_TIMEOUT: ${HTTP_WRITE_TIMEOUT:-11m}
   SESSION_COOKIE_SECURE: "true"
   DATABASE_URL_FILE: /run/secrets/database_url
   CONFIRMATION_TOKEN_KEY_ID: ${CONFIRMATION_TOKEN_KEY_ID:?Token-Key-ID setzen}
   CONFIRMATION_TOKEN_KEYS_FILE: /run/secrets/confirmation_token_keys
   MAIL_ENABLED: ${MAIL_ENABLED:-false}
   SMS_ENABLED: ${SMS_ENABLED:-false}
+  BUSINESS_NAME: ${BUSINESS_NAME:-HackWerk – Betreiber noch nicht hinterlegt}
+  BUSINESS_ADDRESS: ${BUSINESS_ADDRESS:-Ladungsfähige Anschrift noch nicht hinterlegt}
+  BUSINESS_EMAIL: ${BUSINESS_EMAIL:-E-Mail-Adresse noch nicht hinterlegt}
+  BUSINESS_PHONE: ${BUSINESS_PHONE:-Telefonnummer noch nicht hinterlegt}
+  BUSINESS_LEGAL_FORM: ${BUSINESS_LEGAL_FORM:-Rechtsform noch nicht hinterlegt}
+  BUSINESS_REGISTRY_NUMBER: ${BUSINESS_REGISTRY_NUMBER:-Nicht vorhanden oder noch nicht hinterlegt}
+  BUSINESS_REGISTRY_COURT: ${BUSINESS_REGISTRY_COURT:-Nicht vorhanden oder noch nicht hinterlegt}
+  BUSINESS_VAT_ID: ${BUSINESS_VAT_ID:-Nicht vorhanden oder noch nicht hinterlegt}
+  BUSINESS_SUPERVISORY_AUTHORITY: ${BUSINESS_SUPERVISORY_AUTHORITY:-Zuständige Behörde noch nicht hinterlegt}
+  BUSINESS_CHAMBER: ${BUSINESS_CHAMBER:-Kammer/Fachgruppe noch nicht hinterlegt}
+  BUSINESS_TRADE_RULES: ${BUSINESS_TRADE_RULES:-Anwendbare gewerbe- oder berufsrechtliche Vorschriften noch nicht hinterlegt}
+  BUSINESS_DATA_PROTECTION_OFFICER: ${BUSINESS_DATA_PROTECTION_OFFICER:-Kein Datenschutzbeauftragter hinterlegt}
   VOICE_ENABLED: ${VOICE_ENABLED:-false}
   VOICE_TRANSCRIBER: ${VOICE_TRANSCRIBER:-disabled}
   VOICE_EXTRACTOR: ${VOICE_EXTRACTOR:-rules}
+  VOICE_WHISPER_MODEL: ${VOICE_WHISPER_MODEL:-small}
+  VOICE_PROVIDER_TIMEOUT: ${VOICE_PROVIDER_TIMEOUT:-10m}
+  VOICE_CONCURRENT_PER_USER: ${VOICE_CONCURRENT_PER_USER:-1}
   VOICE_TEMP_DIR: /tmp/hackwerk-voice
   CALENDAR_ENABLED: ${CALENDAR_ENABLED:-true}
   CALENDAR_UID_DOMAIN: ${CALENDAR_UID_DOMAIN:-hackwerk.local}
@@ -61,6 +78,29 @@ services:
     pids_limit: 256
     restart: unless-stopped
 
+  whisper:
+    image: ${WHISPER_IMAGE:-hackwerk-whisper:small}
+    entrypoint: ["/app/build/bin/whisper-server"]
+    command: ["--model", "/app/models/ggml-small.bin", "--host", "0.0.0.0", "--port", "8080", "--threads", "${WHISPER_THREADS:-2}", "--processors", "1", "--language", "de", "--convert", "--tmp-dir", "/tmp", "--no-gpu", "--suppress-nst"]
+    networks: [voice]
+    read_only: true
+    user: "65532:65532"
+    tmpfs: ["/tmp:size=64m,mode=1777,noexec,nosuid,nodev"]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 128
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: {cpus: "2.00", memory: 2G, pids: 128}
+        reservations: {memory: 768M}
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
   migrate:
     image: ${HACKWERK_IMAGE:?HACKWERK_IMAGE setzen}
     command: ["migrate", "up"]
@@ -92,10 +132,12 @@ services:
     secrets: [database_url, confirmation_token_keys, voice_openai_api_key, map_tile_token]
     depends_on:
       postgres: {condition: service_healthy}
+      whisper: {condition: service_healthy}
     ports: ["127.0.0.1:18533:18533"]
     networks:
       frontend: {ipv4_address: 172.30.0.10}
       backend: {}
+      voice: {}
       egress: {}
       monitoring: {ipv4_address: 172.33.0.10}
     tmpfs: ["/tmp:size=64m,mode=1777,noexec,nosuid,nodev"]
@@ -188,6 +230,8 @@ networks:
   backend:
     internal: true
   egress:
+  voice:
+    internal: true
   monitoring:
     internal: true
     ipam:

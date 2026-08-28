@@ -1,0 +1,253 @@
+package templates
+
+import (
+	"fmt"
+	"strings"
+	"time"
+)
+
+type LegalPageKind string
+
+const (
+	LegalPageImprint LegalPageKind = "imprint"
+	LegalPagePrivacy LegalPageKind = "privacy"
+	LegalPageCookies LegalPageKind = "cookies"
+)
+
+type LegalData struct {
+	OperatorName          string
+	Address               string
+	Email                 string
+	Phone                 string
+	LegalForm             string
+	RegistryNumber        string
+	RegistryCourt         string
+	VATID                 string
+	SupervisoryAuthority  string
+	Chamber               string
+	TradeRules            string
+	DataProtectionOfficer string
+	SessionCookieName     string
+	CSRFCookieName        string
+	SessionIdleTTL        time.Duration
+	SessionAbsoluteTTL    time.Duration
+	MailEnabled           bool
+	SMSEnabled            bool
+	GeocodingEnabled      bool
+	RoutingMode           string
+	ExternalVoiceEnabled  bool
+	LocalVoiceEnabled     bool
+}
+
+templ siteFooter(page PageData) {
+	<footer class="site-footer">
+		<div class="site-footer__inner">
+			<p class="site-footer__meta"><strong>{ page.AppName }</strong><span>Europe/Vienna · de-AT · Version { page.Version }</span></p>
+			<nav class="site-footer__links" aria-label="Rechtliche Informationen">
+				<a href="/impressum">Impressum</a>
+				<a href="/datenschutz">Datenschutz</a>
+				<a href="/cookies">Cookies</a>
+				<button type="button" data-privacy-notice-open>Cookie-Hinweis öffnen</button>
+			</nav>
+		</div>
+	</footer>
+	@privacyNotice(page)
+}
+
+templ privacyNotice(page PageData) {
+	<section class="cookie-notice" data-privacy-notice aria-labelledby="privacy-notice-title" tabindex="-1" hidden>
+		<div>
+			<p class="eyebrow">Datenschutz</p>
+			<h2 id="privacy-notice-title">Nur notwendige Cookies</h2>
+			<p>{ page.AppName } verwendet für Anmeldung und Sicherheit notwendige Cookies. Analyse-, Werbe- oder Social-Media-Cookies setzt die Anwendung nicht.</p>
+		</div>
+		<div class="cookie-notice__actions">
+			<button class="button" type="button" data-privacy-notice-dismiss>Verstanden</button>
+			<a class="button button--quiet" href="/cookies">Details</a>
+		</div>
+	</section>
+}
+
+templ LegalPage(page PageData, kind LegalPageKind) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(page, legalPageTitle(kind)+" – "+page.AppName)
+		<body>
+			<div class="connectivity-banner" role="status" aria-live="polite" data-connectivity-banner hidden></div>
+			<a class="skip-link" href="#hauptinhalt">Zum Inhalt springen</a>
+			<header class="site-header legal-header">
+				<div class="site-header__inner">
+					<a class="wordmark" href="/" aria-label={ page.AppName + " Startseite" }><span class="wordmark__mark" aria-hidden="true">H</span><span>{ page.AppName }</span></a>
+					<nav class="legal-header__nav" aria-label="Rechtliche Informationen">
+						<a href="/impressum" aria-current={ legalCurrent(kind, LegalPageImprint) }>Impressum</a>
+						<a href="/datenschutz" aria-current={ legalCurrent(kind, LegalPagePrivacy) }>Datenschutz</a>
+						<a href="/cookies" aria-current={ legalCurrent(kind, LegalPageCookies) }>Cookies</a>
+					</nav>
+				</div>
+			</header>
+			<main id="hauptinhalt" class="page legal-page">
+				<header class="legal-page__intro">
+					<p class="eyebrow">Recht & Datenschutz</p>
+					<h1>{ legalPageTitle(kind) }</h1>
+					<p>{ legalPageIntro(kind) }</p>
+					<p class="legal-page__updated">Stand: 29. August 2026</p>
+				</header>
+				if legalHasPlaceholder(page.Legal) {
+					<div class="form-alert form-alert--warning" role="note"><strong>Betreiberangaben noch offen</strong><p>Die gekennzeichneten Angaben sind Platzhalter und müssen vor dem regulären Produktivbetrieb durch die tatsächlichen Betreiberinformationen ersetzt und rechtlich geprüft werden.</p></div>
+				}
+				if kind == LegalPageImprint {
+					@imprintContent(page.Legal)
+				} else if kind == LegalPagePrivacy {
+					@privacyContent(page.Legal)
+				} else {
+					@cookiesContent(page.Legal)
+				}
+			</main>
+			@siteFooter(page)
+			<div class="visually-hidden" aria-live="polite" data-live-status></div>
+		</body>
+	</html>
+}
+
+templ imprintContent(data LegalData) {
+	<div class="legal-sections">
+		<section><h2>Diensteanbieter und Medieninhaber</h2><dl class="legal-facts"><div><dt>Name/Firma</dt><dd>{ data.OperatorName }</dd></div><div><dt>Rechtsform</dt><dd>{ data.LegalForm }</dd></div><div><dt>Anschrift</dt><dd class="legal-preline">{ data.Address }</dd></div></dl></section>
+		<section>
+			<h2>Kontakt</h2>
+			<dl class="legal-facts">
+				<div>
+					<dt>E-Mail</dt>
+					<dd>
+						@legalEmail(data.Email)
+					</dd>
+				</div>
+				<div><dt>Telefon</dt><dd>{ data.Phone }</dd></div>
+			</dl>
+		</section>
+		<section><h2>Register und Steuer</h2><dl class="legal-facts"><div><dt>Firmenbuchnummer</dt><dd>{ data.RegistryNumber }</dd></div><div><dt>Firmenbuchgericht</dt><dd>{ data.RegistryCourt }</dd></div><div><dt>UID</dt><dd>{ data.VATID }</dd></div></dl></section>
+		<section><h2>Gewerbe und Aufsicht</h2><dl class="legal-facts"><div><dt>Aufsichts-/Gewerbebehörde</dt><dd>{ data.SupervisoryAuthority }</dd></div><div><dt>Kammer/Fachgruppe</dt><dd>{ data.Chamber }</dd></div><div><dt>Anwendbare Vorschriften</dt><dd>{ data.TradeRules }</dd></div></dl><p>Die österreichischen Rechtsvorschriften sind über das <a href="https://www.ris.bka.gv.at/" rel="external nofollow noreferrer">Rechtsinformationssystem des Bundes</a> zugänglich.</p></section>
+		<section><h2>Inhaltliche Verantwortung</h2><p>Medieninhaber und für den Inhalt verantwortlich: { data.OperatorName }, Anschrift wie oben.</p><p>Die Anwendung dient der internen Einsatzplanung. Verbindliche Termine und Benachrichtigungen entstehen nur durch ausdrücklich berechtigte Benutzeraktionen.</p></section>
+	</div>
+}
+
+templ privacyContent(data LegalData) {
+	<nav class="legal-toc" aria-label="Inhalt der Datenschutzinformation"><strong>Auf dieser Seite</strong><a href="#verantwortlich">Verantwortlich</a><a href="#verarbeitung">Verarbeitungen</a><a href="#empfaenger">Empfänger</a><a href="#speicherung">Speicherdauer</a><a href="#rechte">Ihre Rechte</a></nav>
+	<div class="legal-sections">
+		<section id="verantwortlich"><h2>1. Verantwortlicher</h2><p class="legal-preline">{ data.OperatorName }<br/>{ data.Address }</p><p>E-Mail: @legalEmail(data.Email)<br/>Telefon: { data.Phone }</p><p>Datenschutzbeauftragter: { data.DataProtectionOfficer }</p></section>
+		<section id="verarbeitung"><h2>2. Welche Daten wir wofür verarbeiten</h2><div class="legal-purpose-grid"><article><h3>Benutzerkonten und Sicherheit</h3><p>Benutzername, Anzeigename, Rolle, Passwort-Hash, Sitzungs- und Sicherheitsdaten sowie technische Request-Metadaten für Anmeldung, Berechtigungsprüfung, Missbrauchsschutz und Fehleranalyse.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung beziehungsweise vorvertragliche Maßnahmen, rechtliche Verpflichtungen und berechtigtes Interesse an einem sicheren Betrieb.</p></article><article><h3>Kunden, Aufträge und Planung</h3><p>Kontakt-, Adress-, Standort-, Auftrags-, Termin-, Fahrer-, Ressourcen- und interne Notizdaten zur Auftragsabwicklung, Einsatzplanung, Dokumentation und Kommunikation.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung und vorvertragliche Maßnahmen, rechtliche Verpflichtungen sowie berechtigte Interessen an nachvollziehbarer Betriebsorganisation und Rechtsverteidigung.</p></article><article><h3>Benachrichtigungen</h3><p>Empfänger, gewählter Kanal, Nachrichtentext, Versandstatus und Providerreferenz zur Zustellung von Termin- und Statusinformationen. Der Versand erfolgt erst nach einer ausdrücklichen fachlichen Aktion.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung, berechtigtes Interesse an der Kundenkommunikation und – soweit erforderlich – Einwilligung.</p></article><article><h3>Sprache, Karte und Route</h3><p>Spracheingaben erzeugen ausschließlich einen prüfbaren Entwurf. Karten- und Routinganfragen enthalten nur erforderliche Koordinaten; eine Adresssuche übermittelt den bewusst eingegebenen Suchtext an den konfigurierten Suchdienst.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung beziehungsweise berechtigtes Interesse an effizienter Planung; Spracheingabe nur nach sichtbarer Benutzeraktion.</p></article></div></section>
+		<section><h2>3. Herkunft und Bereitstellung</h2><p>Daten stammen von Kunden, Benutzern, Administratoren und Fahrern sowie aus bewusst ausgelösten Providerantworten. Pflichtangaben sind erforderlich, um Benutzerkonten zu schützen, Aufträge abzuwickeln und Termine zu planen. Ohne sie können die jeweiligen Funktionen nicht erbracht werden.</p></section>
+		<section id="empfaenger">
+			<h2>4. Empfänger und Auftragsverarbeiter</h2>
+			<ul>
+				<li>Hosting-, Datenbank-, Backup- und Reverse-Proxy-Infrastruktur des Betreibers;</li>
+				if data.MailEnabled {
+					<li>konfigurierter E-Mail-Versanddienst für ausdrücklich ausgelöste E-Mails;</li>
+				}
+				if data.SMSEnabled {
+					<li>konfigurierter SMS-Dienst für ausdrücklich ausgelöste SMS;</li>
+				}
+				if data.GeocodingEnabled {
+					<li>konfigurierter Geocoding-Dienst bei einer bewusst gestarteten Adresssuche;</li>
+				}
+				<li>{ routingPrivacyText(data.RoutingMode) }</li>
+				if data.ExternalVoiceEnabled {
+					<li>konfigurierter OpenAI-Dienst für bewusst gestartete Transkription oder strukturierte Entwurfshilfe; die Anwendung fordert dabei deaktivierte Provider-Speicherung an.</li>
+				}
+				if data.LocalVoiceEnabled {
+					<li>interner, CPU-basierter whisper.cpp-Dienst für bewusst gestartete deutsche Transkription; das Audio verlässt die HackWerk-Infrastruktur dabei nicht.</li>
+				}
+			</ul>
+			<p>Eine Offenlegung an Behörden erfolgt nur bei gesetzlicher Verpflichtung. Daten werden nicht verkauft und nicht für Werbung oder Profilbildung verwendet.</p>
+		</section>
+		<section><h2>5. Drittlandübermittlungen</h2><p>HackWerk bindet keine Werbe-, Analyse- oder Social-Media-Dienste ein. Soweit ein Betreiber einen externen Dienst außerhalb des EWR aktiviert, muss er vor Produktivbetrieb die konkrete Übermittlungsgrundlage, geeignete Garantien und Bezugsmöglichkeiten dokumentieren. Derzeitige Platzhalter ersetzen diese betriebliche Prüfung nicht.</p></section>
+		<section id="speicherung"><h2>6. Speicherdauer</h2><ul><li>Aktive Sitzungen: bei Inaktivität höchstens { legalDuration(data.SessionIdleTTL) }, absolut höchstens { legalDuration(data.SessionAbsoluteTTL) }.</li><li>Temporäres Audio: unmittelbar nach dem Transkriptionsversuch gelöscht; ungeprüfte Sprachentwürfe standardmäßig nach 24 Stunden.</li><li>Auftrags-, Termin-, Kunden-, Audit- und Kommunikationsdaten: bis Zweckfortfall sowie entsprechend gesetzlicher Aufbewahrungs-, Nachweis- und Verjährungsfristen; historische Daten werden zunächst archiviert statt unkontrolliert gelöscht.</li><li>Technische Logs, Outboxdaten und Backups: nach dem dokumentierten betrieblichen Lösch- und Sicherungsplan.</li></ul><p>Konkrete betriebliche Fristen müssen vor Produktivbetrieb vom Verantwortlichen festgelegt werden.</p></section>
+		<section><h2>7. Automatisierte Entscheidungen</h2><p>Es findet keine ausschließlich automatisierte Entscheidung mit rechtlicher oder ähnlich erheblicher Wirkung statt. Planungsvorschläge und Spracheingaben bleiben unverbindliche Entwürfe; Termine werden ausschließlich durch Administratoren bewusst fixiert.</p></section>
+		<section id="rechte"><h2>8. Ihre Rechte</h2><p>Betroffene Personen haben nach Maßgabe der gesetzlichen Voraussetzungen Rechte auf Information, Auskunft, Berichtigung, Löschung, Einschränkung, Datenübertragbarkeit, Widerspruch und Widerruf einer Einwilligung für die Zukunft. Anfragen richten Sie an den oben genannten Verantwortlichen.</p><p>Außerdem besteht ein Beschwerderecht bei der <a href="https://www.dsb.gv.at/" rel="external nofollow noreferrer">Österreichischen Datenschutzbehörde</a>, Barichgasse 40–42, 1030 Wien.</p></section>
+		<section><h2>9. Sicherheit und Änderungen</h2><p>HackWerk verwendet verschlüsselte Übertragung, serverseitige Sitzungen, Rollen- und Rechteprüfungen, CSRF-Schutz, restriktive Browserrichtlinien, protokollierte fachliche Aktionen und minimierte technische Logs. Diese Information wird bei geänderten Datenflüssen, Providern oder Rechtsgrundlagen aktualisiert.</p></section>
+	</div>
+}
+
+templ cookiesContent(data LegalData) {
+	<div class="legal-sections">
+		<section><h2>Was verwendet HackWerk?</h2><p>Die Anwendung selbst setzt ausschließlich technisch notwendige Cookies für Anmeldung und Schutz zustandsändernder Anfragen. Es gibt keine Analyse-, Marketing-, Retargeting- oder Social-Media-Cookies und keine versteckten Zählpixel.</p></section>
+		<section><h2>Notwendige Cookies</h2><div class="table-scroll"><table class="legal-table"><thead><tr><th>Name</th><th>Zweck</th><th>Dauer</th><th>Zugriff</th></tr></thead><tbody><tr><td><code>{ data.SessionCookieName }</code></td><td>Ordnet nach der Anmeldung eine zufällige, serverseitig verwaltete Sitzung zu.</td><td>Inaktiv höchstens { legalDuration(data.SessionIdleTTL) }, absolut höchstens { legalDuration(data.SessionAbsoluteTTL) }.</td><td>Nur Server; HttpOnly</td></tr><tr><td><code>{ data.CSRFCookieName }</code></td><td>Schützt Formulare und andere zustandsändernde Anfragen vor fremder Auslösung.</td><td>Höchstens bis zum absoluten Sitzungsende.</td><td>Nur Server; HttpOnly</td></tr></tbody></table></div><p>Beide Cookies sind in Produktion verschlüsselt übertragen, auf den Pfad <code>/</code> begrenzt und mit einer restriktiven SameSite-Richtlinie versehen.</p></section>
+		<section><h2>Browser-Speicher ohne Cookie</h2><div class="table-scroll"><table class="legal-table"><thead><tr><th>Schlüssel</th><th>Speicher</th><th>Zweck</th><th>Dauer</th></tr></thead><tbody><tr><td><code>hackwerk:density</code></td><td>localStorage</td><td>Gewählte Darstellungsdichte.</td><td>Bis zum Löschen im Browser.</td></tr><tr><td><code>hackwerk:outdoor</code></td><td>localStorage</td><td>Gewählter Outdoor-Kontrast.</td><td>Bis zum Löschen im Browser.</td></tr><tr><td><code>hackwerk:privacy-notice:v1</code></td><td>localStorage</td><td>Merkt, dass der notwendige Cookie-Hinweis gelesen wurde.</td><td>Bis zum Löschen oder einer neuen Hinweiversion.</td></tr><tr><td><code>hackwerk:changed-record</code></td><td>sessionStorage</td><td>Markiert nach einer Navigation einmalig den zuletzt geänderten Datensatz.</td><td>Bis zur Anzeige oder zum Schließen des Tabs.</td></tr></tbody></table></div><p>In diesen Speichern liegen keine Kontakt-, Auftrags-, Standort- oder Sitzungsdaten.</p></section>
+		<section><h2>Warum gibt es keinen „Alle akzeptieren“-Button?</h2><p>Für unbedingt erforderliche Speicherungen ist keine Auswahl zwischen Annehmen und Ablehnen sinnvoll. Der Hinweis erklärt transparent, was geschieht. Sollte HackWerk später optionale Kategorien erhalten, dürfen diese erst nach einer freiwilligen, spezifischen Einwilligung aktiviert werden.</p></section>
+		<section><h2>Vorgeschaltete Infrastruktur und fremde Domain-Cookies</h2><p>Ein Reverse Proxy oder ein anderer Dienst unter derselben übergeordneten Domain kann eigene Sicherheits- oder Anmeldecookies setzen. Ebenso kann der Browser Cookies einer anderen Subdomain mitsenden, wenn deren Domainbereich zu weit gewählt wurde. HackWerk wertet nur die oben genannten eigenen Cookie-Namen aus. Der Betreiber muss zusätzliche Infrastruktur-Cookies separat dokumentieren und unnötig weit gefasste Domain-Cookies einschränken.</p></section>
+		<section><h2>Hinweis erneut anzeigen oder Daten löschen</h2><p>Mit „Cookie-Hinweis öffnen“ im Footer kann der Hinweis jederzeit erneut geöffnet werden. Browser-Speicher lassen sich zusätzlich in den Website-Daten des Browsers löschen; danach werden Sie abgemeldet und Darstellungspräferenzen zurückgesetzt.</p><button class="button button--quiet" type="button" data-privacy-notice-open>Cookie-Hinweis öffnen</button></section>
+	</div>
+}
+
+templ legalEmail(value string) {
+	if legalEmailURL(value) != "" {
+		<a href={ templ.SafeURL(legalEmailURL(value)) }>{ value }</a>
+	} else {
+		{ value }
+	}
+}
+
+func legalPageTitle(kind LegalPageKind) string {
+	switch kind {
+	case LegalPageImprint:
+		return "Impressum"
+	case LegalPagePrivacy:
+		return "Datenschutzinformation"
+	default:
+		return "Cookies und Browser-Speicher"
+	}
+}
+
+func legalPageIntro(kind LegalPageKind) string {
+	switch kind {
+	case LegalPageImprint:
+		return "Anbieterinformationen und Kontaktangaben für HackWerk."
+	case LegalPagePrivacy:
+		return "Wie HackWerk personenbezogene Daten verarbeitet, schützt und begrenzt."
+	default:
+		return "Welche technisch notwendigen Cookies und lokalen Darstellungswerte HackWerk verwendet."
+	}
+}
+
+func legalCurrent(actual, expected LegalPageKind) string {
+	if actual == expected {
+		return "page"
+	}
+	return ""
+}
+
+func legalHasPlaceholder(data LegalData) bool {
+	values := []string{data.OperatorName, data.Address, data.Email, data.Phone, data.LegalForm, data.SupervisoryAuthority}
+	return strings.Contains(strings.ToLower(strings.Join(values, " ")), "noch nicht")
+}
+
+func legalEmailURL(value string) string {
+	if !strings.Contains(value, "@") || strings.Contains(strings.ToLower(value), "noch nicht") {
+		return ""
+	}
+	return "mailto:" + value
+}
+
+func legalDuration(value time.Duration) string {
+	if value <= 0 {
+		return "bis zum Sitzungsende"
+	}
+	if value%time.Hour == 0 {
+		hours := int(value / time.Hour)
+		if hours == 1 {
+			return "1 Stunde"
+		}
+		return fmt.Sprintf("%d Stunden", hours)
+	}
+	return value.String()
+}
+
+func routingPrivacyText(mode string) string {
+	switch mode {
+	case "osrm":
+		return "konfigurierter externer Routingdienst; übertragen werden ausschließlich auf sechs Dezimalstellen begrenzte Koordinaten"
+	case "osrm-internal", "osrm-tailscale":
+		return "privat betriebener Routingdienst; übertragen werden ausschließlich auf sechs Dezimalstellen begrenzte Koordinaten"
+	default:
+		return "lokale Distanzschätzung innerhalb von HackWerk; dabei werden keine Routendaten an einen externen Dienst übertragen"
+	}
+}
