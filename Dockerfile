@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7
-ARG GO_VERSION=1.27.0
+ARG GO_IMAGE=golang:1.27.0-bookworm@sha256:ded31c68586d2e49e760acc2e65a884b23d032e9bbbed0ae0c55abd3fcaf4452
 ARG SOURCE_URL=https://example.invalid/hackwerk
 
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-bookworm AS build
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build
 WORKDIR /src
 ARG VERSION=dev
 ARG COMMIT=unknown

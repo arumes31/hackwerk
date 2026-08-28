@@ -105,10 +105,10 @@ image-archive: build-image
 	docker save --output dist/hackwerk-scan.tar hackwerk-scan:local
 
 scan-image: image-archive
-	$(DOCKER_RUN_PREFIX) docker run --rm -v "$(CURDIR)/dist:/work:ro" -v "$(CURDIR)/dist:/out" ghcr.io/aquasecurity/trivy:0.74.0 image --input /work/hackwerk-scan.tar --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --format json --output /out/trivy-report.json
+	$(DOCKER_RUN_PREFIX) docker run --rm -v "$(CURDIR)/dist:/work:ro" -v "$(CURDIR)/dist:/out" ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 image --input /work/hackwerk-scan.tar --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --format json --output /out/trivy-report.json
 
 sbom: image-archive
-	$(DOCKER_RUN_PREFIX) docker run --rm -v "$(CURDIR)/dist:/work:ro" -v "$(CURDIR)/dist:/out" anchore/syft:v1.51.0 docker-archive:/work/hackwerk-scan.tar -o cyclonedx-json=/out/hackwerk.cdx.json -o spdx-json=/out/hackwerk.spdx.json
+	$(DOCKER_RUN_PREFIX) docker run --rm -v "$(CURDIR)/dist:/work:ro" -v "$(CURDIR)/dist:/out" anchore/syft:v1.51.0@sha256:678bfa565b60f747aac0f8e964fe5588a24445b8d0a480e91f6efd70020dfbb0 docker-archive:/work/hackwerk-scan.tar -o cyclonedx-json=/out/hackwerk.cdx.json -o spdx-json=/out/hackwerk.spdx.json
 
 build-image:
 	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(BUILD_TIME) -t hackwerk-scan:local .

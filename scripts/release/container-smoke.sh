@@ -16,7 +16,7 @@ trap cleanup EXIT HUP INT TERM
 docker network create "$network" >/dev/null
 docker run -d --name "$postgres" --network "$network" \
   -e POSTGRES_DB=hackwerk -e POSTGRES_USER=hackwerk -e POSTGRES_PASSWORD=container-test-only \
-  postgres:18.6-alpine >/dev/null
+  postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2 >/dev/null
 
 attempt=0
 until docker exec "$postgres" pg_isready -U hackwerk -d hackwerk >/dev/null 2>&1; do
