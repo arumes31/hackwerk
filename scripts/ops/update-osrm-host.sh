@@ -5,7 +5,7 @@ deployment_dir=${HACKWERK_DEPLOYMENT_DIR:-/container/hackwerk}
 compose_file=${HACKWERK_COMPOSE_FILE:-compose.yaml}
 compose_override_file=${HACKWERK_COMPOSE_OVERRIDE_FILE:-}
 data_dir=${OSRM_DATA_DIR:-$deployment_dir/.tmp/osrm-data}
-osrm_image=${OSRM_IMAGE:-hackwerk-osrm-tools:v26.7.3-1}
+osrm_image=${OSRM_IMAGE:-hackwerk-osrm-tools:v26.7.3-2}
 
 case "$deployment_dir" in
     /*) ;;

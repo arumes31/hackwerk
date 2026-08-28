@@ -192,7 +192,7 @@ services:
     build:
       context: .
       dockerfile: scripts/ops/osrm-tools.Dockerfile
-    image: ${OSRM_IMAGE:-hackwerk-osrm-tools:v26.7.3-1}
+    image: ${OSRM_IMAGE:-hackwerk-osrm-tools:v26.7.3-2}
     command: ["osrm-routed", "--threads", "2", "--algorithm", "mld", "--mmap", "--max-table-size", "25", "/data/current/route.osrm"]
     volumes:
       - ${OSRM_DATA_DIR:-./.tmp/osrm-data}:/data:ro
@@ -221,7 +221,7 @@ services:
     build:
       context: .
       dockerfile: scripts/ops/osrm-tools.Dockerfile
-    image: ${OSRM_IMAGE:-hackwerk-osrm-tools:v26.7.3-1}
+    image: ${OSRM_IMAGE:-hackwerk-osrm-tools:v26.7.3-2}
     command: ["ionice", "-c", "3", "nice", "-n", "15", "/usr/local/bin/hackwerk-osrm-update"]
     environment:
       OSRM_DATA_ROOT: /data

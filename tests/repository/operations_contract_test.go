@@ -188,6 +188,29 @@ func TestOSRMBuildUsesPinnedToolchainAndCropBeforeMerge(t *testing.T) {
 	}
 }
 
+func TestStandaloneRoutingHostHasNoApplicationOrDatabase(t *testing.T) {
+	t.Parallel()
+	compose := repositoryFile(t, "compose.routing-host.example.yaml")
+	for _, forbidden := range []string{"  app:\n", "  worker:\n", "  postgres:\n", "secrets:"} {
+		if strings.Contains(compose, forbidden) {
+			t.Fatalf("standalone routing host unexpectedly contains %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		"OSRM_BIND_ADDRESS:-127.0.0.1",
+		"OSRM_IMAGE mit unveraenderlichem Digest setzen",
+		"networks: [routing]",
+		"networks: [egress]",
+		"/data:ro",
+		"ionice",
+		"mem_limit: 4g",
+	} {
+		if !strings.Contains(compose, required) {
+			t.Fatalf("standalone routing host is missing %q", required)
+		}
+	}
+}
+
 func TestReleaseScannerAndDockerfileFrontendImagesAreDigestPinned(t *testing.T) {
 	t.Parallel()
 	const dockerfileFrontend = "# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e"

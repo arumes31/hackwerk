@@ -107,7 +107,7 @@ OSRM_MIN_FREE_KB=20971520
 OSRM_THREADS=2
 OSRM_DOWNLOAD_LIMIT=4M
 # In Produktion auf das gepruefte osrm-tools-Image mit Digest setzen.
-# OSRM_IMAGE=registry.example/hackwerk-osrm-tools:v26.7.3-1@sha256:<gepruefter-digest>
+# OSRM_IMAGE=registry.example/hackwerk-osrm-tools:v26.7.3-2@sha256:<gepruefter-digest>
 
 MAP_TILE_URL=https://tile.openstreetmap.org/{z}/{x}/{y}.png
 MAP_TILE_TOKEN=
