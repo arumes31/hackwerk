@@ -137,7 +137,7 @@ func TestOSRMRuntimeAndUpdaterAreIsolated(t *testing.T) {
 			t.Fatal("application Compose must not contain OSRM services or a routing network")
 		}
 	}
-	for _, resourceLimit := range []string{`cpus: "2.00"`, "mem_limit: 6g", "memswap_limit: 8g"} {
+	for _, resourceLimit := range []string{`cpus: "2.00"`, "mem_limit: 8g", "memswap_limit: 10g"} {
 		if !strings.Contains(compose, resourceLimit) {
 			t.Fatalf("standalone OSRM updater is missing resource limit %q", resourceLimit)
 		}
@@ -239,7 +239,7 @@ func TestStandaloneRoutingHostHasNoApplicationOrDatabase(t *testing.T) {
 		"networks: [egress]",
 		"target: /data",
 		"ionice",
-		"mem_limit: 6g",
+		"mem_limit: 8g",
 	} {
 		if !strings.Contains(compose, required) {
 			t.Fatalf("standalone routing host is missing %q", required)
