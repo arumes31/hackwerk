@@ -310,18 +310,43 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 		if len(stops) == 0 || len(stops) != len(storedStops) {
 			return planning.ErrConflict
 		}
+		var inboundTravelSeconds int64
+		for _, stop := range stops {
+			inboundTravelSeconds += int64(stop.TravelDurationSeconds)
+		}
+		if inboundTravelSeconds > int64(draft.DurationSeconds) {
+			return planning.ErrConflict
+		}
+		returnBufferMinutes, bufferErr := routeTravelBufferMinutes(int64(draft.DurationSeconds) - inboundTravelSeconds)
+		if bufferErr != nil {
+			return bufferErr
+		}
 		driverID, _ := uuid(draft.RdDriverID)
 		chipperID, _ := uuid(draft.RdChipperResourceID)
 		var transportID pgtype.UUID
 		if draft.TransportResourceID != "" {
 			transportID, _ = uuid(draft.TransportResourceID)
 		}
-		for _, stop := range stops {
+		reservationCursor := draft.DepartureAt.Time
+		for index, stop := range stops {
 			if err := validateRouteStopForAssignment(stop); err != nil {
 				return err
 			}
+			beforeMinutes, bufferErr := routeTravelBufferMinutes(int64(stop.TravelDurationSeconds))
+			if bufferErr != nil {
+				return bufferErr
+			}
+			reservedStartsAt := stop.PlannedStartsAt.Time.Add(-time.Duration(beforeMinutes) * time.Minute)
+			if !reservedStartsAt.Equal(reservationCursor) {
+				return planning.ErrConflict
+			}
+			afterMinutes := int32(0)
+			if index == len(stops)-1 {
+				afterMinutes = returnBufferMinutes
+			}
+			reservedEndsAt := stop.PlannedEndsAt.Time.Add(time.Duration(afterMinutes) * time.Minute)
 			available, availabilityErr := q.PlanningDriverAvailable(ctx, dbgen.PlanningDriverAvailableParams{
-				DriverID: driverID, StartsAt: stop.PlannedStartsAt, EndsAt: stop.PlannedEndsAt,
+				DriverID: driverID, StartsAt: timestamp(reservedStartsAt), EndsAt: timestamp(reservedEndsAt),
 			})
 			if availabilityErr != nil {
 				return availabilityErr
@@ -332,6 +357,7 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 			jobID, _ := uuid(stop.RsJobID)
 			appointmentID, insertErr := q.InsertAdoptedProposal(ctx, dbgen.InsertAdoptedProposalParams{
 				JobID: jobID, StartsAt: stop.PlannedStartsAt, EndsAt: stop.PlannedEndsAt,
+				BufferBeforeMinutes: beforeMinutes, BufferAfterMinutes: afterMinutes,
 			})
 			if insertErr != nil {
 				return mapRouteError(insertErr)
@@ -355,10 +381,7 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 			if rows != 1 {
 				return planning.ErrConflict
 			}
-			if stop.JobType == "chipping_with_transport" && stop.TransportMode == "internal" {
-				if !transportID.Valid {
-					return planning.ErrConflict
-				}
+			if transportID.Valid {
 				rows, insertErr = q.InsertAppointmentResource(ctx, dbgen.InsertAppointmentResourceParams{
 					AppointmentID: appointmentUUID, ResourceID: transportID, Purpose: "transport",
 				})
@@ -392,6 +415,7 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 			if rows != 1 {
 				return planning.ErrConflict
 			}
+			reservationCursor = stop.PlannedEndsAt.Time
 		}
 		rows, setErr := q.SetRouteDraftAssigned(ctx, dbgen.SetRouteDraftAssignedParams{
 			ID: routeID, ExpectedVersion: input.ExpectedVersion,
@@ -409,6 +433,20 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 		return planning.RouteDraft{}, resultErr
 	}
 	return s.GetRoute(ctx, input.ID)
+}
+
+func routeTravelBufferMinutes(seconds int64) (int32, error) {
+	if seconds < 0 {
+		return 0, planning.ErrConflict
+	}
+	minutes := seconds / 60
+	if seconds%60 != 0 {
+		minutes++
+	}
+	if minutes > math.MaxInt32 {
+		return 0, planning.ErrConflict
+	}
+	return int32(minutes), nil
 }
 
 func (s *RouteStore) SaveRouteOrder(ctx context.Context, actor auth.Actor, input planning.SaveRouteOrderInput) (planning.RouteDraft, error) {
@@ -887,8 +925,18 @@ func routeMetrics(value planning.RouteDirections) (int32, int32, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	duration, err := durationSeconds(value.Duration)
-	return distance, duration, err
+	var duration int64
+	for _, leg := range value.Legs {
+		seconds, secondsErr := durationSeconds(leg.Duration)
+		if secondsErr != nil {
+			return 0, 0, secondsErr
+		}
+		duration += int64(seconds)
+		if duration > math.MaxInt32 {
+			return 0, 0, planning.ErrValidation
+		}
+	}
+	return distance, int32(duration), nil
 }
 
 func nonnegativeInt32(value int) (int32, error) {
@@ -902,7 +950,7 @@ func durationSeconds(value time.Duration) (int32, error) {
 	if value < 0 {
 		return 0, planning.ErrValidation
 	}
-	seconds := math.Round(value.Seconds())
+	seconds := math.Ceil(value.Seconds())
 	if seconds > math.MaxInt32 {
 		return 0, planning.ErrValidation
 	}

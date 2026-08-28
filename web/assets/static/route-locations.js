@@ -13,6 +13,7 @@ function initializeRouteLocationEditor(editor) {
   const latitude = picker?.querySelector("[data-route-location-latitude]") || editor.querySelector("[data-route-location-latitude]");
   const longitude = picker?.querySelector("[data-route-location-longitude]") || editor.querySelector("[data-route-location-longitude]");
   const confirmed = picker?.querySelector("[data-route-location-confirmed]") || editor.querySelector("[data-route-location-confirmed]");
+  const nativeConfirmed = picker?.querySelector("[data-route-location-native-confirmed]");
   const hiddenLatitude = picker?.querySelector("[data-route-location-hidden-latitude]");
   const hiddenLongitude = picker?.querySelector("[data-route-location-hidden-longitude]");
   const message = picker?.querySelector("[data-route-location-message]") || editor.querySelector("[data-route-location-message]");
@@ -31,6 +32,7 @@ function initializeRouteLocationEditor(editor) {
   };
   const invalidate = () => {
     confirmed.value = "";
+    if (nativeConfirmed) nativeConfirmed.checked = false;
     latitude.setAttribute("aria-invalid", "false");
     longitude.setAttribute("aria-invalid", "false");
     setError("");
@@ -72,6 +74,7 @@ function initializeRouteLocationEditor(editor) {
     if (hiddenLatitude) hiddenLatitude.value = latitude.value;
     if (hiddenLongitude) hiddenLongitude.value = longitude.value;
     confirmed.value = "true";
+    if (nativeConfirmed) nativeConfirmed.checked = true;
     if (message) message.textContent = "Standort übernommen. Änderungen an Adresse oder Koordinaten müssen erneut bestätigt werden.";
     setError("");
     return true;
@@ -177,6 +180,7 @@ document.querySelectorAll("[data-route-location-picker]").forEach(picker => {
   const latitude = picker.querySelector("[data-route-location-hidden-latitude]");
   const longitude = picker.querySelector("[data-route-location-hidden-longitude]");
   const confirmed = picker.querySelector("[data-route-location-confirmed]");
+  const nativeConfirmed = picker.querySelector("[data-route-location-native-confirmed]");
   const lastStop = picker.querySelector("[data-route-location-last-stop]");
   const editor = picker.querySelector("[data-route-location-editor]");
   const editorAPI = editor ? initializeRouteLocationEditor(editor) : null;
@@ -197,6 +201,7 @@ document.querySelectorAll("[data-route-location-picker]").forEach(picker => {
       latitude.value = choice.dataset.routeLocationLatitude || "";
       longitude.value = choice.dataset.routeLocationLongitude || "";
       confirmed.value = "";
+      if (nativeConfirmed) nativeConfirmed.checked = false;
       lastStop.value = "";
       return;
     }
@@ -205,13 +210,14 @@ document.querySelectorAll("[data-route-location-picker]").forEach(picker => {
     latitude.value = "";
     longitude.value = "";
     confirmed.value = "";
+    if (nativeConfirmed) nativeConfirmed.checked = false;
     lastStop.value = "true";
   };
   choices.forEach(choice => choice.addEventListener("change", () => setActive(choice)));
   setActive(choices.find(choice => choice.checked));
   picker.closest("form")?.addEventListener("submit", event => {
     const active = choices.find(choice => choice.checked);
-    if (active?.dataset.routeLocationKind !== "custom" || confirmed.value === "true") return;
+    if (active?.dataset.routeLocationKind !== "custom" || confirmed.value === "true" || nativeConfirmed?.checked) return;
     event.preventDefault();
     const error = picker.querySelector("[data-route-location-error]");
     if (error) {

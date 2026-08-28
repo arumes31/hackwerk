@@ -116,7 +116,8 @@ templ jobLocationEditor(page PageData, prefix string, values IntakeValues, custo
 			<p class="form-hint location-search__status" data-location-search-status aria-live="polite"></p>
 			<ul class="location-search__results" data-location-search-results aria-label="Gefundene Adressen" hidden></ul>
 		</div>
-		<div id={ prefix + "-pile-map" } class="job-location-map" data-map-canvas role="application" aria-labelledby={ prefix + "-pile-map-heading" } tabindex="0"><div class="map-fallback" data-map-fallback>Die Straßenkarte wird geladen. Koordinaten können jederzeit direkt eingegeben werden.</div></div>
+		<p class="form-hint" id={ prefix + "-pile-map-hint" }>Position auf der Karte anklicken oder die Koordinaten darunter eingeben. Beide Wege erfordern anschließend „Standort übernehmen“.</p>
+		<div id={ prefix + "-pile-map" } class="job-location-map" data-map-canvas role="region" aria-labelledby={ prefix + "-pile-map-heading" } aria-describedby={ prefix + "-pile-map-hint" }><div class="map-fallback" data-map-fallback>Die Straßenkarte wird geladen. Koordinaten können jederzeit direkt eingegeben werden.</div></div>
 		<div class="coordinate-grid">
 			<label for={ prefix + "-pile-latitude" }>Breitengrad<input id={ prefix + "-pile-latitude" } data-location-latitude inputmode="decimal" value={ values.PileLatitude } aria-invalid={ formFieldInvalid(fieldErrors, "pile_latitude") } aria-describedby={ formFieldDescription(fieldErrors, "pile_latitude") }/></label>
 			<label for={ prefix + "-pile-longitude" }>Längengrad<input id={ prefix + "-pile-longitude" } data-location-longitude inputmode="decimal" value={ values.PileLongitude }/></label>

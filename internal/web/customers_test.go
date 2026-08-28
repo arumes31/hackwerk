@@ -356,10 +356,17 @@ func TestCustomerHTTPDetailUsesOneIndependentMapEditorPerEditableJob(t *testing.
 	if count := strings.Count(body, "data-map-preview"); count != 0 {
 		t.Fatalf("editable jobs render %d redundant map previews, want none", count)
 	}
+	if strings.Contains(body, `role="application"`) {
+		t.Fatal("location map must not claim application semantics without keyboard map controls")
+	}
+	if count := strings.Count(body, `data-map-canvas role="region"`); count != len(jobIDs) {
+		t.Fatalf("accessible location map region count = %d, want %d", count, len(jobIDs))
+	}
 	for _, jobID := range jobIDs {
 		for _, id := range []string{
 			"edit-" + jobID + "-pile-map",
 			"edit-" + jobID + "-pile-map-heading",
+			"edit-" + jobID + "-pile-map-hint",
 			"edit-" + jobID + "-pile-latitude",
 		} {
 			if count := strings.Count(body, `id="`+id+`"`); count != 1 {

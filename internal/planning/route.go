@@ -3,6 +3,7 @@ package planning
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"strings"
@@ -321,13 +322,8 @@ func (s *RouteService) Plan(ctx context.Context, actor auth.Actor, input PlanRou
 		}
 	}
 	manual := append([]RouteCandidate(nil), ordered...)
-	if input.EndAtLastStop {
-		// The optimizer orders only candidate-to-candidate legs. Seed the required
-		// matrix endpoint from a validated candidate until the actual last stop is known.
-		input.End = ordered[len(ordered)-1].Location
-	}
 	if input.Optimize {
-		ordered, err = s.optimize(ctx, input.Start, input.End, ordered, input.FixedJobIDs)
+		ordered, err = s.optimize(ctx, input.Start, input.End, ordered, input.FixedJobIDs, input.EndAtLastStop)
 		if err != nil {
 			return RouteDraft{}, err
 		}
@@ -511,7 +507,7 @@ func routeCandidateLabel(candidate RouteCandidate) string {
 	return strings.Join(parts, " · ")
 }
 
-func (s *RouteService) optimize(ctx context.Context, start, end Point, candidates []RouteCandidate, fixedJobIDs []string) ([]RouteCandidate, error) {
+func (s *RouteService) optimize(ctx context.Context, start, end Point, candidates []RouteCandidate, fixedJobIDs []string, endAtLastStop bool) ([]RouteCandidate, error) {
 	fixed := make(map[string]struct{}, len(fixedJobIDs))
 	for _, id := range fixedJobIDs {
 		if id == "" {
@@ -537,7 +533,9 @@ func (s *RouteService) optimize(ctx context.Context, start, end Point, candidate
 	for _, candidate := range candidates {
 		points = append(points, candidate.Location)
 	}
-	points = append(points, end)
+	if !endAtLastStop {
+		points = append(points, end)
+	}
 	matrix, err := s.matrix.Matrix(ctx, points)
 	if err != nil {
 		return nil, fmt.Errorf("planning: calculating route matrix: %w", err)
@@ -545,30 +543,89 @@ func (s *RouteService) optimize(ctx context.Context, start, end Point, candidate
 	if err := validateRouteMatrix(matrix, len(points)); err != nil {
 		return nil, err
 	}
-	ordered := make([]RouteCandidate, 0, len(candidates))
-	current := 0
-	for position, candidate := range candidates {
-		if slices.Contains(fixedJobIDs, candidate.JobID) {
-			ordered = append(ordered, candidate)
-			current = position + 1
-			continue
+	buildOrder := func(seed int) ([]RouteCandidate, []int) {
+		available := append([]int(nil), remaining...)
+		ordered := make([]RouteCandidate, 0, len(candidates))
+		indices := make([]int, 0, len(candidates))
+		current := 0
+		seedPending := seed != 0
+		for position, candidate := range candidates {
+			if slices.Contains(fixedJobIDs, candidate.JobID) {
+				ordered = append(ordered, candidate)
+				indices = append(indices, position+1)
+				current = position + 1
+				continue
+			}
+			nextPosition := 0
+			if seedPending {
+				nextPosition = slices.Index(available, seed)
+				seedPending = false
+			} else {
+				sort.SliceStable(available, func(left, right int) bool {
+					a, b := matrix.Cells[current][available[left]], matrix.Cells[current][available[right]]
+					if a.Duration != b.Duration {
+						return a.Duration < b.Duration
+					}
+					if a.DistanceMeters != b.DistanceMeters {
+						return a.DistanceMeters < b.DistanceMeters
+					}
+					return candidates[available[left]-1].JobID < candidates[available[right]-1].JobID
+				})
+			}
+			next := available[nextPosition]
+			available = append(available[:nextPosition], available[nextPosition+1:]...)
+			ordered = append(ordered, candidates[next-1])
+			indices = append(indices, next)
+			current = next
 		}
-		sort.SliceStable(remaining, func(left, right int) bool {
-			a, b := matrix.Cells[current][remaining[left]], matrix.Cells[current][remaining[right]]
-			if a.Duration != b.Duration {
-				return a.Duration < b.Duration
-			}
-			if a.DistanceMeters != b.DistanceMeters {
-				return a.DistanceMeters < b.DistanceMeters
-			}
-			return candidates[remaining[left]-1].JobID < candidates[remaining[right]-1].JobID
-		})
-		next := remaining[0]
-		ordered = append(ordered, candidates[next-1])
-		current = next
-		remaining = remaining[1:]
+		return ordered, indices
 	}
-	return ordered, nil
+
+	seeds := remaining
+	if len(seeds) == 0 {
+		seeds = []int{0}
+	}
+	var best []RouteCandidate
+	var bestDuration time.Duration
+	var bestDistance int64
+	var bestKey string
+	for _, seed := range seeds {
+		ordered, indices := buildOrder(seed)
+		path := indices
+		if !endAtLastStop {
+			path = append(path, len(points)-1)
+		}
+		current := 0
+		var duration time.Duration
+		var distance int64
+		valid := true
+		for _, next := range path {
+			cell := matrix.Cells[current][next]
+			if cell.Duration > time.Duration(math.MaxInt64)-duration || int64(cell.DistanceMeters) > math.MaxInt64-distance {
+				valid = false
+				break
+			}
+			duration += cell.Duration
+			distance += int64(cell.DistanceMeters)
+			current = next
+		}
+		if !valid {
+			return nil, ErrValidation
+		}
+		ids := make([]string, len(ordered))
+		for index := range ordered {
+			ids[index] = ordered[index].JobID
+		}
+		key := strings.Join(ids, "\x00")
+		if best == nil || duration < bestDuration ||
+			(duration == bestDuration && (distance < bestDistance || (distance == bestDistance && key < bestKey))) {
+			best = ordered
+			bestDuration = duration
+			bestDistance = distance
+			bestKey = key
+		}
+	}
+	return best, nil
 }
 
 func routeStopsFromCandidates(candidates []RouteCandidate) []RouteStop {
@@ -617,7 +674,11 @@ func (s *RouteService) calculateDirections(ctx context.Context, route *RouteDraf
 	for index := range route.Stops {
 		stop := &route.Stops[index]
 		leg := directions.Legs[index]
-		cursor = cursor.Add(leg.Duration)
+		travelDuration, err := routeReservationDuration(leg.Duration)
+		if err != nil {
+			return err
+		}
+		cursor = cursor.Add(travelDuration)
 		stop.Position = index + 1
 		stop.LegDistanceMeters = leg.DistanceMeters
 		stop.LegDuration = leg.Duration
@@ -630,9 +691,27 @@ func (s *RouteService) calculateDirections(ctx context.Context, route *RouteDraf
 	}
 	route.EstimatedEndAt = cursor
 	if returnsToEnd {
-		route.EstimatedEndAt = cursor.Add(directions.Legs[len(directions.Legs)-1].Duration)
+		travelDuration, err := routeReservationDuration(directions.Legs[len(directions.Legs)-1].Duration)
+		if err != nil {
+			return err
+		}
+		route.EstimatedEndAt = cursor.Add(travelDuration)
 	}
 	return nil
+}
+
+func routeReservationDuration(duration time.Duration) (time.Duration, error) {
+	if duration < 0 {
+		return 0, ErrValidation
+	}
+	minutes := duration / time.Minute
+	if duration%time.Minute != 0 {
+		minutes++
+	}
+	if minutes > time.Duration(math.MaxInt64)/time.Minute {
+		return 0, ErrValidation
+	}
+	return minutes * time.Minute, nil
 }
 
 func orderRouteCandidates(ids []string, candidates []RouteCandidate) ([]RouteCandidate, error) {

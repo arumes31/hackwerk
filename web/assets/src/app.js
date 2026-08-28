@@ -1991,8 +1991,7 @@ function initializeJobLocationEditor(editor, maplibregl) {
             map.easeTo({ center: [point.longitude, point.latitude], zoom: Math.max(map.getZoom(), 15) });
           }
           showSearchStatus(`Karte auf „${label}“ ausgerichtet.`);
-          announce("Karte zur gefundenen Adresse bewegt. Klicken Sie nun den tatsächlichen Haufenstandort an.", badge?.textContent || "Fehlt");
-          canvas.focus({ preventScroll: true });
+          announce("Karte zur gefundenen Adresse bewegt. Klicken Sie den tatsächlichen Haufenstandort an oder geben Sie die Koordinaten ein.", badge?.textContent || "Fehlt");
         });
         item.append(button);
         searchResults.append(item);

@@ -243,12 +243,92 @@ func TestRouteServiceOptimizeKeepsFixedCandidateAtItsPosition(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ordered, err := service.optimize(t.Context(), Point{Latitude: 48, Longitude: 14}, Point{Latitude: 49, Longitude: 15}, candidates, []string{"job-b"})
+	ordered, err := service.optimize(t.Context(), Point{Latitude: 48, Longitude: 14}, Point{Latitude: 49, Longitude: 15}, candidates, []string{"job-b"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := []string{ordered[0].JobID, ordered[1].JobID, ordered[2].JobID}; !reflect.DeepEqual(got, []string{"job-c", "job-b", "job-a"}) {
 		t.Fatalf("fixed order = %v", got)
+	}
+}
+
+func TestRouteServiceOptimizeUsesEndPointForLastStop(t *testing.T) {
+	t.Parallel()
+	candidates := []RouteCandidate{
+		{JobID: "job-a", Location: Point{Latitude: 48.1, Longitude: 14.1}},
+		{JobID: "job-b", Location: Point{Latitude: 48.2, Longitude: 14.2}},
+	}
+	matrix := matrixRouterFunc(func(_ context.Context, points []Point) (Matrix, error) {
+		cells := make([][]MatrixCell, len(points))
+		for row := range cells {
+			cells[row] = make([]MatrixCell, len(points))
+			for column := range cells[row] {
+				cells[row][column] = MatrixCell{DistanceMeters: 1000, Duration: time.Minute}
+			}
+		}
+		end := len(points) - 1
+		if points[end].Latitude > 0 {
+			cells[1][end] = MatrixCell{DistanceMeters: 20_000, Duration: 20 * time.Minute}
+		} else {
+			cells[2][end] = MatrixCell{DistanceMeters: 20_000, Duration: 20 * time.Minute}
+		}
+		return Matrix{Cells: cells, Source: "fake"}, nil
+	})
+	service, err := NewRouteService(&routeStoreFake{}, matrix, directionsRouterFunc(func(_ context.Context, points []Point) (RouteDirections, error) {
+		return testDirections(points, time.Minute), nil
+	}), DefaultRouteConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	north, err := service.optimize(t.Context(), Point{Latitude: 48, Longitude: 14}, Point{Latitude: 49, Longitude: 15}, candidates, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	south, err := service.optimize(t.Context(), Point{Latitude: 48, Longitude: 14}, Point{Latitude: -49, Longitude: 15}, candidates, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string{north[0].JobID, north[1].JobID}; !reflect.DeepEqual(got, []string{"job-a", "job-b"}) {
+		t.Fatalf("north end order = %v, want job-b last", got)
+	}
+	if got := []string{south[0].JobID, south[1].JobID}; !reflect.DeepEqual(got, []string{"job-b", "job-a"}) {
+		t.Fatalf("south end order = %v, want job-a last", got)
+	}
+}
+
+func TestRouteServiceOptimizeEndAtLastStopOmitsExternalEndPoint(t *testing.T) {
+	t.Parallel()
+	candidates := []RouteCandidate{
+		{JobID: "job-a", Location: Point{Latitude: 48.1, Longitude: 14.1}},
+		{JobID: "job-b", Location: Point{Latitude: 48.2, Longitude: 14.2}},
+	}
+	matrix := matrixRouterFunc(func(_ context.Context, points []Point) (Matrix, error) {
+		if len(points) != len(candidates)+1 {
+			t.Fatalf("matrix point count = %d, want start plus candidates", len(points))
+		}
+		cells := make([][]MatrixCell, len(points))
+		for row := range cells {
+			cells[row] = make([]MatrixCell, len(points))
+			for column := range cells[row] {
+				cells[row][column] = MatrixCell{DistanceMeters: 1000, Duration: time.Minute}
+			}
+		}
+		return Matrix{Cells: cells, Source: "fake"}, nil
+	})
+	service, err := NewRouteService(&routeStoreFake{}, matrix, directionsRouterFunc(func(_ context.Context, points []Point) (RouteDirections, error) {
+		return testDirections(points, time.Minute), nil
+	}), DefaultRouteConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ordered, err := service.optimize(t.Context(), Point{Latitude: 48, Longitude: 14}, Point{}, candidates, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ordered) != len(candidates) {
+		t.Fatalf("ordered candidate count = %d, want %d", len(ordered), len(candidates))
 	}
 }
 
@@ -309,6 +389,29 @@ func TestRouteDraftNextStopSkipsCompletedStops(t *testing.T) {
 	}}
 	if next := route.NextStop(now); next == nil || next.ID != "current" {
 		t.Fatalf("NextStop() = %#v, want current", next)
+	}
+}
+
+func TestRouteReservationDurationRoundsUpToWholeMinutes(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name string
+		in   time.Duration
+		want time.Duration
+	}{
+		{name: "zero", in: 0, want: 0},
+		{name: "exact", in: 12 * time.Minute, want: 12 * time.Minute},
+		{name: "partial", in: 12*time.Minute + time.Second, want: 13 * time.Minute},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := routeReservationDuration(test.in)
+			if err != nil || got != test.want {
+				t.Fatalf("routeReservationDuration(%s) = %s, %v; want %s", test.in, got, err, test.want)
+			}
+		})
+	}
+	if _, err := routeReservationDuration(-time.Second); !errors.Is(err, ErrValidation) {
+		t.Fatalf("negative routeReservationDuration error = %v, want validation", err)
 	}
 }
 

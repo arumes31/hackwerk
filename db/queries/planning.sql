@@ -194,8 +194,9 @@ SELECT CASE
 END::boolean;
 
 -- name: InsertAdoptedProposal :one
-INSERT INTO appointments (job_id, lifecycle_status, starts_at, ends_at)
-VALUES (sqlc.arg(job_id)::uuid, 'proposal', sqlc.arg(starts_at)::timestamptz, sqlc.arg(ends_at)::timestamptz)
+INSERT INTO appointments (job_id, lifecycle_status, starts_at, ends_at, buffer_before_minutes, buffer_after_minutes)
+VALUES (sqlc.arg(job_id)::uuid, 'proposal', sqlc.arg(starts_at)::timestamptz, sqlc.arg(ends_at)::timestamptz,
+        sqlc.arg(buffer_before_minutes), sqlc.arg(buffer_after_minutes))
 RETURNING id::text;
 
 -- name: MarkPlanningSuggestionAdopted :execrows

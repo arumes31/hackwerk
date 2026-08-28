@@ -316,12 +316,24 @@ func routeEndpoint(request *http.Request, service *routelocation.Service, actor 
 		if service == nil {
 			return planning.Point{}, "", false, routelocation.ErrNotFound
 		}
-		id := strings.TrimSpace(strings.TrimPrefix(selection, "saved:"))
-		version, err := parseVersion(request.Form.Get(prefix + "_location_version"))
+		value := strings.TrimSpace(strings.TrimPrefix(selection, "saved:"))
+		id := value
+		embeddedVersion := ""
+		if separator := strings.LastIndex(value, ":"); separator > 0 {
+			id = strings.TrimSpace(value[:separator])
+			embeddedVersion = strings.TrimSpace(value[separator+1:])
+		}
+		versionValue := strings.TrimSpace(request.Form.Get(prefix + "_location_version"))
+		if versionValue == "" {
+			versionValue = embeddedVersion
+		} else if embeddedVersion != "" && versionValue != embeddedVersion {
+			return planning.Point{}, "", false, routelocation.ErrConflict
+		}
+		version, err := parseVersion(versionValue)
 		if err != nil || id == "" {
 			return planning.Point{}, "", false, routelocation.ErrValidation
 		}
-		if request.Form.Get(prefix+"_location_id") != id {
+		if submittedID := strings.TrimSpace(request.Form.Get(prefix + "_location_id")); submittedID != "" && submittedID != id {
 			return planning.Point{}, "", false, routelocation.ErrConflict
 		}
 		location, err := service.Resolve(request.Context(), actor, id, version)
@@ -330,7 +342,8 @@ func routeEndpoint(request *http.Request, service *routelocation.Service, actor 
 		}
 		return planning.Point{Latitude: location.Latitude, Longitude: location.Longitude}, location.Label, false, nil
 	}
-	if selection != "custom" || request.Form.Get(prefix+"_custom_confirmed") != "true" {
+	confirmed := request.Form.Get(prefix+"_custom_confirmed") == "true" || request.Form.Get(prefix+"_custom_confirmed_native") == "true"
+	if selection != "custom" || !confirmed {
 		return planning.Point{}, "", false, routelocation.ErrValidation
 	}
 	label := strings.TrimSpace(request.Form.Get(prefix + "_custom_label"))

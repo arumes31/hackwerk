@@ -42,16 +42,17 @@ func TestRouteStoreAssignsEveryStopAsProposalWithoutOutbox(t *testing.T) {
 		t.Fatalf("assigned route = %#v", assigned)
 	}
 	var lifecycle, workflow string
+	var bufferBefore, bufferAfter int
 	var outbox int
-	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT a.lifecycle_status, j.workflow_status
-		FROM appointments a JOIN jobs j ON j.id=a.job_id WHERE a.id=$1`, assigned.Stops[0].AppointmentID).Scan(&lifecycle, &workflow); err != nil {
+	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT a.lifecycle_status, j.workflow_status, a.buffer_before_minutes, a.buffer_after_minutes
+		FROM appointments a JOIN jobs j ON j.id=a.job_id WHERE a.id=$1`, assigned.Stops[0].AppointmentID).Scan(&lifecycle, &workflow, &bufferBefore, &bufferAfter); err != nil {
 		t.Fatal(err)
 	}
 	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM outbox_events WHERE aggregate_id=$1", assigned.Stops[0].AppointmentID).Scan(&outbox); err != nil {
 		t.Fatal(err)
 	}
-	if lifecycle != "proposal" || workflow != "planning" || outbox != 0 {
-		t.Fatalf("proposal state = %s/%s, outbox=%d", lifecycle, workflow, outbox)
+	if lifecycle != "proposal" || workflow != "planning" || bufferBefore != 15 || bufferAfter != 15 || outbox != 0 {
+		t.Fatalf("proposal state = %s/%s, buffers=%d/%d outbox=%d", lifecycle, workflow, bufferBefore, bufferAfter, outbox)
 	}
 	overview, err := store.LoadRouteCandidates(fixture.ctx, nil)
 	if err != nil || len(overview) != 1 || overview[0].JobID != jobID || overview[0].UnavailableReason != "Bereits eingeplant" {
@@ -105,6 +106,61 @@ func TestRouteStoreAssignmentRollsBackEveryProposalOnConflict(t *testing.T) {
 	}
 	if appointments != 0 || linked != 0 || status != "draft" {
 		t.Fatalf("rollback appointments=%d linked=%d status=%s", appointments, linked, status)
+	}
+}
+
+func TestRouteStoreAssignmentRejectsConflictDuringTravel(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	store := postgres.NewRouteStore(fixture.pool)
+	departure := time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC)
+	blockingJobID := fixture.job(t, "HW-ROUTE-TRAVEL-BLOCK")
+	var blockingAppointmentID string
+	if err := fixture.pool.QueryRow(fixture.ctx, `INSERT INTO appointments (job_id,lifecycle_status,starts_at,ends_at)
+		VALUES ($1,'proposal',$2,$3) RETURNING id::text`, blockingJobID, departure, departure.Add(10*time.Minute)).Scan(&blockingAppointmentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, `INSERT INTO appointment_drivers
+		(appointment_id,driver_id,is_primary,active,reserved_starts_at,reserved_ends_at)
+		VALUES ($1,$2,true,true,$3,$4)`, blockingAppointmentID, fixture.driver1, departure, departure.Add(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, `INSERT INTO appointment_resources
+		(appointment_id,resource_id,purpose,exclusive,active,reserved_starts_at,reserved_ends_at)
+		SELECT $1,id,'chipping',exclusive,true,$3,$4 FROM resources WHERE id=$2`, blockingAppointmentID, fixture.chipper1, departure, departure.Add(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	jobID := routeJob(t, fixture, "HW-ROUTE-TRAVEL", 48.21, 14.21)
+	candidates, err := store.LoadRouteCandidates(fixture.ctx, []string{jobID})
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("LoadRouteCandidates() = %#v, %v", candidates, err)
+	}
+	draft, err := store.SaveRouteDraft(fixture.ctx, fixture.admin, planning.SaveRouteDraftInput{
+		Route: routeDraftForCandidates(fixture, departure, candidates, false), RequestID: "route-travel-create",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.AssignRoute(fixture.ctx, fixture.admin, planning.AssignRouteInput{
+		ID: draft.ID, ExpectedVersion: draft.Version, RequestID: "route-travel-assign",
+	})
+	if !errors.Is(err, planning.ErrConflict) {
+		t.Fatalf("AssignRoute() error = %v, want travel conflict", err)
+	}
+	var appointments, outbox int
+	var status string
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM appointments WHERE job_id=$1", jobID).Scan(&appointments); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM outbox_events WHERE aggregate_id IN (SELECT id FROM appointments WHERE job_id=$1)", jobID).Scan(&outbox); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT status FROM route_drafts WHERE id=$1", draft.ID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if appointments != 0 || outbox != 0 || status != "draft" {
+		t.Fatalf("travel conflict rollback appointments=%d outbox=%d status=%s", appointments, outbox, status)
 	}
 }
 

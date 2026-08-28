@@ -150,14 +150,14 @@ ORDER BY rs.position, rs.id;
 -- name: LockRouteDraft :one
 SELECT rd.id::text, rd.driver_id::text, rd.chipper_resource_id::text,
        COALESCE(rd.transport_resource_id::text, '')::text AS transport_resource_id,
-       rd.status, rd.version
+       rd.departure_at, rd.duration_seconds, rd.status, rd.version
 FROM route_drafts rd
 WHERE rd.id=sqlc.arg(id)::uuid
 FOR UPDATE;
 
 -- name: LockRouteStopsForAssignment :many
 SELECT rs.id::text, rs.job_id::text, rs.job_version, rs.waitlist_version, rs.position,
-       rs.planned_starts_at, rs.planned_ends_at,
+       rs.travel_duration_seconds, rs.planned_starts_at, rs.planned_ends_at,
        j.version AS current_job_version, j.workflow_status, j.archived_at,
        j.job_type, j.transport_mode, j.external_transport_confirmed,
        COALESCE(j.pile_latitude::text, '')::text AS latitude,

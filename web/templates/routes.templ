@@ -94,9 +94,11 @@ templ adminRoutePlanner(data RoutePageData) {
 			<p>Alle offenen Aufträge mit gespeichertem Haufenstandort erscheinen auf der Karte. Bereits eingeplante Aufträge bleiben sichtbar, können aber nicht erneut ausgewählt werden.</p>
 			<div class="route-candidate-list">
 				for _, candidate := range data.Candidates {
-					<div class="route-candidate" data-route-candidate data-job-id={ candidate.JobID } data-latitude={ routeCoordinate(candidate.Location.Latitude) } data-longitude={ routeCoordinate(candidate.Location.Longitude) } data-label={ candidate.JobNumber } data-customer={ candidate.CustomerName } data-volume={ candidate.VolumeM3 } data-region={ candidate.Region } data-unavailable-reason={ candidate.UnavailableReason } tabindex="0">
-						<input type="checkbox" name="job_id" value={ candidate.JobID } aria-label={ candidate.JobNumber + " für die Route auswählen" } checked?={ candidate.UnavailableReason == "" && (routeContainsJob(data.Route, candidate.JobID) || slices.Contains(data.SelectedJobIDs, candidate.JobID)) } disabled?={ candidate.UnavailableReason != "" }/>
-						<span><strong>{ candidate.JobNumber } · { candidate.CustomerName }</strong><small>{ candidate.VolumeM3 } m³ · { candidate.Region }{ routeCandidateStatus(candidate) }</small></span>
+					<div class="route-candidate" data-route-candidate data-job-id={ candidate.JobID } data-latitude={ routeCoordinate(candidate.Location.Latitude) } data-longitude={ routeCoordinate(candidate.Location.Longitude) } data-label={ candidate.JobNumber } data-customer={ candidate.CustomerName } data-volume={ candidate.VolumeM3 } data-region={ candidate.Region } data-unavailable-reason={ candidate.UnavailableReason }>
+						<label class="route-candidate__select">
+							<input type="checkbox" name="job_id" value={ candidate.JobID } aria-label={ candidate.JobNumber + " für die Route auswählen" } checked?={ candidate.UnavailableReason == "" && (routeContainsJob(data.Route, candidate.JobID) || slices.Contains(data.SelectedJobIDs, candidate.JobID)) } disabled?={ candidate.UnavailableReason != "" }/>
+							<span><strong>{ candidate.JobNumber } · { candidate.CustomerName }</strong><small>{ candidate.VolumeM3 } m³ · { candidate.Region }{ routeCandidateStatus(candidate) }</small></span>
+						</label>
 						<span class="route-order-actions"><button type="button" class="button button--quiet" data-route-candidate-move="up" aria-label={ candidate.JobNumber + " nach oben" }>↑</button><button type="button" class="button button--quiet" data-route-candidate-move="down" aria-label={ candidate.JobNumber + " nach unten" }>↓</button><label><input type="checkbox" name="fixed_job_id" value={ candidate.JobID } disabled?={ candidate.UnavailableReason != "" } data-route-pin/> Position halten</label></span>
 					</div>
 				}
@@ -169,14 +171,14 @@ templ routeLocationChooser(prefix string, heading string, locations []RouteLocat
 		<legend>{ heading }</legend>
 		<input type="hidden" name={ prefix + "_location_id" } data-route-location-id-value/>
 		<input type="hidden" name={ prefix + "_location_version" } data-route-location-version-value/>
-		<input type="hidden" name={ prefix + "_latitude" } data-route-location-hidden-latitude/>
-		<input type="hidden" name={ prefix + "_longitude" } data-route-location-hidden-longitude/>
+		<input type="hidden" data-route-location-hidden-latitude/>
+		<input type="hidden" data-route-location-hidden-longitude/>
 		<input type="hidden" name={ prefix + "_custom_confirmed" } value="" data-route-location-confirmed/>
 		<input type="hidden" name={ prefix + "_at_last_stop" } value="" data-route-location-last-stop/>
 		<div class="route-location-picker__choices" role="radiogroup" aria-label={ heading + " auswählen" }>
 			for _, location := range locations {
 				<label class="route-location-choice">
-					<input type="radio" name={ prefix + "_selection" } value={ "saved:" + location.ID } checked?={ location.ID == defaultID } data-route-location-choice data-route-location-kind="saved" data-route-location-id={ location.ID } data-route-location-version={ strconv.Itoa(int(location.Version)) } data-route-location-label={ location.Name } data-route-location-latitude={ location.Latitude } data-route-location-longitude={ location.Longitude }/>
+					<input type="radio" name={ prefix + "_selection" } value={ "saved:" + location.ID + ":" + strconv.Itoa(int(location.Version)) } checked?={ location.ID == defaultID } data-route-location-choice data-route-location-kind="saved" data-route-location-id={ location.ID } data-route-location-version={ strconv.Itoa(int(location.Version)) } data-route-location-label={ location.Name } data-route-location-latitude={ location.Latitude } data-route-location-longitude={ location.Longitude }/>
 					<span><strong>{ location.Name }</strong><small>{ location.Address }</small></span>
 				</label>
 			}
@@ -191,7 +193,7 @@ templ routeLocationChooser(prefix string, heading string, locations []RouteLocat
 				</label>
 			}
 		</div>
-		<div class="route-location-custom" data-route-location-custom hidden?={ defaultID != "" }>
+		<div class="route-location-custom" data-route-location-custom>
 			<div class="form-grid">
 				<label>{ heading } bezeichnen<input type="text" name={ prefix + "_custom_label" } maxlength="120" autocomplete="off" placeholder="z. B. Lagerplatz Nord" data-route-location-label/></label>
 				<label>{ heading }-Adresse<input type="text" name={ prefix + "_custom_address" } maxlength="500" autocomplete="street-address" placeholder="Straße, Ort" data-route-location-address/></label>
@@ -202,9 +204,10 @@ templ routeLocationChooser(prefix string, heading string, locations []RouteLocat
 				<p class="form-hint location-search__status" data-route-location-search-status aria-live="polite"></p>
 				<ul class="location-search__results" data-route-location-search-results aria-label="Gefundene Adressen" hidden></ul>
 				<div class="coordinate-grid">
-					<label>Breitengrad<input type="text" inputmode="decimal" autocomplete="off" placeholder="48,208000" data-route-location-latitude aria-describedby={ prefix + "-custom-hint" }/></label>
-					<label>Längengrad<input type="text" inputmode="decimal" autocomplete="off" placeholder="16,373000" data-route-location-longitude aria-describedby={ prefix + "-custom-hint" }/></label>
+					<label>Breitengrad<input type="text" name={ prefix + "_latitude" } inputmode="decimal" autocomplete="off" placeholder="48,208000" data-route-location-latitude aria-describedby={ prefix + "-custom-hint" }/></label>
+					<label>Längengrad<input type="text" name={ prefix + "_longitude" } inputmode="decimal" autocomplete="off" placeholder="16,373000" data-route-location-longitude aria-describedby={ prefix + "-custom-hint" }/></label>
 				</div>
+				<label class="check-label route-location-native-confirm"><input type="checkbox" name={ prefix + "_custom_confirmed_native" } value="true" data-route-location-native-confirmed/> Adresse und Koordinaten geprüft</label>
 				<div class="route-location-custom__confirm"><button class="button button--quiet" type="button" data-route-location-confirm>Standort übernehmen</button><span id={ prefix + "-custom-hint" } class="form-hint" data-route-location-message aria-live="polite">Bitte Adresse oder Koordinaten prüfen und anschließend übernehmen.</span></div>
 			</div>
 		</div>

@@ -1434,10 +1434,10 @@ dialog.modal-dialog::backdrop { background: var(--overlay-backdrop); backdrop-fi
   border: 1px solid var(--line);
   border-radius: .55rem;
   background: rgb(255 253 247 / 74%);
-  cursor: pointer;
 }
 
 .route-candidate > input[type="checkbox"],
+.route-candidate__select > input[type="checkbox"],
 .route-candidate .route-order-actions input[type="checkbox"] { width: 1.2rem; min-height: 1.2rem; margin: 0; }
 
 .route-candidate:hover { border-color: var(--moss); }
@@ -1447,9 +1447,12 @@ dialog.modal-dialog::backdrop { background: var(--overlay-backdrop); backdrop-fi
 .route-candidate span { display: grid; min-width: 0; }
 .route-candidate small { color: var(--muted); }
 .route-candidate > label { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .65rem; }
+.route-candidate > .route-candidate__select { grid-column: 1 / -1; min-height: 44px; cursor: pointer; }
+.route-candidate[data-unavailable-reason]:not([data-unavailable-reason=""]) > .route-candidate__select { cursor: default; }
 .route-candidate .route-order-actions { grid-column: 2; display: flex; align-items: center; justify-content: flex-start; gap: .35rem; flex-wrap: wrap; }
 .route-candidate .route-order-actions .button { min-width: 44px; margin: 0; padding-inline: .55rem; }
-.route-candidate .route-order-actions label { display: inline-flex; align-items: center; gap: .35rem; font-size: .82rem; }
+.route-candidate .route-order-actions label { display: inline-flex; align-items: center; gap: .35rem; min-height: 44px; padding-block: .25rem; font-size: .82rem; cursor: pointer; }
+.js .route-location-native-confirm { display: none; }
 
 .route-map-legend {
   display: flex;

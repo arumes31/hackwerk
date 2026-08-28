@@ -258,19 +258,28 @@ func (q *Queries) GetPlanningSuggestionForUpdate(ctx context.Context, id pgtype.
 }
 
 const insertAdoptedProposal = `-- name: InsertAdoptedProposal :one
-INSERT INTO appointments (job_id, lifecycle_status, starts_at, ends_at)
-VALUES ($1::uuid, 'proposal', $2::timestamptz, $3::timestamptz)
+INSERT INTO appointments (job_id, lifecycle_status, starts_at, ends_at, buffer_before_minutes, buffer_after_minutes)
+VALUES ($1::uuid, 'proposal', $2::timestamptz, $3::timestamptz,
+        $4, $5)
 RETURNING id::text
 `
 
 type InsertAdoptedProposalParams struct {
-	JobID    pgtype.UUID
-	StartsAt pgtype.Timestamptz
-	EndsAt   pgtype.Timestamptz
+	JobID               pgtype.UUID
+	StartsAt            pgtype.Timestamptz
+	EndsAt              pgtype.Timestamptz
+	BufferBeforeMinutes int32
+	BufferAfterMinutes  int32
 }
 
 func (q *Queries) InsertAdoptedProposal(ctx context.Context, arg InsertAdoptedProposalParams) (string, error) {
-	row := q.db.QueryRow(ctx, insertAdoptedProposal, arg.JobID, arg.StartsAt, arg.EndsAt)
+	row := q.db.QueryRow(ctx, insertAdoptedProposal,
+		arg.JobID,
+		arg.StartsAt,
+		arg.EndsAt,
+		arg.BufferBeforeMinutes,
+		arg.BufferAfterMinutes,
+	)
 	var id string
 	err := row.Scan(&id)
 	return id, err

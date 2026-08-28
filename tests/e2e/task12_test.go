@@ -22,6 +22,27 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
+type e2eStreetDirections struct{}
+
+func (e2eStreetDirections) Directions(_ context.Context, points []planning.Point) (planning.RouteDirections, error) {
+	result := planning.RouteDirections{Source: "osrm", FreshAt: time.Date(2026, 9, 1, 5, 0, 0, 0, time.UTC)}
+	if len(points) > 0 {
+		result.Geometry = append(result.Geometry, points[0])
+	}
+	for index := 0; index+1 < len(points); index++ {
+		from, to := points[index], points[index+1]
+		result.Geometry = append(result.Geometry,
+			planning.Point{Latitude: (from.Latitude+to.Latitude)/2 + 0.002, Longitude: (from.Longitude + to.Longitude) / 2},
+			to,
+		)
+		leg := planning.RouteLeg{DistanceMeters: 12_000 + index*1_000, Duration: time.Duration(12+index) * time.Minute}
+		result.Legs = append(result.Legs, leg)
+		result.DistanceMeters += leg.DistanceMeters
+		result.Duration += leg.Duration
+	}
+	return result, nil
+}
+
 func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	databaseURL := os.Getenv("TEST_DATABASE_URL")
 	if databaseURL == "" {
@@ -43,7 +64,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	}
 
 	routerAdapter := planning.NewHaversineRouter(1.3, 55)
-	routes, err := planning.NewRouteService(postgres.NewRouteStore(pool), routerAdapter, routerAdapter, planning.DefaultRouteConfig())
+	routes, err := planning.NewRouteService(postgres.NewRouteStore(pool), routerAdapter, e2eStreetDirections{}, planning.DefaultRouteConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,6 +130,39 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		t.Fatalf("route-location map/confirm/invalidate/layout=%v/%v/%v/%v", routeLocationMapReady, routeLocationConfirmed, routeLocationInvalidated, routeLocationLayout)
 	}
 
+	var nativeCustomRoute bool
+	if err := runBrowserStep(browser, "plan custom endpoints without JavaScript",
+		chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetScriptExecutionDisabled(true).Do(ctx) }),
+		chromedp.Navigate(server.URL+"/planning/routes"),
+		chromedp.WaitVisible("form[action='/planning/routes']", chromedp.ByQuery),
+		chromedp.Click("input[name='start_selection'][value='custom']", chromedp.ByQuery),
+		chromedp.Click("input[name='end_selection'][value='custom']", chromedp.ByQuery),
+		chromedp.SetValue("input[name='start_custom_label']", "Hof ohne JavaScript", chromedp.ByQuery),
+		chromedp.SetValue("input[name='start_custom_address']", "Hofstraße 1", chromedp.ByQuery),
+		chromedp.SetValue("input[name='start_latitude']", "48.200000", chromedp.ByQuery),
+		chromedp.SetValue("input[name='start_longitude']", "14.200000", chromedp.ByQuery),
+		chromedp.Click("input[name='start_custom_confirmed_native']", chromedp.ByQuery),
+		chromedp.SetValue("input[name='end_custom_label']", "Lager ohne JavaScript", chromedp.ByQuery),
+		chromedp.SetValue("input[name='end_custom_address']", "Lagerweg 2", chromedp.ByQuery),
+		chromedp.SetValue("input[name='end_latitude']", "48.260000", chromedp.ByQuery),
+		chromedp.SetValue("input[name='end_longitude']", "14.260000", chromedp.ByQuery),
+		chromedp.Click("input[name='end_custom_confirmed_native']", chromedp.ByQuery),
+		chromedp.Click("input[name='job_id'][value='"+jobID+"']", chromedp.ByQuery),
+		chromedp.SetValue("select[name='driver_id']", driverID, chromedp.ByQuery),
+		chromedp.SetValue("select[name='chipper_resource_id']", chipperID, chromedp.ByQuery),
+		chromedp.SetValue("input[name='departure_date']", "2026-09-01", chromedp.ByQuery),
+		chromedp.SetValue("input[name='departure_time']", "06:30", chromedp.ByQuery),
+		chromedp.Click("form[action='/planning/routes'] button[type='submit']", chromedp.ByQuery),
+		chromedp.WaitVisible(".route-summary", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('.route-summary')?.textContent.includes('Hof ohne JavaScript')&&document.querySelector('.route-summary')?.textContent.includes('Lager ohne JavaScript')`, &nativeCustomRoute),
+		chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetScriptExecutionDisabled(false).Do(ctx) }),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if !nativeCustomRoute {
+		t.Fatal("custom route endpoints are not usable without JavaScript")
+	}
+
 	var compactDesktopOverflow, compactMobileOverflow bool
 	var driverCreateOpen bool
 	if err := runBrowserStep(browser, "compact driver list",
@@ -139,8 +193,8 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		t.Fatalf("compact default/create/desktop-overflow/mobile-overflow=%v/%v/%v", driverCreateOpen, compactDesktopOverflow, compactMobileOverflow)
 	}
 
-	var desktopOverflow, smallDesktopTarget, selectedByMap, mapReady bool
-	var routeGeometryPresent, routeLineDrawn, routeLineRendered, routeLineAnnounced bool
+	var desktopOverflow, smallDesktopTarget, selectedByMap, selectedByCard, deselectedByKeyboard, candidateSemantics, mapReady bool
+	var routeGeometryPresent, routeStreetSource, routeLineDrawn, routeLineRendered, routeLineAnnounced bool
 	var routeLineState, mapError string
 	var desktopLayout struct {
 		TwoColumns, MapAboveFold, CompactCandidate, BuilderWide, EndpointCardsReadable bool
@@ -173,7 +227,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 			const workspace=document.querySelector('[data-route-context][data-route-admin="true"]');
 			const builder=workspace.querySelector('.route-builder').getBoundingClientRect();
 			const panel=workspace.querySelector('.route-map-panel').getBoundingClientRect();
-			const checkbox=workspace.querySelector('.route-candidate > input[type="checkbox"]').getBoundingClientRect();
+			const checkbox=workspace.querySelector('.route-candidate__select > input[type="checkbox"]').getBoundingClientRect();
 			const endpointCards=Array.from(workspace.querySelectorAll('.route-location-picker')).map(card=>card.getBoundingClientRect());
 			return {TwoColumns:builder.right<panel.left&&Math.abs(builder.top-panel.top)<4,
 				MapAboveFold:panel.top<window.innerHeight&&panel.height>300,
@@ -181,6 +235,12 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 				BuilderWide:builder.width>=560,
 				EndpointCardsReadable:endpointCards.length===2&&endpointCards.every(card=>card.width>=250)};
 		})()`, &desktopLayout),
+		chromedp.Evaluate(`(() => { const rows=Array.from(document.querySelectorAll('[data-route-candidate]')); return rows.length>0&&rows.every(row=>!row.hasAttribute('tabindex')&&row.querySelector('.route-candidate__select')?.getBoundingClientRect().height>=44&&row.querySelector('.route-order-actions label')?.getBoundingClientRect().height>=44); })()`, &candidateSemantics),
+		chromedp.Click(".route-candidate[data-job-id='"+jobID+"'] .route-candidate__select span", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector("input[name='job_id'][value='`+jobID+`']").checked`, &selectedByCard),
+		chromedp.Focus("input[name='job_id'][value='"+jobID+"']", chromedp.ByQuery),
+		chromedp.KeyEvent(" "),
+		chromedp.Evaluate(`!document.querySelector("input[name='job_id'][value='`+jobID+`']").checked`, &deselectedByKeyboard),
 		chromedp.Click(".route-map-marker--candidate[data-job-id='"+jobID+"']", chromedp.ByQuery),
 		chromedp.WaitVisible(".route-map-popup__action", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector('.route-map-popup__action').click()`, nil),
@@ -197,23 +257,24 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		chromedp.WaitVisible(".route-summary", chromedp.ByQuery),
 		chromedp.Poll(`document.querySelector('[data-route-map]')?.dataset.routeLineState==='drawn'`, nil),
 		chromedp.Evaluate(`Boolean(document.querySelector('[data-route-map]')?.dataset.routeGeometry)`, &routeGeometryPresent),
+		chromedp.Evaluate(`document.querySelector('[data-route-map]')?.dataset.routeSource==='osrm'`, &routeStreetSource),
 		chromedp.Evaluate(`document.querySelector('[data-route-map]')?.dataset.routeLineState==='drawn'`, &routeLineDrawn),
 		chromedp.Evaluate(`(() => { const canvas=document.querySelector('[data-route-line-overlay]'); if (!canvas) return false; const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data; for(let index=3;index<pixels.length;index+=4){if(pixels[index]>0)return true} return false })()`, &routeLineRendered),
 		chromedp.Evaluate(`document.querySelector('[data-route-map]')?.dataset.routeLineState||''`, &routeLineState),
 		chromedp.Evaluate(`document.querySelector('[data-route-map]')?.dataset.mapError||''`, &mapError),
-		chromedp.Evaluate(`document.querySelector('[data-route-map-notice]')?.textContent.includes('Routenlinie')`, &routeLineAnnounced),
+		chromedp.Evaluate(`document.querySelector('[data-route-map-notice]')?.textContent.includes('Straßenroute')`, &routeLineAnnounced),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
-	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || startMarkerCount != 1 || !selectedByMap || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate || !routeGeometryPresent || !routeLineDrawn || !routeLineRendered || !routeLineAnnounced {
-		t.Fatalf("desktop route map-ready/admin/toolbar/presets/candidates/start/selected/overflow/small-target/layout/geometry/line/rendered/notice=%v/%v/%v/%v/%d/%d/%v/%v/%v/%+v/%v/%v/%v/%v state=%q map-error=%q targets=%v", mapReady, adminRouteContext, mapToolbar, routeDatePresets, candidateMarkerCount, startMarkerCount, selectedByMap, desktopOverflow, smallDesktopTarget, desktopLayout, routeGeometryPresent, routeLineDrawn, routeLineRendered, routeLineAnnounced, routeLineState, mapError, smallDesktopTargets)
+	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || startMarkerCount != 1 || !selectedByCard || !deselectedByKeyboard || !candidateSemantics || !selectedByMap || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate || !routeGeometryPresent || !routeStreetSource || !routeLineDrawn || !routeLineRendered || !routeLineAnnounced {
+		t.Fatalf("desktop route map-ready/admin/toolbar/presets/candidates/start/card/keyboard/semantics/map/overflow/small-target/layout/geometry/street/line/rendered/notice=%v/%v/%v/%v/%d/%d/%v/%v/%v/%v/%v/%v/%+v/%v/%v/%v/%v/%v state=%q map-error=%q targets=%v", mapReady, adminRouteContext, mapToolbar, routeDatePresets, candidateMarkerCount, startMarkerCount, selectedByCard, deselectedByKeyboard, candidateSemantics, selectedByMap, desktopOverflow, smallDesktopTarget, desktopLayout, routeGeometryPresent, routeStreetSource, routeLineDrawn, routeLineRendered, routeLineAnnounced, routeLineState, mapError, smallDesktopTargets)
 	}
 
 	var routeText string
 	if err := chromedp.Run(browser, chromedp.Text("main", &routeText, chromedp.ByQuery)); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(routeText, "2 Stopps") || !strings.Contains(routeText, "Schätzung") || !strings.Contains(routeText, "keine Nachricht") {
+	if !strings.Contains(routeText, "2 Stopps") || !strings.Contains(routeText, "Straßenrouting") || !strings.Contains(routeText, "keine Nachricht") {
 		t.Fatalf("route summary misses safety information: %s", routeText)
 	}
 
