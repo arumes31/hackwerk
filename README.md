@@ -7,6 +7,10 @@ Dieses Paket übersetzt die fachlichen Anforderungen für eine Terminplanungs-Ap
 
 Der Arbeitsname ist vollständig konfigurierbar. Weitere Namensideen stehen in `reference/naming-ideas.md`.
 
+Der Quellcode ist proprietär; Nutzung und Weitergabe richten sich nach der
+[Lizenz](LICENSE). Sicherheitslücken bitte ausschließlich über den in
+[SECURITY.md](SECURITY.md) beschriebenen privaten Meldeweg übermitteln.
+
 ## Schnellstart der Anwendung
 
 Vorausgesetzt werden Docker Engine und Docker Compose. Browser-Assets liegen als geprüfte statische Dateien im Repository und werden direkt in das Go-Binary eingebettet; weder Build noch Laufzeit benötigen Node, npm oder ein CDN.

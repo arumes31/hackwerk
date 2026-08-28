@@ -20,6 +20,7 @@ jobs:
   quality:
     name: Generate, format and lint
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -27,7 +28,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: true
@@ -51,6 +52,7 @@ jobs:
   test:
     name: Unit, race and binary
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -58,7 +60,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: true
@@ -69,7 +71,7 @@ jobs:
       - name: Build versioned binary
         run: make build
       - name: Upload binary
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: hackwerk-linux-amd64
           path: bin/hackwerk
@@ -79,9 +81,10 @@ jobs:
   integration:
     name: PostgreSQL integration
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
-        image: postgres:18.6-alpine
+        image: postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
         env:
           POSTGRES_DB: hackplan_test
           POSTGRES_USER: hackplan
@@ -105,7 +108,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: true
@@ -115,6 +118,7 @@ jobs:
   e2e:
     name: Chromium E2E (${{ matrix.name }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       max-parallel: 4
@@ -146,7 +150,7 @@ jobs:
             pattern: ^TestTask13AllMainPagesDesktopAndMobileUsability$
     services:
       postgres:
-        image: postgres:18.6-alpine
+        image: postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
         env:
           POSTGRES_DB: hackplan_test
           POSTGRES_USER: hackplan
@@ -170,7 +174,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: true

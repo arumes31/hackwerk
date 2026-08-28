@@ -39,7 +39,7 @@ x-runtime-security: &runtime-security
 
 services:
   postgres:
-    image: postgres:18.6-alpine
+    image: postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
     environment:
       POSTGRES_DB: hackwerk
       POSTGRES_USER: hackwerk_bootstrap
@@ -148,7 +148,7 @@ services:
         reservations: {memory: 96M}
 
   backup:
-    image: postgres:18.6-alpine
+    image: postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
     entrypoint: ["/bin/sh", "/opt/hackwerk/backup-postgres.sh"]
     environment:
       DATABASE_URL_FILE: /run/secrets/backup_database_url
