@@ -1463,8 +1463,31 @@ document.querySelectorAll("[data-planning-workbench]").forEach((workbench) => {
   const radius = workbench.querySelector("[data-planning-radius]");
 	const region = workbench.querySelector("[data-planning-region]");
   const single = workbench.querySelector("[data-planning-single]");
+  const singleSubmit = workbench.querySelector("[data-planning-single-submit]");
   const routeButton = workbench.querySelector("[data-planning-route]");
   const detail = workbench.querySelector("[data-planning-detail-panel]");
+  const results = workbench.querySelector("[data-planning-results]");
+  const planningSteps = Array.from(workbench.querySelectorAll("[data-planning-step]"));
+  const setCurrentStep = (number) => planningSteps.forEach((step) => {
+    const current = step.dataset.planningStep === String(number);
+    step.closest("li")?.classList.toggle("is-active", current);
+    if (current) step.setAttribute("aria-current", "step");
+    else step.removeAttribute("aria-current");
+  });
+  planningSteps.filter((step) => step.matches("a[href^='#']")).forEach((step) => {
+    step.addEventListener("click", (event) => {
+      const target = document.querySelector(step.hash);
+      if (!target) return;
+      event.preventDefault();
+      window.history.pushState(null, "", step.hash);
+      setCurrentStep(step.dataset.planningStep);
+      target.focus({ preventScroll: true });
+      target.scrollIntoView({ block: "start", behavior: "auto" });
+    });
+  });
+  workbench.querySelectorAll("form[action$='/adopt']").forEach((form) => {
+    form.addEventListener("submit", () => setCurrentStep(4));
+  });
   const radiusOrigin = mapPoint(workbench.dataset.planningRadiusLatitude, workbench.dataset.planningRadiusLongitude);
   if (radius && !radiusOrigin) {
     radius.value = "";
@@ -1493,7 +1516,7 @@ document.querySelectorAll("[data-planning-workbench]").forEach((workbench) => {
   };
   const renderFilters = () => rows.forEach((row) => { row.hidden = !visible(row); });
   const checkedRows = () => rows.filter((row) => row.querySelector('input[name="job_id"]')?.checked);
-  const update = () => {
+  const update = ({ syncSingle = true } = {}) => {
     const selected = checkedRows();
     const volume = selected.reduce((sum, row) => sum + (Number(String(row.dataset.volume || "0").replace(",", ".")) || 0), 0);
     const duration = selected.reduce((sum, row) => sum + (Number(row.dataset.durationMinutes) || 0), 0);
@@ -1503,11 +1526,22 @@ document.querySelectorAll("[data-planning-workbench]").forEach((workbench) => {
     set("[data-planning-duration]", duration >= 60 ? `${Math.floor(duration / 60)} Std. ${duration % 60} Min.` : `${duration} Min.`);
     set("[data-planning-selection-title]", selected.length === 0 ? "Noch nichts gewählt" : selected.length === 1 ? selected[0].dataset.label : `${selected.length} Aufträge gewählt`);
     if (routeButton) routeButton.disabled = selected.length === 0;
-    if (selected.length === 1 && single) single.value = selected[0].dataset.jobId;
+    if (syncSingle && single) single.value = selected.length === 1 ? selected[0].dataset.jobId : "";
+    if (singleSubmit) singleSubmit.disabled = !single?.value;
+    rows.forEach((row) => row.classList.toggle("route-candidate--selected", selected.includes(row)));
+    setCurrentStep(results ? 3 : selected.length === 1 ? 2 : 1);
   };
   rows.forEach((row) => {
     row.querySelector('input[name="job_id"]')?.addEventListener("change", update);
     row.querySelector("[data-planning-detail]")?.addEventListener("click", () => {
+      const selectedBox = row.querySelector('input[name="job_id"]');
+      if (selectedBox && !selectedBox.disabled) {
+        rows.forEach((candidate) => {
+          const box = candidate.querySelector('input[name="job_id"]');
+          if (box) box.checked = candidate === row;
+        });
+        update();
+      }
       if (!detail) return;
       detail.replaceChildren();
       const title = document.createElement("strong"); title.textContent = `${row.dataset.label} · ${row.dataset.customer}`;
@@ -1518,9 +1552,26 @@ document.querySelectorAll("[data-planning-workbench]").forEach((workbench) => {
     });
   });
 	search?.addEventListener("input", renderFilters); radius?.addEventListener("input", renderFilters); region?.addEventListener("change", renderFilters);
+  single?.addEventListener("change", () => {
+    rows.forEach((row) => {
+      const box = row.querySelector('input[name="job_id"]');
+      if (box) box.checked = Boolean(single.value) && row.dataset.jobId === single.value;
+    });
+    update({ syncSingle: false });
+  });
   workbench.querySelector("[data-planning-select-visible]")?.addEventListener("click", () => { rows.filter(visible).forEach((row) => { const box = row.querySelector('input[name="job_id"]'); if (box && !box.disabled) box.checked = true; }); update(); });
 	workbench.querySelector("[data-planning-reset]")?.addEventListener("click", () => { rows.forEach((row) => { const box = row.querySelector('input[name="job_id"]'); if (box) box.checked = false; row.hidden = false; }); if (search) search.value = ""; if (radius) radius.value = ""; if (region) region.value = ""; update(); });
-  renderFilters(); update();
+  if (single?.value) {
+    const selectedRow = rows.find((row) => row.dataset.jobId === single.value);
+    const selectedBox = selectedRow?.querySelector('input[name="job_id"]');
+    if (selectedBox && !selectedBox.disabled) selectedBox.checked = true;
+  }
+  renderFilters(); update({ syncSingle: false });
+  if (results && !window.location.hash) requestAnimationFrame(() => {
+    results.focus({ preventScroll: true });
+    results.scrollIntoView({ block: "start", behavior: "auto" });
+  });
+  workbench.dataset.planningReady = "true";
 });
 
 document.querySelectorAll(".parallel-move-form").forEach((form) => {
@@ -2307,6 +2358,7 @@ function initializeRouteMap(canvas, maplibregl) {
   const stops = routeStops(context);
   const candidates = routeCandidates(context);
   const geometry = routeLineFeature(canvas.dataset.routeGeometry);
+  canvas.dataset.routeLineState = geometry ? "pending" : "missing";
   const geometryCoordinates = geometry?.geometry.coordinates || [];
   const selectedStart = context.querySelector('[data-route-location-prefix="start"] [data-route-location-choice]:checked');
   const selectedEnd = context.querySelector('[data-route-location-prefix="end"] [data-route-location-choice]:checked');
@@ -2434,21 +2486,25 @@ function initializeRouteMap(canvas, maplibregl) {
     if (!ready) markRouteMapUnavailable(canvas);
   });
   const addRouteLayers = () => {
-    if (geometry) {
-      if (map.getSource("hackwerk-route")) return;
+    if (!geometry) return;
+    try {
+      if (map.getSource("hackwerk-route")) {
+        if (map.getLayer("hackwerk-route")) canvas.dataset.routeLineState = "drawn";
+        return;
+      }
       map.addSource("hackwerk-route", { type: "geojson", data: geometry });
       map.addLayer({
         id: "hackwerk-route-halo",
         type: "line",
         source: "hackwerk-route",
-        paint: { "line-color": "#fffdf7", "line-width": 9, "line-opacity": .88 },
+        paint: { "line-color": "#fffdf7", "line-width": 12, "line-opacity": .94 },
         layout: { "line-cap": "round", "line-join": "round" },
       });
       map.addLayer({
         id: "hackwerk-route",
         type: "line",
         source: "hackwerk-route",
-        paint: { "line-color": "#9b4931", "line-width": 5, "line-opacity": .96 },
+        paint: { "line-color": "#9b4931", "line-width": 7, "line-opacity": 1 },
         layout: { "line-cap": "round", "line-join": "round" },
       });
       const directions = routeDirectionFeatures(geometry);
@@ -2462,13 +2518,21 @@ function initializeRouteMap(canvas, maplibregl) {
           layout: { "line-cap": "round", "line-join": "round" },
         });
       }
+      canvas.dataset.routeLineState = map.getSource("hackwerk-route") && map.getLayer("hackwerk-route") ? "drawn" : "failed";
+    } catch {
+      canvas.dataset.routeLineState = "failed";
+      routeMapNotice(context, "Die berechnete Routenlinie konnte nicht gezeichnet werden. Start, Ende und Stopps bleiben als Punkte sichtbar; laden Sie die Karte erneut.");
     }
   };
   map.on("style.load", addRouteLayers);
   map.once("style.load", () => {
-    if (!geometry && stops.length) {
+    if (canvas.dataset.routeLineState === "drawn") {
+      routeMapNotice(context, "Die berechnete Routenlinie ist sichtbar. Start, Stopps und Ende bleiben zusätzlich als beschriftete Punkte bedienbar.");
+    } else if (geometry) {
+      routeMapNotice(context, "Die Route ist berechnet, aber die Routenlinie konnte nicht gezeichnet werden. Start, Ende und Stopps bleiben als Punkte sichtbar.");
+    } else if (stops.length) {
       routeMapNotice(context, "Die Routenlinie fehlt; die verfügbaren Stopps werden als Kartenpunkte gezeigt.");
-    } else if (candidates.some((candidate) => !candidate.checkbox.disabled)) {
+    } else if (visibleCandidates.some((candidate) => !candidate.checkbox.disabled)) {
       routeMapNotice(context, "Wählen Sie Aufträge direkt in der Liste oder über einen Karten-Pin aus. Die Route wird erst mit „Route berechnen“ erzeugt.");
     } else if (candidates.length) {
       routeMapNotice(context, "Alle sichtbaren Aufträge sind bereits eingeplant. Ihre Pins bleiben zur Übersicht geöffnet, können aber nicht erneut ausgewählt werden.");

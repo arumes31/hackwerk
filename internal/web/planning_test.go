@@ -75,6 +75,11 @@ func TestPlanningHTTPRouteSelectionWorksWithoutEnhancement(t *testing.T) {
 	body := page.Body.String()
 	if page.Code != http.StatusOK || !strings.Contains(body, `form="planning-route-selection" type="checkbox" name="job_id" value="job-1"`) ||
 		!strings.Contains(body, `type="submit" data-planning-route>Auswahl als Tagesroute planen`) ||
+		!strings.Contains(body, `type="submit" data-planning-single-submit>Weiter: Top-3 berechnen`) ||
+		!strings.Contains(body, `href="#planung-auftrag" data-planning-step="1"`) ||
+		!strings.Contains(body, `href="#planung-rahmen" data-planning-step="2"`) ||
+		!strings.Contains(body, `id="planung-auftrag"`) ||
+		!strings.Contains(body, `id="planung-rahmen"`) ||
 		!strings.Contains(body, `data-planning-radius-latitude="48.200000" data-planning-radius-longitude="14.200000"`) {
 		t.Fatalf("planning route fallback=%d %s", page.Code, body)
 	}

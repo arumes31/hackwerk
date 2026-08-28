@@ -105,6 +105,46 @@ func TestTask08PlanningSuggestionsMobileJourney(t *testing.T) {
 	if !desktopWorkbench {
 		t.Fatal("planning workbench is not a compact three-column desktop layout")
 	}
+	var selectedSingle, selectedCheckbox, selectedRow, continueEnabled bool
+	var planningStepsReachable, frameReached, suggestionsReached, adoptionReached bool
+	if err := runBrowserStep(browser, "select single order and continue",
+		chromedp.Navigate(server.URL+"/planning"),
+		chromedp.Poll(`document.querySelector('[data-planning-workbench]')?.dataset.planningReady==='true'`, nil),
+		chromedp.WaitVisible("[data-planning-single]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const links=Array.from(document.querySelectorAll('[data-planning-step][href]'));
+			return links.some(link=>link.dataset.planningStep==='1'&&link.hash==='#planung-auftrag')
+				&&links.some(link=>link.dataset.planningStep==='2'&&link.hash==='#planung-rahmen');
+		})()`, &planningStepsReachable),
+		chromedp.SetValue("[data-planning-single]", jobID, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('[data-planning-single]').value === '`+jobID+`'`, nil),
+		chromedp.Evaluate(`document.querySelector('[data-planning-single]').value === '`+jobID+`'`, &selectedSingle),
+		chromedp.Evaluate(`document.querySelector("input[form='planning-route-selection'][value='`+jobID+`']").checked`, &selectedCheckbox),
+		chromedp.Evaluate(`document.querySelector("[data-planning-order][data-job-id='`+jobID+`']").classList.contains('route-candidate--selected')`, &selectedRow),
+		chromedp.Evaluate(`!document.querySelector('[data-planning-single-submit]').disabled`, &continueEnabled),
+		chromedp.Click("[data-planning-step='2']", chromedp.ByQuery),
+		chromedp.Poll(`location.hash==='#planung-rahmen'`, nil),
+		chromedp.Evaluate(`(() => { const target=document.querySelector('#planung-rahmen'); return location.hash==='#planung-rahmen'&&target&&target.getBoundingClientRect().top<window.innerHeight&&document.querySelector('[data-planning-step="2"]')?.getAttribute('aria-current')==='step'; })()`, &frameReached),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if !planningStepsReachable || !selectedSingle || !selectedCheckbox || !selectedRow || !continueEnabled || !frameReached {
+		t.Fatalf("planning steps/select/checkbox/row/continue/frame=%v/%v/%v/%v/%v/%v", planningStepsReachable, selectedSingle, selectedCheckbox, selectedRow, continueEnabled, frameReached)
+	}
+	if err := runBrowserStep(browser, "calculate suggestions and reach adoption",
+		chromedp.Click("[data-planning-single-submit]", chromedp.ByQuery),
+		chromedp.WaitVisible(".suggestion-card", chromedp.ByQuery),
+		chromedp.Poll(`document.activeElement?.id==='planung-vorschlaege'`, nil),
+		chromedp.Evaluate(`document.querySelector('[data-planning-step="3"][aria-current="step"]')?.hash==='#planung-vorschlaege'&&document.activeElement?.id==='planung-vorschlaege'`, &suggestionsReached),
+		chromedp.Click("[data-planning-step='4']", chromedp.ByQuery),
+		chromedp.Poll(`location.hash==='#planung-uebernahme'&&document.activeElement?.id==='planung-uebernahme'`, nil),
+		chromedp.Evaluate(`location.hash==='#planung-uebernahme'&&document.activeElement?.id==='planung-uebernahme'&&document.querySelector('[data-planning-step="4"]')?.getAttribute('aria-current')==='step'`, &adoptionReached),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if !suggestionsReached || !adoptionReached {
+		t.Fatalf("planning suggestions/adoption=%v/%v", suggestionsReached, adoptionReached)
+	}
 	var fallbackSourceSelected, fallbackSelected bool
 	var fallbackLocation string
 	if err := runBrowserStep(browser, "select route without JavaScript",

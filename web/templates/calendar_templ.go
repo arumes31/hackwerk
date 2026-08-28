@@ -421,7 +421,7 @@ func Calendar(data CalendarData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\"></div><noscript><p class=\"form-alert\">Die interaktive Tages-/Wochenansicht benötigt JavaScript. Die Agenda und Einplanungsmaske darunter bleiben verfügbar.</p></noscript></section></div><section class=\"calendar-agenda\" aria-labelledby=\"agenda-title\"><h2 id=\"agenda-title\">Kommende Termine</h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\"></div><noscript><p class=\"form-alert form-alert--warning\">Die interaktive Tages-/Wochenansicht benötigt JavaScript. Die Agenda und Einplanungsmaske darunter bleiben verfügbar.</p></noscript></section></div><section class=\"calendar-agenda\" aria-labelledby=\"agenda-title\"><h2 id=\"agenda-title\">Kommende Termine</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -144,7 +144,12 @@ templ adminRoutePlanner(data RoutePageData) {
 		<div class="route-map-panel">
 			@mapAssetData(data.Shell.Page)
 			<div class="section-heading"><div><p class="eyebrow">Kartenansicht</p><h2>{ routeMapHeading(data.Route) }</h2></div><span class="status-badge">{ fmt.Sprint(len(data.Candidates)) } Standorte</span></div>
-			<div class="route-map-legend" aria-label="Kartenlegende"><span><i class="route-map-legend__start" aria-hidden="true">S</i>Startort</span><span><i class="route-map-legend__end" aria-hidden="true">E</i>Endort</span><span><i class="route-map-legend__candidate" aria-hidden="true"></i>Offener Auftrag</span><span><i class="route-map-legend__selected" aria-hidden="true">✓</i>Ausgewählt</span><span><i class="route-map-legend__unavailable" aria-hidden="true">–</i>Bereits eingeplant</span></div>
+			<div class="route-map-legend" aria-label="Kartenlegende">
+				if data.Route != nil {
+					<span><i class="route-map-legend__line" aria-hidden="true"></i>Berechnete Routenlinie</span>
+				}
+				<span><i class="route-map-legend__start" aria-hidden="true">S</i>Startort</span><span><i class="route-map-legend__end" aria-hidden="true">E</i>Endort</span><span><i class="route-map-legend__candidate" aria-hidden="true"></i>Offener Auftrag</span><span><i class="route-map-legend__selected" aria-hidden="true">✓</i>Ausgewählt</span><span><i class="route-map-legend__unavailable" aria-hidden="true">–</i>Bereits eingeplant</span>
+			</div>
 			<div class="route-map-toolbar" data-route-map-toolbar aria-label="Kartenwerkzeuge"><button type="button" class="button button--quiet" data-route-map-start>Startort</button><button type="button" class="button button--quiet" data-route-map-fit>Alle Punkte</button><button type="button" class="button button--quiet" data-route-map-labels aria-pressed="true">Beschriftungen</button><button type="button" class="button button--quiet" data-route-map-retry>Karte erneut laden</button><span class="status-badge" data-route-map-count></span></div>
 			<div class="route-map" role="region" aria-label="Interaktive Karte der offenen Aufträge" data-route-map data-route-start-label={ routeStartLabel(data.Route) } data-route-start-latitude={ routeStartLatitude(data.Route) } data-route-start-longitude={ routeStartLongitude(data.Route) } data-route-end-label={ routeEndLabel(data.Route) } data-route-end-latitude={ routeEndLatitude(data.Route) } data-route-end-longitude={ routeEndLongitude(data.Route) } data-route-geometry={ routeGeometry(data.Route) } data-route-arrows="true"><div class="map-fallback" data-map-fallback>Die Straßenkarte wird geladen. Die Auftragsliste bleibt nutzbar.</div></div>
 			if data.Route != nil {

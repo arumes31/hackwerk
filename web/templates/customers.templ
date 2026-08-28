@@ -471,7 +471,7 @@ templ CustomerDetail(data CustomerDetailData) {
 					</div>
 				</div>
 				if data.Detail.Customer.ArchivedAt != nil {
-					<div class="form-alert">Dieser Kunde ist archiviert. Die Historie bleibt sichtbar.</div>
+					<div class="form-alert form-alert--info">Dieser Kunde ist archiviert. Die Historie bleibt sichtbar.</div>
 				}
 				if data.Error != "" {
 					<div class="form-alert" role="alert">{ data.Error }</div>

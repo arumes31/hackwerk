@@ -2787,7 +2787,7 @@ func CustomerDetail(data CustomerDetailData) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if data.Detail.Customer.ArchivedAt != nil {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 262, "<div class=\"form-alert\">Dieser Kunde ist archiviert. Die Historie bleibt sichtbar.</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 262, "<div class=\"form-alert form-alert--info\">Dieser Kunde ist archiviert. Die Historie bleibt sichtbar.</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

@@ -34,7 +34,7 @@ templ VoiceCapture(data VoiceCaptureData) {
 					<a class="button button--quiet" href="/customers/new">Manuell erfassen</a>
 				</div>
 				if !data.Enabled {
-					<div class="form-alert" role="status"><strong>Spracheingabe ist deaktiviert.</strong> Die vollständige manuelle Erfassung steht weiterhin zur Verfügung.</div>
+					<div class="form-alert form-alert--info" role="status"><strong>Spracheingabe ist deaktiviert.</strong> Die vollständige manuelle Erfassung steht weiterhin zur Verfügung.</div>
 				} else {
 					<section class="voice-capture" data-voice-capture data-max-seconds={ fmt.Sprint(data.MaxSeconds) } data-csrf={ data.Shell.CSRFToken }>
 						if data.Error != "" {
@@ -84,9 +84,9 @@ templ VoiceReview(data VoiceReviewData) {
 					<div class="form-alert" role="alert">Die Transkription ist fehlgeschlagen. Audio wurde gelöscht. Sie können bewusst neu aufnehmen oder manuell erfassen.</div>
 					<a class="button" href="/voice">Neu aufnehmen</a>
 				} else if data.Draft.Status == voice.StatusExpired {
-					<div class="form-alert" role="alert">Dieser Entwurf ist abgelaufen und enthält keine weiter nutzbaren Daten.</div>
+					<div class="form-alert form-alert--warning" role="alert">Dieser Entwurf ist abgelaufen und enthält keine weiter nutzbaren Daten.</div>
 				} else if data.Draft.Status == voice.StatusCommitted {
-					<div class="form-alert">Dieser Entwurf wurde bereits übernommen.</div>
+					<div class="form-alert form-alert--info">Dieser Entwurf wurde bereits übernommen.</div>
 					<a class="button" href={ "/customers/" + data.Draft.Committed.CustomerID }>Zur Kundenakte</a>
 				} else {
 					if data.Error != "" {

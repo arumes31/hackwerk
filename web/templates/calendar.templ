@@ -104,7 +104,7 @@ templ Calendar(data CalendarData) {
 						</div>
 						<div class="calendar-message" role="status" aria-live="polite" data-calendar-message></div>
 						<div data-calendar data-event-source="/api/v1/calendar" data-csrf={ data.Shell.CSRFToken } data-editable={ fmt.Sprint(data.Shell.Actor.Role == auth.RoleAdmin) }></div>
-						<noscript><p class="form-alert">Die interaktive Tages-/Wochenansicht benötigt JavaScript. Die Agenda und Einplanungsmaske darunter bleiben verfügbar.</p></noscript>
+						<noscript><p class="form-alert form-alert--warning">Die interaktive Tages-/Wochenansicht benötigt JavaScript. Die Agenda und Einplanungsmaske darunter bleiben verfügbar.</p></noscript>
 					</section>
 				</div>
 				<section class="calendar-agenda" aria-labelledby="agenda-title">

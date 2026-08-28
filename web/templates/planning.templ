@@ -39,9 +39,23 @@ templ Planning(data PlanningData) {
 					<div class="form-alert" role="alert">{ data.Error }</div>
 				}
 				<nav class="planning-mode-tabs" aria-label="Planungsmodus"><a class="button" href="/planning" aria-current="page">Einzelauftrag</a><a class="button button--quiet" href="/planning/routes">Tagesroute</a><a class="button button--quiet" href="/availability">Kapazität</a></nav>
-				<ol class="planning-progress" aria-label="Planungsfortschritt"><li class="is-active"><span>1</span>Auftrag</li><li><span>2</span>Rahmen</li><li><span>3</span>Vorschläge</li><li><span>4</span>Übernahme</li></ol>
+				<ol class="planning-progress" aria-label="Planungsfortschritt">
+					if data.Run == nil {
+						<li class="is-active"><a href="#planung-auftrag" data-planning-step="1" aria-current="step"><span class="planning-progress__number">1</span><span>Auftrag</span></a></li>
+					} else {
+						<li><a href="#planung-auftrag" data-planning-step="1"><span class="planning-progress__number">1</span><span>Auftrag</span></a></li>
+					}
+					<li><a href="#planung-rahmen" data-planning-step="2"><span class="planning-progress__number">2</span><span>Rahmen</span></a></li>
+					if data.Run != nil && len(data.Run.Suggestions) > 0 {
+						<li class="is-active"><a href="#planung-vorschlaege" data-planning-step="3" aria-current="step"><span class="planning-progress__number">3</span><span>Vorschläge</span></a></li>
+						<li><a href="#planung-uebernahme" data-planning-step="4"><span class="planning-progress__number">4</span><span>Übernahme</span></a></li>
+					} else {
+						<li class="is-disabled"><span data-planning-step="3" aria-disabled="true" title="Zuerst einen Auftrag und seinen Rahmen bestätigen"><span class="planning-progress__number">3</span><span>Vorschläge</span></span></li>
+						<li class="is-disabled"><span data-planning-step="4" aria-disabled="true" title="Zuerst Vorschläge berechnen"><span class="planning-progress__number">4</span><span>Übernahme</span></span></li>
+					}
+				</ol>
 				<form id="planning-route-selection" method="get" action="/planning/routes"></form>
-				<section class="planning-workspace route-workspace" data-route-context>
+				<section id="planung-auftrag" class="planning-workspace route-workspace" data-route-context tabindex="-1">
 					<div class="planning-orders form-card">
 						<div class="section-heading"><div><p class="eyebrow">Auftragsvorrat</p><h2>Aufträge</h2></div><span class="status-badge">{ fmt.Sprint(len(data.Candidates)) } vollständig</span></div>
 						<label class="planning-search">Suchen<input type="search" placeholder="Auftrag, Kunde, Ort oder Region" data-planning-search autocomplete="off"/></label>
@@ -61,7 +75,7 @@ templ Planning(data PlanningData) {
 							for _, candidate := range data.Candidates {
 								<div class="route-candidate planning-order-row" data-route-candidate data-planning-order data-job-id={ candidate.JobID } data-search={ strings.ToLower(candidate.JobNumber + " " + candidate.CustomerName + " " + candidate.Locality + " " + candidate.Region) } data-region={ candidate.Region } data-latitude={ routeCoordinate(candidate.Location.Latitude) } data-longitude={ routeCoordinate(candidate.Location.Longitude) } data-label={ candidate.JobNumber } data-customer={ candidate.CustomerName } data-volume={ candidate.VolumeM3 } data-duration-minutes={ fmt.Sprint(int(candidate.WorkDuration / time.Minute)) } data-unavailable-reason={ candidate.UnavailableReason }>
 									<input form="planning-route-selection" type="checkbox" name="job_id" value={ candidate.JobID } aria-label={ candidate.JobNumber + " auswählen" } disabled?={ candidate.UnavailableReason != "" }/>
-									<button type="button" class="planning-order-detail" data-planning-detail aria-label={ "Details zu " + candidate.JobNumber }><strong>{ candidate.JobNumber }</strong><span>{ candidate.CustomerName }</span><small>{ candidate.Locality } · { candidate.Region } · { candidate.VolumeM3 } m³ · { planningDurationShort(candidate.WorkDuration) }</small></button>
+									<button type="button" class="planning-order-detail" data-planning-detail aria-label={ candidate.JobNumber + " auswählen und Details anzeigen" }><strong>{ candidate.JobNumber }</strong><span>{ candidate.CustomerName }</span><small>{ candidate.Locality } · { candidate.Region } · { candidate.VolumeM3 } m³ · { planningDurationShort(candidate.WorkDuration) }</small></button>
 									if candidate.UnavailableReason != "" {
 										<span class="status-badge">{ candidate.UnavailableReason }</span>
 									}
@@ -89,11 +103,11 @@ templ Planning(data PlanningData) {
 						<div class="route-map-toolbar" data-route-map-toolbar></div>
 						<div class="route-map planning-map" role="region" aria-label="Interaktive Karte der Planungsaufträge" data-route-map><div class="map-fallback" data-map-fallback>Die Karte wird geladen. Die Auftragsliste bleibt vollständig bedienbar.</div></div>
 					</div>
-					<aside class="planning-selection form-card" aria-live="polite">
-						<div class="section-heading"><div><p class="eyebrow">Aktuelle Auswahl</p><h2 data-planning-selection-title>Noch nichts gewählt</h2></div></div>
+					<aside id="planung-rahmen" class="planning-selection form-card" aria-live="polite" tabindex="-1">
+						<div class="section-heading"><div><p class="eyebrow">Schritt 2 · Rahmen</p><h2 data-planning-selection-title>Noch nichts gewählt</h2></div></div>
 						<dl class="planning-selection-metrics"><div><dt>Aufträge</dt><dd data-planning-count>0</dd></div><div><dt>Menge</dt><dd data-planning-volume>0 m³</dd></div><div><dt>Arbeit</dt><dd data-planning-duration>0 Min.</dd></div></dl>
 						<div class="planning-detail-panel" data-planning-detail-panel><p>Wählen Sie einen Auftrag für die kompakte Zusammenfassung.</p></div>
-						<form method="post" action="/planning/suggestions" class="form-stack planning-single-form">
+						<form method="post" action="/planning/suggestions" class="form-stack planning-single-form" data-planning-single-form>
 							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="return_to" value={ data.ReturnTo }/>
 							<label>
 								Einzelauftrag
@@ -111,10 +125,10 @@ templ Planning(data PlanningData) {
 										<option value={ candidate.JobID } selected?={ candidate.JobID == data.JobID }>{ candidate.JobNumber } · { candidate.CustomerName } · Standort unvollständig</option>
 									}
 								</select>
-							</label><button class="button" type="submit">Top-3 berechnen</button>
+							</label><button class="button" type="submit" data-planning-single-submit>Weiter: Top-3 berechnen</button>
 						</form>
 						<button form="planning-route-selection" class="button button--quiet" type="submit" data-planning-route>Auswahl als Tagesroute planen</button>
-						<p class="form-hint">Die Berechnung legt keinen Termin an und versendet keine Nachricht.</p>
+						<p class="form-hint">Ein Auftrag führt über „Weiter“ zu den Top-3. Mehrere Aufträge können als Tagesroute geplant werden. Keine Berechnung legt einen Termin an oder versendet eine Nachricht.</p>
 					</aside>
 				</section>
 				if len(data.Clusters) > 0 {
@@ -126,8 +140,9 @@ templ Planning(data PlanningData) {
 					</section>
 				}
 				if data.Run != nil {
-					<section class="module-card" aria-labelledby="suggestions-title">
+					<section id="planung-vorschlaege" class="module-card planning-results" aria-labelledby="suggestions-title" tabindex="-1" data-planning-results>
 						<div class="section-heading"><div><p class="eyebrow">Berechnung { planningShortID(data.Run.ID) }</p><h2 id="suggestions-title">Bis zu drei valide Optionen</h2></div><form method="post" action="/planning/suggestions"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="return_to" value={ data.ReturnTo }/><input type="hidden" name="job_id" value={ data.Run.JobID }/><button class="button button--quiet" type="submit">Neu berechnen</button></form></div>
+						<div id="planung-uebernahme" class="planning-adoption-intro" tabindex="-1"><div><p class="eyebrow">Schritt 4 · Übernahme</p><h3>Option prüfen und übernehmen</h3></div><p>Die Übernahme revalidiert den aktuellen Datenstand und erzeugt ausschließlich einen unverbindlichen Terminvorschlag.</p></div>
 						<div class="suggestion-grid">
 							for _, item := range data.Run.Suggestions {
 								<article class="suggestion-card" data-suggestion-rank={ fmt.Sprint(item.Rank) }>

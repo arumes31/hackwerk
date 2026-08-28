@@ -98,7 +98,7 @@ templ NotificationFailures(data NotificationFailuresData) {
 				<section class="table-card" aria-labelledby="template-preview-title">
 					<div class="section-heading"><div><p class="eyebrow">Synthetische Beispieldaten</p><h2 id="template-preview-title">Nachrichtenvorschau</h2><p>Diese Vorschau verwendet keine Kunden-, Termin- oder Providerdaten und löst keinen Versand aus.</p></div></div>
 					<div class="form-grid"><div><h3>E-Mail</h3><p><strong>Betreff:</strong> { data.Preview.Subject }</p><pre>{ data.Preview.Text }</pre></div><div><h3>SMS</h3><p><span class="status-badge">{ fmt.Sprintf("%d Segment(e) · %s", data.Preview.SMSSegments, data.Preview.SMSEncoding) }</span></p><pre>{ data.Preview.SMS }</pre></div></div>
-					<div class="form-alert"><strong>Kanalprüfung vor Fixierung</strong><p>HackWerk zeigt den konfigurierten Kanal und das maskierte Ziel. Fehlen Wunschkanal oder Kontaktdaten, wird der konkrete Grund genannt. Ein anderer vorhandener Kanal wird nur vorgeschlagen und niemals automatisch entgegen der Kundenpräferenz verwendet. Bei Präferenz „Keine“ bleibt eine begründete Adminausnahme erforderlich.</p></div>
+					<div class="form-alert form-alert--info"><strong>Kanalprüfung vor Fixierung</strong><p>HackWerk zeigt den konfigurierten Kanal und das maskierte Ziel. Fehlen Wunschkanal oder Kontaktdaten, wird der konkrete Grund genannt. Ein anderer vorhandener Kanal wird nur vorgeschlagen und niemals automatisch entgegen der Kundenpräferenz verwendet. Bei Präferenz „Keine“ bleibt eine begründete Adminausnahme erforderlich.</p></div>
 				</section>
 			</main>@appFooter(data.Shell.Page)
 		</body>

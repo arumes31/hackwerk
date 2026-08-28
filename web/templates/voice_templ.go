@@ -72,7 +72,7 @@ func VoiceCapture(data VoiceCaptureData) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if !data.Enabled {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"form-alert\" role=\"status\"><strong>Spracheingabe ist deaktiviert.</strong> Die vollständige manuelle Erfassung steht weiterhin zur Verfügung.</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"form-alert form-alert--info\" role=\"status\"><strong>Spracheingabe ist deaktiviert.</strong> Die vollständige manuelle Erfassung steht weiterhin zur Verfügung.</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -295,12 +295,12 @@ func VoiceReview(data VoiceReviewData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		} else if data.Draft.Status == voice.StatusExpired {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<div class=\"form-alert\" role=\"alert\">Dieser Entwurf ist abgelaufen und enthält keine weiter nutzbaren Daten.</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<div class=\"form-alert form-alert--warning\" role=\"alert\">Dieser Entwurf ist abgelaufen und enthält keine weiter nutzbaren Daten.</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if data.Draft.Status == voice.StatusCommitted {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<div class=\"form-alert\">Dieser Entwurf wurde bereits übernommen.</div><a class=\"button\" href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<div class=\"form-alert form-alert--info\">Dieser Entwurf wurde bereits übernommen.</div><a class=\"button\" href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

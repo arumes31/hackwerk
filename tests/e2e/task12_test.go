@@ -140,6 +140,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	}
 
 	var desktopOverflow, smallDesktopTarget, selectedByMap, mapReady bool
+	var routeGeometryPresent, routeLineDrawn, routeLineAnnounced bool
 	var desktopLayout struct {
 		TwoColumns, MapAboveFold, CompactCandidate, BuilderWide, EndpointCardsReadable bool
 	}
@@ -193,11 +194,15 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('button,a.button')).filter(e=>e.getBoundingClientRect().height>0&&e.getBoundingClientRect().height<44).map(e=>e.textContent.trim()+':'+Math.round(e.getBoundingClientRect().height))`, &smallDesktopTargets),
 		chromedp.Click("form[action='/planning/routes'] button[type='submit']", chromedp.ByQuery),
 		chromedp.WaitVisible(".route-summary", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('[data-route-map]')?.dataset.routeLineState==='drawn'`, nil),
+		chromedp.Evaluate(`Boolean(document.querySelector('[data-route-map]')?.dataset.routeGeometry)`, &routeGeometryPresent),
+		chromedp.Evaluate(`document.querySelector('[data-route-map]')?.dataset.routeLineState==='drawn'`, &routeLineDrawn),
+		chromedp.Evaluate(`document.querySelector('[data-route-map-notice]')?.textContent.includes('Routenlinie')`, &routeLineAnnounced),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
-	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || startMarkerCount != 1 || !selectedByMap || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate {
-		t.Fatalf("desktop route map-ready/admin/toolbar/presets/candidates/start/selected/overflow/small-target/layout=%v/%v/%v/%v/%d/%d/%v/%v/%v/%+v targets=%v", mapReady, adminRouteContext, mapToolbar, routeDatePresets, candidateMarkerCount, startMarkerCount, selectedByMap, desktopOverflow, smallDesktopTarget, desktopLayout, smallDesktopTargets)
+	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || startMarkerCount != 1 || !selectedByMap || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate || !routeGeometryPresent || !routeLineDrawn || !routeLineAnnounced {
+		t.Fatalf("desktop route map-ready/admin/toolbar/presets/candidates/start/selected/overflow/small-target/layout/geometry/line/notice=%v/%v/%v/%v/%d/%d/%v/%v/%v/%+v/%v/%v/%v targets=%v", mapReady, adminRouteContext, mapToolbar, routeDatePresets, candidateMarkerCount, startMarkerCount, selectedByMap, desktopOverflow, smallDesktopTarget, desktopLayout, routeGeometryPresent, routeLineDrawn, routeLineAnnounced, smallDesktopTargets)
 	}
 
 	var routeText string

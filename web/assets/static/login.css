@@ -128,13 +128,19 @@ html {
 
 .login-alert {
   margin: 1.15rem 0 -.2rem;
-  padding: .7rem .8rem;
-  border-inline-start: 3px solid var(--login-error);
+  padding: .75rem .85rem;
+  border: 1px solid rgb(143 29 24 / 32%);
+  border-inline-start: 4px solid var(--login-error);
+  border-radius: .25rem;
   color: var(--login-error);
   background: #fff4f1;
+  box-shadow: 0 .35rem .85rem rgb(40 20 18 / 7%);
   font-size: .74rem;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
+
+.login-alert:focus { outline: 3px solid rgb(0 43 20 / 28%); outline-offset: 3px; }
 
 .login-form {
   display: grid;
