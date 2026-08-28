@@ -2200,39 +2200,6 @@ function routeLineFeature(rawGeometry) {
   };
 }
 
-function routeDirectionFeatures(routeFeature) {
-  const coordinates = routeFeature?.geometry?.coordinates || [];
-  if (coordinates.length < 2) return { type: "FeatureCollection", features: [] };
-  const spacing = Math.max(1, Math.floor(coordinates.length / 7));
-  const features = [];
-  for (let index = spacing; index < coordinates.length; index += spacing) {
-    const tip = coordinates[index];
-    const previous = coordinates[Math.max(0, index - spacing)];
-    const dx = tip[0] - previous[0];
-    const dy = tip[1] - previous[1];
-    const length = Math.hypot(dx, dy);
-    if (!Number.isFinite(length) || length <= 0) continue;
-    const size = Math.min(.003, Math.max(.00035, length * .18));
-    const ux = dx / length;
-    const uy = dy / length;
-    const base = [tip[0] - ux * size, tip[1] - uy * size];
-    const wing = size * .55;
-    features.push({
-      type: "Feature",
-      properties: {},
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [base[0] + -uy * wing, base[1] + ux * wing],
-          tip,
-          [base[0] - -uy * wing, base[1] - ux * wing],
-        ],
-      },
-    });
-  }
-  return { type: "FeatureCollection", features };
-}
-
 function routeStops(context) {
   return Array.from(context.querySelectorAll("[data-route-stop]"))
     .map((element, index) => ({
@@ -2349,6 +2316,105 @@ function markRouteMapUnavailable(canvas, message = "Die Routenkarte ist derzeit 
   fallback.textContent = message;
 }
 
+function initializeRouteLineOverlay(container, map, geometry, routeSource, context) {
+  if (!geometry) return;
+  const lineCanvas = document.createElement("canvas");
+  lineCanvas.className = "route-map-line-overlay";
+  lineCanvas.dataset.routeLineOverlay = "true";
+  lineCanvas.setAttribute("aria-hidden", "true");
+  container.append(lineCanvas);
+  const drawing = lineCanvas.getContext("2d");
+  if (!drawing) {
+    container.dataset.routeLineState = "failed";
+    routeMapNotice(context, "Die berechnete Routenlinie konnte nicht gezeichnet werden. Start, Ende und Stopps bleiben als Punkte sichtbar.");
+    return;
+  }
+
+  let announced = false;
+  const draw = () => {
+    const width = Math.max(1, Math.round(container.clientWidth));
+    const height = Math.max(1, Math.round(container.clientHeight));
+    const pixelRatio = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    const pixelWidth = Math.round(width * pixelRatio);
+    const pixelHeight = Math.round(height * pixelRatio);
+    if (lineCanvas.width !== pixelWidth || lineCanvas.height !== pixelHeight) {
+      lineCanvas.width = pixelWidth;
+      lineCanvas.height = pixelHeight;
+    }
+    lineCanvas.style.width = `${width}px`;
+    lineCanvas.style.height = `${height}px`;
+    drawing.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    drawing.clearRect(0, 0, width, height);
+
+    const points = geometry.geometry.coordinates.map((coordinate) => map.project(coordinate));
+    if (points.length < 2 || points.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y))) {
+      container.dataset.routeLineState = "failed";
+      return;
+    }
+    drawing.beginPath();
+    drawing.moveTo(points[0].x, points[0].y);
+    points.slice(1).forEach((point) => drawing.lineTo(point.x, point.y));
+    drawing.setLineDash([]);
+    drawing.lineCap = "round";
+    drawing.lineJoin = "round";
+    drawing.strokeStyle = "#fffdf7";
+    drawing.lineWidth = 15;
+    drawing.globalAlpha = .97;
+    drawing.stroke();
+    drawing.setLineDash(routeSource === "osrm" ? [] : [12, 9]);
+    drawing.strokeStyle = "#a13f22";
+    drawing.lineWidth = 9;
+    drawing.globalAlpha = 1;
+    drawing.stroke();
+    drawing.setLineDash([]);
+    const arrowSpacing = Math.max(1, Math.floor(points.length / 7));
+    drawing.strokeStyle = "#fffdf7";
+    drawing.lineWidth = 3;
+    for (let index = arrowSpacing; index < points.length; index += arrowSpacing) {
+      const tip = points[index];
+      const previous = points[Math.max(0, index - arrowSpacing)];
+      const dx = tip.x - previous.x;
+      const dy = tip.y - previous.y;
+      const length = Math.hypot(dx, dy);
+      if (!Number.isFinite(length) || length < 12) continue;
+      const ux = dx / length;
+      const uy = dy / length;
+      const size = Math.min(12, Math.max(7, length * .15));
+      const baseX = tip.x - ux * size;
+      const baseY = tip.y - uy * size;
+      drawing.beginPath();
+      drawing.moveTo(baseX - uy * size * .55, baseY + ux * size * .55);
+      drawing.lineTo(tip.x, tip.y);
+      drawing.lineTo(baseX + uy * size * .55, baseY - ux * size * .55);
+      drawing.stroke();
+    }
+
+    const sample = points[Math.floor(points.length / 2)];
+    let paintedPixels = 0;
+    if (sample.x >= 0 && sample.y >= 0 && sample.x < width && sample.y < height) {
+      const sampleX = Math.max(0, Math.round(sample.x * pixelRatio) - 5);
+      const sampleY = Math.max(0, Math.round(sample.y * pixelRatio) - 5);
+      const sampleWidth = Math.min(11, pixelWidth - sampleX);
+      const sampleHeight = Math.min(11, pixelHeight - sampleY);
+      const pixels = drawing.getImageData(sampleX, sampleY, sampleWidth, sampleHeight).data;
+      for (let index = 3; index < pixels.length; index += 4) {
+        if (pixels[index] > 0) paintedPixels++;
+      }
+    }
+    container.dataset.routeLineRenderedPixels = String(paintedPixels);
+    if (paintedPixels > 0) container.dataset.routeLineState = "drawn";
+    else if (container.dataset.routeLineState !== "drawn") container.dataset.routeLineState = "pending";
+    if (paintedPixels > 0 && !announced) {
+      announced = true;
+      const lineKind = routeSource === "osrm" ? "Straßenroute" : "geschätzte Routenlinie";
+      routeMapNotice(context, `Die ${lineKind} ist sichtbar. Start, Stopps und Ende bleiben zusätzlich als beschriftete Punkte bedienbar.`);
+    }
+  };
+  map.on("render", draw);
+  map.on("remove", () => lineCanvas.remove());
+  window.requestAnimationFrame(draw);
+}
+
 function initializeRouteMap(canvas, maplibregl) {
   const context = canvas.closest("[data-route-context]");
   if (!context) {
@@ -2358,7 +2424,9 @@ function initializeRouteMap(canvas, maplibregl) {
   const stops = routeStops(context);
   const candidates = routeCandidates(context);
   const geometry = routeLineFeature(canvas.dataset.routeGeometry);
+  const routeSource = String(canvas.dataset.routeSource || "").trim().toLowerCase();
   canvas.dataset.routeLineState = geometry ? "pending" : "missing";
+  canvas.dataset.routeLineRenderedPixels = "0";
   const geometryCoordinates = geometry?.geometry.coordinates || [];
   const selectedStart = context.querySelector('[data-route-location-prefix="start"] [data-route-location-choice]:checked');
   const selectedEnd = context.querySelector('[data-route-location-prefix="end"] [data-route-location-choice]:checked');
@@ -2479,55 +2547,17 @@ function initializeRouteMap(canvas, maplibregl) {
     map.on("remove", () => resizeObserver.disconnect());
   }
   map.on("error", (event) => {
+    const mapError = String(event?.error?.message || event?.message || "Kartenfehler");
+    canvas.dataset.mapError = mapError;
     if (event?.sourceId === "hackwerk-streets") {
       routeMapNotice(context, "Die Kartenkacheln sind vorübergehend nicht verfügbar. Startort, Auftrags-Pins und Auswahl bleiben bedienbar.");
       return;
     }
     if (!ready) markRouteMapUnavailable(canvas);
   });
-  const addRouteLayers = () => {
-    if (!geometry) return;
-    try {
-      if (map.getSource("hackwerk-route")) {
-        if (map.getLayer("hackwerk-route")) canvas.dataset.routeLineState = "drawn";
-        return;
-      }
-      map.addSource("hackwerk-route", { type: "geojson", data: geometry });
-      map.addLayer({
-        id: "hackwerk-route-halo",
-        type: "line",
-        source: "hackwerk-route",
-        paint: { "line-color": "#fffdf7", "line-width": 12, "line-opacity": .94 },
-        layout: { "line-cap": "round", "line-join": "round" },
-      });
-      map.addLayer({
-        id: "hackwerk-route",
-        type: "line",
-        source: "hackwerk-route",
-        paint: { "line-color": "#9b4931", "line-width": 7, "line-opacity": 1 },
-        layout: { "line-cap": "round", "line-join": "round" },
-      });
-      const directions = routeDirectionFeatures(geometry);
-      if (directions.features.length) {
-        map.addSource("hackwerk-route-directions", { type: "geojson", data: directions });
-        map.addLayer({
-          id: "hackwerk-route-direction",
-          type: "line",
-          source: "hackwerk-route-directions",
-          paint: { "line-color": "#fffdf7", "line-width": 3 },
-          layout: { "line-cap": "round", "line-join": "round" },
-        });
-      }
-      canvas.dataset.routeLineState = map.getSource("hackwerk-route") && map.getLayer("hackwerk-route") ? "drawn" : "failed";
-    } catch {
-      canvas.dataset.routeLineState = "failed";
-      routeMapNotice(context, "Die berechnete Routenlinie konnte nicht gezeichnet werden. Start, Ende und Stopps bleiben als Punkte sichtbar; laden Sie die Karte erneut.");
-    }
-  };
-  map.on("style.load", addRouteLayers);
   map.once("style.load", () => {
-    if (canvas.dataset.routeLineState === "drawn") {
-      routeMapNotice(context, "Die berechnete Routenlinie ist sichtbar. Start, Stopps und Ende bleiben zusätzlich als beschriftete Punkte bedienbar.");
+    if (geometry && canvas.dataset.routeLineState !== "failed") {
+      routeMapNotice(context, "Die berechnete Routenlinie wird geladen …");
     } else if (geometry) {
       routeMapNotice(context, "Die Route ist berechnet, aber die Routenlinie konnte nicht gezeichnet werden. Start, Ende und Stopps bleiben als Punkte sichtbar.");
     } else if (stops.length) {
@@ -2692,6 +2722,7 @@ function initializeRouteMap(canvas, maplibregl) {
     });
 
     fitAll();
+    initializeRouteLineOverlay(canvas, map, geometry, routeSource, context);
     updateVisibleCount();
     ready = true;
     markMapReady(canvas);

@@ -1333,6 +1333,16 @@ dialog.modal-dialog::backdrop { background: var(--overlay-backdrop); backdrop-fi
     var(--paper-deep);
   box-shadow: inset 0 0 0 1px rgb(255 253 247 / 55%);
 }
+.route-map-line-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  max-width: none;
+  pointer-events: none;
+}
+[data-route-map] .maplibregl-marker,
+[data-route-map] .maplibregl-control-container { z-index: 2; }
 
 .route-page { width: min(1440px, calc(100% - 2rem)); }
 .route-page .page-heading { align-items: end; margin-bottom: 1.25rem; }
@@ -1475,6 +1485,10 @@ dialog.modal-dialog::backdrop { background: var(--overlay-backdrop); backdrop-fi
   border: 2px solid var(--surface);
   border-radius: 999px;
   background: var(--rust);
+}
+.route-map-legend .route-map-legend__line--estimated {
+  border-inline-style: dashed;
+  background: color-mix(in srgb, var(--rust) 72%, var(--surface));
 }
 
 .route-map-marker {

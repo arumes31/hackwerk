@@ -140,7 +140,8 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	}
 
 	var desktopOverflow, smallDesktopTarget, selectedByMap, mapReady bool
-	var routeGeometryPresent, routeLineDrawn, routeLineAnnounced bool
+	var routeGeometryPresent, routeLineDrawn, routeLineRendered, routeLineAnnounced bool
+	var routeLineState, mapError string
 	var desktopLayout struct {
 		TwoColumns, MapAboveFold, CompactCandidate, BuilderWide, EndpointCardsReadable bool
 	}
@@ -197,12 +198,15 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		chromedp.Poll(`document.querySelector('[data-route-map]')?.dataset.routeLineState==='drawn'`, nil),
 		chromedp.Evaluate(`Boolean(document.querySelector('[data-route-map]')?.dataset.routeGeometry)`, &routeGeometryPresent),
 		chromedp.Evaluate(`document.querySelector('[data-route-map]')?.dataset.routeLineState==='drawn'`, &routeLineDrawn),
+		chromedp.Evaluate(`(() => { const canvas=document.querySelector('[data-route-line-overlay]'); if (!canvas) return false; const pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data; for(let index=3;index<pixels.length;index+=4){if(pixels[index]>0)return true} return false })()`, &routeLineRendered),
+		chromedp.Evaluate(`document.querySelector('[data-route-map]')?.dataset.routeLineState||''`, &routeLineState),
+		chromedp.Evaluate(`document.querySelector('[data-route-map]')?.dataset.mapError||''`, &mapError),
 		chromedp.Evaluate(`document.querySelector('[data-route-map-notice]')?.textContent.includes('Routenlinie')`, &routeLineAnnounced),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
-	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || startMarkerCount != 1 || !selectedByMap || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate || !routeGeometryPresent || !routeLineDrawn || !routeLineAnnounced {
-		t.Fatalf("desktop route map-ready/admin/toolbar/presets/candidates/start/selected/overflow/small-target/layout/geometry/line/notice=%v/%v/%v/%v/%d/%d/%v/%v/%v/%+v/%v/%v/%v targets=%v", mapReady, adminRouteContext, mapToolbar, routeDatePresets, candidateMarkerCount, startMarkerCount, selectedByMap, desktopOverflow, smallDesktopTarget, desktopLayout, routeGeometryPresent, routeLineDrawn, routeLineAnnounced, smallDesktopTargets)
+	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || startMarkerCount != 1 || !selectedByMap || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate || !routeGeometryPresent || !routeLineDrawn || !routeLineRendered || !routeLineAnnounced {
+		t.Fatalf("desktop route map-ready/admin/toolbar/presets/candidates/start/selected/overflow/small-target/layout/geometry/line/rendered/notice=%v/%v/%v/%v/%d/%d/%v/%v/%v/%+v/%v/%v/%v/%v state=%q map-error=%q targets=%v", mapReady, adminRouteContext, mapToolbar, routeDatePresets, candidateMarkerCount, startMarkerCount, selectedByMap, desktopOverflow, smallDesktopTarget, desktopLayout, routeGeometryPresent, routeLineDrawn, routeLineRendered, routeLineAnnounced, routeLineState, mapError, smallDesktopTargets)
 	}
 
 	var routeText string
