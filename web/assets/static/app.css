@@ -1494,32 +1494,92 @@ dialog.modal-dialog::backdrop { background: var(--overlay-backdrop); backdrop-fi
   background: color-mix(in srgb, var(--rust) 72%, var(--surface));
 }
 
+[data-route-context] {
+  --route-marker-head-size: 28px;
+  --route-marker-tip-half: 6px;
+  --route-marker-tip-height: 9px;
+  --route-marker-label-size: .75rem;
+}
+[data-route-marker-scale="overview"] {
+  --route-marker-head-size: 24px;
+  --route-marker-tip-half: 5px;
+  --route-marker-tip-height: 8px;
+  --route-marker-label-size: .68rem;
+}
+[data-route-marker-scale="detail"] {
+  --route-marker-head-size: 32px;
+  --route-marker-tip-half: 7px;
+  --route-marker-tip-height: 10px;
+  --route-marker-label-size: .8rem;
+}
+
 .route-map-marker {
+  --route-marker-color: var(--rust);
+  --route-marker-emphasis: 1;
   width: 44px;
   height: 44px;
-  display: grid;
-  place-items: center;
+  position: relative;
+  display: block;
   margin: 0;
   padding: 0;
-  border: 3px solid var(--surface);
-  border-radius: 50%;
+  border: 0;
+  border-radius: 0;
+  appearance: none;
   color: #fff;
-  background: var(--rust);
-  box-shadow: 0 .25rem .9rem rgb(24 32 26 / 35%);
+  background: transparent;
+  box-shadow: none;
   cursor: pointer;
   font-family: inherit;
-  font-size: .86rem;
+  font-size: var(--route-marker-label-size);
   font-weight: 850;
   font-variant-numeric: tabular-nums;
-  transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+  line-height: 1;
 }
-.route-map-marker:hover { transform: translateY(-2px) scale(1.04); }
+.route-map-marker::before {
+  width: var(--route-marker-head-size);
+  height: var(--route-marker-head-size);
+  position: absolute;
+  z-index: 1;
+  left: 50%;
+  bottom: 9px;
+  display: grid;
+  box-sizing: border-box;
+  place-items: center;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--route-marker-color);
+  box-shadow: 0 .18rem .55rem rgb(24 32 26 / 28%);
+  content: attr(data-marker-label);
+  transform: translateX(-50%) scale(var(--route-marker-emphasis));
+  transform-origin: 50% 100%;
+  transition: transform 140ms ease, width 140ms ease, height 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+.route-map-marker::after {
+  width: 0;
+  height: 0;
+  position: absolute;
+  z-index: 0;
+  left: 50%;
+  bottom: 1px;
+  border-right: var(--route-marker-tip-half) solid transparent;
+  border-left: var(--route-marker-tip-half) solid transparent;
+  border-top: var(--route-marker-tip-height) solid var(--route-marker-color);
+  content: "";
+  filter: drop-shadow(1px 1px 0 var(--surface)) drop-shadow(-1px 0 0 var(--surface));
+  transform: translateX(-50%) scale(var(--route-marker-emphasis));
+  transform-origin: 50% 0;
+  transition: transform 140ms ease, border-color 140ms ease;
+}
+.route-map-marker:hover { --route-marker-emphasis: 1.06; }
 .route-map-marker:focus-visible { outline: 3px solid var(--ochre); outline-offset: 3px; }
-.route-map-marker--candidate { background: var(--moss); }
-.route-map-marker--candidate-unavailable { color: var(--ink); background: #a8ada7; }
-.route-map-marker--selected { background: var(--rust); box-shadow: 0 0 0 4px rgb(178 106 41 / 28%), 0 .25rem .9rem rgb(24 32 26 / 35%); }
-.route-map-marker--start { border-radius: .55rem; background: var(--ink); }
-.route-map-marker--end { border-radius: .55rem; background: #2459a6; }
+.route-map-marker--candidate { --route-marker-color: var(--moss); }
+.route-map-marker--candidate-unavailable { --route-marker-color: #a8ada7; color: var(--ink); }
+.route-map-marker--selected { --route-marker-color: var(--rust); --route-marker-emphasis: 1.1; }
+.route-map-marker--selected::before { box-shadow: 0 0 0 3px rgb(178 106 41 / 24%), 0 .2rem .65rem rgb(24 32 26 / 30%); }
+.route-map-marker--start { --route-marker-color: var(--ink); }
+.route-map-marker--end { --route-marker-color: #2459a6; }
+.route-map-marker--start::before,
+.route-map-marker--end::before { border-radius: .4rem; }
 
 .route-map-popup {
   min-width: 12rem;
@@ -1593,7 +1653,9 @@ dialog.modal-dialog::backdrop { background: var(--overlay-backdrop); backdrop-fi
 }
 
 @media (forced-colors: active) {
-  .route-map-marker { border-color: Canvas; color: HighlightText; background: Highlight; box-shadow: none; }
+  .route-map-marker { --route-marker-color: Highlight; color: HighlightText; }
+  .route-map-marker::before { border-color: Canvas; box-shadow: none; }
+  .route-map-marker::after { filter: none; }
   .route-candidate--selected { outline: 2px solid Highlight; }
   .route-map-notice { border-color: Highlight; }
 }
@@ -1721,10 +1783,13 @@ dialog.modal-dialog::backdrop { background: var(--overlay-backdrop); backdrop-fi
 .route-map-toolbar { justify-content: flex-start; margin: 0 0 .65rem; }
 .route-map-toolbar .status-badge { margin-left: auto; }
 .route-candidate--focused { border-color: var(--rust); box-shadow: 0 0 0 3px rgb(155 73 49 / 18%); }
-.route-map-marker--focused { transform: translateY(-2px) scale(1.12); box-shadow: 0 0 0 5px rgb(216 149 47 / 38%); }
-.route-map-marker--location { color: #fff; background: #2459a6; cursor: default; font-size: .72rem; }
-.route-map-labels-hidden .route-map-marker:not(.route-map-marker--start):not(.route-map-marker--end):not(.route-map-marker--location) { color: transparent; }
-.route-map-labels-hidden .route-map-marker:not(.route-map-marker--start):not(.route-map-marker--end):not(.route-map-marker--location)::after { width: .55rem; height: .55rem; border-radius: 50%; background: #fff; content: ""; }
+.route-map-marker--focused { --route-marker-emphasis: 1.12; }
+.route-map-marker--focused::before { box-shadow: 0 0 0 4px rgb(216 149 47 / 32%), 0 .2rem .65rem rgb(24 32 26 / 30%); }
+.route-map-marker--location { --route-marker-color: #2459a6; color: #fff; cursor: default; }
+.route-map-labels-hidden .route-map-marker:not(.route-map-marker--start):not(.route-map-marker--end):not(.route-map-marker--location)::before {
+  color: transparent;
+  background: radial-gradient(circle, #fff 0 .18rem, var(--route-marker-color) .2rem);
+}
 .route-sticky-navigation { position: sticky; z-index: 12; bottom: .5rem; display: grid; gap: .4rem; padding: .5rem; border: 1px solid var(--line); border-radius: .75rem; background: rgb(255 253 247 / 96%); box-shadow: var(--shadow); }
 .route-stop-pagination { display: flex; justify-content: space-between; gap: .5rem; margin-top: .65rem; }
 .route-stop-pagination .button { margin: 0; }

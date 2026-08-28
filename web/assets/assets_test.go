@@ -80,3 +80,34 @@ func TestEmbeddedStylesDefineFeedbackAndOverlayContracts(t *testing.T) {
 		})
 	}
 }
+
+func TestRouteMapMarkersRemainCompactPointedAndTouchSized(t *testing.T) {
+	t.Parallel()
+
+	stylesheet, err := Files.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(stylesheet)
+	for _, contract := range []string{
+		".route-map-marker::before",
+		".route-map-marker::after",
+		`[data-route-marker-scale="overview"]`,
+		`[data-route-marker-scale="detail"]`,
+	} {
+		if !strings.Contains(styles, contract) {
+			t.Errorf("route marker styles do not define %q", contract)
+		}
+	}
+
+	script, err := Files.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(script)
+	for _, contract := range []string{`dataset.markerLabel`, `dataset.routeMarkerScale`, `anchor:"bottom"`} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("route marker script does not define %q", contract)
+		}
+	}
+}

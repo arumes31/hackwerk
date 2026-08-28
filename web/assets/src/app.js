@@ -2236,7 +2236,7 @@ function routeMarkerElement(stop, kind = "stop") {
   const marker = document.createElement("button");
   marker.type = "button";
   marker.className = `route-map-marker route-map-marker--${kind}`;
-  marker.textContent = String(stop.position);
+  marker.dataset.markerLabel = String(stop.position);
   marker.title = `${stop.position}. ${stop.label}`;
   marker.setAttribute("aria-label", `${stop.position}. ${stop.label} auf der Karte öffnen`);
   if (stop.jobID) marker.dataset.jobId = stop.jobID;
@@ -2247,7 +2247,7 @@ function startMarkerElement() {
   const marker = document.createElement("button");
   marker.type = "button";
   marker.className = "route-map-marker route-map-marker--start";
-  marker.textContent = "S";
+  marker.dataset.markerLabel = "S";
   marker.title = "Startort";
   marker.setAttribute("aria-label", "Startort auf der Karte öffnen");
   return marker;
@@ -2257,7 +2257,7 @@ function endMarkerElement() {
   const marker = document.createElement("button");
   marker.type = "button";
   marker.className = "route-map-marker route-map-marker--end";
-  marker.textContent = "E";
+  marker.dataset.markerLabel = "E";
   marker.title = "Endort";
   marker.setAttribute("aria-label", "Endort auf der Karte öffnen");
   return marker;
@@ -2518,8 +2518,8 @@ function initializeRouteMap(canvas, maplibregl) {
       if (!locationMarker) {
         const marker = document.createElement("span");
         marker.className = "route-map-marker route-map-marker--location";
-        marker.textContent = "Ich";
-        locationMarker = new maplibregl.Marker({ element: marker, anchor: "center" }).setLngLat(point).addTo(map);
+        marker.dataset.markerLabel = "Ich";
+        locationMarker = new maplibregl.Marker({ element: marker, anchor: "bottom" }).setLngLat(point).addTo(map);
       } else locationMarker.setLngLat(point);
       map.easeTo({ center: point, zoom: 14 });
       routeMapNotice(context, "Ihr Browserstandort wird nur auf dieser Karte gezeigt und nicht gespeichert.");
@@ -2545,6 +2545,12 @@ function initializeRouteMap(canvas, maplibregl) {
     resizeObserver.observe(canvas);
     map.on("remove", () => resizeObserver.disconnect());
   }
+  const updateRouteMarkerScale = () => {
+    const zoom = map.getZoom();
+    context.dataset.routeMarkerScale = zoom < 10 ? "overview" : zoom >= 13 ? "detail" : "standard";
+  };
+  updateRouteMarkerScale();
+  map.on("zoomend", updateRouteMarkerScale);
   map.on("error", (event) => {
     const mapError = String(event?.error?.message || event?.message || "Kartenfehler");
     canvas.dataset.mapError = mapError;
@@ -2572,7 +2578,7 @@ function initializeRouteMap(canvas, maplibregl) {
     if (start) {
       const startLabel = String(canvas.dataset.routeStartLabel || selectedStart?.dataset.routeLocationLabel || "Startort").trim() || "Startort";
       const startPopup = routePopupContent({ label: startLabel, customer: sameEndpoint ? "Start und Ende der Route" : "Start der Route" });
-      new maplibregl.Marker({ element: startMarkerElement(), anchor: "center" })
+      new maplibregl.Marker({ element: startMarkerElement(), anchor: "bottom" })
         .setLngLat([start.longitude, start.latitude])
         .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(startPopup.content))
         .addTo(map);
@@ -2580,7 +2586,7 @@ function initializeRouteMap(canvas, maplibregl) {
     if (end && !sameEndpoint) {
       const endLabel = String(canvas.dataset.routeEndLabel || selectedEnd?.dataset.routeLocationLabel || "Endort").trim() || "Endort";
       const endPopup = routePopupContent({ label: endLabel, customer: "Ende der Route" });
-      new maplibregl.Marker({ element: endMarkerElement(), anchor: "center" })
+      new maplibregl.Marker({ element: endMarkerElement(), anchor: "bottom" })
         .setLngLat([end.longitude, end.latitude])
         .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(endPopup.content))
         .addTo(map);
@@ -2590,7 +2596,7 @@ function initializeRouteMap(canvas, maplibregl) {
     stops.forEach((stop) => {
       const markerElement = routeMarkerElement(stop);
       const popup = routePopupContent(stop);
-      new maplibregl.Marker({ element: markerElement, anchor: "center" })
+      new maplibregl.Marker({ element: markerElement, anchor: "bottom" })
         .setLngLat([stop.point.longitude, stop.point.latitude])
         .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(popup.content))
         .addTo(map);
@@ -2674,7 +2680,7 @@ function initializeRouteMap(canvas, maplibregl) {
         });
       }
       syncSelection();
-      new maplibregl.Marker({ element: markerElement, anchor: "center" })
+      new maplibregl.Marker({ element: markerElement, anchor: "bottom" })
         .setLngLat([candidate.point.longitude, candidate.point.latitude])
         .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(popup.content))
         .addTo(map);
@@ -2700,7 +2706,7 @@ function initializeRouteMap(canvas, maplibregl) {
         candidate.position = index + 1;
         const marker = candidateMarkers.get(candidate.jobID);
         if (marker) {
-          marker.textContent = String(candidate.position);
+          marker.dataset.markerLabel = String(candidate.position);
           marker.title = `${candidate.position}. ${candidate.label}`;
           marker.setAttribute("aria-label", `${candidate.position}. ${candidate.label} auf der Karte öffnen`);
         }

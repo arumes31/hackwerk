@@ -193,9 +193,13 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		t.Fatalf("compact default/create/desktop-overflow/mobile-overflow=%v/%v/%v", driverCreateOpen, compactDesktopOverflow, compactMobileOverflow)
 	}
 
-	var desktopOverflow, smallDesktopTarget, selectedByMap, selectedByCard, deselectedByKeyboard, candidateSemantics, mapReady bool
+	var desktopOverflow, smallDesktopTarget, selectedByMap, selectedByCard, selectedMarkerState, deselectedByKeyboard, candidateSemantics, mapReady bool
 	var routeGeometryPresent, routeStreetSource, routeLineDrawn, routeLineRendered, routeLineAnnounced bool
 	var routeLineState, mapError string
+	var markerPresentation struct {
+		TouchTarget, CompactHead, Pointed bool
+		Scale                             string
+	}
 	var desktopLayout struct {
 		TwoColumns, MapAboveFold, CompactCandidate, BuilderWide, EndpointCardsReadable bool
 	}
@@ -225,6 +229,17 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		chromedp.Evaluate(`document.querySelectorAll('.route-map-marker--start').length`, &startMarkerCount),
 		chromedp.Evaluate(`(() => {
 			const workspace=document.querySelector('[data-route-context][data-route-admin="true"]');
+			const marker=workspace.querySelector('.route-map-marker--candidate');
+			const target=marker.getBoundingClientRect();
+			const head=getComputedStyle(marker,'::before');
+			const tip=getComputedStyle(marker,'::after');
+			return {TouchTarget:target.width>=44&&target.height>=44,
+				CompactHead:parseFloat(head.width)<=28&&parseFloat(head.height)<=28,
+				Pointed:parseFloat(tip.borderTopWidth)>=8,
+				Scale:workspace.dataset.routeMarkerScale||''};
+		})()`, &markerPresentation),
+		chromedp.Evaluate(`(() => {
+			const workspace=document.querySelector('[data-route-context][data-route-admin="true"]');
 			const builder=workspace.querySelector('.route-builder').getBoundingClientRect();
 			const panel=workspace.querySelector('.route-map-panel').getBoundingClientRect();
 			const checkbox=workspace.querySelector('.route-candidate__select > input[type="checkbox"]').getBoundingClientRect();
@@ -238,6 +253,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		chromedp.Evaluate(`(() => { const rows=Array.from(document.querySelectorAll('[data-route-candidate]')); return rows.length>0&&rows.every(row=>!row.hasAttribute('tabindex')&&row.querySelector('.route-candidate__select')?.getBoundingClientRect().height>=44&&row.querySelector('.route-order-actions label')?.getBoundingClientRect().height>=44); })()`, &candidateSemantics),
 		chromedp.Click(".route-candidate[data-job-id='"+jobID+"'] .route-candidate__select span", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector("input[name='job_id'][value='`+jobID+`']").checked`, &selectedByCard),
+		chromedp.Evaluate(`document.querySelector(".route-map-marker--candidate[data-job-id='`+jobID+`']").classList.contains('route-map-marker--selected')`, &selectedMarkerState),
 		chromedp.Focus("input[name='job_id'][value='"+jobID+"']", chromedp.ByQuery),
 		chromedp.KeyEvent(" "),
 		chromedp.Evaluate(`!document.querySelector("input[name='job_id'][value='`+jobID+`']").checked`, &deselectedByKeyboard),
@@ -266,8 +282,8 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
-	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || startMarkerCount != 1 || !selectedByCard || !deselectedByKeyboard || !candidateSemantics || !selectedByMap || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate || !routeGeometryPresent || !routeStreetSource || !routeLineDrawn || !routeLineRendered || !routeLineAnnounced {
-		t.Fatalf("desktop route map-ready/admin/toolbar/presets/candidates/start/card/keyboard/semantics/map/overflow/small-target/layout/geometry/street/line/rendered/notice=%v/%v/%v/%v/%d/%d/%v/%v/%v/%v/%v/%v/%+v/%v/%v/%v/%v/%v state=%q map-error=%q targets=%v", mapReady, adminRouteContext, mapToolbar, routeDatePresets, candidateMarkerCount, startMarkerCount, selectedByCard, deselectedByKeyboard, candidateSemantics, selectedByMap, desktopOverflow, smallDesktopTarget, desktopLayout, routeGeometryPresent, routeStreetSource, routeLineDrawn, routeLineRendered, routeLineAnnounced, routeLineState, mapError, smallDesktopTargets)
+	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || startMarkerCount != 1 || !markerPresentation.TouchTarget || !markerPresentation.CompactHead || !markerPresentation.Pointed || markerPresentation.Scale == "" || !selectedByCard || !selectedMarkerState || !deselectedByKeyboard || !candidateSemantics || !selectedByMap || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate || !routeGeometryPresent || !routeStreetSource || !routeLineDrawn || !routeLineRendered || !routeLineAnnounced {
+		t.Fatalf("desktop route map-ready/admin/toolbar/presets/candidates/start/marker/card/selected/keyboard/semantics/map/overflow/small-target/layout/geometry/street/line/rendered/notice=%v/%v/%v/%v/%d/%d/%+v/%v/%v/%v/%v/%v/%v/%v/%+v/%v/%v/%v/%v/%v state=%q map-error=%q targets=%v", mapReady, adminRouteContext, mapToolbar, routeDatePresets, candidateMarkerCount, startMarkerCount, markerPresentation, selectedByCard, selectedMarkerState, deselectedByKeyboard, candidateSemantics, selectedByMap, desktopOverflow, smallDesktopTarget, desktopLayout, routeGeometryPresent, routeStreetSource, routeLineDrawn, routeLineRendered, routeLineAnnounced, routeLineState, mapError, smallDesktopTargets)
 	}
 
 	var routeText string
