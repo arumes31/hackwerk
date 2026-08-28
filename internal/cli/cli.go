@@ -84,7 +84,15 @@ func Run(ctx context.Context, arguments []string, streams IO) int {
 		return ExitUsage
 	}
 
-	cfg, err := config.LoadForCommand(arguments[0])
+	configuredCommand := arguments[0]
+	if configuredCommand == "config-check" {
+		var ok bool
+		configuredCommand, ok = configCheckTarget(arguments[1:])
+		if !ok {
+			return usage(streams.Error, "Verwendung: hackwerk config-check [serve|worker]")
+		}
+	}
+	cfg, err := config.LoadForCommand(configuredCommand)
 	if err != nil {
 		_, _ = fmt.Fprintln(streams.Error, "Konfiguration ist ungültig:", err)
 		return ExitFailure
@@ -124,9 +132,6 @@ func Run(ctx context.Context, arguments []string, streams IO) int {
 			return web.Healthcheck(ctx, cfg.ListenAddr, strings.TrimRight(cfg.BaseURL, "/"), 5*time.Second)
 		})
 	case "config-check":
-		if len(arguments) != 1 {
-			return usage(streams.Error, "Verwendung: hackwerk config-check")
-		}
 		encoder := json.NewEncoder(streams.Output)
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(cfg.Diagnostic()); err != nil {
@@ -146,6 +151,16 @@ func knownConfiguredCommand(command string) bool {
 	}
 }
 
+func configCheckTarget(arguments []string) (string, bool) {
+	if len(arguments) == 0 {
+		return "serve", true
+	}
+	if len(arguments) == 1 && (arguments[0] == "serve" || arguments[0] == "worker") {
+		return arguments[0], true
+	}
+	return "", false
+}
+
 func isHelp(argument string) bool {
 	return argument == "help" || argument == "--help" || argument == "-h"
 }
@@ -158,7 +173,7 @@ func writeCommandHelp(output io.Writer, command string) bool {
 		"seed-dev":       "Verwendung: hackwerk seed-dev\nErzeugt ausschließlich lokale Entwicklungsdaten.",
 		"admin":          adminHelp,
 		"healthcheck":    "Verwendung: hackwerk healthcheck [worker]\nPrüft lokal die Web-Readiness oder direkt Datenbank, Schema und Worker-Heartbeat.",
-		"config-check":   "Verwendung: hackwerk config-check\nValidiert die Startkonfiguration und zeigt nur redigierte Diagnosedaten.",
+		"config-check":   "Verwendung: hackwerk config-check [serve|worker]\nValidiert standardmäßig die Web- oder ausdrücklich die Worker-Konfiguration und zeigt nur redigierte Diagnosedaten.",
 		"schema-version": "Verwendung: hackwerk schema-version\nGibt die vom Binary erwartete Schemaversion aus.",
 	}
 	message, ok := help[command]
@@ -859,7 +874,8 @@ Verwendung:
   hackwerk seed-dev              Entwicklungsschema und Demodaten vorbereiten
   hackwerk admin --help          Benutzer-CLI
   hackwerk healthcheck [worker]  Web- oder Worker-Readiness prüfen
-  hackwerk config-check          Konfiguration redigiert diagnostizieren
+  hackwerk config-check [serve|worker]
+                                Web- oder Worker-Konfiguration redigiert diagnostizieren
   hackwerk schema-version        Erwartete Schemaversion ausgeben
   hackwerk version               Buildversion anzeigen`)
 }

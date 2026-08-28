@@ -167,3 +167,56 @@ func TestConfigCheckRedactsEnvironmentSecrets(t *testing.T) {
 		t.Fatalf("config-check output=%s", output.String())
 	}
 }
+
+func TestConfigCheckValidatesSelectedProcessRole(t *testing.T) {
+	for _, name := range []string{
+		"SENDBERRY_API_URL", "SENDBERRY_API_KEY", "SENDBERRY_API_KEY_FILE",
+		"SENDBERRY_ACCESS_NAME", "SENDBERRY_ACCESS_NAME_FILE",
+		"SENDBERRY_ACCESS_PASSWORD", "SENDBERRY_ACCESS_PASSWORD_FILE", "SMS_SENDER",
+	} {
+		t.Setenv(name, "")
+	}
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("SMS_ENABLED", "true")
+	t.Setenv("SMS_PROVIDER", "sendberry")
+
+	var appOutput, appError bytes.Buffer
+	if code := Run(t.Context(), []string{"config-check"}, IO{Output: &appOutput, Error: &appError}); code != ExitSuccess {
+		t.Fatalf("app config-check code=%d error=%s", code, appError.String())
+	}
+	if !strings.Contains(appOutput.String(), `"sms_enabled": true`) || !strings.Contains(appOutput.String(), `"sendberry_api_url": "not_set"`) {
+		t.Fatalf("app config-check output=%s", appOutput.String())
+	}
+
+	var workerOutput, workerError bytes.Buffer
+	if code := Run(t.Context(), []string{"config-check", "worker"}, IO{Output: &workerOutput, Error: &workerError}); code != ExitFailure {
+		t.Fatalf("worker config-check without credentials code=%d output=%s error=%s", code, workerOutput.String(), workerError.String())
+	}
+	if !strings.Contains(workerError.String(), "enabled SMS") {
+		t.Fatalf("worker config-check error=%s", workerError.String())
+	}
+
+	t.Setenv("SENDBERRY_API_URL", "https://sms.example.test/SMS/SEND")
+	t.Setenv("SENDBERRY_API_KEY", "canary-secret-key-123456789")
+	t.Setenv("SENDBERRY_ACCESS_NAME", "canary-access-name")
+	t.Setenv("SENDBERRY_ACCESS_PASSWORD", "canary-access-password")
+	t.Setenv("SMS_SENDER", "HackWerk")
+	workerOutput.Reset()
+	workerError.Reset()
+	if code := Run(t.Context(), []string{"config-check", "worker"}, IO{Output: &workerOutput, Error: &workerError}); code != ExitSuccess {
+		t.Fatalf("worker config-check code=%d error=%s", code, workerError.String())
+	}
+	for _, forbidden := range []string{"canary-secret-key", "canary-access-name", "canary-access-password"} {
+		if strings.Contains(workerOutput.String(), forbidden) {
+			t.Fatalf("worker config-check leaked %q: %s", forbidden, workerOutput.String())
+		}
+	}
+
+	var invalidOutput, invalidError bytes.Buffer
+	if code := Run(t.Context(), []string{"config-check", "invalid"}, IO{Output: &invalidOutput, Error: &invalidError}); code != ExitUsage {
+		t.Fatalf("invalid config-check role code=%d output=%s error=%s", code, invalidOutput.String(), invalidError.String())
+	}
+	if !strings.Contains(invalidError.String(), "config-check [serve|worker]") {
+		t.Fatalf("invalid config-check usage=%s", invalidError.String())
+	}
+}
