@@ -178,9 +178,10 @@ func TestOSRMBuildUsesPinnedToolchainAndCropBeforeMerge(t *testing.T) {
 		"install -d -m 0750 -o 65532 -g 65532",
 		"docker image inspect",
 		"HACKWERK_COMPOSE_OVERRIDE_FILE",
+		"--entrypoint ionice osrm-update",
 		"wait_for_healthy_osrm",
-		"osrm-update rollback",
-		"osrm-update prune",
+		"run_update_mode rollback",
+		"run_update_mode prune",
 	} {
 		if !strings.Contains(hostUpdate, required) {
 			t.Fatalf("OSRM host updater is missing %q", required)

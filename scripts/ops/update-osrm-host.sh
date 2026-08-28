@@ -36,6 +36,13 @@ run_compose() {
     fi
 }
 
+run_update_mode() {
+    update_mode=$1
+    run_compose --profile osrm-ops run --rm \
+        --entrypoint ionice osrm-update \
+        -c 3 nice -n 15 /usr/local/bin/hackwerk-osrm-update "$update_mode"
+}
+
 wait_for_healthy_osrm() {
     attempt=0
     while [ "$attempt" -lt 60 ]; do
@@ -70,14 +77,14 @@ if ! docker image inspect "$osrm_image" >/dev/null 2>&1; then
     printf '%s\n' "OSRM_IMAGE is not loaded on this host: $osrm_image" >&2
     exit 1
 fi
-run_compose --profile osrm-ops run --rm osrm-update
+run_update_mode update
 if run_compose --profile routing up -d --no-deps --force-recreate osrm && wait_for_healthy_osrm; then
-    run_compose --profile osrm-ops run --rm osrm-update prune
+    run_update_mode prune
     exit 0
 fi
 
 printf '%s\n' "new OSRM generation is unhealthy; restoring previous generation" >&2
-if ! run_compose --profile osrm-ops run --rm osrm-update rollback; then
+if ! run_update_mode rollback; then
     printf '%s\n' "no valid previous OSRM generation is available" >&2
     exit 1
 fi
