@@ -129,7 +129,7 @@ func TestOSRMRuntimeAndUpdaterAreIsolated(t *testing.T) {
 	if strings.Contains(runtime, "ports:") {
 		t.Fatal("OSRM runtime must not expose a host port directly")
 	}
-	for _, required := range []string{"TCP-LISTEN:5000,fork,reuseaddr", "TCP:osrm:5000", "127.0.0.1:${OSRM_PORT:-5000}:5000", "networks: [routing, loopback]", "read_only: true", `user: "65532:65532"`, "cap_drop: [ALL]"} {
+	for _, required := range []string{"TCP-LISTEN:5000,fork,reuseaddr", "TCP:osrm:5000", "${OSRM_BIND_ADDRESS:-127.0.0.1}:${OSRM_PORT:-5000}:5000", "networks: [routing, loopback]", "read_only: true", `user: "65532:65532"`, "cap_drop: [ALL]"} {
 		if !strings.Contains(proxy, required) {
 			t.Fatalf("OSRM loopback proxy is missing %q", required)
 		}
@@ -156,18 +156,22 @@ func TestOSRMRuntimeAndUpdaterAreIsolated(t *testing.T) {
 	windowsHostUpdate := repositoryFile(t, "scripts", "ops", "update-osrm-host.ps1")
 	for _, required := range []string{
 		"Wait-DockerEngine",
+		"for ($attempt = 0; $attempt -lt 100; $attempt++)",
 		"Docker Desktop did not become ready within 10 minutes",
 		"touch /data/$sentinel && rm /data/$sentinel",
 		"Invoke-UpdateMode -Mode rollback",
 		"Invoke-UpdateMode -Mode prune",
+		"must be IPv4 loopback or an IPv4 address in 100.64.0.0/10",
 		"DriveType]::Fixed",
+		"OSRM_BIND_ADDRESS",
+		"100.64.0.0/10",
 	} {
 		if !strings.Contains(windowsHostUpdate, required) {
 			t.Fatalf("Windows OSRM host updater is missing %q", required)
 		}
 	}
 	windowsTask := repositoryFile(t, "scripts", "ops", "install-osrm-update-task.ps1")
-	for _, required := range []string{"-RunLevel Limited", "-RestartCount 3", "ExecutionTimeLimit ([TimeSpan]::Zero)", "-LogonType Interactive"} {
+	for _, required := range []string{"-RunLevel Limited", "-RestartCount 3", "ExecutionTimeLimit ([TimeSpan]::Zero)", "-LogonType Interactive", "-BindAddress", "100.64.0.0/10"} {
 		if !strings.Contains(windowsTask, required) {
 			t.Fatalf("Windows OSRM update task is missing %q", required)
 		}
@@ -238,7 +242,7 @@ func TestStandaloneRoutingHostHasNoApplicationOrDatabase(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
-		"127.0.0.1:${OSRM_PORT:-5000}:5000",
+		"${OSRM_BIND_ADDRESS:-127.0.0.1}:${OSRM_PORT:-5000}:5000",
 		"OSRM_IMAGE mit unveraenderlichem Digest setzen",
 		"networks: [routing]",
 		"networks: [egress]",
@@ -250,8 +254,8 @@ func TestStandaloneRoutingHostHasNoApplicationOrDatabase(t *testing.T) {
 			t.Fatalf("standalone routing host is missing %q", required)
 		}
 	}
-	if strings.Contains(compose, "0.0.0.0") || strings.Contains(compose, "OSRM_BIND_ADDRESS") || strings.Count(compose, "127.0.0.1:${OSRM_PORT:-5000}:5000") != 1 {
-		t.Fatal("standalone routing host contains a non-loopback or ambiguous port binding")
+	if strings.Contains(compose, "0.0.0.0") || strings.Count(compose, "${OSRM_BIND_ADDRESS:-127.0.0.1}:${OSRM_PORT:-5000}:5000") != 1 {
+		t.Fatal("standalone routing host contains a wildcard or ambiguous port binding")
 	}
 }
 

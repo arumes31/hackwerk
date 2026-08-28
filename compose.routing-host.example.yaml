@@ -34,7 +34,7 @@ services:
     depends_on:
       osrm: {condition: service_healthy}
     ports:
-      - 127.0.0.1:${OSRM_PORT:-5000}:5000
+      - ${OSRM_BIND_ADDRESS:-127.0.0.1}:${OSRM_PORT:-5000}:5000
     networks: [routing, loopback]
     read_only: true
     user: "65532:65532"

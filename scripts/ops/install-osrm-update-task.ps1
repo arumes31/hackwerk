@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$DataDir,
-    [string]$TaskName = "HackWerk OSRM Update"
+    [string]$TaskName = "HackWerk OSRM Update",
+    [string]$BindAddress = "127.0.0.1"
 )
 
 Set-StrictMode -Version Latest
@@ -12,12 +13,25 @@ if ([WildcardPattern]::ContainsWildcardCharacters($DataDir) -or -not [IO.Path]::
     throw "OSRM data directory must be an absolute path without wildcard characters."
 }
 
+$parsedBindAddress = $null
+if (-not [Net.IPAddress]::TryParse($BindAddress, [ref]$parsedBindAddress)) {
+    throw "OSRM bind address must be a numeric IPv4 address."
+}
+$bindBytes = $parsedBindAddress.GetAddressBytes()
+$isIPv4 = $parsedBindAddress.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork
+$isLoopbackIPv4 = $isIPv4 -and $bindBytes[0] -eq 127
+$isTailscaleIPv4 = $isIPv4 -and $bindBytes[0] -eq 100 -and $bindBytes[1] -ge 64 -and $bindBytes[1] -le 127
+if (-not $isLoopbackIPv4 -and -not $isTailscaleIPv4) {
+    throw "OSRM bind address must be IPv4 loopback or an IPv4 address in 100.64.0.0/10."
+}
+
 $updateScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "update-osrm-host.ps1"))
 $arguments = @(
     "-NoProfile",
     "-NonInteractive",
     "-File", ('"{0}"' -f $updateScript),
-    "-DataDir", ('"{0}"' -f [IO.Path]::GetFullPath($DataDir))
+    "-DataDir", ('"{0}"' -f [IO.Path]::GetFullPath($DataDir)),
+    "-BindAddress", $parsedBindAddress.ToString()
 ) -join " "
 
 $powerShell = (Get-Command pwsh.exe -ErrorAction Stop).Source

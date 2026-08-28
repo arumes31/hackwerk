@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$DataDir,
     [string]$ComposeFile = "",
-    [string]$Image = "hackwerk-osrm-tools:v26.7.3-2"
+    [string]$Image = "hackwerk-osrm-tools:v26.7.3-2",
+    [string]$BindAddress = "127.0.0.1"
 )
 
 Set-StrictMode -Version Latest
@@ -12,6 +13,18 @@ $PSNativeCommandUseErrorActionPreference = $false
 
 if ([WildcardPattern]::ContainsWildcardCharacters($DataDir) -or -not [IO.Path]::IsPathFullyQualified($DataDir)) {
     throw "OSRM data directory must be an absolute path without wildcard characters."
+}
+
+$parsedBindAddress = $null
+if (-not [Net.IPAddress]::TryParse($BindAddress, [ref]$parsedBindAddress)) {
+    throw "OSRM bind address must be a numeric IPv4 address."
+}
+$bindBytes = $parsedBindAddress.GetAddressBytes()
+$isIPv4 = $parsedBindAddress.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork
+$isLoopbackIPv4 = $isIPv4 -and $bindBytes[0] -eq 127
+$isTailscaleIPv4 = $isIPv4 -and $bindBytes[0] -eq 100 -and $bindBytes[1] -ge 64 -and $bindBytes[1] -le 127
+if (-not $isLoopbackIPv4 -and -not $isTailscaleIPv4) {
+    throw "OSRM bind address must be IPv4 loopback or an IPv4 address in 100.64.0.0/10."
 }
 
 if (-not $ComposeFile) {
@@ -47,6 +60,7 @@ while ($null -ne $ancestor) {
 
 $env:OSRM_DATA_DIR = $DataDir
 $env:OSRM_IMAGE = $Image
+$env:OSRM_BIND_ADDRESS = $parsedBindAddress.ToString()
 
 function Invoke-Compose {
     param([Parameter(Mandatory = $true)][string[]]$ComposeArgs)
@@ -66,7 +80,7 @@ function Invoke-UpdateMode {
 
 function Wait-ServiceHealthy {
     param([Parameter(Mandatory = $true)][string]$Service)
-    for ($attempt = 0; $attempt -lt 60; $attempt++) {
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
         $containerID = (& docker compose -f $ComposeFile --profile routing ps -q $Service).Trim()
         if ($LASTEXITCODE -ne 0) {
             throw "Unable to inspect OSRM container."
