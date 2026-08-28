@@ -13,7 +13,7 @@ function initializeRouteLocationEditor(editor) {
   const latitude = picker?.querySelector("[data-route-location-latitude]") || editor.querySelector("[data-route-location-latitude]");
   const longitude = picker?.querySelector("[data-route-location-longitude]") || editor.querySelector("[data-route-location-longitude]");
   const confirmed = picker?.querySelector("[data-route-location-confirmed]") || editor.querySelector("[data-route-location-confirmed]");
-  const nativeConfirmed = picker?.querySelector("[data-route-location-native-confirmed]");
+  const nativeConfirmed = picker?.querySelector("[data-route-location-native-confirmed]") || editor.querySelector("[data-route-location-native-confirmed]");
   const hiddenLatitude = picker?.querySelector("[data-route-location-hidden-latitude]");
   const hiddenLongitude = picker?.querySelector("[data-route-location-hidden-longitude]");
   const message = picker?.querySelector("[data-route-location-message]") || editor.querySelector("[data-route-location-message]");
@@ -164,6 +164,7 @@ function initializeRouteLocationEditor(editor) {
   if (!picker) {
     form?.addEventListener("submit", event => {
       if (confirmed.value === "true") return;
+      if (confirmLocation()) return;
       event.preventDefault();
       setError("Bitte den Standort nach Änderungen ausdrücklich übernehmen.");
       confirm.focus({ preventScroll: true });

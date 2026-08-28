@@ -108,7 +108,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
 
-	var routeLocationMapReady, routeLocationConfirmed, routeLocationInvalidated, routeLocationLayout bool
+	var routeLocationMapReady, routeLocationWorkerReady, routeLocationConfirmed, routeLocationInvalidated, routeLocationLayout, routeLocationSaved bool
 	if err := runBrowserStep(browser, "select route location on map",
 		chromedp.Navigate(server.URL+"/settings/route-locations"),
 		chromedp.WaitVisible("[data-route-location-map]", chromedp.ByQuery),
@@ -118,16 +118,25 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		chromedp.Click("[data-route-location-map]", chromedp.ByQuery),
 		chromedp.Poll(`Boolean(document.querySelector('[data-route-location-latitude]').value&&document.querySelector('[data-route-location-longitude]').value)`, nil),
 		chromedp.Evaluate(`document.querySelector('[data-route-location-map]').dataset.mapSelectionEnabled==='true'`, &routeLocationMapReady),
+		chromedp.Evaluate(`typeof window.maplibregl?.setWorkerUrl==='function'&&String(window.maplibregl?.getWorkerUrl?.()||'').startsWith(window.location.origin+'/assets/maplibre-gl-csp-worker.js?')`, &routeLocationWorkerReady),
 		chromedp.Click("[data-route-location-confirm]", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector('[data-route-location-confirmed]').value==='true'`, &routeLocationConfirmed),
 		chromedp.Evaluate(`(() => { const input=document.querySelector('[data-route-location-latitude]'); input.value=String(Number(input.value)+0.001); input.dispatchEvent(new Event('input',{bubbles:true})); return document.querySelector('[data-route-location-confirmed]').value===''; })()`, &routeLocationInvalidated),
 		chromedp.Evaluate(`(() => { const checks=Array.from(document.querySelectorAll('.route-location-defaults__choices input[type="checkbox"]')); return document.documentElement.scrollWidth<=window.innerWidth&&checks.length===2&&checks.every(input=>{const box=input.getBoundingClientRect();const label=input.closest('label').getBoundingClientRect();return box.width<=24&&box.height<=24&&label.height>=44;}); })()`, &routeLocationLayout),
-		chromedp.Evaluate(`document.querySelector('form[data-route-location-editor]').reset()`, nil),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
-	if !routeLocationMapReady || !routeLocationConfirmed || !routeLocationInvalidated || !routeLocationLayout {
-		t.Fatalf("route-location map/confirm/invalidate/layout=%v/%v/%v/%v", routeLocationMapReady, routeLocationConfirmed, routeLocationInvalidated, routeLocationLayout)
+	if _, err := chromedp.RunResponse(browser, chromedp.Click("form[data-route-location-editor] button[type='submit']", chromedp.ByQuery)); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if err := runBrowserStep(browser, "read saved route location",
+		chromedp.Poll(`Array.from(document.querySelectorAll('.route-location-card input[name="name"]')).some(input=>input.value==='Kartenort')`, nil),
+		chromedp.Evaluate(`Array.from(document.querySelectorAll('.route-location-card input[name="name"]')).some(input=>input.value==='Kartenort')`, &routeLocationSaved),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if !routeLocationMapReady || !routeLocationWorkerReady || !routeLocationConfirmed || !routeLocationInvalidated || !routeLocationLayout || !routeLocationSaved {
+		t.Fatalf("route-location map/worker/confirm/invalidate/layout/save=%v/%v/%v/%v/%v/%v", routeLocationMapReady, routeLocationWorkerReady, routeLocationConfirmed, routeLocationInvalidated, routeLocationLayout, routeLocationSaved)
 	}
 
 	var nativeCustomRoute bool

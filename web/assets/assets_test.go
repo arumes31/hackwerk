@@ -111,3 +111,37 @@ func TestRouteMapMarkersRemainCompactPointedAndTouchSized(t *testing.T) {
 		}
 	}
 }
+
+func TestMapLibreCSPWorkerUsesSupportedConfigurationAPI(t *testing.T) {
+	t.Parallel()
+
+	script, err := Files.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(script)
+	if !strings.Contains(javascript, `.setWorkerUrl(`) {
+		t.Fatal("application script does not configure the MapLibre CSP worker with setWorkerUrl")
+	}
+	if strings.Contains(javascript, `.workerUrl=`) {
+		t.Fatal("application script assigns unsupported MapLibre workerUrl property")
+	}
+}
+
+func TestRouteLocationSaveConfirmsValidDraftAndKeepsNativeFallback(t *testing.T) {
+	t.Parallel()
+
+	script, err := Files.ReadFile("static/route-locations.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(script)
+	for _, expected := range []string{
+		`editor.querySelector("[data-route-location-native-confirmed]")`,
+		`if (confirmLocation()) return;`,
+	} {
+		if !strings.Contains(javascript, expected) {
+			t.Fatalf("route-location save script missing %q", expected)
+		}
+	}
+}

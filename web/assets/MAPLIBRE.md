@@ -25,3 +25,6 @@ The browser builds a raster style locally and requests tiles only through the
 same-origin template `/map/tiles/{z}/{x}/{y}`. Provider URLs and credentials
 remain server-side. The configured attribution is passed as text and escaped
 before MapLibre renders it.
+
+The CSP build's worker is configured with MapLibre's `setWorkerUrl` API and
+the content-versioned, same-origin worker asset before a map is created.

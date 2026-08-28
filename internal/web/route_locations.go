@@ -93,7 +93,7 @@ func deactivateRouteLocation(service *routelocation.Service, page templates.Page
 }
 
 func routeLocationInput(request *http.Request) (routelocation.Input, error) {
-	if request.Form.Get("confirmed") != "true" {
+	if request.Form.Get("confirmed") != "true" && request.Form.Get("confirmed_native") != "true" {
 		return routelocation.Input{}, routelocation.ErrValidation
 	}
 	latitude, latitudeErr := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(request.Form.Get("latitude")), ",", "."), 64)

@@ -48,6 +48,7 @@ templ RouteLocationsSettings(data RouteLocationsSettingsData) {
 									<label>Längengrad<input type="text" name="longitude" inputmode="decimal" autocomplete="off" placeholder="16,373000" data-route-location-longitude required/></label>
 								</div>
 								<div class="route-location-defaults__choices"><label class="check-label"><input type="checkbox" name="default_start" value="true"/>Als Standard-Start verwenden</label><label class="check-label"><input type="checkbox" name="default_end" value="true"/>Als Standard-Ende verwenden</label></div>
+								<label class="check-label route-location-native-confirm"><input type="checkbox" name="confirmed_native" value="true" data-route-location-native-confirmed/> Adresse und Koordinaten geprüft</label>
 								<div class="route-location-editor-actions"><button class="button button--quiet" type="button" data-route-location-confirm>Standort übernehmen</button><button class="button" type="submit">Ort speichern</button></div>
 								<span class="form-hint" data-route-location-message aria-live="polite">Adresse oder Koordinaten prüfen und anschließend übernehmen.</span>
 								<p class="form-alert route-location-picker__error" data-route-location-error role="alert" hidden></p>
@@ -79,6 +80,7 @@ templ RouteLocationsSettings(data RouteLocationsSettingsData) {
 										<label>Längengrad<input type="text" name="longitude" inputmode="decimal" value={ location.Longitude } data-route-location-longitude required/></label>
 										<label class="check-label"><input type="checkbox" name="default_start" value="true" checked?={ location.DefaultStart }/>Standard-Start</label>
 										<label class="check-label"><input type="checkbox" name="default_end" value="true" checked?={ location.DefaultEnd }/>Standard-Ende</label>
+										<label class="check-label route-location-native-confirm"><input type="checkbox" name="confirmed_native" value="true" data-route-location-native-confirmed checked/> Adresse und Koordinaten geprüft</label>
 										<div class="route-location-card__facts"><span>Version { strconv.Itoa(int(location.Version)) }</span></div>
 										<div class="route-location-custom__confirm"><button class="button button--quiet" type="button" data-route-location-confirm>Geänderten Standort übernehmen</button><span class="form-hint" data-route-location-message aria-live="polite">Gespeicherter Standort ist bestätigt.</span></div>
 										<p class="form-alert route-location-picker__error" data-route-location-error role="alert" hidden></p>

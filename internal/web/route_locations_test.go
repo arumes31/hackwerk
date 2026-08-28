@@ -102,6 +102,16 @@ func TestRouteLocationSettingsAdminCanManageAndDriverCannotOpen(t *testing.T) {
 		t.Fatalf("create=%d input=%+v body=%s", created.Code, store.created, created.Body.String())
 	}
 
+	nativeCreate := url.Values{
+		"csrf_token": {csrf}, "confirmed_native": {"true"}, "name": {"Lager West"}, "address": {"Feldweg 4"},
+		"latitude": {"48,260000"}, "longitude": {"14,260000"},
+	}
+	nativeCreated := httptest.NewRecorder()
+	router.ServeHTTP(nativeCreated, authenticatedCustomerRequest(t, http.MethodPost, "/settings/route-locations", nativeCreate, session, csrf))
+	if nativeCreated.Code != http.StatusSeeOther || store.created.Label != "Lager West" {
+		t.Fatalf("native create=%d input=%+v body=%s", nativeCreated.Code, store.created, nativeCreated.Body.String())
+	}
+
 	withoutConfirmation := url.Values{
 		"csrf_token": {csrf}, "name": {"Unbestätigt"}, "address": {"Waldweg 4"}, "latitude": {"48.3"}, "longitude": {"14.3"},
 	}

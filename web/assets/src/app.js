@@ -1778,11 +1778,11 @@ function loadMapLibre() {
     script.async = true;
     script.dataset.maplibreScript = "true";
     script.addEventListener("load", () => {
-      if (!window.maplibregl) {
+      if (!window.maplibregl || typeof window.maplibregl.setWorkerUrl !== "function") {
         reject(new Error("Kartenbibliothek konnte nicht gestartet werden"));
         return;
       }
-      window.maplibregl.workerUrl = assets.worker;
+      window.maplibregl.setWorkerUrl(assets.worker);
       resolve(window.maplibregl);
     }, { once: true });
     script.addEventListener("error", () => reject(new Error("Kartenbibliothek konnte nicht geladen werden")), { once: true });
