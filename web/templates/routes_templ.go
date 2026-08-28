@@ -2072,22 +2072,22 @@ func routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, now
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var123 string
-		templ_7745c5c3_Var123, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(len(route.Stops)))
+		templ_7745c5c3_Var123, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(routePointCount(route)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 290, Col: 113}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 290, Col: 119}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var123))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 178, " Stopps</h2></div><span class=\"status-badge\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 178, " Routenpunkte</h2></div><span class=\"status-badge\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var124 string
 		templ_7745c5c3_Var124, templ_7745c5c3_Err = templ.JoinStringErrs(routeSource(route.Directions))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 290, Col: 191}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 290, Col: 203}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var124))
 		if templ_7745c5c3_Err != nil {
@@ -3168,6 +3168,17 @@ func routeReturnLeg(route planning.RouteDraft) (planning.RouteLeg, bool) {
 		return planning.RouteLeg{}, false
 	}
 	return route.Directions.Legs[len(route.Directions.Legs)-1], true
+}
+
+func routePointCount(route planning.RouteDraft) int {
+	if len(route.Stops) == 0 {
+		return 0
+	}
+	count := len(route.Stops) + 1
+	if route.End != route.Stops[len(route.Stops)-1].Location {
+		count++
+	}
+	return count
 }
 
 var _ = templruntime.GeneratedTemplate

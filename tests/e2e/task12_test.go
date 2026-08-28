@@ -274,7 +274,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	if err := chromedp.Run(browser, chromedp.Text("main", &routeText, chromedp.ByQuery)); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(routeText, "2 Stopps") || !strings.Contains(routeText, "Straßenrouting") || !strings.Contains(routeText, "keine Nachricht") {
+	if !strings.Contains(routeText, "4 Routenpunkte") || !strings.Contains(routeText, "Straßenrouting") || !strings.Contains(routeText, "keine Nachricht") {
 		t.Fatalf("route summary misses safety information: %s", routeText)
 	}
 

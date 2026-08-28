@@ -287,7 +287,7 @@ templ ownRoute(data RoutePageData) {
 
 templ routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, now time.Time) {
 	<section class="route-summary">
-		<div class="section-heading"><div><p class="eyebrow">{ route.DriverName }</p><h2>{ fmt.Sprint(len(route.Stops)) } Stopps</h2></div><span class="status-badge">{ routeSource(route.Directions) }</span></div>
+		<div class="section-heading"><div><p class="eyebrow">{ route.DriverName }</p><h2>{ fmt.Sprint(routePointCount(route)) } Routenpunkte</h2></div><span class="status-badge">{ routeSource(route.Directions) }</span></div>
 		<dl class="suggestion-facts"><div><dt>Abfahrt</dt><dd>{ planningClock(route.Departure) } Uhr</dd></div><div><dt>Startort</dt><dd>{ routeOptional(route.StartLabel) }</dd></div><div><dt>Endort</dt><dd>{ routeOptional(route.EndLabel) }</dd></div><div><dt>Strecke</dt><dd>{ routeDistance(route.Directions.DistanceMeters) }</dd></div><div><dt>Fahrzeit</dt><dd>{ routeDuration(route.Directions.Duration) }</dd></div><div><dt>Arbeitszeit</dt><dd>{ routeDuration(routeWorkDuration(route)) }</dd></div><div><dt>Gesamtzeit</dt><dd>{ routeDuration(route.EstimatedEndAt.Sub(route.Departure)) }</dd></div><div><dt>Voraussichtliches Ende</dt><dd>{ planningClock(route.EstimatedEndAt) } Uhr</dd></div><div><dt>Hackmaschine</dt><dd>{ route.ChipperName }</dd></div><div><dt>Transport</dt><dd>{ routeOptional(route.TransportName) }</dd></div></dl>
 		if route.Comparison.ManualDuration > 0 {
 			<p class="route-comparison" data-route-comparison>Optimierung: { routeDistance(routeComparisonDistanceSaving(route.Comparison)) } und { routeDuration(routeComparisonDurationSaving(route.Comparison)) } gegenüber der manuellen Reihenfolge gespart.</p>
@@ -609,4 +609,15 @@ func routeReturnLeg(route planning.RouteDraft) (planning.RouteLeg, bool) {
 		return planning.RouteLeg{}, false
 	}
 	return route.Directions.Legs[len(route.Directions.Legs)-1], true
+}
+
+func routePointCount(route planning.RouteDraft) int {
+	if len(route.Stops) == 0 {
+		return 0
+	}
+	count := len(route.Stops) + 1
+	if route.End != route.Stops[len(route.Stops)-1].Location {
+		count++
+	}
+	return count
 }

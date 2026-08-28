@@ -7,7 +7,41 @@ import (
 	"testing"
 
 	"example.invalid/hackplan/internal/auth"
+	"example.invalid/hackplan/internal/planning"
 )
+
+func TestRoutePointCountIncludesDistinctEndpoints(t *testing.T) {
+	t.Parallel()
+
+	stops := []planning.RouteStop{
+		{Location: planning.Point{Latitude: 48.2, Longitude: 14.2}},
+		{Location: planning.Point{Latitude: 48.3, Longitude: 14.3}},
+	}
+	tests := []struct {
+		name  string
+		route planning.RouteDraft
+		want  int
+	}{
+		{
+			name:  "separate end point",
+			route: planning.RouteDraft{Start: planning.Point{Latitude: 48.1, Longitude: 14.1}, End: planning.Point{Latitude: 48.4, Longitude: 14.4}, Stops: stops},
+			want:  4,
+		},
+		{
+			name:  "last job is end point",
+			route: planning.RouteDraft{Start: planning.Point{Latitude: 48.1, Longitude: 14.1}, End: stops[len(stops)-1].Location, Stops: stops},
+			want:  3,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := routePointCount(test.route); got != test.want {
+				t.Fatalf("routePointCount() = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
 
 func TestFullCalendarAssetsArePageSpecific(t *testing.T) {
 	t.Parallel()

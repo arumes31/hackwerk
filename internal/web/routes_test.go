@@ -132,6 +132,7 @@ func TestRouteHTTPDriverCanReorderOnlyOwnAssignedRoute(t *testing.T) {
 	page := httptest.NewRecorder()
 	router.ServeHTTP(page, authenticatedCustomerRequest(t, http.MethodGet, "/my-route?date=2026-08-27", nil, session, csrf))
 	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Meine Route") || !strings.Contains(page.Body.String(), "Nur Fahrreihenfolge") ||
+		!strings.Contains(page.Body.String(), "4 Routenpunkte") ||
 		!strings.Contains(page.Body.String(), `data-route-own="true"`) || !strings.Contains(page.Body.String(), `type="submit" name="move_up" value="stop-2"`) ||
 		!strings.Contains(page.Body.String(), `data-route-start-label="Betriebshof" data-route-start-latitude="48.200000"`) ||
 		!strings.Contains(page.Body.String(), `data-route-end-label="Betriebshof" data-route-end-latitude="48.200000"`) ||
