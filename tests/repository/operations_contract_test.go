@@ -106,13 +106,13 @@ func TestOSRMRuntimeAndUpdaterAreIsolated(t *testing.T) {
 	compose := repositoryFile(t, "compose.routing-host.example.yaml")
 	productionCompose := repositoryFile(t, "compose.prod.example.yaml")
 	developmentCompose := repositoryFile(t, "compose.yaml")
-	runtime := section(t, compose, "  osrm:\n", "  osrm-update:\n")
+	runtime := section(t, compose, "  osrm:\n", "  osrm-loopback:\n")
+	proxy := section(t, compose, "  osrm-loopback:\n", "  osrm-update:\n")
 	updater := section(t, compose, "  osrm-update:\n", "networks:\n")
 
 	for _, required := range []string{
 		`["osrm-routed", "--threads", "2", "--algorithm", "mld", "--mmap"`,
 		"networks: [routing]",
-		"127.0.0.1:${OSRM_PORT:-5000}:5000",
 		"target: /data",
 		"read_only: true",
 		`user: "65532:65532"`,
@@ -126,8 +126,13 @@ func TestOSRMRuntimeAndUpdaterAreIsolated(t *testing.T) {
 	if strings.Contains(runtime, "egress") || strings.Contains(runtime, "backend") {
 		t.Fatal("OSRM runtime must not have egress or a database network")
 	}
-	if strings.Count(runtime, "127.0.0.1:${OSRM_PORT:-5000}:5000") != 1 || strings.Contains(runtime, "0.0.0.0") || strings.Contains(runtime, "OSRM_BIND_ADDRESS") {
-		t.Fatal("OSRM runtime must expose exactly one loopback-only host port")
+	if strings.Contains(runtime, "ports:") {
+		t.Fatal("OSRM runtime must not expose a host port directly")
+	}
+	for _, required := range []string{"TCP-LISTEN:5000,fork,reuseaddr", "TCP:osrm:5000", "127.0.0.1:${OSRM_PORT:-5000}:5000", "networks: [routing, loopback]", "read_only: true", `user: "65532:65532"`, "cap_drop: [ALL]"} {
+		if !strings.Contains(proxy, required) {
+			t.Fatalf("OSRM loopback proxy is missing %q", required)
+		}
 	}
 	if !strings.Contains(updater, "networks: [egress]") || strings.Contains(updater, "routing") || strings.Contains(updater, "backend") {
 		t.Fatal("OSRM updater must have egress only and no runtime or database network")

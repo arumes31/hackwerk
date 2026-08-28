@@ -9,8 +9,6 @@ services:
         source: ${OSRM_DATA_DIR:?OSRM_DATA_DIR setzen}
         target: /data
         read_only: true
-    ports:
-      - 127.0.0.1:${OSRM_PORT:-5000}:5000
     networks: [routing]
     read_only: true
     user: "65532:65532"
@@ -21,6 +19,32 @@ services:
     cpus: "1.50"
     mem_limit: 2g
     memswap_limit: 3g
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --max-time 5 'http://127.0.0.1:5000/route/v1/driving/14.2858,48.3069;14.3000,48.3100?overview=false' | grep -q '\"code\":\"Ok\"'"]
+      interval: 15s
+      timeout: 6s
+      retries: 8
+      start_period: 30s
+    profiles: [routing]
+    restart: unless-stopped
+
+  osrm-loopback:
+    image: ${OSRM_IMAGE:?OSRM_IMAGE mit unveraenderlichem Digest setzen}
+    command: ["socat", "TCP-LISTEN:5000,fork,reuseaddr", "TCP:osrm:5000"]
+    depends_on:
+      osrm: {condition: service_healthy}
+    ports:
+      - 127.0.0.1:${OSRM_PORT:-5000}:5000
+    networks: [routing, loopback]
+    read_only: true
+    user: "65532:65532"
+    tmpfs: ["/tmp:size=8m,mode=1777,noexec,nosuid,nodev"]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 64
+    cpus: "0.25"
+    mem_limit: 64m
+    memswap_limit: 64m
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent --max-time 5 'http://127.0.0.1:5000/route/v1/driving/14.2858,48.3069;14.3000,48.3100?overview=false' | grep -q '\"code\":\"Ok\"'"]
       interval: 15s
@@ -59,4 +83,5 @@ services:
 networks:
   routing:
     internal: true
+  loopback: {}
   egress:

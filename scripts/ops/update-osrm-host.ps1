@@ -64,9 +64,10 @@ function Invoke-UpdateMode {
     )
 }
 
-function Wait-OSRMHealthy {
+function Wait-ServiceHealthy {
+    param([Parameter(Mandatory = $true)][string]$Service)
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
-        $containerID = (& docker compose -f $ComposeFile --profile routing ps -q osrm).Trim()
+        $containerID = (& docker compose -f $ComposeFile --profile routing ps -q $Service).Trim()
         if ($LASTEXITCODE -ne 0) {
             throw "Unable to inspect OSRM container."
         }
@@ -110,8 +111,8 @@ Invoke-Compose -ComposeArgs @(
 Invoke-UpdateMode -Mode update
 $newGenerationHealthy = $false
 try {
-    Invoke-Compose -ComposeArgs @("--profile", "routing", "up", "-d", "--no-deps", "--force-recreate", "osrm")
-    $newGenerationHealthy = Wait-OSRMHealthy
+    Invoke-Compose -ComposeArgs @("--profile", "routing", "up", "-d", "--force-recreate", "osrm", "osrm-loopback")
+    $newGenerationHealthy = (Wait-ServiceHealthy -Service "osrm") -and (Wait-ServiceHealthy -Service "osrm-loopback")
 } catch {
     Write-Warning $_.Exception.Message
 }
@@ -122,8 +123,8 @@ if ($newGenerationHealthy) {
 
 Write-Warning "New OSRM generation is unhealthy; restoring previous generation."
 Invoke-UpdateMode -Mode rollback
-Invoke-Compose -ComposeArgs @("--profile", "routing", "up", "-d", "--no-deps", "--force-recreate", "osrm")
-if (-not (Wait-OSRMHealthy)) {
+Invoke-Compose -ComposeArgs @("--profile", "routing", "up", "-d", "--force-recreate", "osrm", "osrm-loopback")
+if (-not ((Wait-ServiceHealthy -Service "osrm") -and (Wait-ServiceHealthy -Service "osrm-loopback"))) {
     throw "Previous OSRM generation also failed health validation."
 }
 exit 1
