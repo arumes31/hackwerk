@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strings"
 	"time"
 )
 
@@ -29,6 +30,17 @@ func Transport() *http.Transport {
 	transport.Proxy = nil
 	dialer := &net.Dialer{}
 	transport.DialContext = restrictedDialContext(net.DefaultResolver, dialer.DialContext)
+	return transport
+}
+
+// InternalServiceTransport returns a transport that can reach exactly one
+// private service endpoint. It is intentionally separate from Transport so an
+// internal Compose service cannot weaken the boundary for external providers.
+func InternalServiceTransport(host, port string) *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	dialer := &net.Dialer{}
+	transport.DialContext = internalServiceDialContext(net.DefaultResolver, dialer.DialContext, host, port)
 	return transport
 }
 
@@ -67,6 +79,36 @@ func restrictedDialContext(nameResolver resolver, dial dialContextFunc) dialCont
 			dialErr = errors.Join(dialErr, err)
 		}
 		return nil, fmt.Errorf("outbound: connecting provider: %w", dialErr)
+	}
+}
+
+func internalServiceDialContext(nameResolver resolver, dial dialContextFunc, allowedHost, allowedPort string) dialContextFunc {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil || !strings.EqualFold(host, allowedHost) || port != allowedPort {
+			return nil, fmt.Errorf("%w: internal service endpoint", ErrRestrictedAddress)
+		}
+		addresses, err := resolve(ctx, nameResolver, host)
+		if err != nil {
+			return nil, err
+		}
+		for _, candidate := range addresses {
+			if !candidate.IsValid() || !candidate.IsPrivate() || candidate.IsLoopback() ||
+				candidate.IsUnspecified() || candidate.IsLinkLocalUnicast() ||
+				candidate.IsLinkLocalMulticast() || candidate.IsMulticast() {
+				return nil, fmt.Errorf("%w: internal service resolution", ErrRestrictedAddress)
+			}
+		}
+
+		var dialErr error
+		for _, candidate := range addresses {
+			connection, err := dial(ctx, network, net.JoinHostPort(candidate.String(), port))
+			if err == nil {
+				return connection, nil
+			}
+			dialErr = errors.Join(dialErr, err)
+		}
+		return nil, fmt.Errorf("outbound: connecting internal service: %w", dialErr)
 	}
 }
 

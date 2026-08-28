@@ -101,6 +101,87 @@ func TestBuildAndPostgresImagesAreDigestPinned(t *testing.T) {
 	}
 }
 
+func TestOSRMRuntimeAndUpdaterAreIsolated(t *testing.T) {
+	t.Parallel()
+	compose := repositoryFile(t, "compose.prod.example.yaml")
+	developmentCompose := repositoryFile(t, "compose.yaml")
+	runtime := section(t, compose, "  osrm:\n", "  osrm-update:\n")
+	updater := section(t, compose, "  osrm-update:\n", "  app:\n")
+	app := section(t, compose, "  app:\n", "  worker:\n")
+
+	for _, required := range []string{
+		`["osrm-routed", "--threads", "2", "--algorithm", "mld", "--mmap"`,
+		"networks: [routing]",
+		"/data:ro",
+		"read_only: true",
+		`user: "65532:65532"`,
+		"no-new-privileges:true",
+		"cap_drop: [ALL]",
+	} {
+		if !strings.Contains(runtime, required) {
+			t.Fatalf("OSRM runtime is missing %q", required)
+		}
+	}
+	if strings.Contains(runtime, "ports:") || strings.Contains(runtime, "egress") || strings.Contains(runtime, "backend") {
+		t.Fatal("OSRM runtime must not have a host port, egress, or database network")
+	}
+	if !strings.Contains(updater, "networks: [egress]") || strings.Contains(updater, "routing") || strings.Contains(updater, "backend") {
+		t.Fatal("OSRM updater must have egress only and no runtime or database network")
+	}
+	if !strings.Contains(app, "routing: {}") || !strings.Contains(compose, "  routing:\n    internal: true") {
+		t.Fatal("application and OSRM are not connected through an isolated routing network")
+	}
+	for _, resourceLimit := range []string{`cpus: "2.00"`, "mem_limit: 4g", "memswap_limit: 6g"} {
+		if !strings.Contains(developmentCompose, resourceLimit) {
+			t.Fatalf("development OSRM updater is missing resource limit %q", resourceLimit)
+		}
+	}
+}
+
+func TestOSRMBuildUsesPinnedToolchainAndCropBeforeMerge(t *testing.T) {
+	t.Parallel()
+	const osrmImage = "ghcr.io/project-osrm/osrm-backend:v26.7.3-debian@sha256:a7091038e39a73659767f34ef2d389909b42ea80b09bd2bdca482dce2991cbad"
+	dockerfile := repositoryFile(t, "scripts", "ops", "osrm-tools.Dockerfile")
+	if !strings.Contains(dockerfile, osrmImage) {
+		t.Fatal("OSRM toolchain image is not pinned to the reviewed digest")
+	}
+
+	updater := repositoryFile(t, "scripts", "ops", "update-osrm.sh")
+	for _, required := range []string{
+		"9.4,46.3,17.5,49.5",
+		"https://download.geofabrik.de/europe/austria-latest.osm.pbf",
+		"https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf",
+		"https://download.geofabrik.de/europe/czech-republic-latest.osm.pbf",
+		"--strategy=complete_ways",
+		"osrm-partition",
+		"osrm-customize",
+		"--trial",
+		"mv -Tf -- \"$data_root/current.next.$$\" \"$data_root/current\"",
+		"regional OSM sources do not share one replication timestamp",
+		"OSRM validation route has no positive road metrics or geometry",
+	} {
+		if !strings.Contains(updater, required) {
+			t.Fatalf("OSRM updater is missing %q", required)
+		}
+	}
+	if strings.Index(updater, "osmium extract") > strings.Index(updater, "osmium merge") {
+		t.Fatal("OSRM source files are merged before they are cropped")
+	}
+
+	hostUpdate := repositoryFile(t, "scripts", "ops", "update-osrm-host.sh")
+	for _, required := range []string{
+		"install -d -m 0750 -o 65532 -g 65532",
+		"docker image inspect",
+		"wait_for_healthy_osrm",
+		"osrm-update rollback",
+		"osrm-update prune",
+	} {
+		if !strings.Contains(hostUpdate, required) {
+			t.Fatalf("OSRM host updater is missing %q", required)
+		}
+	}
+}
+
 func TestReleaseScannerAndDockerfileFrontendImagesAreDigestPinned(t *testing.T) {
 	t.Parallel()
 	const dockerfileFrontend = "# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e"

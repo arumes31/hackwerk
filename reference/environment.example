@@ -77,6 +77,7 @@ VOICE_EXTERNAL_PROVIDER_NOTICE=Bei aktivem externem Sprachdienst verlassen Audio
 
 PLANNING_ROUTER=haversine
 PLANNING_ROUTING_URL=
+# Self-hosted Compose-OSRM: PLANNING_ROUTER=osrm-internal und PLANNING_ROUTING_URL=http://osrm:5000
 PLANNING_ROUTING_TIMEOUT=5s
 PLANNING_ROUTING_MAX_RESPONSE_BYTES=1048576
 PLANNING_ROUTING_BACKOFF=30s
@@ -98,6 +99,14 @@ PLANNING_WEIGHT_RESOURCE=10
 PLANNING_WEIGHT_UTILIZATION=10
 PLANNING_WEIGHT_URGENCY=10
 PLANNING_WEIGHT_REGION=5
+
+# Host-Bind-Mount fuer den getrennten OSRM-Datensatz; nicht in Secrets oder das App-Image aufnehmen.
+OSRM_DATA_DIR=/var/lib/hackwerk/osrm
+OSRM_BBOX=9.4,46.3,17.5,49.5
+OSRM_MIN_FREE_KB=20971520
+OSRM_THREADS=2
+# In Produktion auf das gepruefte osrm-tools-Image mit Digest setzen.
+# OSRM_IMAGE=registry.example/hackwerk-osrm-tools:v26.7.3-1@sha256:<gepruefter-digest>
 
 MAP_TILE_URL=https://tile.openstreetmap.org/{z}/{x}/{y}.png
 MAP_TILE_TOKEN=

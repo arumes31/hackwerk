@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly HackWerk OSRM border-region data update
+
+[Timer]
+OnCalendar=Sun *-*-* 03:15:00 Europe/Vienna
+RandomizedDelaySec=45m
+Persistent=true
+Unit=hackwerk-osrm-update.service
+
+[Install]
+WantedBy=timers.target

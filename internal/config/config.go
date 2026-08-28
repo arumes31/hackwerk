@@ -751,8 +751,8 @@ func (cfg Config) Validate() error {
 		cfg.CalendarFeed.RateLimit < 1 || cfg.CalendarFeed.RateLimit > 1000 {
 		return errors.New("config: invalid calendar feed limits")
 	}
-	if cfg.Planning.Router != "haversine" && cfg.Planning.Router != "osrm" {
-		return errors.New("config: planning router must be haversine or osrm")
+	if cfg.Planning.Router != "haversine" && cfg.Planning.Router != "osrm" && cfg.Planning.Router != "osrm-internal" {
+		return errors.New("config: planning router must be haversine, osrm or osrm-internal")
 	}
 	if err := validateMapConfig(cfg.Map); err != nil {
 		return err
@@ -765,6 +765,9 @@ func (cfg Config) Validate() error {
 		if parseErr != nil || routingURL.Scheme != "https" || routingURL.Host == "" || routingURL.User != nil || isLoopbackHost(routingURL.Hostname()) || routingURL.RawQuery != "" || routingURL.Fragment != "" {
 			return errors.New("config: OSRM requires a static non-loopback HTTPS URL")
 		}
+	}
+	if cfg.Planning.Router == "osrm-internal" && cfg.Planning.RoutingURL != "http://osrm:5000" {
+		return errors.New("config: internal OSRM requires exactly http://osrm:5000")
 	}
 	openPlanning, openPlanningErr := time.Parse("15:04", cfg.Planning.BusinessOpen)
 	closePlanning, closePlanningErr := time.Parse("15:04", cfg.Planning.BusinessClose)

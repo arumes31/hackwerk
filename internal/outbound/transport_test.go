@@ -84,6 +84,63 @@ func TestTransportDisablesProxyResolutionBypass(t *testing.T) {
 	}
 }
 
+func TestInternalServiceDialContextAllowsOnlyExactPrivateEndpoint(t *testing.T) {
+	t.Parallel()
+	wantErr := errors.New("dial stopped")
+	var dialedAddress string
+	dial := internalServiceDialContext(
+		staticResolver{addresses: []netip.Addr{netip.MustParseAddr("172.30.0.8")}},
+		func(_ context.Context, _ string, address string) (net.Conn, error) {
+			dialedAddress = address
+			return nil, wantErr
+		},
+		"osrm",
+		"5000",
+	)
+	_, err := dial(t.Context(), "tcp", "osrm:5000")
+	if !errors.Is(err, wantErr) || dialedAddress != "172.30.0.8:5000" {
+		t.Fatalf("dial error/address = %v/%q", err, dialedAddress)
+	}
+
+	for _, address := range []string{"router:5000", "osrm:80", "osrm", "127.0.0.1:5000"} {
+		if _, err := dial(t.Context(), "tcp", address); !errors.Is(err, ErrRestrictedAddress) {
+			t.Fatalf("dial(%q) error = %v, want restricted address", address, err)
+		}
+	}
+}
+
+func TestInternalServiceDialContextRejectsNonPrivateOrMixedResolution(t *testing.T) {
+	t.Parallel()
+	for _, addresses := range [][]netip.Addr{
+		{netip.MustParseAddr("127.0.0.1")},
+		{netip.MustParseAddr("169.254.1.1")},
+		{netip.MustParseAddr("93.184.216.34")},
+		{netip.MustParseAddr("172.30.0.8"), netip.MustParseAddr("93.184.216.34")},
+		{netip.MustParseAddr("ff02::1")},
+	} {
+		addresses := addresses
+		t.Run(addresses[0].String(), func(t *testing.T) {
+			t.Parallel()
+			dialed := false
+			dial := internalServiceDialContext(staticResolver{addresses: addresses}, func(context.Context, string, string) (net.Conn, error) {
+				dialed = true
+				return nil, errors.New("unexpected dial")
+			}, "osrm", "5000")
+			_, err := dial(t.Context(), "tcp", "osrm:5000")
+			if !errors.Is(err, ErrRestrictedAddress) || dialed {
+				t.Fatalf("dial error/dialed = %v/%v", err, dialed)
+			}
+		})
+	}
+}
+
+func TestInternalServiceTransportDisablesProxyResolutionBypass(t *testing.T) {
+	t.Parallel()
+	if InternalServiceTransport("osrm", "5000").Proxy != nil {
+		t.Fatal("internal service transport allows a proxy resolution path")
+	}
+}
+
 func TestResolveHandlesIPLiteralsResolverFailuresAndEmptyAnswers(t *testing.T) {
 	direct, err := resolve(t.Context(), staticResolver{}, "::ffff:93.184.216.34")
 	if err != nil || len(direct) != 1 || direct[0].String() != "93.184.216.34" {

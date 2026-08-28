@@ -40,6 +40,24 @@ func TestOSRMRejectsSSRFConfiguration(t *testing.T) {
 	}
 }
 
+func TestOSRMInternalEndpointIsExactAndExplicit(t *testing.T) {
+	if _, err := NewOSRMRouter(OSRMConfig{BaseURL: "http://osrm:5000", Internal: true}); err != nil {
+		t.Fatalf("exact internal endpoint rejected: %v", err)
+	}
+	for _, raw := range []string{
+		"http://osrm", "http://osrm:80", "http://OSRM:5000", "http://osrm:5000/",
+		"http://osrm:5000/base", "http://osrm:5000?target=x", "http://user@osrm:5000",
+		"https://osrm:5000", "http://127.0.0.1:5000", "http://router:5000",
+	} {
+		if _, err := NewOSRMRouter(OSRMConfig{BaseURL: raw, Internal: true}); !errors.Is(err, ErrValidation) {
+			t.Fatalf("internal endpoint %q accepted: %v", raw, err)
+		}
+	}
+	if _, err := NewOSRMRouter(OSRMConfig{BaseURL: "http://osrm:5000"}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("internal endpoint accepted without opt-in: %v", err)
+	}
+}
+
 func TestOSRMMatrixContainsCoordinatesOnly(t *testing.T) {
 	var path string
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

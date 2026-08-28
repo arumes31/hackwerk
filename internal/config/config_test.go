@@ -29,6 +29,9 @@ func TestLoad(t *testing.T) {
 		{name: "OpenAI voice needs secret", values: map[string]string{"VOICE_ENABLED": "true", "VOICE_TRANSCRIBER": "openai"}, expectError: "API key"},
 		{name: "production rejects fake voice", values: map[string]string{"APP_ENV": "production", "APP_BASE_URL": "https://hackwerk.example", "SESSION_COOKIE_SECURE": "true", "DATABASE_URL": "postgres://secure@example/hackwerk", "CONFIRMATION_TOKEN_KEY_ID": "production", "CONFIRMATION_TOKEN_KEYS": `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`, "VOICE_TRANSCRIBER": "fake"}, expectError: "fake voice"},
 		{name: "OSRM rejects request-controlled query", values: map[string]string{"PLANNING_ROUTER": "osrm", "PLANNING_ROUTING_URL": "https://router.example/table?target=internal"}, expectError: "static non-loopback HTTPS"},
+		{name: "internal OSRM requires exact endpoint", values: map[string]string{"PLANNING_ROUTER": "osrm-internal", "PLANNING_ROUTING_URL": "http://router:5000"}, expectError: "exactly http://osrm:5000"},
+		{name: "internal OSRM rejects path", values: map[string]string{"PLANNING_ROUTER": "osrm-internal", "PLANNING_ROUTING_URL": "http://osrm:5000/base"}, expectError: "exactly http://osrm:5000"},
+		{name: "internal HTTP requires explicit mode", values: map[string]string{"PLANNING_ROUTER": "osrm", "PLANNING_ROUTING_URL": "http://osrm:5000"}, expectError: "static non-loopback HTTPS"},
 		{name: "map tiles reject loopback upstream", values: map[string]string{"MAP_TILE_URL": "https://127.0.0.1/{z}/{x}/{y}.png"}, expectError: "map tiles"},
 		{name: "map tiles require all placeholders", values: map[string]string{"MAP_TILE_URL": "https://tiles.example/{z}/{x}.png"}, expectError: "z, x and y"},
 		{name: "map tile token requires placeholder", values: map[string]string{"MAP_TILE_TOKEN": "secret-value"}, expectError: "configured together"},
@@ -96,6 +99,18 @@ func TestLoadPlanningConfigurationFromEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.Planning.Router != "osrm" || cfg.Planning.RoutingURL != values["PLANNING_ROUTING_URL"] || cfg.Planning.HorizonDays != 42 || cfg.Planning.SlotMinutes != 20 || cfg.Planning.BufferMinutes != 25 || cfg.Planning.WeightTravel != 30 {
+		t.Fatalf("planning config=%+v", cfg.Planning)
+	}
+}
+
+func TestLoadInternalPlanningRouterFromEnvironment(t *testing.T) {
+	t.Parallel()
+	values := map[string]string{"PLANNING_ROUTER": "osrm-internal", "PLANNING_ROUTING_URL": "http://osrm:5000"}
+	cfg, err := load(func(name string) string { return values[name] }, func(string) ([]byte, error) { return nil, errors.New("unexpected read") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Planning.Router != "osrm-internal" || cfg.Planning.RoutingURL != "http://osrm:5000" {
 		t.Fatalf("planning config=%+v", cfg.Planning)
 	}
 }

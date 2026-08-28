@@ -112,6 +112,7 @@ type OSRMConfig struct {
 	BaseURL          string
 	Timeout, Backoff time.Duration
 	MaxResponseBytes int
+	Internal         bool
 }
 type OSRMRouter struct {
 	base         *url.URL
@@ -126,7 +127,7 @@ type OSRMRouter struct {
 
 func NewOSRMRouter(cfg OSRMConfig) (*OSRMRouter, error) {
 	parsed, err := url.Parse(strings.TrimSpace(cfg.BaseURL))
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || loopback(parsed.Hostname()) {
+	if err != nil || !validOSRMEndpoint(parsed, cfg.Internal) {
 		return nil, ErrValidation
 	}
 	if cfg.Timeout <= 0 {
@@ -138,8 +139,22 @@ func NewOSRMRouter(cfg OSRMConfig) (*OSRMRouter, error) {
 	if cfg.MaxResponseBytes < 1024 {
 		cfg.MaxResponseBytes = 1 << 20
 	}
-	client := &http.Client{Transport: outbound.Transport(), Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("planning: routing redirect rejected") }}
+	transport := http.RoundTripper(outbound.Transport())
+	if cfg.Internal {
+		transport = outbound.InternalServiceTransport("osrm", "5000")
+	}
+	client := &http.Client{Transport: transport, Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("planning: routing redirect rejected") }}
 	return &OSRMRouter{base: parsed, client: client, max: cfg.MaxResponseBytes, backoff: cfg.Backoff, now: time.Now}, nil
+}
+
+func validOSRMEndpoint(parsed *url.URL, internal bool) bool {
+	if parsed == nil || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || parsed.RawPath != "" || parsed.Opaque != "" {
+		return false
+	}
+	if internal {
+		return parsed.Scheme == "http" && parsed.Host == "osrm:5000" && parsed.Path == ""
+	}
+	return parsed.Scheme == "https" && parsed.Host != "" && !loopback(parsed.Hostname())
 }
 func (r *OSRMRouter) Matrix(ctx context.Context, points []Point) (result Matrix, resultErr error) {
 	if len(points) < 2 || len(points) > 25 {
