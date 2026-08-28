@@ -172,6 +172,7 @@ func TestOSRMBuildUsesPinnedToolchainAndCropBeforeMerge(t *testing.T) {
 	for _, required := range []string{
 		"install -d -m 0750 -o 65532 -g 65532",
 		"docker image inspect",
+		"HACKWERK_COMPOSE_OVERRIDE_FILE",
 		"wait_for_healthy_osrm",
 		"osrm-update rollback",
 		"osrm-update prune",
