@@ -136,6 +136,11 @@ func TestOSRMRuntimeAndUpdaterAreIsolated(t *testing.T) {
 			t.Fatalf("development OSRM updater is missing resource limit %q", resourceLimit)
 		}
 	}
+	for _, lowImpactSetting := range []string{`["ionice", "-c", "3", "nice", "-n", "15"`, "weight: 100", "OSRM_DOWNLOAD_LIMIT:"} {
+		if !strings.Contains(developmentCompose, lowImpactSetting) {
+			t.Fatalf("development OSRM updater is missing low-impact setting %q", lowImpactSetting)
+		}
+	}
 }
 
 func TestOSRMBuildUsesPinnedToolchainAndCropBeforeMerge(t *testing.T) {

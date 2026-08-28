@@ -222,12 +222,13 @@ services:
       context: .
       dockerfile: scripts/ops/osrm-tools.Dockerfile
     image: ${OSRM_IMAGE:-hackwerk-osrm-tools:v26.7.3-1}
-    command: ["/usr/local/bin/hackwerk-osrm-update"]
+    command: ["ionice", "-c", "3", "nice", "-n", "15", "/usr/local/bin/hackwerk-osrm-update"]
     environment:
       OSRM_DATA_ROOT: /data
       OSRM_BBOX: ${OSRM_BBOX:-9.4,46.3,17.5,49.5}
       OSRM_MIN_FREE_KB: ${OSRM_MIN_FREE_KB:-20971520}
       OSRM_THREADS: ${OSRM_THREADS:-2}
+      OSRM_DOWNLOAD_LIMIT: ${OSRM_DOWNLOAD_LIMIT:-4M}
     volumes:
       - ${OSRM_DATA_DIR:-./.tmp/osrm-data}:/data
     networks: [egress]
@@ -242,6 +243,8 @@ services:
     cpus: "2.00"
     mem_limit: 4g
     memswap_limit: 6g
+    blkio_config:
+      weight: 100
     profiles: [osrm-ops]
     restart: "no"
 

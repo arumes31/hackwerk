@@ -105,6 +105,7 @@ OSRM_DATA_DIR=/var/lib/hackwerk/osrm
 OSRM_BBOX=9.4,46.3,17.5,49.5
 OSRM_MIN_FREE_KB=20971520
 OSRM_THREADS=2
+OSRM_DOWNLOAD_LIMIT=4M
 # In Produktion auf das gepruefte osrm-tools-Image mit Digest setzen.
 # OSRM_IMAGE=registry.example/hackwerk-osrm-tools:v26.7.3-1@sha256:<gepruefter-digest>
 

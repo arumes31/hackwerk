@@ -5,6 +5,7 @@ data_root=${OSRM_DATA_ROOT:-/data}
 bbox=${OSRM_BBOX:-9.4,46.3,17.5,49.5}
 min_free_kb=${OSRM_MIN_FREE_KB:-20971520}
 threads=${OSRM_THREADS:-2}
+download_limit=${OSRM_DOWNLOAD_LIMIT:-4M}
 mode=${1:-update}
 download_dir="$data_root/downloads"
 generation_dir="$data_root/generations"
@@ -36,6 +37,13 @@ case "$threads" in
     1|2|3|4) ;;
     *)
         printf '%s\n' "OSRM_THREADS must be between 1 and 4" >&2
+        exit 1
+        ;;
+esac
+case "$download_limit" in
+    1M|2M|4M|8M) ;;
+    *)
+        printf '%s\n' "OSRM_DOWNLOAD_LIMIT must be 1M, 2M, 4M or 8M" >&2
         exit 1
         ;;
 esac
@@ -121,6 +129,7 @@ download_source() {
 
     curl --fail --location --silent --show-error \
         --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors \
+        --limit-rate "$download_limit" \
         --connect-timeout 30 --max-time 7200 \
         "$source_url.md5" --output "$checksum_next"
 
@@ -129,6 +138,7 @@ download_source() {
     else
         curl --fail --location --silent --show-error \
             --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors \
+            --limit-rate "$download_limit" \
             --connect-timeout 30 --max-time 21600 \
             "$source_url" --output "$source_file.part"
         expected=$(awk 'NR == 1 {print $1}' "$checksum_next")
