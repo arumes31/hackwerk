@@ -103,16 +103,17 @@ func TestBuildAndPostgresImagesAreDigestPinned(t *testing.T) {
 
 func TestOSRMRuntimeAndUpdaterAreIsolated(t *testing.T) {
 	t.Parallel()
-	compose := repositoryFile(t, "compose.prod.example.yaml")
+	compose := repositoryFile(t, "compose.routing-host.example.yaml")
+	productionCompose := repositoryFile(t, "compose.prod.example.yaml")
 	developmentCompose := repositoryFile(t, "compose.yaml")
 	runtime := section(t, compose, "  osrm:\n", "  osrm-update:\n")
-	updater := section(t, compose, "  osrm-update:\n", "  app:\n")
-	app := section(t, compose, "  app:\n", "  worker:\n")
+	updater := section(t, compose, "  osrm-update:\n", "networks:\n")
 
 	for _, required := range []string{
 		`["osrm-routed", "--threads", "2", "--algorithm", "mld", "--mmap"`,
 		"networks: [routing]",
-		"/data:ro",
+		"127.0.0.1:${OSRM_PORT:-5000}:5000",
+		"target: /data",
 		"read_only: true",
 		`user: "65532:65532"`,
 		"no-new-privileges:true",
@@ -122,24 +123,52 @@ func TestOSRMRuntimeAndUpdaterAreIsolated(t *testing.T) {
 			t.Fatalf("OSRM runtime is missing %q", required)
 		}
 	}
-	if strings.Contains(runtime, "ports:") || strings.Contains(runtime, "egress") || strings.Contains(runtime, "backend") {
-		t.Fatal("OSRM runtime must not have a host port, egress, or database network")
+	if strings.Contains(runtime, "egress") || strings.Contains(runtime, "backend") {
+		t.Fatal("OSRM runtime must not have egress or a database network")
+	}
+	if strings.Count(runtime, "127.0.0.1:${OSRM_PORT:-5000}:5000") != 1 || strings.Contains(runtime, "0.0.0.0") || strings.Contains(runtime, "OSRM_BIND_ADDRESS") {
+		t.Fatal("OSRM runtime must expose exactly one loopback-only host port")
 	}
 	if !strings.Contains(updater, "networks: [egress]") || strings.Contains(updater, "routing") || strings.Contains(updater, "backend") {
 		t.Fatal("OSRM updater must have egress only and no runtime or database network")
 	}
-	if !strings.Contains(app, "routing: {}") || !strings.Contains(compose, "  routing:\n    internal: true") {
-		t.Fatal("application and OSRM are not connected through an isolated routing network")
-	}
-	for _, resourceLimit := range []string{`cpus: "2.00"`, "mem_limit: 4g", "memswap_limit: 6g"} {
-		if !strings.Contains(developmentCompose, resourceLimit) {
-			t.Fatalf("development OSRM updater is missing resource limit %q", resourceLimit)
+	for _, appCompose := range []string{developmentCompose, productionCompose} {
+		if strings.Contains(appCompose, "  osrm:\n") || strings.Contains(appCompose, "  osrm-update:\n") || strings.Contains(appCompose, "  routing:\n") {
+			t.Fatal("application Compose must not contain OSRM services or a routing network")
 		}
 	}
-	for _, lowImpactSetting := range []string{`["ionice", "-c", "3", "nice", "-n", "15"`, "weight: 100", "OSRM_DOWNLOAD_LIMIT:"} {
-		if !strings.Contains(developmentCompose, lowImpactSetting) {
-			t.Fatalf("development OSRM updater is missing low-impact setting %q", lowImpactSetting)
+	for _, resourceLimit := range []string{`cpus: "2.00"`, "mem_limit: 6g", "memswap_limit: 8g"} {
+		if !strings.Contains(compose, resourceLimit) {
+			t.Fatalf("standalone OSRM updater is missing resource limit %q", resourceLimit)
 		}
+	}
+	for _, lowImpactSetting := range []string{`["ionice", "-c", "3", "nice", "-n", "15"`, "OSRM_DOWNLOAD_LIMIT:"} {
+		if !strings.Contains(compose, lowImpactSetting) {
+			t.Fatalf("standalone OSRM updater is missing low-impact setting %q", lowImpactSetting)
+		}
+	}
+
+	windowsHostUpdate := repositoryFile(t, "scripts", "ops", "update-osrm-host.ps1")
+	for _, required := range []string{
+		"Wait-DockerEngine",
+		"Docker Desktop did not become ready within 10 minutes",
+		"touch /data/$sentinel && rm /data/$sentinel",
+		"Invoke-UpdateMode -Mode rollback",
+		"Invoke-UpdateMode -Mode prune",
+		"DriveType]::Fixed",
+	} {
+		if !strings.Contains(windowsHostUpdate, required) {
+			t.Fatalf("Windows OSRM host updater is missing %q", required)
+		}
+	}
+	windowsTask := repositoryFile(t, "scripts", "ops", "install-osrm-update-task.ps1")
+	for _, required := range []string{"-RunLevel Limited", "-RestartCount 3", "ExecutionTimeLimit ([TimeSpan]::Zero)", "-LogonType Interactive"} {
+		if !strings.Contains(windowsTask, required) {
+			t.Fatalf("Windows OSRM update task is missing %q", required)
+		}
+	}
+	if strings.Contains(windowsTask, "-RunLevel Highest") || strings.Contains(windowsTask, "ExecutionPolicy\", \"Bypass") {
+		t.Fatal("Windows OSRM update task uses elevated or policy-bypassing execution")
 	}
 }
 
@@ -158,11 +187,22 @@ func TestOSRMBuildUsesPinnedToolchainAndCropBeforeMerge(t *testing.T) {
 		"https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf",
 		"https://download.geofabrik.de/europe/czech-republic-latest.osm.pbf",
 		"--strategy=complete_ways",
+		`mktemp -d "$staging_root/candidate.XXXXXX"`,
+		`find "$staging_root" -mindepth 1 -maxdepth 1 -type d -name 'candidate.*'`,
+		"--retry-max-time 21600 --continue-at -",
+		"osmium merge --overwrite --with-history",
+		"osmium time-filter --overwrite",
+		"osmium tags-filter --overwrite",
+		"w/highway w/route r/type=restriction",
+		`osmium check-refs "$routing_input"`,
 		"osrm-partition",
 		"osrm-customize",
-		"--trial",
+		"--trial=1",
 		"mv -Tf -- \"$data_root/current.next.$$\" \"$data_root/current\"",
-		"regional OSM sources do not share one replication timestamp",
+		"max_source_skew_seconds=7200",
+		"regional OSM source timestamps differ by more than 2 hours",
+		"osm_replication_timestamp_min",
+		"osm_replication_timestamp_max",
 		"OSRM validation route has no positive road metrics or geometry",
 	} {
 		if !strings.Contains(updater, required) {
@@ -172,21 +212,16 @@ func TestOSRMBuildUsesPinnedToolchainAndCropBeforeMerge(t *testing.T) {
 	if strings.Index(updater, "osmium extract") > strings.Index(updater, "osmium merge") {
 		t.Fatal("OSRM source files are merged before they are cropped")
 	}
-
-	hostUpdate := repositoryFile(t, "scripts", "ops", "update-osrm-host.sh")
-	for _, required := range []string{
-		"install -d -m 0750 -o 65532 -g 65532",
-		"docker image inspect",
-		"HACKWERK_COMPOSE_OVERRIDE_FILE",
-		"--entrypoint ionice osrm-update",
-		"wait_for_healthy_osrm",
-		"run_update_mode rollback",
-		"run_update_mode prune",
-	} {
-		if !strings.Contains(hostUpdate, required) {
-			t.Fatalf("OSRM host updater is missing %q", required)
-		}
+	if strings.Index(updater, "osmium merge --overwrite --with-history") > strings.Index(updater, "osmium time-filter --overwrite") ||
+		strings.Index(updater, "osmium time-filter --overwrite") > strings.Index(updater, "osmium tags-filter --overwrite") ||
+		strings.Index(updater, "osmium tags-filter --overwrite") > strings.Index(updater, `osmium check-refs "$routing_input"`) ||
+		strings.Index(updater, `osmium check-refs "$routing_input"`) > strings.Index(updater, "osrm-extract") {
+		t.Fatal("OSRM regional snapshots are not reconciled and checked before graph extraction")
 	}
+	if strings.Contains(updater, "osmium check-refs --check-relations") {
+		t.Fatal("complete_ways extracts must not require reference-complete relations")
+	}
+
 }
 
 func TestStandaloneRoutingHostHasNoApplicationOrDatabase(t *testing.T) {
@@ -198,17 +233,20 @@ func TestStandaloneRoutingHostHasNoApplicationOrDatabase(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
-		"OSRM_BIND_ADDRESS:-127.0.0.1",
+		"127.0.0.1:${OSRM_PORT:-5000}:5000",
 		"OSRM_IMAGE mit unveraenderlichem Digest setzen",
 		"networks: [routing]",
 		"networks: [egress]",
-		"/data:ro",
+		"target: /data",
 		"ionice",
-		"mem_limit: 4g",
+		"mem_limit: 6g",
 	} {
 		if !strings.Contains(compose, required) {
 			t.Fatalf("standalone routing host is missing %q", required)
 		}
+	}
+	if strings.Contains(compose, "0.0.0.0") || strings.Contains(compose, "OSRM_BIND_ADDRESS") || strings.Count(compose, "127.0.0.1:${OSRM_PORT:-5000}:5000") != 1 {
+		t.Fatal("standalone routing host contains a non-loopback or ambiguous port binding")
 	}
 }
 

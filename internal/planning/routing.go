@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -113,6 +114,7 @@ type OSRMConfig struct {
 	Timeout, Backoff time.Duration
 	MaxResponseBytes int
 	Internal         bool
+	Tailscale        bool
 }
 type OSRMRouter struct {
 	base         *url.URL
@@ -127,7 +129,7 @@ type OSRMRouter struct {
 
 func NewOSRMRouter(cfg OSRMConfig) (*OSRMRouter, error) {
 	parsed, err := url.Parse(strings.TrimSpace(cfg.BaseURL))
-	if err != nil || !validOSRMEndpoint(parsed, cfg.Internal) {
+	if err != nil || !validOSRMEndpoint(parsed, cfg.Internal, cfg.Tailscale) {
 		return nil, ErrValidation
 	}
 	if cfg.Timeout <= 0 {
@@ -142,20 +144,36 @@ func NewOSRMRouter(cfg OSRMConfig) (*OSRMRouter, error) {
 	transport := http.RoundTripper(outbound.Transport())
 	if cfg.Internal {
 		transport = outbound.InternalServiceTransport("osrm", "5000")
+	} else if cfg.Tailscale {
+		transport, err = outbound.TailscaleServiceTransport(parsed.Hostname(), parsed.Port())
+		if err != nil {
+			return nil, ErrValidation
+		}
 	}
 	client := &http.Client{Transport: transport, Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("planning: routing redirect rejected") }}
 	return &OSRMRouter{base: parsed, client: client, max: cfg.MaxResponseBytes, backoff: cfg.Backoff, now: time.Now}, nil
 }
 
-func validOSRMEndpoint(parsed *url.URL, internal bool) bool {
+func validOSRMEndpoint(parsed *url.URL, internal, tailscale bool) bool {
 	if parsed == nil || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || parsed.RawPath != "" || parsed.Opaque != "" {
+		return false
+	}
+	if internal && tailscale {
 		return false
 	}
 	if internal {
 		return parsed.Scheme == "http" && parsed.Host == "osrm:5000" && parsed.Path == ""
 	}
+	if tailscale {
+		address, err := netip.ParseAddr(parsed.Hostname())
+		return err == nil && address.Is4() && tailscaleIPv4Prefix.Contains(address) &&
+			parsed.Scheme == "http" && parsed.Host == net.JoinHostPort(address.String(), "5000") && parsed.Path == ""
+	}
 	return parsed.Scheme == "https" && parsed.Host != "" && !loopback(parsed.Hostname())
 }
+
+var tailscaleIPv4Prefix = netip.MustParsePrefix("100.64.0.0/10")
+
 func (r *OSRMRouter) Matrix(ctx context.Context, points []Point) (result Matrix, resultErr error) {
 	if len(points) < 2 || len(points) > 25 {
 		return Matrix{}, ErrValidation

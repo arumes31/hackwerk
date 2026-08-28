@@ -5,9 +5,12 @@ services:
     image: ${OSRM_IMAGE:?OSRM_IMAGE mit unveraenderlichem Digest setzen}
     command: ["osrm-routed", "--threads", "2", "--algorithm", "mld", "--mmap", "--max-table-size", "25", "/data/current/route.osrm"]
     volumes:
-      - ${OSRM_DATA_DIR:?OSRM_DATA_DIR setzen}:/data:ro
+      - type: bind
+        source: ${OSRM_DATA_DIR:?OSRM_DATA_DIR setzen}
+        target: /data
+        read_only: true
     ports:
-      - ${OSRM_BIND_ADDRESS:-127.0.0.1}:${OSRM_PORT:-5000}:5000
+      - 127.0.0.1:${OSRM_PORT:-5000}:5000
     networks: [routing]
     read_only: true
     user: "65532:65532"
@@ -37,7 +40,9 @@ services:
       OSRM_THREADS: ${OSRM_THREADS:-2}
       OSRM_DOWNLOAD_LIMIT: ${OSRM_DOWNLOAD_LIMIT:-4M}
     volumes:
-      - ${OSRM_DATA_DIR:?OSRM_DATA_DIR setzen}:/data
+      - type: bind
+        source: ${OSRM_DATA_DIR:?OSRM_DATA_DIR setzen}
+        target: /data
     networks: [egress]
     read_only: true
     user: "65532:65532"
@@ -46,10 +51,8 @@ services:
     cap_drop: [ALL]
     pids_limit: 512
     cpus: "2.00"
-    mem_limit: 4g
-    memswap_limit: 6g
-    blkio_config:
-      weight: 100
+    mem_limit: 6g
+    memswap_limit: 8g
     profiles: [osrm-ops]
     restart: "no"
 

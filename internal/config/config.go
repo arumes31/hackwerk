@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -751,8 +752,8 @@ func (cfg Config) Validate() error {
 		cfg.CalendarFeed.RateLimit < 1 || cfg.CalendarFeed.RateLimit > 1000 {
 		return errors.New("config: invalid calendar feed limits")
 	}
-	if cfg.Planning.Router != "haversine" && cfg.Planning.Router != "osrm" && cfg.Planning.Router != "osrm-internal" {
-		return errors.New("config: planning router must be haversine, osrm or osrm-internal")
+	if cfg.Planning.Router != "haversine" && cfg.Planning.Router != "osrm" && cfg.Planning.Router != "osrm-internal" && cfg.Planning.Router != "osrm-tailscale" {
+		return errors.New("config: planning router must be haversine, osrm, osrm-internal or osrm-tailscale")
 	}
 	if err := validateMapConfig(cfg.Map); err != nil {
 		return err
@@ -768,6 +769,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Planning.Router == "osrm-internal" && cfg.Planning.RoutingURL != "http://osrm:5000" {
 		return errors.New("config: internal OSRM requires exactly http://osrm:5000")
+	}
+	if cfg.Planning.Router == "osrm-tailscale" && !validTailscaleRoutingURL(cfg.Planning.RoutingURL) {
+		return errors.New("config: Tailscale OSRM requires a numeric http://100.64.0.0/10:5000 endpoint")
 	}
 	openPlanning, openPlanningErr := time.Parse("15:04", cfg.Planning.BusinessOpen)
 	closePlanning, closePlanningErr := time.Parse("15:04", cfg.Planning.BusinessClose)
@@ -916,6 +920,19 @@ func isLoopbackHost(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
+}
+
+func validTailscaleRoutingURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" ||
+		parsed.RawPath != "" || parsed.Opaque != "" || parsed.Path != "" || parsed.Scheme != "http" {
+		return false
+	}
+	address, err := netip.ParseAddr(parsed.Hostname())
+	if err != nil || !address.Is4() || !netip.MustParsePrefix("100.64.0.0/10").Contains(address) {
+		return false
+	}
+	return parsed.Host == net.JoinHostPort(address.String(), "5000")
 }
 
 func validAllowedHost(host string) bool {

@@ -77,7 +77,8 @@ VOICE_EXTERNAL_PROVIDER_NOTICE=Bei aktivem externem Sprachdienst verlassen Audio
 
 PLANNING_ROUTER=haversine
 PLANNING_ROUTING_URL=
-# Self-hosted Compose-OSRM: PLANNING_ROUTER=osrm-internal und PLANNING_ROUTING_URL=http://osrm:5000
+# Separater Tailscale-OSRM-Host: PLANNING_ROUTER=osrm-tailscale und
+# PLANNING_ROUTING_URL=http://100.x.y.z:5000 (nur numerische Tailscale-IPv4-Adresse).
 PLANNING_ROUTING_TIMEOUT=5s
 PLANNING_ROUTING_MAX_RESPONSE_BYTES=1048576
 PLANNING_ROUTING_BACKOFF=30s
@@ -101,7 +102,7 @@ PLANNING_WEIGHT_URGENCY=10
 PLANNING_WEIGHT_REGION=5
 
 # Host-Bind-Mount fuer den getrennten OSRM-Datensatz; nicht in Secrets oder das App-Image aufnehmen.
-OSRM_DATA_DIR=/var/lib/hackwerk/osrm
+OSRM_DATA_DIR=C:\hackwerk-osrm
 OSRM_BBOX=9.4,46.3,17.5,49.5
 OSRM_MIN_FREE_KB=20971520
 OSRM_THREADS=2

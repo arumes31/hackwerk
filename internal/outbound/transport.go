@@ -44,6 +44,21 @@ func InternalServiceTransport(host, port string) *http.Transport {
 	return transport
 }
 
+// TailscaleServiceTransport returns a transport that can reach exactly one
+// numeric Tailscale IPv4 endpoint. It deliberately avoids DNS and proxy
+// resolution so the configured peer cannot be changed at request time.
+func TailscaleServiceTransport(host, port string) (*http.Transport, error) {
+	address, err := netip.ParseAddr(host)
+	if err != nil || !address.Is4() || !tailscaleIPv4Prefix.Contains(address) || port != "5000" {
+		return nil, fmt.Errorf("%w: tailscale service endpoint", ErrRestrictedAddress)
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	dialer := &net.Dialer{}
+	transport.DialContext = tailscaleServiceDialContext(dialer.DialContext, address, port)
+	return transport, nil
+}
+
 // DialContext returns a connection-time DNS validating dialer for non-HTTP
 // protocols such as SMTP.
 func DialContext(timeout time.Duration) func(context.Context, string, string) (net.Conn, error) {
@@ -112,6 +127,22 @@ func internalServiceDialContext(nameResolver resolver, dial dialContextFunc, all
 	}
 }
 
+func tailscaleServiceDialContext(dial dialContextFunc, allowedAddress netip.Addr, allowedPort string) dialContextFunc {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		candidate, parseErr := netip.ParseAddr(host)
+		if err != nil || parseErr != nil || candidate != allowedAddress || port != allowedPort ||
+			!candidate.Is4() || !tailscaleIPv4Prefix.Contains(candidate) {
+			return nil, fmt.Errorf("%w: tailscale service endpoint", ErrRestrictedAddress)
+		}
+		connection, err := dial(ctx, network, net.JoinHostPort(allowedAddress.String(), allowedPort))
+		if err != nil {
+			return nil, fmt.Errorf("outbound: connecting tailscale service: %w", err)
+		}
+		return connection, nil
+	}
+}
+
 func resolve(ctx context.Context, nameResolver resolver, host string) ([]netip.Addr, error) {
 	if address, err := netip.ParseAddr(host); err == nil {
 		return []netip.Addr{address.Unmap()}, nil
@@ -165,3 +196,5 @@ var restrictedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("3fff::/20"),
 	netip.MustParsePrefix("5f00::/16"),
 }
+
+var tailscaleIPv4Prefix = netip.MustParsePrefix("100.64.0.0/10")

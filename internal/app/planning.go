@@ -87,11 +87,12 @@ func RoutePlanningService(cfg config.Config, pool *pgxpool.Pool) (*planning.Rout
 func buildPlanningRouter(cfg config.Config) (planning.Router, planning.DirectionsRouter, error) {
 	haversine := planning.NewHaversineRouter(cfg.Planning.HaversineRoadFactor, cfg.Planning.HaversineSpeedKMH)
 	var router planning.Router = haversine
-	if cfg.Planning.Router == "osrm" || cfg.Planning.Router == "osrm-internal" {
+	if cfg.Planning.Router == "osrm" || cfg.Planning.Router == "osrm-internal" || cfg.Planning.Router == "osrm-tailscale" {
 		primary, err := planning.NewOSRMRouter(planning.OSRMConfig{
 			BaseURL: cfg.Planning.RoutingURL, Timeout: cfg.Planning.RoutingTimeout,
 			Backoff: cfg.Planning.RoutingBackoff, MaxResponseBytes: cfg.Planning.RoutingMaxResponseBytes,
-			Internal: cfg.Planning.Router == "osrm-internal",
+			Internal:  cfg.Planning.Router == "osrm-internal",
+			Tailscale: cfg.Planning.Router == "osrm-tailscale",
 		})
 		if err != nil {
 			return nil, nil, err

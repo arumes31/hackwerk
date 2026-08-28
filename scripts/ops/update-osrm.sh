@@ -10,17 +10,22 @@ mode=${1:-update}
 download_dir="$data_root/downloads"
 generation_dir="$data_root/generations"
 staging_root="$data_root/staging"
-candidate="$staging_root/candidate.$$"
-route_base="$candidate/route.osrm"
+candidate=
+route_base=
+routing_input=
 server_pid=
 snapshot_timestamp=
+newest_snapshot_timestamp=
+snapshot_epoch=
+newest_snapshot_epoch=
+max_source_skew_seconds=7200
 
 cleanup() {
     if [ -n "$server_pid" ]; then
         kill "$server_pid" 2>/dev/null || true
         wait "$server_pid" 2>/dev/null || true
     fi
-    if [ -d "$candidate" ]; then
+    if [ -n "$candidate" ] && [ -d "$candidate" ]; then
         rm -rf -- "$candidate"
     fi
 }
@@ -58,6 +63,10 @@ if ! flock -n 9; then
     printf '%s\n' "another OSRM update is already running" >&2
     exit 1
 fi
+
+# Once this process owns the update lock, no candidate directory can still be
+# active. Remove only interrupted staging generations before creating a new one.
+find "$staging_root" -mindepth 1 -maxdepth 1 -type d -name 'candidate.*' -exec rm -rf -- {} +
 
 valid_generation_target() {
     target=$1
@@ -118,7 +127,9 @@ if [ "$available_kb" -lt "$min_free_kb" ]; then
     exit 1
 fi
 
-mkdir "$candidate"
+candidate=$(mktemp -d "$staging_root/candidate.XXXXXX")
+route_base="$candidate/route.osrm"
+routing_input="$candidate/routing-input.osm.pbf"
 
 download_source() {
     source_name=$1
@@ -129,8 +140,9 @@ download_source() {
 
     curl --fail --location --silent --show-error \
         --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors \
+        --retry-max-time 900 \
         --limit-rate "$download_limit" \
-        --connect-timeout 30 --max-time 7200 \
+        --connect-timeout 30 --max-time 300 \
         "$source_url.md5" --output "$checksum_next"
 
     if [ -f "$source_file" ] && [ -f "$checksum_file" ] && cmp -s "$checksum_next" "$checksum_file"; then
@@ -138,8 +150,9 @@ download_source() {
     else
         curl --fail --location --silent --show-error \
             --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors \
+            --retry-max-time 21600 --continue-at - \
             --limit-rate "$download_limit" \
-            --connect-timeout 30 --max-time 21600 \
+            --connect-timeout 30 --max-time 7200 \
             "$source_url" --output "$source_file.part"
         expected=$(awk 'NR == 1 {print $1}' "$checksum_next")
         actual=$(md5sum "$source_file.part" | awk '{print $1}')
@@ -157,11 +170,20 @@ download_source() {
         printf '%s\n' "missing OSM replication timestamp for $source_name" >&2
         exit 1
     fi
-    if [ -z "$snapshot_timestamp" ]; then
+    source_epoch=$(date -d "$source_timestamp" '+%s' 2>/dev/null || true)
+    case "$source_epoch" in
+        ''|*[!0-9]*)
+            printf '%s\n' "invalid OSM replication timestamp for $source_name" >&2
+            exit 1
+            ;;
+    esac
+    if [ -z "$snapshot_epoch" ] || [ "$source_epoch" -lt "$snapshot_epoch" ]; then
         snapshot_timestamp=$source_timestamp
-    elif [ "$snapshot_timestamp" != "$source_timestamp" ]; then
-        printf '%s\n' "regional OSM sources do not share one replication timestamp" >&2
-        exit 1
+        snapshot_epoch=$source_epoch
+    fi
+    if [ -z "$newest_snapshot_epoch" ] || [ "$source_epoch" -gt "$newest_snapshot_epoch" ]; then
+        newest_snapshot_timestamp=$source_timestamp
+        newest_snapshot_epoch=$source_epoch
     fi
 
     osmium extract --overwrite --strategy=complete_ways --bbox "$bbox" \
@@ -172,18 +194,35 @@ download_source austria https://download.geofabrik.de/europe/austria-latest.osm.
 download_source bavaria https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf
 download_source czech-republic https://download.geofabrik.de/europe/czech-republic-latest.osm.pbf
 
-osmium merge --overwrite \
+snapshot_skew_seconds=$((newest_snapshot_epoch - snapshot_epoch))
+if [ "$snapshot_skew_seconds" -gt "$max_source_skew_seconds" ]; then
+    printf '%s\n' "regional OSM source timestamps differ by more than 2 hours" >&2
+    exit 1
+fi
+
+osmium merge --overwrite --with-history \
     "$candidate/austria.osm.pbf" \
     "$candidate/bavaria.osm.pbf" \
     "$candidate/czech-republic.osm.pbf" \
-    --output "$candidate/corridor.osm.pbf"
+    --output "$candidate/corridor-history.osh.pbf"
 rm -f -- "$candidate/austria.osm.pbf" "$candidate/bavaria.osm.pbf" "$candidate/czech-republic.osm.pbf"
 
-osrm-extract --threads "$threads" --profile /opt/car.lua --output "$route_base" "$candidate/corridor.osm.pbf"
+# Regional extracts are published at slightly different replication points.
+# Treat the overlap as bounded partial history, then collapse every OSM ID to
+# its newest available version before OSRM sees the data.
+osmium time-filter --overwrite "$candidate/corridor-history.osh.pbf" \
+    "$newest_snapshot_timestamp" --output "$candidate/corridor.osm.pbf"
+rm -f -- "$candidate/corridor-history.osh.pbf"
+osmium tags-filter --overwrite "$candidate/corridor.osm.pbf" \
+    w/highway w/route r/type=restriction --output "$routing_input"
 rm -f -- "$candidate/corridor.osm.pbf"
+osmium check-refs "$routing_input"
+
+osrm-extract --threads "$threads" --profile /opt/car.lua --output "$route_base" "$routing_input"
+rm -f -- "$routing_input"
 osrm-partition --threads "$threads" "$route_base"
 osrm-customize --threads "$threads" "$route_base"
-osrm-routed --threads "$threads" --algorithm mld --mmap --trial "$route_base"
+osrm-routed --threads "$threads" --algorithm mld --mmap --trial=1 "$route_base"
 
 osrm-routed --threads "$threads" --algorithm mld --mmap --ip 127.0.0.1 --port 5001 "$route_base" >"$candidate/validation.log" 2>&1 &
 server_pid=$!
@@ -246,7 +285,9 @@ fi
     printf 'generated_at=%s\n' "$generation"
     printf 'bbox=%s\n' "$bbox"
     printf 'profile=car\n'
-    printf 'osm_replication_timestamp=%s\n' "$snapshot_timestamp"
+    printf 'osm_replication_timestamp_min=%s\n' "$snapshot_timestamp"
+    printf 'osm_replication_timestamp_max=%s\n' "$newest_snapshot_timestamp"
+    printf 'osm_replication_skew_seconds=%s\n' "$snapshot_skew_seconds"
     for checksum in "$download_dir"/*.md5; do
         printf '%s=' "$(basename "$checksum" .md5)"
         awk 'NR == 1 {print $1}' "$checksum"

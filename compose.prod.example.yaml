@@ -80,57 +80,6 @@ services:
     restart: "no"
     profiles: [deploy]
 
-  osrm:
-    image: ${OSRM_IMAGE:?OSRM_IMAGE mit unveraenderlichem Digest setzen}
-    command: ["osrm-routed", "--threads", "2", "--algorithm", "mld", "--mmap", "--max-table-size", "25", "/data/current/route.osrm"]
-    volumes:
-      - ${OSRM_DATA_DIR:?OSRM_DATA_DIR setzen}:/data:ro
-    networks: [routing]
-    read_only: true
-    user: "65532:65532"
-    tmpfs: ["/tmp:size=32m,mode=1777,noexec,nosuid,nodev"]
-    security_opt: [no-new-privileges:true]
-    cap_drop: [ALL]
-    pids_limit: 128
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: {cpus: "1.50", memory: 3G, pids: 128}
-        reservations: {memory: 512M}
-    healthcheck:
-      test: ["CMD-SHELL", "curl --fail --silent --max-time 5 'http://127.0.0.1:5000/route/v1/driving/14.2858,48.3069;14.3000,48.3100?overview=false' | grep -q '\"code\":\"Ok\"'"]
-      interval: 15s
-      timeout: 6s
-      retries: 8
-      start_period: 30s
-
-  osrm-update:
-    image: ${OSRM_IMAGE:?OSRM_IMAGE mit unveraenderlichem Digest setzen}
-    command: ["ionice", "-c", "3", "nice", "-n", "15", "/usr/local/bin/hackwerk-osrm-update"]
-    environment:
-      OSRM_DATA_ROOT: /data
-      OSRM_BBOX: ${OSRM_BBOX:-9.4,46.3,17.5,49.5}
-      OSRM_MIN_FREE_KB: ${OSRM_MIN_FREE_KB:-20971520}
-      OSRM_THREADS: ${OSRM_THREADS:-2}
-      OSRM_DOWNLOAD_LIMIT: ${OSRM_DOWNLOAD_LIMIT:-4M}
-    volumes:
-      - ${OSRM_DATA_DIR:?OSRM_DATA_DIR setzen}:/data
-    networks: [egress]
-    read_only: true
-    user: "65532:65532"
-    tmpfs: ["/tmp:size=64m,mode=1777,noexec,nosuid,nodev"]
-    security_opt: [no-new-privileges:true]
-    cap_drop: [ALL]
-    pids_limit: 512
-    blkio_config:
-      weight: 100
-    profiles: [osrm-ops]
-    restart: "no"
-    deploy:
-      resources:
-        limits: {cpus: "2.50", memory: 5G, pids: 512}
-        reservations: {memory: 512M}
-
   app:
     image: ${HACKWERK_IMAGE:?HACKWERK_IMAGE setzen}
     command: ["serve"]
@@ -148,7 +97,6 @@ services:
       frontend: {ipv4_address: 172.30.0.10}
       backend: {}
       egress: {}
-      routing: {}
       monitoring: {ipv4_address: 172.33.0.10}
     tmpfs: ["/tmp:size=64m,mode=1777,noexec,nosuid,nodev"]
     <<: *runtime-security
@@ -244,9 +192,6 @@ networks:
     internal: true
     ipam:
       config: [{subnet: 172.33.0.0/24}]
-  routing:
-    internal: true
-
 secrets:
   database_url: {file: ./secrets/database_url}
   migration_database_url: {file: ./secrets/migration_database_url}

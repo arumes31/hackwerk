@@ -18,3 +18,15 @@ func TestBuildPlanningRouterAcceptsExactInternalOSRM(t *testing.T) {
 		t.Fatalf("buildPlanningRouter() error = %v", err)
 	}
 }
+
+func TestBuildPlanningRouterAcceptsExactTailscaleOSRM(t *testing.T) {
+	cfg := config.Config{Planning: config.Planning{
+		Router: "osrm-tailscale", RoutingURL: "http://100.115.58.99:5000",
+		RoutingTimeout: time.Second, RoutingBackoff: time.Second,
+		RoutingMaxResponseBytes: 1 << 20, RoutingCacheTTL: time.Minute,
+		RoutingCacheEntries: 8, HaversineRoadFactor: 1.3, HaversineSpeedKMH: 55,
+	}}
+	if _, _, err := buildPlanningRouter(cfg); err != nil {
+		t.Fatalf("buildPlanningRouter() error = %v", err)
+	}
+}

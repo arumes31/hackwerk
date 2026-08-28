@@ -32,6 +32,9 @@ func TestLoad(t *testing.T) {
 		{name: "internal OSRM requires exact endpoint", values: map[string]string{"PLANNING_ROUTER": "osrm-internal", "PLANNING_ROUTING_URL": "http://router:5000"}, expectError: "exactly http://osrm:5000"},
 		{name: "internal OSRM rejects path", values: map[string]string{"PLANNING_ROUTER": "osrm-internal", "PLANNING_ROUTING_URL": "http://osrm:5000/base"}, expectError: "exactly http://osrm:5000"},
 		{name: "internal HTTP requires explicit mode", values: map[string]string{"PLANNING_ROUTER": "osrm", "PLANNING_ROUTING_URL": "http://osrm:5000"}, expectError: "static non-loopback HTTPS"},
+		{name: "Tailscale OSRM requires numeric CGNAT endpoint", values: map[string]string{"PLANNING_ROUTER": "osrm-tailscale", "PLANNING_ROUTING_URL": "http://router:5000"}, expectError: "numeric http://100.64.0.0/10:5000"},
+		{name: "Tailscale OSRM rejects wrong port", values: map[string]string{"PLANNING_ROUTER": "osrm-tailscale", "PLANNING_ROUTING_URL": "http://100.115.58.99:80"}, expectError: "numeric http://100.64.0.0/10:5000"},
+		{name: "Tailscale OSRM rejects path", values: map[string]string{"PLANNING_ROUTER": "osrm-tailscale", "PLANNING_ROUTING_URL": "http://100.115.58.99:5000/base"}, expectError: "numeric http://100.64.0.0/10:5000"},
 		{name: "map tiles reject loopback upstream", values: map[string]string{"MAP_TILE_URL": "https://127.0.0.1/{z}/{x}/{y}.png"}, expectError: "map tiles"},
 		{name: "map tiles require all placeholders", values: map[string]string{"MAP_TILE_URL": "https://tiles.example/{z}/{x}.png"}, expectError: "z, x and y"},
 		{name: "map tile token requires placeholder", values: map[string]string{"MAP_TILE_TOKEN": "secret-value"}, expectError: "configured together"},
@@ -111,6 +114,18 @@ func TestLoadInternalPlanningRouterFromEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.Planning.Router != "osrm-internal" || cfg.Planning.RoutingURL != "http://osrm:5000" {
+		t.Fatalf("planning config=%+v", cfg.Planning)
+	}
+}
+
+func TestLoadTailscalePlanningRouterFromEnvironment(t *testing.T) {
+	t.Parallel()
+	values := map[string]string{"PLANNING_ROUTER": "osrm-tailscale", "PLANNING_ROUTING_URL": "http://100.115.58.99:5000"}
+	cfg, err := load(func(name string) string { return values[name] }, func(string) ([]byte, error) { return nil, errors.New("unexpected read") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Planning.Router != "osrm-tailscale" || cfg.Planning.RoutingURL != "http://100.115.58.99:5000" {
 		t.Fatalf("planning config=%+v", cfg.Planning)
 	}
 }

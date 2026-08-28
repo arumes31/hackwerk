@@ -141,6 +141,49 @@ func TestInternalServiceTransportDisablesProxyResolutionBypass(t *testing.T) {
 	}
 }
 
+func TestTailscaleServiceDialContextAllowsOnlyConfiguredNumericEndpoint(t *testing.T) {
+	t.Parallel()
+	wantErr := errors.New("dial stopped")
+	var dialedAddress string
+	dial := tailscaleServiceDialContext(func(_ context.Context, _ string, address string) (net.Conn, error) {
+		dialedAddress = address
+		return nil, wantErr
+	}, netip.MustParseAddr("100.115.58.99"), "5000")
+	_, err := dial(t.Context(), "tcp", "100.115.58.99:5000")
+	if !errors.Is(err, wantErr) || dialedAddress != "100.115.58.99:5000" {
+		t.Fatalf("dial error/address = %v/%q", err, dialedAddress)
+	}
+
+	for _, address := range []string{
+		"100.115.58.98:5000", "100.115.58.99:80", "router:5000",
+		"127.0.0.1:5000", "10.0.0.1:5000", "93.184.216.34:5000",
+	} {
+		dialedAddress = ""
+		if _, err := dial(t.Context(), "tcp", address); !errors.Is(err, ErrRestrictedAddress) || dialedAddress != "" {
+			t.Fatalf("dial(%q) error/address = %v/%q", address, err, dialedAddress)
+		}
+	}
+}
+
+func TestTailscaleServiceTransportValidatesEndpointAndDisablesProxy(t *testing.T) {
+	t.Parallel()
+	transport, err := TailscaleServiceTransport("100.115.58.99", "5000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport.Proxy != nil {
+		t.Fatal("tailscale service transport allows a proxy resolution path")
+	}
+	for _, endpoint := range [][2]string{
+		{"router", "5000"}, {"100.63.255.255", "5000"}, {"100.128.0.0", "5000"},
+		{"10.0.0.1", "5000"}, {"100.115.58.99", "80"},
+	} {
+		if _, err := TailscaleServiceTransport(endpoint[0], endpoint[1]); !errors.Is(err, ErrRestrictedAddress) {
+			t.Fatalf("TailscaleServiceTransport(%q, %q) error = %v", endpoint[0], endpoint[1], err)
+		}
+	}
+}
+
 func TestResolveHandlesIPLiteralsResolverFailuresAndEmptyAnswers(t *testing.T) {
 	direct, err := resolve(t.Context(), staticResolver{}, "::ffff:93.184.216.34")
 	if err != nil || len(direct) != 1 || direct[0].String() != "93.184.216.34" {
