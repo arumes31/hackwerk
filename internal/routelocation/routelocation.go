@@ -84,7 +84,8 @@ func (s *Service) Resolve(ctx context.Context, actor auth.Actor, id string, vers
 	if err := actor.Require(auth.PermissionRoutePlan); err != nil {
 		return Location{}, err
 	}
-	if strings.TrimSpace(id) == "" || version < 1 {
+	id = strings.TrimSpace(id)
+	if id == "" || version < 1 {
 		return Location{}, ErrNotFound
 	}
 	return s.store.Resolve(ctx, id, version)
@@ -105,8 +106,9 @@ func (s *Service) Update(ctx context.Context, actor auth.Actor, id string, versi
 	if err := actor.Require(auth.PermissionSettingsManage); err != nil {
 		return Location{}, err
 	}
+	id = strings.TrimSpace(id)
 	normalize(&input)
-	if strings.TrimSpace(id) == "" || version < 1 {
+	if id == "" || version < 1 {
 		return Location{}, ErrValidation
 	}
 	if err := input.Validate(); err != nil {
@@ -119,7 +121,8 @@ func (s *Service) Deactivate(ctx context.Context, actor auth.Actor, id string, v
 	if err := actor.Require(auth.PermissionSettingsManage); err != nil {
 		return err
 	}
-	if strings.TrimSpace(id) == "" || version < 1 {
+	id = strings.TrimSpace(id)
+	if id == "" || version < 1 {
 		return ErrValidation
 	}
 	current, err := s.store.Resolve(ctx, id, version)

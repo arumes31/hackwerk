@@ -125,12 +125,12 @@ func TestUpdateAndDeactivateValidateVersionAndForward(t *testing.T) {
 	}
 	input := validInput()
 	input.DefaultEnd = true
-	updated, err := service.Update(t.Context(), testAdmin(), "location-1", 4, input, "request")
+	updated, err := service.Update(t.Context(), testAdmin(), "  location-1  ", 4, input, "request")
 	if err != nil || updated.Version != 5 || store.updateCalls != 1 || store.lastID != "location-1" || store.lastVersion != 4 || !store.lastInput.DefaultEnd {
 		t.Fatalf("Update() = %#v, %v; store=%#v", updated, err, store)
 	}
 	store.resolved = Location{ID: "location-1", Active: true, Version: 5}
-	if err := service.Deactivate(t.Context(), testAdmin(), "location-1", 5, false, "request"); err != nil || store.deactivateCalls != 1 || store.lastVersion != 5 {
+	if err := service.Deactivate(t.Context(), testAdmin(), "  location-1  ", 5, false, "request"); err != nil || store.deactivateCalls != 1 || store.lastID != "location-1" || store.lastVersion != 5 {
 		t.Fatalf("Deactivate() error/store = %v/%#v", err, store)
 	}
 }
@@ -187,7 +187,7 @@ func TestResolveRequiresRoutePlanningAndForwardsOnlyStoredReference(t *testing.T
 	if _, err := service.Resolve(t.Context(), testAdmin(), " ", 3); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("blank Resolve() error = %v, want not found", err)
 	}
-	value, err := service.Resolve(t.Context(), testAdmin(), "location-1", 3)
+	value, err := service.Resolve(t.Context(), testAdmin(), "  location-1  ", 3)
 	if err != nil || value.ID != "location-1" || store.lastID != "location-1" || store.lastVersion != 3 {
 		t.Fatalf("Resolve() = %#v, %v; store=%#v", value, err, store)
 	}

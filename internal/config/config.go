@@ -23,6 +23,17 @@ const (
 	EnvironmentTest        = "test"
 	EnvironmentProduction  = "production"
 	CurrentSchemaVersion   = int64(14)
+
+	businessNamePlaceholder                  = "HackWerk – Betreiber noch nicht hinterlegt"
+	businessAddressPlaceholder               = "Ladungsfähige Anschrift noch nicht hinterlegt"
+	businessEmailPlaceholder                 = "E-Mail-Adresse noch nicht hinterlegt"
+	businessPhonePlaceholder                 = "Telefonnummer noch nicht hinterlegt"
+	businessLegalFormPlaceholder             = "Rechtsform noch nicht hinterlegt"
+	businessRegistryPlaceholder              = "Nicht vorhanden oder noch nicht hinterlegt"
+	businessSupervisoryAuthorityPlaceholder  = "Zuständige Behörde noch nicht hinterlegt"
+	businessChamberPlaceholder               = "Kammer/Fachgruppe noch nicht hinterlegt"
+	businessTradeRulesPlaceholder            = "Anwendbare gewerbe- oder berufsrechtliche Vorschriften noch nicht hinterlegt"
+	businessDataProtectionOfficerPlaceholder = "Kein Datenschutzbeauftragter hinterlegt"
 )
 
 // Config contains the startup settings shared by serve, worker, and CLI modes.
@@ -394,18 +405,18 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 			WebhookURL: strings.TrimSpace(getenv("SMS_WEBHOOK_URL")), HMACSecret: smsSecret,
 		},
 		Business: Business{
-			Name:                  valueOrDefault(getenv("BUSINESS_NAME"), "HackWerk – Betreiber noch nicht hinterlegt"),
-			Address:               valueOrDefault(getenv("BUSINESS_ADDRESS"), "Ladungsfähige Anschrift noch nicht hinterlegt"),
-			Email:                 valueOrDefault(getenv("BUSINESS_EMAIL"), "E-Mail-Adresse noch nicht hinterlegt"),
-			Phone:                 valueOrDefault(getenv("BUSINESS_PHONE"), "Telefonnummer noch nicht hinterlegt"),
-			LegalForm:             valueOrDefault(getenv("BUSINESS_LEGAL_FORM"), "Rechtsform noch nicht hinterlegt"),
-			RegistryNumber:        valueOrDefault(getenv("BUSINESS_REGISTRY_NUMBER"), "Nicht vorhanden oder noch nicht hinterlegt"),
-			RegistryCourt:         valueOrDefault(getenv("BUSINESS_REGISTRY_COURT"), "Nicht vorhanden oder noch nicht hinterlegt"),
-			VATID:                 valueOrDefault(getenv("BUSINESS_VAT_ID"), "Nicht vorhanden oder noch nicht hinterlegt"),
-			SupervisoryAuthority:  valueOrDefault(getenv("BUSINESS_SUPERVISORY_AUTHORITY"), "Zuständige Behörde noch nicht hinterlegt"),
-			Chamber:               valueOrDefault(getenv("BUSINESS_CHAMBER"), "Kammer/Fachgruppe noch nicht hinterlegt"),
-			TradeRules:            valueOrDefault(getenv("BUSINESS_TRADE_RULES"), "Anwendbare gewerbe- oder berufsrechtliche Vorschriften noch nicht hinterlegt"),
-			DataProtectionOfficer: valueOrDefault(getenv("BUSINESS_DATA_PROTECTION_OFFICER"), "Kein Datenschutzbeauftragter hinterlegt"),
+			Name:                  valueOrDefault(getenv("BUSINESS_NAME"), businessNamePlaceholder),
+			Address:               valueOrDefault(getenv("BUSINESS_ADDRESS"), businessAddressPlaceholder),
+			Email:                 valueOrDefault(getenv("BUSINESS_EMAIL"), businessEmailPlaceholder),
+			Phone:                 valueOrDefault(getenv("BUSINESS_PHONE"), businessPhonePlaceholder),
+			LegalForm:             valueOrDefault(getenv("BUSINESS_LEGAL_FORM"), businessLegalFormPlaceholder),
+			RegistryNumber:        valueOrDefault(getenv("BUSINESS_REGISTRY_NUMBER"), businessRegistryPlaceholder),
+			RegistryCourt:         valueOrDefault(getenv("BUSINESS_REGISTRY_COURT"), businessRegistryPlaceholder),
+			VATID:                 valueOrDefault(getenv("BUSINESS_VAT_ID"), businessRegistryPlaceholder),
+			SupervisoryAuthority:  valueOrDefault(getenv("BUSINESS_SUPERVISORY_AUTHORITY"), businessSupervisoryAuthorityPlaceholder),
+			Chamber:               valueOrDefault(getenv("BUSINESS_CHAMBER"), businessChamberPlaceholder),
+			TradeRules:            valueOrDefault(getenv("BUSINESS_TRADE_RULES"), businessTradeRulesPlaceholder),
+			DataProtectionOfficer: valueOrDefault(getenv("BUSINESS_DATA_PROTECTION_OFFICER"), businessDataProtectionOfficerPlaceholder),
 		},
 		Dashboard: Dashboard{HorizonDays: 14, PendingAfter: 15 * time.Minute, BusinessOpen: valueOrDefault(getenv("DASHBOARD_BUSINESS_OPEN"), "07:00"), BusinessClose: valueOrDefault(getenv("DASHBOARD_BUSINESS_CLOSE"), "17:00")},
 		CalendarFeed: CalendarFeed{
@@ -892,11 +903,42 @@ func (cfg Config) Validate() error {
 		if cfg.LogFormat != "json" || cfg.LogLevel == "debug" {
 			return errors.New("config: production logging must use non-debug JSON")
 		}
+		if err := validateProductionBusiness(cfg.Business); err != nil {
+			return err
+		}
 		if cfg.Mail.Enabled && (strings.HasSuffix(strings.ToLower(cfg.Mail.Host), ".invalid") || strings.HasSuffix(strings.ToLower(cfg.Mail.FromAddress), ".invalid")) {
 			return errors.New("config: production mail configuration must not use example defaults")
 		}
 		if cfg.CalendarFeed.Enabled && strings.EqualFold(cfg.CalendarFeed.UIDDomain, "hackwerk.local") {
 			return errors.New("config: production calendar UID domain is required")
+		}
+	}
+	return nil
+}
+
+func validateProductionBusiness(business Business) error {
+	fields := []struct {
+		name        string
+		value       string
+		placeholder string
+	}{
+		{name: "name", value: business.Name, placeholder: businessNamePlaceholder},
+		{name: "address", value: business.Address, placeholder: businessAddressPlaceholder},
+		{name: "email", value: business.Email, placeholder: businessEmailPlaceholder},
+		{name: "phone", value: business.Phone, placeholder: businessPhonePlaceholder},
+		{name: "legal form", value: business.LegalForm, placeholder: businessLegalFormPlaceholder},
+		{name: "registry number", value: business.RegistryNumber, placeholder: businessRegistryPlaceholder},
+		{name: "registry court", value: business.RegistryCourt, placeholder: businessRegistryPlaceholder},
+		{name: "VAT ID", value: business.VATID, placeholder: businessRegistryPlaceholder},
+		{name: "supervisory authority", value: business.SupervisoryAuthority, placeholder: businessSupervisoryAuthorityPlaceholder},
+		{name: "chamber", value: business.Chamber, placeholder: businessChamberPlaceholder},
+		{name: "trade rules", value: business.TradeRules, placeholder: businessTradeRulesPlaceholder},
+		{name: "data protection officer", value: business.DataProtectionOfficer, placeholder: businessDataProtectionOfficerPlaceholder},
+	}
+	for _, field := range fields {
+		value := strings.TrimSpace(field.value)
+		if value == "" || strings.EqualFold(value, field.placeholder) {
+			return fmt.Errorf("config: production business %s is required", field.name)
 		}
 	}
 	return nil

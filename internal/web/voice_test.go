@@ -20,6 +20,7 @@ import (
 	"example.invalid/hackplan/internal/config"
 	"example.invalid/hackplan/internal/customers"
 	"example.invalid/hackplan/internal/voice"
+	"example.invalid/hackplan/web/templates"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -283,6 +284,40 @@ func TestVoiceRecordingPlaybackIsAdminOnlyAndNotCacheable(t *testing.T) {
 		if test.role == auth.RoleAdmin && (response.Header().Get("Cache-Control") != "private, no-store" || response.Header().Get("X-Content-Type-Options") != "nosniff" || response.Header().Get("Content-Type") != "audio/wav") {
 			t.Fatalf("playback headers = %#v", response.Header())
 		}
+	}
+}
+
+func TestVoiceRecordingsPageLabelsCurrentPageCount(t *testing.T) {
+	store := &webVoiceStore{recordings: make([]voice.Recording, 51)}
+	for index := range store.recordings {
+		store.recordings[index] = voice.Recording{
+			ID:               "recording",
+			OwnerDisplayName: "Test Admin",
+			RecordedAt:       time.Date(2026, 8, 29, 8, 0, 0, 0, time.UTC),
+			ExpiresAt:        time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC),
+		}
+	}
+	location, _ := time.LoadLocation("Europe/Vienna")
+	service, err := voice.New(store, voice.FakeTranscriber{Text: "fixture"}, voice.RuleExtractor{}, voice.Config{
+		Enabled: true, Retention: time.Hour, RecordingRetention: 30 * 24 * time.Hour,
+		RateLimitPerMinute: 10, ConcurrentPerUser: 1, Timezone: location,
+	}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := voiceRecordingsPage(service, templates.PageData{AppName: "HackWerk", Version: "test"}, "csrf", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.test/admin/voice-recordings", nil)
+	request = request.WithContext(context.WithValue(request.Context(), sessionContextKey{}, auth.Session{
+		Actor: auth.Actor{UserID: "admin", Role: auth.RoleAdmin},
+	}))
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	body := response.Body.String()
+	if response.Code != http.StatusOK || store.listLimit != 51 || store.listOffset != 0 ||
+		!strings.Contains(body, "50 auf dieser Seite") || !strings.Contains(body, "Ältere Aufnahmen") || strings.Contains(body, "50 aktiv") {
+		t.Fatalf("status/limit/offset = %d/%d/%d body=%q", response.Code, store.listLimit, store.listOffset, body)
 	}
 }
 

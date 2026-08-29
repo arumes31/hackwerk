@@ -226,7 +226,7 @@ document.querySelectorAll("[data-route-location-picker]").forEach(picker => {
   const lastStop = picker.querySelector("[data-route-location-last-stop]");
   const editor = picker.querySelector("[data-route-location-editor]");
   const editorAPI = editor ? initializeRouteLocationEditor(editor) : null;
-  const setActive = choice => {
+  const setActive = (choice, selectionChanged = false) => {
     const kind = choice?.dataset.routeLocationKind || "custom";
     custom.hidden = kind !== "custom";
     if (kind === "custom") {
@@ -235,6 +235,10 @@ document.querySelectorAll("[data-route-location-picker]").forEach(picker => {
       latitude.value = "";
       longitude.value = "";
       lastStop.value = "";
+      if (selectionChanged) {
+        confirmed.value = "";
+        if (nativeConfirmed) nativeConfirmed.checked = false;
+      }
       picker.dispatchEvent(new Event("route-location-status", { bubbles: true }));
       return;
     }
@@ -258,7 +262,7 @@ document.querySelectorAll("[data-route-location-picker]").forEach(picker => {
     lastStop.value = "true";
     picker.dispatchEvent(new Event("route-location-status", { bubbles: true }));
   };
-  choices.forEach(choice => choice.addEventListener("change", () => setActive(choice)));
+  choices.forEach(choice => choice.addEventListener("change", () => setActive(choice, true)));
   setActive(choices.find(choice => choice.checked));
   picker.closest("form")?.addEventListener("submit", event => {
     const active = choices.find(choice => choice.checked);

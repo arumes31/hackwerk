@@ -1759,7 +1759,7 @@ if (voiceCapture) {
   });
   window.addEventListener("pagehide", () => {
     cancelled = true;
-    if (recorder?.state !== "inactive") recorder.stop();
+    if (recorder && recorder.state !== "inactive") recorder.stop();
     chunks = [];
     stopTracks();
   });

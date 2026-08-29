@@ -17,9 +17,10 @@ import (
 type LegalPageKind string
 
 const (
-	LegalPageImprint LegalPageKind = "imprint"
-	LegalPagePrivacy LegalPageKind = "privacy"
-	LegalPageCookies LegalPageKind = "cookies"
+	LegalPageImprint    LegalPageKind = "imprint"
+	LegalPagePrivacy    LegalPageKind = "privacy"
+	LegalPageCookies    LegalPageKind = "cookies"
+	legalContentUpdated               = "29. August 2026"
 )
 
 type LegalData struct {
@@ -75,7 +76,7 @@ func siteFooter(page PageData) templ.Component {
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(page.AppName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 45, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 46, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
@@ -88,7 +89,7 @@ func siteFooter(page PageData) templ.Component {
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(page.Version)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 45, Col: 119}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 46, Col: 119}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -134,7 +135,7 @@ func privacyNotice(page PageData) templ.Component {
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(page.AppName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 62, Col: 20}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 63, Col: 20}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
@@ -184,7 +185,7 @@ func LegalPage(page PageData, kind LegalPageKind) templ.Component {
 		var templ_7745c5c3_Var7 string
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.AppName + " Startseite")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 80, Col: 75}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 81, Col: 75}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 		if templ_7745c5c3_Err != nil {
@@ -197,7 +198,7 @@ func LegalPage(page PageData, kind LegalPageKind) templ.Component {
 		var templ_7745c5c3_Var8 string
 		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(page.AppName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 80, Col: 154}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 81, Col: 154}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 		if templ_7745c5c3_Err != nil {
@@ -210,7 +211,7 @@ func LegalPage(page PageData, kind LegalPageKind) templ.Component {
 		var templ_7745c5c3_Var9 string
 		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(legalCurrent(kind, LegalPageImprint))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 82, Col: 78}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 83, Col: 78}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 		if templ_7745c5c3_Err != nil {
@@ -223,7 +224,7 @@ func LegalPage(page PageData, kind LegalPageKind) templ.Component {
 		var templ_7745c5c3_Var10 string
 		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(legalCurrent(kind, LegalPagePrivacy))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 83, Col: 80}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 84, Col: 80}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 		if templ_7745c5c3_Err != nil {
@@ -236,7 +237,7 @@ func LegalPage(page PageData, kind LegalPageKind) templ.Component {
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(legalCurrent(kind, LegalPageCookies))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 84, Col: 76}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 85, Col: 76}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 		if templ_7745c5c3_Err != nil {
@@ -249,7 +250,7 @@ func LegalPage(page PageData, kind LegalPageKind) templ.Component {
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(legalPageTitle(kind))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 91, Col: 31}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 92, Col: 31}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 		if templ_7745c5c3_Err != nil {
@@ -262,18 +263,31 @@ func LegalPage(page PageData, kind LegalPageKind) templ.Component {
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(legalPageIntro(kind))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 92, Col: 30}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 93, Col: 30}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</p><p class=\"legal-page__updated\">Stand: 29. August 2026</p></header>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</p><p class=\"legal-page__updated\">Stand: ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var14 string
+		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(legalContentUpdated)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 94, Col: 64}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</p></header>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if legalHasPlaceholder(page.Legal) {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<div class=\"form-alert form-alert--warning\" role=\"note\"><strong>Betreiberangaben noch offen</strong><p>Die gekennzeichneten Angaben sind Platzhalter und müssen vor dem regulären Produktivbetrieb durch die tatsächlichen Betreiberinformationen ersetzt und rechtlich geprüft werden.</p></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<div class=\"form-alert form-alert--warning\" role=\"note\"><strong>Betreiberangaben noch offen</strong><p>Die gekennzeichneten Angaben sind Platzhalter und müssen vor dem regulären Produktivbetrieb durch die tatsächlichen Betreiberinformationen ersetzt und rechtlich geprüft werden.</p></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -294,7 +308,7 @@ func LegalPage(page PageData, kind LegalPageKind) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</main>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</main>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -302,7 +316,7 @@ func LegalPage(page PageData, kind LegalPageKind) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<div class=\"visually-hidden\" aria-live=\"polite\" data-live-status></div></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<div class=\"visually-hidden\" aria-live=\"polite\" data-live-status></div></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -326,51 +340,51 @@ func imprintContent(data LegalData) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var14 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var14 == nil {
-			templ_7745c5c3_Var14 = templ.NopComponent
+		templ_7745c5c3_Var15 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var15 == nil {
+			templ_7745c5c3_Var15 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<div class=\"legal-sections\"><section><h2>Diensteanbieter und Medieninhaber</h2><dl class=\"legal-facts\"><div><dt>Name/Firma</dt><dd>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var15 string
-		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(data.OperatorName)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 114, Col: 124}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</dd></div><div><dt>Rechtsform</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<div class=\"legal-sections\"><section><h2>Diensteanbieter und Medieninhaber</h2><dl class=\"legal-facts\"><div><dt>Name/Firma</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var16 string
-		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(data.LegalForm)
+		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(data.OperatorName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 114, Col: 181}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 115, Col: 124}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</dd></div><div><dt>Anschrift</dt><dd class=\"legal-preline\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</dd></div><div><dt>Rechtsform</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var17 string
-		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(data.Address)
+		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(data.LegalForm)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 114, Col: 257}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 115, Col: 181}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</dd></div></dl></section><section><h2>Kontakt</h2><dl class=\"legal-facts\"><div><dt>E-Mail</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</dd></div><div><dt>Anschrift</dt><dd class=\"legal-preline\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var18 string
+		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(data.Address)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 115, Col: 257}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</dd></div></dl></section><section><h2>Kontakt</h2><dl class=\"legal-facts\"><div><dt>E-Mail</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -378,111 +392,111 @@ func imprintContent(data LegalData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</dd></div><div><dt>Telefon</dt><dd>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var18 string
-		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(data.Phone)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 124, Col: 41}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</dd></div></dl></section><section><h2>Register und Steuer</h2><dl class=\"legal-facts\"><div><dt>Firmenbuchnummer</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</dd></div><div><dt>Telefon</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var19 string
-		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(data.RegistryNumber)
+		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(data.Phone)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 127, Col: 118}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 125, Col: 41}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "</dd></div><div><dt>Firmenbuchgericht</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "</dd></div></dl></section><section><h2>Register und Steuer</h2><dl class=\"legal-facts\"><div><dt>Firmenbuchnummer</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var20 string
-		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(data.RegistryCourt)
+		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(data.RegistryNumber)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 127, Col: 186}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 128, Col: 118}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</dd></div><div><dt>UID</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</dd></div><div><dt>Firmenbuchgericht</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var21 string
-		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(data.VATID)
+		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(data.RegistryCourt)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 127, Col: 232}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 128, Col: 186}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</dd></div></dl></section><section><h2>Gewerbe und Aufsicht</h2><dl class=\"legal-facts\"><div><dt>Aufsichts-/Gewerbebehörde</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</dd></div><div><dt>UID</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(data.SupervisoryAuthority)
+		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(data.VATID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 128, Col: 135}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 128, Col: 232}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</dd></div><div><dt>Kammer/Fachgruppe</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</dd></div></dl></section><section><h2>Gewerbe und Aufsicht</h2><dl class=\"legal-facts\"><div><dt>Aufsichts-/Gewerbebehörde</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var23 string
-		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(data.Chamber)
+		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(data.SupervisoryAuthority)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 128, Col: 197}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 129, Col: 135}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</dd></div><div><dt>Anwendbare Vorschriften</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</dd></div><div><dt>Kammer/Fachgruppe</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var24 string
-		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(data.TradeRules)
+		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(data.Chamber)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 128, Col: 268}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 129, Col: 197}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "</dd></div></dl><p>Die österreichischen Rechtsvorschriften sind über das <a href=\"https://www.ris.bka.gv.at/\" rel=\"external nofollow noreferrer\">Rechtsinformationssystem des Bundes</a> zugänglich.</p></section><section><h2>Inhaltliche Verantwortung</h2><p>Medieninhaber und für den Inhalt verantwortlich: ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "</dd></div><div><dt>Anwendbare Vorschriften</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var25 string
-		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(data.OperatorName)
+		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(data.TradeRules)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 129, Col: 117}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 129, Col: 268}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, ", Anschrift wie oben.</p><p>Die Anwendung dient der internen Einsatzplanung. Verbindliche Termine und Benachrichtigungen entstehen nur durch ausdrücklich berechtigte Benutzeraktionen.</p></section></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</dd></div></dl><p>Die österreichischen Rechtsvorschriften sind über das <a href=\"https://www.ris.bka.gv.at/\" rel=\"external nofollow noreferrer\">Rechtsinformationssystem des Bundes</a> zugänglich.</p></section><section><h2>Inhaltliche Verantwortung</h2><p>Medieninhaber und für den Inhalt verantwortlich: ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var26 string
+		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(data.OperatorName)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 130, Col: 117}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, ", Anschrift wie oben.</p><p>Die Anwendung dient der internen Einsatzplanung. Verbindliche Termine und Benachrichtigungen entstehen nur durch ausdrücklich berechtigte Benutzeraktionen.</p></section></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -506,141 +520,149 @@ func privacyContent(data LegalData) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var26 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var26 == nil {
-			templ_7745c5c3_Var26 = templ.NopComponent
+		templ_7745c5c3_Var27 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var27 == nil {
+			templ_7745c5c3_Var27 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<nav class=\"legal-toc\" aria-label=\"Inhalt der Datenschutzinformation\"><strong>Auf dieser Seite</strong><a href=\"#verantwortlich\">Verantwortlich</a><a href=\"#verarbeitung\">Verarbeitungen</a><a href=\"#empfaenger\">Empfänger</a><a href=\"#speicherung\">Speicherdauer</a><a href=\"#rechte\">Ihre Rechte</a></nav><div class=\"legal-sections\"><section id=\"verantwortlich\"><h2>1. Verantwortlicher</h2><p class=\"legal-preline\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var27 string
-		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(data.OperatorName)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 136, Col: 103}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<br>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<nav class=\"legal-toc\" aria-label=\"Inhalt der Datenschutzinformation\"><strong>Auf dieser Seite</strong><a href=\"#verantwortlich\">Verantwortlich</a><a href=\"#verarbeitung\">Verarbeitungen</a><a href=\"#empfaenger\">Empfänger</a><a href=\"#speicherung\">Speicherdauer</a><a href=\"#rechte\">Ihre Rechte</a></nav><div class=\"legal-sections\"><section id=\"verantwortlich\"><h2>1. Verantwortlicher</h2><p class=\"legal-preline\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var28 string
-		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(data.Address)
+		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(data.OperatorName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 136, Col: 124}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 139, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</p><p>E-Mail: @legalEmail(data.Email)<br>Telefon: ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<br>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var29 string
-		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(data.Phone)
+		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(data.Address)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 136, Col: 190}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 139, Col: 68}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</p><p>Datenschutzbeauftragter: ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</p><p><span>E-Mail: </span>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = legalEmail(data.Email).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<br><span>Telefon: ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var30 string
-		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(data.DataProtectionOfficer)
+		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(data.Phone)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 136, Col: 252}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 144, Col: 31}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</p></section><section id=\"verarbeitung\"><h2>2. Welche Daten wir wofür verarbeiten</h2><div class=\"legal-purpose-grid\"><article><h3>Benutzerkonten und Sicherheit</h3><p>Benutzername, Anzeigename, Rolle, Passwort-Hash, Sitzungs- und Sicherheitsdaten sowie technische Request-Metadaten für Anmeldung, Berechtigungsprüfung, Missbrauchsschutz und Fehleranalyse.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung beziehungsweise vorvertragliche Maßnahmen, rechtliche Verpflichtungen und berechtigtes Interesse an einem sicheren Betrieb.</p></article><article><h3>Kunden, Aufträge und Planung</h3><p>Kontakt-, Adress-, Standort-, Auftrags-, Termin-, Fahrer-, Ressourcen- und interne Notizdaten zur Auftragsabwicklung, Einsatzplanung, Dokumentation und Kommunikation.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung und vorvertragliche Maßnahmen, rechtliche Verpflichtungen sowie berechtigte Interessen an nachvollziehbarer Betriebsorganisation und Rechtsverteidigung.</p></article><article><h3>Benachrichtigungen</h3><p>Empfänger, gewählter Kanal, Nachrichtentext, Versandstatus und Providerreferenz zur Zustellung von Termin- und Statusinformationen. Der Versand erfolgt erst nach einer ausdrücklichen fachlichen Aktion.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung, berechtigtes Interesse an der Kundenkommunikation und – soweit erforderlich – Einwilligung.</p></article><article><h3>Sprache, Karte und Route</h3><p>Spracheingaben erzeugen ausschließlich einen prüfbaren Entwurf. Die Originalaufnahme wird zur Transkription sowie zur nachvollziehbaren Prüfung durch Administratoren verarbeitet und spätestens 30 Tage nach dem Upload gelöscht. Karten- und Routinganfragen enthalten nur erforderliche Koordinaten; eine Adresssuche übermittelt den bewusst eingegebenen Suchtext an den konfigurierten Suchdienst.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung beziehungsweise berechtigtes Interesse an effizienter, nachvollziehbarer Planung und Qualitätssicherung; Spracheingabe nur nach sichtbarer Benutzeraktion.</p></article></div></section><section><h2>3. Herkunft und Bereitstellung</h2><p>Daten stammen von Kunden, Benutzern, Administratoren und Fahrern sowie aus bewusst ausgelösten Providerantworten. Pflichtangaben sind erforderlich, um Benutzerkonten zu schützen, Aufträge abzuwickeln und Termine zu planen. Ohne sie können die jeweiligen Funktionen nicht erbracht werden.</p></section><section id=\"empfaenger\"><h2>4. Empfänger und Auftragsverarbeiter</h2><ul><li>Hosting-, Datenbank-, Backup- und Reverse-Proxy-Infrastruktur des Betreibers;</li>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if data.MailEnabled {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<li>konfigurierter E-Mail-Versanddienst für ausdrücklich ausgelöste E-Mails;</li>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		if data.SMSEnabled {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<li>konfigurierter SMS-Dienst für ausdrücklich ausgelöste SMS;</li>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		if data.GeocodingEnabled {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<li>konfigurierter Geocoding-Dienst bei einer bewusst gestarteten Adresssuche;</li>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<li>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</span></p><p>Datenschutzbeauftragter: ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var31 string
-		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(routingPrivacyText(data.RoutingMode))
+		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(data.DataProtectionOfficer)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 152, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 146, Col: 59}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</li>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</p></section><section id=\"verarbeitung\"><h2>2. Welche Daten wir wofür verarbeiten</h2><div class=\"legal-purpose-grid\"><article><h3>Benutzerkonten und Sicherheit</h3><p>Benutzername, Anzeigename, Rolle, Passwort-Hash, Sitzungs- und Sicherheitsdaten sowie technische Request-Metadaten für Anmeldung, Berechtigungsprüfung, Missbrauchsschutz und Fehleranalyse.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung beziehungsweise vorvertragliche Maßnahmen, rechtliche Verpflichtungen und berechtigtes Interesse an einem sicheren Betrieb.</p></article><article><h3>Kunden, Aufträge und Planung</h3><p>Kontakt-, Adress-, Standort-, Auftrags-, Termin-, Fahrer-, Ressourcen- und interne Notizdaten zur Auftragsabwicklung, Einsatzplanung, Dokumentation und Kommunikation.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung und vorvertragliche Maßnahmen, rechtliche Verpflichtungen sowie berechtigte Interessen an nachvollziehbarer Betriebsorganisation und Rechtsverteidigung.</p></article><article><h3>Benachrichtigungen</h3><p>Empfänger, gewählter Kanal, Nachrichtentext, Versandstatus und Providerreferenz zur Zustellung von Termin- und Statusinformationen. Der Versand erfolgt erst nach einer ausdrücklichen fachlichen Aktion.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung, berechtigtes Interesse an der Kundenkommunikation und – soweit erforderlich – Einwilligung.</p></article><article><h3>Sprache, Karte und Route</h3><p>Spracheingaben erzeugen ausschließlich einen prüfbaren Entwurf. Die Originalaufnahme wird zur Transkription sowie zur nachvollziehbaren Prüfung durch Administratoren verarbeitet und spätestens 30 Tage nach dem Upload gelöscht. Karten- und Routinganfragen enthalten nur erforderliche Koordinaten; eine Adresssuche übermittelt den bewusst eingegebenen Suchtext an den konfigurierten Suchdienst.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung beziehungsweise berechtigtes Interesse an effizienter, nachvollziehbarer Planung und Qualitätssicherung; Spracheingabe nur nach sichtbarer Benutzeraktion.</p></article></div></section><section><h2>3. Herkunft und Bereitstellung</h2><p>Daten stammen von Kunden, Benutzern, Administratoren und Fahrern sowie aus bewusst ausgelösten Providerantworten. Pflichtangaben sind erforderlich, um Benutzerkonten zu schützen, Aufträge abzuwickeln und Termine zu planen. Ohne sie können die jeweiligen Funktionen nicht erbracht werden.</p></section><section id=\"empfaenger\"><h2>4. Empfänger und Auftragsverarbeiter</h2><ul><li>Hosting-, Datenbank-, Backup- und Reverse-Proxy-Infrastruktur des Betreibers;</li>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if data.ExternalVoiceEnabled {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<li>konfigurierter OpenAI-Dienst für bewusst gestartete Transkription oder strukturierte Entwurfshilfe; die Anwendung fordert dabei deaktivierte Provider-Speicherung an.</li>")
+		if data.MailEnabled {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<li>konfigurierter E-Mail-Versanddienst für ausdrücklich ausgelöste E-Mails;</li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		if data.LocalVoiceEnabled {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<li>interner, CPU-basierter whisper.cpp-Dienst für bewusst gestartete deutsche Transkription; das Audio verlässt die HackWerk-Infrastruktur dabei nicht.</li>")
+		if data.SMSEnabled {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<li>konfigurierter SMS-Dienst für ausdrücklich ausgelöste SMS;</li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "</ul><p>Eine Offenlegung an Behörden erfolgt nur bei gesetzlicher Verpflichtung. Daten werden nicht verkauft und nicht für Werbung oder Profilbildung verwendet.</p></section><section><h2>5. Drittlandübermittlungen</h2><p>HackWerk bindet keine Werbe-, Analyse- oder Social-Media-Dienste ein. Soweit ein Betreiber einen externen Dienst außerhalb des EWR aktiviert, muss er vor Produktivbetrieb die konkrete Übermittlungsgrundlage, geeignete Garantien und Bezugsmöglichkeiten dokumentieren. Derzeitige Platzhalter ersetzen diese betriebliche Prüfung nicht.</p></section><section id=\"speicherung\"><h2>6. Speicherdauer</h2><ul><li>Aktive Sitzungen: bei Inaktivität höchstens ")
+		if data.GeocodingEnabled {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<li>konfigurierter Geocoding-Dienst bei einer bewusst gestarteten Adresssuche;</li>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<li>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var32 string
-		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(legalDuration(data.SessionIdleTTL))
+		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(routingPrivacyText(data.RoutingMode))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 163, Col: 143}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 163, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, ", absolut höchstens ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</li>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if data.ExternalVoiceEnabled {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<li>konfigurierter OpenAI-Dienst für bewusst gestartete Transkription oder strukturierte Entwurfshilfe; die Anwendung fordert dabei deaktivierte Provider-Speicherung an.</li>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		if data.LocalVoiceEnabled {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<li>interner, CPU-basierter whisper.cpp-Dienst für bewusst gestartete deutsche Transkription; das Audio verlässt die HackWerk-Infrastruktur dabei nicht.</li>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "</ul><p>Eine Offenlegung an Behörden erfolgt nur bei gesetzlicher Verpflichtung. Daten werden nicht verkauft und nicht für Werbung oder Profilbildung verwendet.</p></section><section><h2>5. Drittlandübermittlungen</h2><p>HackWerk bindet keine Werbe-, Analyse- oder Social-Media-Dienste ein. Soweit ein Betreiber einen externen Dienst außerhalb des EWR aktiviert, muss er vor Produktivbetrieb die konkrete Übermittlungsgrundlage, geeignete Garantien und Bezugsmöglichkeiten dokumentieren. Derzeitige Platzhalter ersetzen diese betriebliche Prüfung nicht.</p></section><section id=\"speicherung\"><h2>6. Speicherdauer</h2><ul><li>Aktive Sitzungen: bei Inaktivität höchstens ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var33 string
-		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(legalDuration(data.SessionAbsoluteTTL))
+		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(legalDuration(data.SessionIdleTTL))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 163, Col: 206}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 174, Col: 143}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, ".</li><li>Originale Sprachaufnahme: spätestens 30 Tage nach Upload; ungeprüfte abgeleitete Sprachentwürfe standardmäßig nach 24 Stunden. Nach einem Commit oder Verwerfen bleiben Audio und Entwurfsdaten technisch getrennt.</li><li>Auftrags-, Termin-, Kunden-, Audit- und Kommunikationsdaten: bis Zweckfortfall sowie entsprechend gesetzlicher Aufbewahrungs-, Nachweis- und Verjährungsfristen; historische Daten werden zunächst archiviert statt unkontrolliert gelöscht.</li><li>Technische Logs, Outboxdaten und Backups: nach dem dokumentierten betrieblichen Lösch- und Sicherungsplan. Bereits erzeugte verschlüsselte Datenbanksicherungen können eine Aufnahme bis zum Ablauf ihrer eigenen, getrennten Backupfrist enthalten.</li></ul><p>Konkrete betriebliche Fristen müssen vor Produktivbetrieb vom Verantwortlichen festgelegt werden.</p></section><section><h2>7. Automatisierte Entscheidungen</h2><p>Es findet keine ausschließlich automatisierte Entscheidung mit rechtlicher oder ähnlich erheblicher Wirkung statt. Planungsvorschläge und Spracheingaben bleiben unverbindliche Entwürfe; Termine werden ausschließlich durch Administratoren bewusst fixiert.</p></section><section id=\"rechte\"><h2>8. Ihre Rechte</h2><p>Betroffene Personen haben nach Maßgabe der gesetzlichen Voraussetzungen Rechte auf Information, Auskunft, Berichtigung, Löschung, Einschränkung, Datenübertragbarkeit, Widerspruch und Widerruf einer Einwilligung für die Zukunft. Anfragen richten Sie an den oben genannten Verantwortlichen.</p><p>Außerdem besteht ein Beschwerderecht bei der <a href=\"https://www.dsb.gv.at/\" rel=\"external nofollow noreferrer\">Österreichischen Datenschutzbehörde</a>, Barichgasse 40–42, 1030 Wien.</p></section><section><h2>9. Sicherheit und Änderungen</h2><p>HackWerk verwendet verschlüsselte Übertragung, serverseitige Sitzungen, Rollen- und Rechteprüfungen, CSRF-Schutz, restriktive Browserrichtlinien, protokollierte fachliche Aktionen und minimierte technische Logs. Diese Information wird bei geänderten Datenflüssen, Providern oder Rechtsgrundlagen aktualisiert.</p></section></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, ", absolut höchstens ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var34 string
+		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(legalDuration(data.SessionAbsoluteTTL))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 174, Col: 206}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, ".</li><li>Originale Sprachaufnahme: spätestens 30 Tage nach Upload; ungeprüfte abgeleitete Sprachentwürfe standardmäßig nach 24 Stunden. Nach einem Commit oder Verwerfen bleiben Audio und Entwurfsdaten technisch getrennt.</li><li>Auftrags-, Termin-, Kunden-, Audit- und Kommunikationsdaten: bis Zweckfortfall sowie entsprechend gesetzlicher Aufbewahrungs-, Nachweis- und Verjährungsfristen; historische Daten werden zunächst archiviert statt unkontrolliert gelöscht.</li><li>Technische Logs, Outboxdaten und Backups: nach dem dokumentierten betrieblichen Lösch- und Sicherungsplan. Bereits erzeugte verschlüsselte Datenbanksicherungen können eine Aufnahme bis zum Ablauf ihrer eigenen, getrennten Backupfrist enthalten.</li></ul><p>Konkrete betriebliche Fristen müssen vor Produktivbetrieb vom Verantwortlichen festgelegt werden.</p></section><section><h2>7. Automatisierte Entscheidungen</h2><p>Es findet keine ausschließlich automatisierte Entscheidung mit rechtlicher oder ähnlich erheblicher Wirkung statt. Planungsvorschläge und Spracheingaben bleiben unverbindliche Entwürfe; Termine werden ausschließlich durch Administratoren bewusst fixiert.</p></section><section id=\"rechte\"><h2>8. Ihre Rechte</h2><p>Betroffene Personen haben nach Maßgabe der gesetzlichen Voraussetzungen Rechte auf Information, Auskunft, Berichtigung, Löschung, Einschränkung, Datenübertragbarkeit, Widerspruch und Widerruf einer Einwilligung für die Zukunft. Anfragen richten Sie an den oben genannten Verantwortlichen.</p><p>Außerdem besteht ein Beschwerderecht bei der <a href=\"https://www.dsb.gv.at/\" rel=\"external nofollow noreferrer\">Österreichischen Datenschutzbehörde</a>, Barichgasse 40–42, 1030 Wien.</p></section><section><h2>9. Sicherheit und Änderungen</h2><p>HackWerk verwendet verschlüsselte Übertragung, serverseitige Sitzungen, Rollen- und Rechteprüfungen, CSRF-Schutz, restriktive Browserrichtlinien, protokollierte fachliche Aktionen und minimierte technische Logs. Diese Information wird bei geänderten Datenflüssen, Providern oder Rechtsgrundlagen aktualisiert.</p></section></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -664,64 +686,64 @@ func cookiesContent(data LegalData) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var34 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var34 == nil {
-			templ_7745c5c3_Var34 = templ.NopComponent
+		templ_7745c5c3_Var35 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var35 == nil {
+			templ_7745c5c3_Var35 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<div class=\"legal-sections\"><section><h2>Was verwendet HackWerk?</h2><p>Die Anwendung selbst setzt ausschließlich technisch notwendige Cookies für Anmeldung und Schutz zustandsändernder Anfragen. Es gibt keine Analyse-, Marketing-, Retargeting- oder Social-Media-Cookies und keine versteckten Zählpixel.</p></section><section><h2>Notwendige Cookies</h2><div class=\"table-scroll\"><table class=\"legal-table\"><thead><tr><th>Name</th><th>Zweck</th><th>Dauer</th><th>Zugriff</th></tr></thead><tbody><tr><td><code>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var35 string
-		templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(data.SessionCookieName)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 173, Col: 217}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "</code></td><td>Ordnet nach der Anmeldung eine zufällige, serverseitig verwaltete Sitzung zu.</td><td>Inaktiv höchstens ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<div class=\"legal-sections\"><section><h2>Was verwendet HackWerk?</h2><p>Die Anwendung selbst setzt ausschließlich technisch notwendige Cookies für Anmeldung und Schutz zustandsändernder Anfragen. Es gibt keine Analyse-, Marketing-, Retargeting- oder Social-Media-Cookies und keine versteckten Zählpixel.</p></section><section><h2>Notwendige Cookies</h2><div class=\"table-scroll\"><table class=\"legal-table\"><thead><tr><th>Name</th><th>Zweck</th><th>Dauer</th><th>Zugriff</th></tr></thead><tbody><tr><td><code>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var36 string
-		templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(legalDuration(data.SessionIdleTTL))
+		templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(data.SessionCookieName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 173, Col: 377}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 184, Col: 217}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, ", absolut höchstens ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "</code></td><td>Ordnet nach der Anmeldung eine zufällige, serverseitig verwaltete Sitzung zu.</td><td>Inaktiv höchstens ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var37 string
-		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(legalDuration(data.SessionAbsoluteTTL))
+		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(legalDuration(data.SessionIdleTTL))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 173, Col: 440}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 184, Col: 377}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, ".</td><td>Nur Server; HttpOnly</td></tr><tr><td><code>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, ", absolut höchstens ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var38 string
-		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(data.CSRFCookieName)
+		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(legalDuration(data.SessionAbsoluteTTL))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 173, Col: 517}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 184, Col: 440}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "</code></td><td>Schützt Formulare und andere zustandsändernde Anfragen vor fremder Auslösung.</td><td>Höchstens bis zum absoluten Sitzungsende.</td><td>Nur Server; HttpOnly</td></tr></tbody></table></div><p>Beide Cookies sind in Produktion verschlüsselt übertragen, auf den Pfad <code>/</code> begrenzt und mit einer restriktiven SameSite-Richtlinie versehen.</p></section><section><h2>Browser-Speicher ohne Cookie</h2><div class=\"table-scroll\"><table class=\"legal-table\"><thead><tr><th>Schlüssel</th><th>Speicher</th><th>Zweck</th><th>Dauer</th></tr></thead><tbody><tr><td><code>hackwerk:density</code></td><td>localStorage</td><td>Gewählte Darstellungsdichte.</td><td>Bis zum Löschen im Browser.</td></tr><tr><td><code>hackwerk:outdoor</code></td><td>localStorage</td><td>Gewählter Outdoor-Kontrast.</td><td>Bis zum Löschen im Browser.</td></tr><tr><td><code>hackwerk:privacy-notice:v1</code></td><td>localStorage</td><td>Merkt, dass der notwendige Cookie-Hinweis gelesen wurde.</td><td>Bis zum Löschen oder einer neuen Hinweiversion.</td></tr><tr><td><code>hackwerk:changed-record</code></td><td>sessionStorage</td><td>Markiert nach einer Navigation einmalig den zuletzt geänderten Datensatz.</td><td>Bis zur Anzeige oder zum Schließen des Tabs.</td></tr></tbody></table></div><p>In diesen Speichern liegen keine Kontakt-, Auftrags-, Standort- oder Sitzungsdaten.</p></section><section><h2>Warum gibt es keinen „Alle akzeptieren“-Button?</h2><p>Für unbedingt erforderliche Speicherungen ist keine Auswahl zwischen Annehmen und Ablehnen sinnvoll. Der Hinweis erklärt transparent, was geschieht. Sollte HackWerk später optionale Kategorien erhalten, dürfen diese erst nach einer freiwilligen, spezifischen Einwilligung aktiviert werden.</p></section><section><h2>Vorgeschaltete Infrastruktur und fremde Domain-Cookies</h2><p>Ein Reverse Proxy oder ein anderer Dienst unter derselben übergeordneten Domain kann eigene Sicherheits- oder Anmeldecookies setzen. Ebenso kann der Browser Cookies einer anderen Subdomain mitsenden, wenn deren Domainbereich zu weit gewählt wurde. HackWerk wertet nur die oben genannten eigenen Cookie-Namen aus. Der Betreiber muss zusätzliche Infrastruktur-Cookies separat dokumentieren und unnötig weit gefasste Domain-Cookies einschränken.</p></section><section><h2>Hinweis erneut anzeigen oder Daten löschen</h2><p>Mit „Cookie-Hinweis öffnen“ im Footer kann der Hinweis jederzeit erneut geöffnet werden. Browser-Speicher lassen sich zusätzlich in den Website-Daten des Browsers löschen; danach werden Sie abgemeldet und Darstellungspräferenzen zurückgesetzt.</p><button class=\"button button--quiet\" type=\"button\" data-privacy-notice-open>Cookie-Hinweis öffnen</button></section></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, ".</td><td>Nur Server; HttpOnly</td></tr><tr><td><code>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var39 string
+		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(data.CSRFCookieName)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 184, Col: 517}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "</code></td><td>Schützt Formulare und andere zustandsändernde Anfragen vor fremder Auslösung.</td><td>Höchstens bis zum absoluten Sitzungsende.</td><td>Nur Server; HttpOnly</td></tr></tbody></table></div><p>Beide Cookies sind in Produktion verschlüsselt übertragen, auf den Pfad <code>/</code> begrenzt und mit einer restriktiven SameSite-Richtlinie versehen.</p></section><section><h2>Browser-Speicher ohne Cookie</h2><div class=\"table-scroll\"><table class=\"legal-table\"><thead><tr><th>Schlüssel</th><th>Speicher</th><th>Zweck</th><th>Dauer</th></tr></thead><tbody><tr><td><code>hackwerk:density</code></td><td>localStorage</td><td>Gewählte Darstellungsdichte.</td><td>Bis zum Löschen im Browser.</td></tr><tr><td><code>hackwerk:outdoor</code></td><td>localStorage</td><td>Gewählter Outdoor-Kontrast.</td><td>Bis zum Löschen im Browser.</td></tr><tr><td><code>hackwerk:privacy-notice:v1</code></td><td>localStorage</td><td>Merkt, dass der notwendige Cookie-Hinweis gelesen wurde.</td><td>Bis zum Löschen oder einer neuen Hinweisversion.</td></tr><tr><td><code>hackwerk:changed-record</code></td><td>sessionStorage</td><td>Markiert nach einer Navigation einmalig den zuletzt geänderten Datensatz.</td><td>Bis zur Anzeige oder zum Schließen des Tabs.</td></tr></tbody></table></div><p>In diesen Speichern liegen keine Kontakt-, Auftrags-, Standort- oder Sitzungsdaten.</p></section><section><h2>Warum gibt es keinen „Alle akzeptieren“-Button?</h2><p>Für unbedingt erforderliche Speicherungen ist keine Auswahl zwischen Annehmen und Ablehnen sinnvoll. Der Hinweis erklärt transparent, was geschieht. Sollte HackWerk später optionale Kategorien erhalten, dürfen diese erst nach einer freiwilligen, spezifischen Einwilligung aktiviert werden.</p></section><section><h2>Vorgeschaltete Infrastruktur und fremde Domain-Cookies</h2><p>Ein Reverse Proxy oder ein anderer Dienst unter derselben übergeordneten Domain kann eigene Sicherheits- oder Anmeldecookies setzen. Ebenso kann der Browser Cookies einer anderen Subdomain mitsenden, wenn deren Domainbereich zu weit gewählt wurde. HackWerk wertet nur die oben genannten eigenen Cookie-Namen aus. Der Betreiber muss zusätzliche Infrastruktur-Cookies separat dokumentieren und unnötig weit gefasste Domain-Cookies einschränken.</p></section><section><h2>Hinweis erneut anzeigen oder Daten löschen</h2><p>Mit „Cookie-Hinweis öffnen“ im Footer kann der Hinweis jederzeit erneut geöffnet werden. Browser-Speicher lassen sich zusätzlich in den Website-Daten des Browsers löschen; danach werden Sie abgemeldet und Darstellungspräferenzen zurückgesetzt.</p><button class=\"button button--quiet\" type=\"button\" data-privacy-notice-open>Cookie-Hinweis öffnen</button></section></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -745,49 +767,49 @@ func legalEmail(value string) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var39 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var39 == nil {
-			templ_7745c5c3_Var39 = templ.NopComponent
+		templ_7745c5c3_Var40 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var40 == nil {
+			templ_7745c5c3_Var40 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		if legalEmailURL(value) != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "<a href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var40 templ.SafeURL
-			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(legalEmailURL(value)))
+			var templ_7745c5c3_Var41 templ.SafeURL
+			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(legalEmailURL(value)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 183, Col: 47}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var41 string
-			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(value)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 183, Col: 57}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 194, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "</a>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var42 string
+			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(value)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 194, Col: 57}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "</a>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			var templ_7745c5c3_Var42 string
-			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(value)
+			var templ_7745c5c3_Var43 string
+			templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(value)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 185, Col: 9}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/legal.templ`, Line: 196, Col: 9}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -847,6 +869,13 @@ func legalDuration(value time.Duration) string {
 			return "1 Stunde"
 		}
 		return fmt.Sprintf("%d Stunden", hours)
+	}
+	if value%time.Minute == 0 {
+		minutes := int(value / time.Minute)
+		if minutes == 1 {
+			return "1 Minute"
+		}
+		return fmt.Sprintf("%d Minuten", minutes)
 	}
 	return value.String()
 }

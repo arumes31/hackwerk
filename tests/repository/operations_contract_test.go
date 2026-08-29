@@ -101,6 +101,35 @@ func TestBuildAndPostgresImagesAreDigestPinned(t *testing.T) {
 	}
 }
 
+func TestWhisperHostStartupAndTimeoutExampleAreProviderSafe(t *testing.T) {
+	t.Parallel()
+
+	startup := repositoryFile(t, "scripts", "ops", "start-whisper-host.ps1")
+	for _, required := range []string{
+		"$containerIDs = @(",
+		"$containerIDs.Count -eq 1",
+		"$healthValues.Count -eq 1",
+		"ForEach-Object { ([string]$_).Trim() }",
+	} {
+		if !strings.Contains(startup, required) {
+			t.Fatalf("Whisper host startup is missing safe output handling %q", required)
+		}
+	}
+	if strings.Contains(startup, `(& docker compose -f $ComposeFile ps -q whisper).Trim()`) {
+		t.Fatal("Whisper host startup still trims possibly missing or multi-line native output directly")
+	}
+
+	environment := repositoryFile(t, "reference", "environment.example")
+	if !strings.Contains(environment, "# VOICE_PROVIDER_TIMEOUT=10m") || !strings.Contains(environment, "lokale Whisper-Transcriber") {
+		t.Fatal("environment example does not document the local-Whisper-only timeout override")
+	}
+	for _, line := range strings.Split(environment, "\n") {
+		if strings.TrimSpace(line) == "VOICE_PROVIDER_TIMEOUT=10m" {
+			t.Fatal("environment example enables the local Whisper timeout for every provider")
+		}
+	}
+}
+
 func TestOSRMRuntimeAndUpdaterAreIsolated(t *testing.T) {
 	t.Parallel()
 	compose := repositoryFile(t, "compose.routing-host.example.yaml")
@@ -199,6 +228,7 @@ func TestOSRMBuildUsesPinnedToolchainAndCropBeforeMerge(t *testing.T) {
 		`mktemp -d "$staging_root/candidate.XXXXXX"`,
 		`find "$staging_root" -mindepth 1 -maxdepth 1 -type d -name 'candidate.*'`,
 		"--retry-max-time 21600 --continue-at -",
+		"osmium extract",
 		"osmium merge --overwrite --with-history",
 		"osmium time-filter --overwrite",
 		"osmium tags-filter --overwrite",

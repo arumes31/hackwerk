@@ -9,9 +9,10 @@ import (
 type LegalPageKind string
 
 const (
-	LegalPageImprint LegalPageKind = "imprint"
-	LegalPagePrivacy LegalPageKind = "privacy"
-	LegalPageCookies LegalPageKind = "cookies"
+	LegalPageImprint    LegalPageKind = "imprint"
+	LegalPagePrivacy    LegalPageKind = "privacy"
+	LegalPageCookies    LegalPageKind = "cookies"
+	legalContentUpdated               = "29. August 2026"
 )
 
 type LegalData struct {
@@ -90,7 +91,7 @@ templ LegalPage(page PageData, kind LegalPageKind) {
 					<p class="eyebrow">Recht & Datenschutz</p>
 					<h1>{ legalPageTitle(kind) }</h1>
 					<p>{ legalPageIntro(kind) }</p>
-					<p class="legal-page__updated">Stand: 29. August 2026</p>
+					<p class="legal-page__updated">Stand: { legalContentUpdated }</p>
 				</header>
 				if legalHasPlaceholder(page.Legal) {
 					<div class="form-alert form-alert--warning" role="note"><strong>Betreiberangaben noch offen</strong><p>Die gekennzeichneten Angaben sind Platzhalter und müssen vor dem regulären Produktivbetrieb durch die tatsächlichen Betreiberinformationen ersetzt und rechtlich geprüft werden.</p></div>
@@ -133,7 +134,17 @@ templ imprintContent(data LegalData) {
 templ privacyContent(data LegalData) {
 	<nav class="legal-toc" aria-label="Inhalt der Datenschutzinformation"><strong>Auf dieser Seite</strong><a href="#verantwortlich">Verantwortlich</a><a href="#verarbeitung">Verarbeitungen</a><a href="#empfaenger">Empfänger</a><a href="#speicherung">Speicherdauer</a><a href="#rechte">Ihre Rechte</a></nav>
 	<div class="legal-sections">
-		<section id="verantwortlich"><h2>1. Verantwortlicher</h2><p class="legal-preline">{ data.OperatorName }<br/>{ data.Address }</p><p>E-Mail: @legalEmail(data.Email)<br/>Telefon: { data.Phone }</p><p>Datenschutzbeauftragter: { data.DataProtectionOfficer }</p></section>
+		<section id="verantwortlich">
+			<h2>1. Verantwortlicher</h2>
+			<p class="legal-preline">{ data.OperatorName }<br/>{ data.Address }</p>
+			<p>
+				<span>E-Mail: </span>
+				@legalEmail(data.Email)
+				<br/>
+				<span>Telefon: { data.Phone }</span>
+			</p>
+			<p>Datenschutzbeauftragter: { data.DataProtectionOfficer }</p>
+		</section>
 		<section id="verarbeitung"><h2>2. Welche Daten wir wofür verarbeiten</h2><div class="legal-purpose-grid"><article><h3>Benutzerkonten und Sicherheit</h3><p>Benutzername, Anzeigename, Rolle, Passwort-Hash, Sitzungs- und Sicherheitsdaten sowie technische Request-Metadaten für Anmeldung, Berechtigungsprüfung, Missbrauchsschutz und Fehleranalyse.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung beziehungsweise vorvertragliche Maßnahmen, rechtliche Verpflichtungen und berechtigtes Interesse an einem sicheren Betrieb.</p></article><article><h3>Kunden, Aufträge und Planung</h3><p>Kontakt-, Adress-, Standort-, Auftrags-, Termin-, Fahrer-, Ressourcen- und interne Notizdaten zur Auftragsabwicklung, Einsatzplanung, Dokumentation und Kommunikation.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung und vorvertragliche Maßnahmen, rechtliche Verpflichtungen sowie berechtigte Interessen an nachvollziehbarer Betriebsorganisation und Rechtsverteidigung.</p></article><article><h3>Benachrichtigungen</h3><p>Empfänger, gewählter Kanal, Nachrichtentext, Versandstatus und Providerreferenz zur Zustellung von Termin- und Statusinformationen. Der Versand erfolgt erst nach einer ausdrücklichen fachlichen Aktion.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung, berechtigtes Interesse an der Kundenkommunikation und – soweit erforderlich – Einwilligung.</p></article><article><h3>Sprache, Karte und Route</h3><p>Spracheingaben erzeugen ausschließlich einen prüfbaren Entwurf. Die Originalaufnahme wird zur Transkription sowie zur nachvollziehbaren Prüfung durch Administratoren verarbeitet und spätestens 30 Tage nach dem Upload gelöscht. Karten- und Routinganfragen enthalten nur erforderliche Koordinaten; eine Adresssuche übermittelt den bewusst eingegebenen Suchtext an den konfigurierten Suchdienst.</p><p><strong>Rechtsgrundlage:</strong> Vertragserfüllung beziehungsweise berechtigtes Interesse an effizienter, nachvollziehbarer Planung und Qualitätssicherung; Spracheingabe nur nach sichtbarer Benutzeraktion.</p></article></div></section>
 		<section><h2>3. Herkunft und Bereitstellung</h2><p>Daten stammen von Kunden, Benutzern, Administratoren und Fahrern sowie aus bewusst ausgelösten Providerantworten. Pflichtangaben sind erforderlich, um Benutzerkonten zu schützen, Aufträge abzuwickeln und Termine zu planen. Ohne sie können die jeweiligen Funktionen nicht erbracht werden.</p></section>
 		<section id="empfaenger">
@@ -171,7 +182,7 @@ templ cookiesContent(data LegalData) {
 	<div class="legal-sections">
 		<section><h2>Was verwendet HackWerk?</h2><p>Die Anwendung selbst setzt ausschließlich technisch notwendige Cookies für Anmeldung und Schutz zustandsändernder Anfragen. Es gibt keine Analyse-, Marketing-, Retargeting- oder Social-Media-Cookies und keine versteckten Zählpixel.</p></section>
 		<section><h2>Notwendige Cookies</h2><div class="table-scroll"><table class="legal-table"><thead><tr><th>Name</th><th>Zweck</th><th>Dauer</th><th>Zugriff</th></tr></thead><tbody><tr><td><code>{ data.SessionCookieName }</code></td><td>Ordnet nach der Anmeldung eine zufällige, serverseitig verwaltete Sitzung zu.</td><td>Inaktiv höchstens { legalDuration(data.SessionIdleTTL) }, absolut höchstens { legalDuration(data.SessionAbsoluteTTL) }.</td><td>Nur Server; HttpOnly</td></tr><tr><td><code>{ data.CSRFCookieName }</code></td><td>Schützt Formulare und andere zustandsändernde Anfragen vor fremder Auslösung.</td><td>Höchstens bis zum absoluten Sitzungsende.</td><td>Nur Server; HttpOnly</td></tr></tbody></table></div><p>Beide Cookies sind in Produktion verschlüsselt übertragen, auf den Pfad <code>/</code> begrenzt und mit einer restriktiven SameSite-Richtlinie versehen.</p></section>
-		<section><h2>Browser-Speicher ohne Cookie</h2><div class="table-scroll"><table class="legal-table"><thead><tr><th>Schlüssel</th><th>Speicher</th><th>Zweck</th><th>Dauer</th></tr></thead><tbody><tr><td><code>hackwerk:density</code></td><td>localStorage</td><td>Gewählte Darstellungsdichte.</td><td>Bis zum Löschen im Browser.</td></tr><tr><td><code>hackwerk:outdoor</code></td><td>localStorage</td><td>Gewählter Outdoor-Kontrast.</td><td>Bis zum Löschen im Browser.</td></tr><tr><td><code>hackwerk:privacy-notice:v1</code></td><td>localStorage</td><td>Merkt, dass der notwendige Cookie-Hinweis gelesen wurde.</td><td>Bis zum Löschen oder einer neuen Hinweiversion.</td></tr><tr><td><code>hackwerk:changed-record</code></td><td>sessionStorage</td><td>Markiert nach einer Navigation einmalig den zuletzt geänderten Datensatz.</td><td>Bis zur Anzeige oder zum Schließen des Tabs.</td></tr></tbody></table></div><p>In diesen Speichern liegen keine Kontakt-, Auftrags-, Standort- oder Sitzungsdaten.</p></section>
+		<section><h2>Browser-Speicher ohne Cookie</h2><div class="table-scroll"><table class="legal-table"><thead><tr><th>Schlüssel</th><th>Speicher</th><th>Zweck</th><th>Dauer</th></tr></thead><tbody><tr><td><code>hackwerk:density</code></td><td>localStorage</td><td>Gewählte Darstellungsdichte.</td><td>Bis zum Löschen im Browser.</td></tr><tr><td><code>hackwerk:outdoor</code></td><td>localStorage</td><td>Gewählter Outdoor-Kontrast.</td><td>Bis zum Löschen im Browser.</td></tr><tr><td><code>hackwerk:privacy-notice:v1</code></td><td>localStorage</td><td>Merkt, dass der notwendige Cookie-Hinweis gelesen wurde.</td><td>Bis zum Löschen oder einer neuen Hinweisversion.</td></tr><tr><td><code>hackwerk:changed-record</code></td><td>sessionStorage</td><td>Markiert nach einer Navigation einmalig den zuletzt geänderten Datensatz.</td><td>Bis zur Anzeige oder zum Schließen des Tabs.</td></tr></tbody></table></div><p>In diesen Speichern liegen keine Kontakt-, Auftrags-, Standort- oder Sitzungsdaten.</p></section>
 		<section><h2>Warum gibt es keinen „Alle akzeptieren“-Button?</h2><p>Für unbedingt erforderliche Speicherungen ist keine Auswahl zwischen Annehmen und Ablehnen sinnvoll. Der Hinweis erklärt transparent, was geschieht. Sollte HackWerk später optionale Kategorien erhalten, dürfen diese erst nach einer freiwilligen, spezifischen Einwilligung aktiviert werden.</p></section>
 		<section><h2>Vorgeschaltete Infrastruktur und fremde Domain-Cookies</h2><p>Ein Reverse Proxy oder ein anderer Dienst unter derselben übergeordneten Domain kann eigene Sicherheits- oder Anmeldecookies setzen. Ebenso kann der Browser Cookies einer anderen Subdomain mitsenden, wenn deren Domainbereich zu weit gewählt wurde. HackWerk wertet nur die oben genannten eigenen Cookie-Namen aus. Der Betreiber muss zusätzliche Infrastruktur-Cookies separat dokumentieren und unnötig weit gefasste Domain-Cookies einschränken.</p></section>
 		<section><h2>Hinweis erneut anzeigen oder Daten löschen</h2><p>Mit „Cookie-Hinweis öffnen“ im Footer kann der Hinweis jederzeit erneut geöffnet werden. Browser-Speicher lassen sich zusätzlich in den Website-Daten des Browsers löschen; danach werden Sie abgemeldet und Darstellungspräferenzen zurückgesetzt.</p><button class="button button--quiet" type="button" data-privacy-notice-open>Cookie-Hinweis öffnen</button></section>
@@ -237,6 +248,13 @@ func legalDuration(value time.Duration) string {
 			return "1 Stunde"
 		}
 		return fmt.Sprintf("%d Stunden", hours)
+	}
+	if value%time.Minute == 0 {
+		minutes := int(value / time.Minute)
+		if minutes == 1 {
+			return "1 Minute"
+		}
+		return fmt.Sprintf("%d Minuten", minutes)
 	}
 	return value.String()
 }

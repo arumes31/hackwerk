@@ -292,6 +292,9 @@ func TestProductionRequiresTrustedProxyAndRejectsWildcardHost(t *testing.T) {
 		"SESSION_COOKIE_SECURE": "true", "DATABASE_URL": "postgres://secure@example/hackwerk?sslmode=require",
 		"CONFIRMATION_TOKEN_KEY_ID": "production", "CONFIRMATION_TOKEN_KEYS": `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`,
 	}
+	for name, value := range validBusinessEnvironment() {
+		base[name] = value
+	}
 	get := func(values map[string]string) func(string) string {
 		return func(name string) string { return values[name] }
 	}
@@ -307,6 +310,61 @@ func TestProductionRequiresTrustedProxyAndRejectsWildcardHost(t *testing.T) {
 	base["APP_ALLOWED_HOSTS"] = "hackwerk.example"
 	if _, err := load(get(base), func(string) ([]byte, error) { return nil, errors.New("unexpected read") }); err != nil {
 		t.Fatalf("secure production config error=%v", err)
+	}
+}
+
+func TestProductionRejectsBusinessPlaceholders(t *testing.T) {
+	tests := map[string]string{
+		"BUSINESS_NAME":                    businessNamePlaceholder,
+		"BUSINESS_ADDRESS":                 businessAddressPlaceholder,
+		"BUSINESS_EMAIL":                   businessEmailPlaceholder,
+		"BUSINESS_PHONE":                   businessPhonePlaceholder,
+		"BUSINESS_LEGAL_FORM":              businessLegalFormPlaceholder,
+		"BUSINESS_REGISTRY_NUMBER":         businessRegistryPlaceholder,
+		"BUSINESS_REGISTRY_COURT":          businessRegistryPlaceholder,
+		"BUSINESS_VAT_ID":                  businessRegistryPlaceholder,
+		"BUSINESS_SUPERVISORY_AUTHORITY":   businessSupervisoryAuthorityPlaceholder,
+		"BUSINESS_CHAMBER":                 businessChamberPlaceholder,
+		"BUSINESS_TRADE_RULES":             businessTradeRulesPlaceholder,
+		"BUSINESS_DATA_PROTECTION_OFFICER": businessDataProtectionOfficerPlaceholder,
+	}
+	for name, placeholder := range tests {
+		t.Run(name, func(t *testing.T) {
+			values := map[string]string{
+				"APP_ENV": "production", "APP_BASE_URL": "https://hackwerk.example", "APP_ALLOWED_HOSTS": "hackwerk.example",
+				"APP_TRUSTED_PROXY_CIDRS": "10.0.0.0/8", "SESSION_COOKIE_SECURE": "true",
+				"DATABASE_URL": "postgres://secure@example/hackwerk?sslmode=require", "CALENDAR_UID_DOMAIN": "calendar.hackwerk.example",
+				"CONFIRMATION_TOKEN_KEY_ID": "production", "CONFIRMATION_TOKEN_KEYS": `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`,
+			}
+			for businessName, value := range validBusinessEnvironment() {
+				values[businessName] = value
+			}
+			values[name] = placeholder
+
+			_, err := load(func(environmentName string) string { return values[environmentName] }, func(string) ([]byte, error) {
+				return nil, errors.New("unexpected read")
+			})
+			if err == nil || !strings.Contains(err.Error(), "production business") {
+				t.Fatalf("placeholder error = %v", err)
+			}
+		})
+	}
+}
+
+func validBusinessEnvironment() map[string]string {
+	return map[string]string{
+		"BUSINESS_NAME":                    "HackWerk Testbetrieb",
+		"BUSINESS_ADDRESS":                 "Testweg 1, 4020 Linz",
+		"BUSINESS_EMAIL":                   "datenschutz@example.test",
+		"BUSINESS_PHONE":                   "+43 1 234567",
+		"BUSINESS_LEGAL_FORM":              "Einzelunternehmen",
+		"BUSINESS_REGISTRY_NUMBER":         "Nicht im Firmenbuch eingetragen",
+		"BUSINESS_REGISTRY_COURT":          "Nicht zutreffend",
+		"BUSINESS_VAT_ID":                  "ATU12345678",
+		"BUSINESS_SUPERVISORY_AUTHORITY":   "Bezirkshauptmannschaft Test",
+		"BUSINESS_CHAMBER":                 "Wirtschaftskammer Test",
+		"BUSINESS_TRADE_RULES":             "Gewerbeordnung",
+		"BUSINESS_DATA_PROTECTION_OFFICER": "Kein Datenschutzbeauftragter bestellt",
 	}
 }
 

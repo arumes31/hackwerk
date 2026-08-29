@@ -23,7 +23,7 @@ templ VoiceRecordings(data VoiceRecordingsData) {
 			<main id="hauptinhalt" class="page compact-page voice-recordings-page">
 				<div class="page-heading">
 					<div><p class="eyebrow">Administration · Datenschutz</p><h1>Originale Sprachaufnahmen</h1><p>Nur Administratoren können diese Aufnahmen anhören. Jede Aufnahme wird spätestens 30 Tage nach dem Upload automatisch gelöscht.</p></div>
-					<span class="status-badge">{ fmt.Sprint(len(data.Recordings)) } aktiv</span>
+					<span class="status-badge">{ fmt.Sprint(len(data.Recordings)) } auf dieser Seite</span>
 				</div>
 				<div class="form-alert form-alert--warning" role="note"><strong>Vertrauliche Daten:</strong> Spielen Sie Aufnahmen nur ab, wenn dies für Prüfung, Fehlerklärung oder Qualitätssicherung erforderlich ist. Audio wird nicht vorgeladen und nicht vom Browser zwischengespeichert.</div>
 				if len(data.Recordings) == 0 {

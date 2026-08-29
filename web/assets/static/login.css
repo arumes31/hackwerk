@@ -255,7 +255,7 @@ html {
 
 .login-meta nav { display: flex; flex-wrap: wrap; justify-content: center; gap: .25rem 1rem; }
 .login-meta nav a,
-.login-meta nav button { min-height: 44px; display: inline-flex; align-items: center; border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: .2em; cursor: pointer; }
+.login-meta nav button { min-height: 44px; display: inline-flex; align-items: center; border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: .2em; cursor: pointer; pointer-events: auto; }
 
 @media (max-width: 480px) {
   .login-page {

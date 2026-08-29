@@ -222,8 +222,8 @@ func TestLegalPagesArePublicAndDoNotSetCookies(t *testing.T) {
 		contents []string
 	}{
 		{name: "imprint", path: "/impressum", contents: []string{"HackWerk Testbetrieb", "FN 123456a", "Impressum"}},
-		{name: "privacy", path: "/datenschutz", contents: []string{"Datenschutzinformation", "Automatisierte Entscheidungen", "Österreichischen Datenschutzbehörde"}},
-		{name: "cookies", path: "/cookies", contents: []string{"test_session", "test_csrf", "hackwerk:privacy-notice:v1", "keine Analyse-"}},
+		{name: "privacy", path: "/datenschutz", contents: []string{"Datenschutzinformation", "Automatisierte Entscheidungen", "Österreichischen Datenschutzbehörde", "mailto:datenschutz@example.test", "Stand: 29. August 2026"}},
+		{name: "cookies", path: "/cookies", contents: []string{"test_session", "test_csrf", "hackwerk:privacy-notice:v1", "Hinweisversion", "keine Analyse-"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -245,6 +245,9 @@ func TestLegalPagesArePublicAndDoNotSetCookies(t *testing.T) {
 				if !strings.Contains(response.Body.String(), link) {
 					t.Errorf("body does not contain footer contract %q", link)
 				}
+			}
+			if tt.name == "privacy" && strings.Contains(response.Body.String(), "@legalEmail") {
+				t.Error("privacy page renders the legal email component call as literal text")
 			}
 		})
 	}

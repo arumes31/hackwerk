@@ -29,6 +29,21 @@ func TestVoiceCaptureCancelsNavigationUploadAndUsesAmbiguousDeliveryMessage(t *t
 	if !regexp.MustCompile(`(?s)window\.addEventListener\("pagehide", \(\) => \{\s*cancelled = true;`).MatchString(javascript) {
 		t.Fatal("voice capture does not cancel the pending recorder upload before navigation")
 	}
+	if !regexp.MustCompile(`(?s)window\.addEventListener\("pagehide", \(\) => \{.*if \(recorder && recorder\.state !== "inactive"\) recorder\.stop\(\);`).MatchString(javascript) {
+		t.Fatal("voice capture page-hide cleanup does not guard a missing recorder")
+	}
+}
+
+func TestLoginFooterControlsOverrideDisabledPointerEvents(t *testing.T) {
+	t.Parallel()
+
+	stylesheet, err := Files.ReadFile("static/login.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`(?s)\.login-meta nav a,\s*\.login-meta nav button\s*\{[^}]*pointer-events:\s*auto`).Match(stylesheet) {
+		t.Fatal("login footer navigation controls do not restore pointer events")
+	}
 }
 
 func TestLoadPathsReturnsContentVersionedURLs(t *testing.T) {
@@ -194,6 +209,8 @@ func TestRouteLocationSaveConfirmsValidDraftAndKeepsNativeFallback(t *testing.T)
 		`data-route-form-feedback`,
 		`Bitte mindestens einen Auftrag auswählen.`,
 		`dataset.routeLocationsReady = "true"`,
+		`const setActive = (choice, selectionChanged = false) => {`,
+		`setActive(choice, true)`,
 		`Die Bezeichnung darf höchstens 120 Zeichen lang sein.`,
 	} {
 		if !strings.Contains(javascript, expected) {

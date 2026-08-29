@@ -72,7 +72,7 @@ func VoiceRecordings(data VoiceRecordingsData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, " aktiv</span></div><div class=\"form-alert form-alert--warning\" role=\"note\"><strong>Vertrauliche Daten:</strong> Spielen Sie Aufnahmen nur ab, wenn dies für Prüfung, Fehlerklärung oder Qualitätssicherung erforderlich ist. Audio wird nicht vorgeladen und nicht vom Browser zwischengespeichert.</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, " auf dieser Seite</span></div><div class=\"form-alert form-alert--warning\" role=\"note\"><strong>Vertrauliche Daten:</strong> Spielen Sie Aufnahmen nur ab, wenn dies für Prüfung, Fehlerklärung oder Qualitätssicherung erforderlich ist. Audio wird nicht vorgeladen und nicht vom Browser zwischengespeichert.</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

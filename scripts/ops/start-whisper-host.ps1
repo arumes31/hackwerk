@@ -53,14 +53,24 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 for ($attempt = 0; $attempt -lt 90; $attempt++) {
-    $containerID = (& docker compose -f $ComposeFile ps -q whisper).Trim()
-    if ($containerID) {
-        $health = (& docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' $containerID).Trim()
-        if ($health -eq "healthy") {
-            exit 0
-        }
-        if ($health -in @("unhealthy", "exited", "dead")) {
-            throw "Whisper host container became unhealthy."
+    $containerIDs = @(
+        & docker compose -f $ComposeFile ps -q whisper |
+            ForEach-Object { ([string]$_).Trim() } |
+            Where-Object { $_ }
+    )
+    if ($containerIDs.Count -eq 1) {
+        $healthValues = @(
+            & docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' $containerIDs[0] |
+                ForEach-Object { ([string]$_).Trim() } |
+                Where-Object { $_ }
+        )
+        if ($healthValues.Count -eq 1) {
+            if ($healthValues[0] -eq "healthy") {
+                exit 0
+            }
+            if ($healthValues[0] -in @("unhealthy", "exited", "dead")) {
+                throw "Whisper host container became unhealthy."
+            }
         }
     }
     Start-Sleep -Seconds 2
