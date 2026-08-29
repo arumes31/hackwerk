@@ -82,6 +82,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	handler, err := web.NewRouter(web.Dependencies{
 		Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pool, Build: buildinfo.Info{Version: "e2e"},
 		Identity: identity, Customers: customerService, Drivers: drivers, Resources: resources, Appointments: appointments, Dashboard: e2eDashboard(t, pool), Routes: routes, RouteLocations: routeLocations,
+		Geocoder: &task02Geocoder{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +110,8 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	}
 
 	var routeLocationMapReady, routeLocationWorkerReady, routeLocationConfirmed, routeLocationInvalidated, routeLocationLayout, routeLocationSaved bool
-	if err := runBrowserStep(browser, "select route location on map",
+	routeLocationContext, cancelRouteLocation := context.WithTimeout(browser, 45*time.Second)
+	if err := chromedp.Run(routeLocationContext,
 		chromedp.Navigate(server.URL+"/settings/route-locations"),
 		chromedp.WaitVisible("[data-route-location-map]", chromedp.ByQuery),
 		chromedp.Poll(`document.querySelector('[data-route-location-map]')?.dataset.mapSelectionEnabled==='true'&&document.querySelector('[data-route-location-map]')?.dataset.mapReady==='true'`, nil),
@@ -124,8 +126,10 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		chromedp.Evaluate(`(() => { const input=document.querySelector('[data-route-location-latitude]'); input.value=String(Number(input.value)+0.001); input.dispatchEvent(new Event('input',{bubbles:true})); return document.querySelector('[data-route-location-confirmed]').value===''; })()`, &routeLocationInvalidated),
 		chromedp.Evaluate(`(() => { const checks=Array.from(document.querySelectorAll('.route-location-defaults__choices input[type="checkbox"]')); return document.documentElement.scrollWidth<=window.innerWidth&&checks.length===2&&checks.every(input=>{const box=input.getBoundingClientRect();const label=input.closest('label').getBoundingClientRect();return box.width<=24&&box.height<=24&&label.height>=44;}); })()`, &routeLocationLayout),
 	); err != nil {
+		cancelRouteLocation()
 		t.Fatal(browserDiagnostics(browser, err))
 	}
+	cancelRouteLocation()
 	if _, err := chromedp.RunResponse(browser, chromedp.Click("form[data-route-location-editor] button[type='submit']", chromedp.ByQuery)); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
@@ -203,6 +207,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	}
 
 	var desktopOverflow, smallDesktopTarget, selectedByMap, selectedByCard, selectedMarkerState, deselectedByKeyboard, candidateSemantics, mapReady bool
+	var selectionFeedbackSpecific bool
 	var routeGeometryPresent, routeStreetSource, routeLineDrawn, routeLineRendered, routeLineAnnounced bool
 	var routeLineState, mapError string
 	var markerPresentation struct {
@@ -218,7 +223,8 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	}
 	var candidateMarkerCount, startMarkerCount int
 	var smallDesktopTargets []string
-	if err := runBrowserStep(browser, "plan desktop route",
+	desktopRouteContext, cancelDesktopRoute := context.WithTimeout(browser, 60*time.Second)
+	if err := chromedp.Run(desktopRouteContext,
 		chromedp.Navigate(server.URL+"/planning/routes"), chromedp.WaitVisible("form[action='/planning/routes']", chromedp.ByQuery),
 		chromedp.WaitVisible(".route-map-marker--candidate[data-job-id='"+jobID+"']", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector('[data-route-map]').dataset.mapReady === 'true'`, &mapReady),
@@ -260,14 +266,29 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 				EndpointCardsReadable:endpointCards.length===2&&endpointCards.every(card=>card.width>=250)};
 		})()`, &desktopLayout),
 		chromedp.Evaluate(`(() => { const rows=Array.from(document.querySelectorAll('[data-route-candidate]')); return rows.length>0&&rows.every(row=>!row.hasAttribute('tabindex')&&row.querySelector('.route-candidate__select')?.getBoundingClientRect().height>=44&&row.querySelector('.route-order-actions label')?.getBoundingClientRect().height>=44); })()`, &candidateSemantics),
+	); err != nil {
+		cancelDesktopRoute()
+		t.Fatalf("desktop route map setup: %s", browserDiagnostics(browser, err))
+	}
+	cancelDesktopRoute()
+	desktopRouteSelectionContext, cancelDesktopRouteSelection := context.WithTimeout(browser, 30*time.Second)
+	if err := chromedp.Run(desktopRouteSelectionContext,
 		chromedp.Click(".route-candidate[data-job-id='"+jobID+"'] .route-candidate__select span", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector("input[name='job_id'][value='`+jobID+`']").checked`, &selectedByCard),
+		chromedp.Evaluate(`(() => { const feedback=document.querySelector('[data-route-form-feedback]'); return !feedback.hidden&&feedback.textContent.includes('Fahrer auswählen')&&feedback.textContent.includes('Hackmaschine auswählen'); })()`, &selectionFeedbackSpecific),
 		chromedp.Evaluate(`document.querySelector(".route-map-marker--candidate[data-job-id='`+jobID+`']").classList.contains('route-map-marker--selected')`, &selectedMarkerState),
 		chromedp.Focus("input[name='job_id'][value='"+jobID+"']", chromedp.ByQuery),
 		chromedp.KeyEvent(" "),
 		chromedp.Evaluate(`!document.querySelector("input[name='job_id'][value='`+jobID+`']").checked`, &deselectedByKeyboard),
-		chromedp.Click(".route-map-marker--candidate[data-job-id='"+jobID+"']", chromedp.ByQuery),
-		chromedp.WaitVisible(".route-map-popup__action", chromedp.ByQuery),
+	); err != nil {
+		cancelDesktopRouteSelection()
+		t.Fatalf("desktop route card selection: %s", browserDiagnostics(browser, err))
+	}
+	cancelDesktopRouteSelection()
+	desktopRouteMapSelectionContext, cancelDesktopRouteMapSelection := context.WithTimeout(browser, 30*time.Second)
+	if err := chromedp.Run(desktopRouteMapSelectionContext,
+		chromedp.Evaluate(`document.querySelector(".route-map-marker--candidate[data-job-id='`+jobID+`']").click()`, nil),
+		chromedp.Poll(`Boolean(document.querySelector('.route-map-popup__action'))`, nil),
 		chromedp.Evaluate(`document.querySelector('.route-map-popup__action').click()`, nil),
 		chromedp.Evaluate(`document.querySelector("input[name='job_id'][value='`+jobID+`']").checked`, &selectedByMap),
 		chromedp.Click("input[name='job_id'][value='"+secondJobID+"']", chromedp.ByQuery),
@@ -278,6 +299,24 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		chromedp.Evaluate(`document.documentElement.scrollWidth > window.innerWidth`, &desktopOverflow),
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('button,a.button')).some(e=>e.getBoundingClientRect().height>0&&e.getBoundingClientRect().height<44)`, &smallDesktopTarget),
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('button,a.button')).filter(e=>e.getBoundingClientRect().height>0&&e.getBoundingClientRect().height<44).map(e=>e.textContent.trim()+':'+Math.round(e.getBoundingClientRect().height))`, &smallDesktopTargets),
+	); err != nil {
+		cancelDesktopRouteMapSelection()
+		t.Fatalf("desktop route map selection: %s", browserDiagnostics(browser, err))
+	}
+	cancelDesktopRouteMapSelection()
+	var routeFormReady bool
+	var routeFormState string
+	if err := chromedp.Run(browser,
+		chromedp.Evaluate(`document.querySelector('[data-route-form-feedback]')?.classList.contains('route-form-feedback--complete')`, &routeFormReady),
+		chromedp.Evaluate(`JSON.stringify((()=>{const form=document.querySelector("form[action='/planning/routes']");return {feedback:form.querySelector('[data-route-form-feedback]')?.textContent||'',start:form.querySelector("input[name='start_selection']:checked")?.value||'',end:form.querySelector("input[name='end_selection']:checked")?.value||'',jobs:Array.from(form.querySelectorAll("input[name='job_id']:checked"),input=>input.value),driver:form.elements.driver_id.value,chipper:form.elements.chipper_resource_id.value,date:form.elements.departure_date.value,time:form.elements.departure_time.value}})())`, &routeFormState),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !routeFormReady {
+		t.Fatalf("desktop route form not ready: %s", routeFormState)
+	}
+	desktopRouteResultContext, cancelDesktopRouteResult := context.WithTimeout(browser, 60*time.Second)
+	if err := chromedp.Run(desktopRouteResultContext,
 		chromedp.Click("form[action='/planning/routes'] button[type='submit']", chromedp.ByQuery),
 		chromedp.WaitVisible(".route-summary", chromedp.ByQuery),
 		chromedp.Poll(`document.querySelector('[data-route-map]')?.dataset.routeLineState==='drawn'`, nil),
@@ -289,9 +328,11 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		chromedp.Evaluate(`document.querySelector('[data-route-map]')?.dataset.mapError||''`, &mapError),
 		chromedp.Evaluate(`document.querySelector('[data-route-map-notice]')?.textContent.includes('Straßenroute')`, &routeLineAnnounced),
 	); err != nil {
+		cancelDesktopRouteResult()
 		t.Fatal(browserDiagnostics(browser, err))
 	}
-	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || startMarkerCount != 1 || !markerPresentation.TouchTarget || !markerPresentation.CompactHead || !markerPresentation.Pointed || markerPresentation.Scale == "" || !selectedByCard || !selectedMarkerState || !deselectedByKeyboard || !candidateSemantics || !selectedByMap || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate || !routeGeometryPresent || !routeStreetSource || !routeLineDrawn || !routeLineRendered || !routeLineAnnounced {
+	cancelDesktopRouteResult()
+	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || startMarkerCount != 1 || !markerPresentation.TouchTarget || !markerPresentation.CompactHead || !markerPresentation.Pointed || markerPresentation.Scale == "" || !selectedByCard || !selectionFeedbackSpecific || !selectedMarkerState || !deselectedByKeyboard || !candidateSemantics || !selectedByMap || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate || !routeGeometryPresent || !routeStreetSource || !routeLineDrawn || !routeLineRendered || !routeLineAnnounced {
 		t.Fatalf("desktop route map-ready/admin/toolbar/presets/candidates/start/marker/card/selected/keyboard/semantics/map/overflow/small-target/layout/geometry/street/line/rendered/notice=%v/%v/%v/%v/%d/%d/%+v/%v/%v/%v/%v/%v/%v/%v/%+v/%v/%v/%v/%v/%v state=%q map-error=%q targets=%v", mapReady, adminRouteContext, mapToolbar, routeDatePresets, candidateMarkerCount, startMarkerCount, markerPresentation, selectedByCard, selectedMarkerState, deselectedByKeyboard, candidateSemantics, selectedByMap, desktopOverflow, smallDesktopTarget, desktopLayout, routeGeometryPresent, routeStreetSource, routeLineDrawn, routeLineRendered, routeLineAnnounced, routeLineState, mapError, smallDesktopTargets)
 	}
 
@@ -467,4 +508,73 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 			t.Fatalf("driver reorder changed appointment %s times to %s-%s", appointmentID, startsAt, endsAt)
 		}
 	}
+	if err := runBrowserStep(browser, "return to admin for route geocoding",
+		chromedp.Evaluate(`document.querySelector("header form[action='/logout']").requestSubmit()`, nil),
+		chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery),
+		chromedp.SetValue("#username", "admin-task04", chromedp.ByQuery),
+		chromedp.SetValue("#password", adminPassword, chromedp.ByQuery),
+		chromedp.Click("form[action='/login'] button[type='submit']", chromedp.ByQuery),
+		chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	assertRouteGeocodingJourney(t, browser, server.URL)
+}
+
+func assertRouteGeocodingJourney(t *testing.T, browser context.Context, serverURL string) {
+	t.Helper()
+	if err := runBrowserStep(browser, "open custom route location",
+		chromedp.Navigate(serverURL+"/planning/routes"),
+		chromedp.WaitVisible("form[action='/planning/routes']", chromedp.ByQuery),
+		chromedp.Poll(`document.documentElement.dataset.routeLocationsReady==='true'`, nil),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	var geocodingStatus string
+	var geocodingResultCount int
+	if err := runBrowserStep(browser, "search custom route location",
+		chromedp.Evaluate(`document.querySelector("input[name='start_selection'][value='custom']").click()`, nil),
+		chromedp.SetValue("#start-route-location-search", "Waldstraße 9", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector("[data-route-location-prefix='start'] [data-route-location-search-submit]").click()`, nil),
+		chromedp.Sleep(750*time.Millisecond),
+		chromedp.Text("[data-route-location-prefix='start'] [data-route-location-search-status]", &geocodingStatus, chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelectorAll('[data-route-location-prefix="start"] .location-search__result').length`, &geocodingResultCount),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if geocodingResultCount != 1 {
+		t.Fatalf("route geocoding results=%d status=%q", geocodingResultCount, geocodingStatus)
+	}
+	var geocodingDraftVisible, geocodingNeedsLabel, customLocationConfirmed bool
+	if err := runBrowserStep(browser, "select searched custom route location",
+		chromedp.Click("[data-route-location-prefix='start'] button.location-search__result", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const picker=document.querySelector('[data-route-location-prefix="start"]');
+			return !picker.querySelector('[data-route-location-custom]').hidden
+				&&!picker.querySelector('[data-route-location-search-results]').hidden
+				&&Boolean(picker.querySelector('[data-route-location-selected-result]'))
+				&&picker.querySelector('[data-route-location-confirmed]').value==='';
+		})()`, &geocodingDraftVisible),
+		chromedp.Evaluate(`document.querySelector('[data-route-location-prefix="start"] [data-route-location-error]')?.textContent.includes('Bezeichnung')`, &geocodingNeedsLabel),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if err := runBrowserStep(browser, "confirm searched custom route location",
+		chromedp.SetValue("input[name='start_custom_label']", "Waldlager", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector("[data-route-location-prefix='start'] [data-route-location-confirm]").click()`, nil),
+		chromedp.Evaluate(`(() => {
+			const picker=document.querySelector('[data-route-location-prefix="start"]');
+			return picker.querySelector('[data-route-location-confirmed]').value==='true'
+				&&!picker.querySelector('[data-route-location-custom]').hidden
+				&&picker.querySelector('[data-route-location-selected-state]')?.textContent.includes('übernommen');
+		})()`, &customLocationConfirmed),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if geocodingDraftVisible && geocodingNeedsLabel && customLocationConfirmed {
+		return
+	}
+	var state string
+	_ = chromedp.Run(browser, chromedp.Evaluate(`JSON.stringify((()=>{const picker=document.querySelector('[data-route-location-prefix="start"]');return {result:picker.querySelector('.location-search__result')?.outerHTML||'',address:picker.querySelector('[data-route-location-address]')?.value||'',latitude:picker.querySelector('[data-route-location-latitude]')?.value||'',confirmed:picker.querySelector('[data-route-location-confirmed]')?.value||'',error:picker.querySelector('[data-route-location-error]')?.textContent||'',status:picker.querySelector('[data-route-location-search-status]')?.textContent||''}})())`, &state))
+	t.Fatalf("route geocoding draft/label/confirmed=%v/%v/%v state=%s", geocodingDraftVisible, geocodingNeedsLabel, customLocationConfirmed, state)
 }

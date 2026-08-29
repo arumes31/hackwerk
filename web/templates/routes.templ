@@ -31,6 +31,19 @@ type RoutePageData struct {
 	RouteLocations []RouteLocationOption
 	DefaultStartID string
 	DefaultEndID   string
+	Form           RouteFormState
+}
+
+type RouteFormState struct {
+	Submitted                                bool
+	DriverID, ChipperResourceID, TransportID string
+	Start, End                               RouteEndpointFormState
+	Optimize                                 bool
+}
+
+type RouteEndpointFormState struct {
+	Selection, Label, Address, Latitude, Longitude string
+	Confirmed                                      bool
 }
 
 // RouteLocationOption is the view model for a reusable route endpoint.
@@ -87,8 +100,8 @@ templ adminRoutePlanner(data RoutePageData) {
 			<div class="section-heading"><div><p class="eyebrow">Schritt 1</p><h2>Start und Ende festlegen</h2></div><a class="button button--quiet" href="/settings/route-locations">Orte verwalten</a></div>
 			<p class="form-hint">Wählen Sie einen gespeicherten Ort oder bestätigen Sie einen anderen Ort ausdrücklich. Die Route verwendet keinen stillen Ersatzstandort.</p>
 			<div class="route-location-grid">
-				@routeLocationChooser("start", "Startort", data.RouteLocations, data.DefaultStartID, false)
-				@routeLocationChooser("end", "Endort", data.RouteLocations, data.DefaultEndID, true)
+				@routeLocationChooser("start", "Startort", data.RouteLocations, data.DefaultStartID, false, data.Form.Submitted, data.Form.Start)
+				@routeLocationChooser("end", "Endort", data.RouteLocations, data.DefaultEndID, true, data.Form.Submitted, data.Form.End)
 			</div>
 			<div class="section-heading"><div><p class="eyebrow">Schritt 2</p><h2>Aufträge verbinden</h2></div><span class="status-badge" data-route-marker-count data-total={ fmt.Sprint(len(data.Candidates)) }>{ fmt.Sprint(len(data.Candidates)) } Standorte</span></div>
 			<p>Alle offenen Aufträge mit gespeichertem Haufenstandort erscheinen auf der Karte. Bereits eingeplante Aufträge bleiben sichtbar, können aber nicht erneut ausgewählt werden.</p>
@@ -116,29 +129,33 @@ templ adminRoutePlanner(data RoutePageData) {
 					</ul>
 				</details>
 			}
+			<div class="route-form-feedback" data-route-form-feedback role="status" aria-live="polite" hidden>
+				<strong data-route-form-feedback-title>Planung noch unvollständig</strong>
+				<ul data-route-form-feedback-list></ul>
+			</div>
 			<div class="form-grid">
 				<label>
 					Fahrer
 					<select name="driver_id" required>
-						<option value="">Bitte wählen</option>@routeDriverOptions(data.Options.Drivers)
+						<option value="">Bitte wählen</option>@routeDriverOptions(data.Options.Drivers, data.Form.DriverID)
 					</select>
 				</label>
 				<label>
 					Hackmaschine
 					<select name="chipper_resource_id" required>
-						<option value="">Bitte wählen</option>@routeResourceOptions(data.Options.Resources, "chipper")
+						<option value="">Bitte wählen</option>@routeResourceOptions(data.Options.Resources, "chipper", data.Form.ChipperResourceID)
 					</select>
 				</label>
 				<label>
 					Transportmittel (optional)
 					<select name="transport_resource_id">
-						<option value="">Keines / extern</option>@routeResourceOptions(data.Options.Resources, "transport_vehicle")
+						<option value="">Keines / extern</option>@routeResourceOptions(data.Options.Resources, "transport_vehicle", data.Form.TransportID)
 					</select>
 				</label>
 				<label>Abfahrtsdatum<input name="departure_date" type="date" value={ routeDepartureDate(data.Departure) } data-route-day-filter required/></label>
 				<label>Abfahrtszeit<input name="departure_time" type="time" value={ routeDepartureTime(data.Departure) } required/></label>
 			</div>
-			<label class="check-label"><input type="checkbox" name="optimize" value="true" checked/> Reihenfolge nach Fahrzeit optimieren</label>
+			<label class="check-label"><input type="checkbox" name="optimize" value="true" checked?={ !data.Form.Submitted || data.Form.Optimize }/> Reihenfolge nach Fahrzeit optimieren</label>
 			<div class="action-row" data-route-date-presets><button type="button" class="button button--quiet" data-route-date-preset="today">Heute</button><button type="button" class="button button--quiet" data-route-date-preset="tomorrow">Morgen</button><button type="button" class="button button--quiet" data-route-date-preset="business-day">Nächster Werktag</button></div>
 			<p class="form-hint">Die Berechnung erzeugt einen Entwurf, keine Termine. Gespeicherte Orte werden beim Absenden serverseitig erneut geprüft.</p>
 			<button class="button" type="submit" disabled?={ routeSelectableCandidateCount(data.Candidates) == 0 }>Route berechnen</button>
@@ -166,37 +183,37 @@ templ adminRoutePlanner(data RoutePageData) {
 	@parallelRouteBoard(data)
 }
 
-templ routeLocationChooser(prefix string, heading string, locations []RouteLocationOption, defaultID string, allowLastStop bool) {
+templ routeLocationChooser(prefix string, heading string, locations []RouteLocationOption, defaultID string, allowLastStop bool, submitted bool, state RouteEndpointFormState) {
 	<fieldset class="route-location-picker" data-route-location-picker data-route-location-prefix={ prefix }>
 		<legend>{ heading }</legend>
 		<input type="hidden" name={ prefix + "_location_id" } data-route-location-id-value/>
 		<input type="hidden" name={ prefix + "_location_version" } data-route-location-version-value/>
 		<input type="hidden" data-route-location-hidden-latitude/>
 		<input type="hidden" data-route-location-hidden-longitude/>
-		<input type="hidden" name={ prefix + "_custom_confirmed" } value="" data-route-location-confirmed/>
+		<input type="hidden" name={ prefix + "_custom_confirmed" } value={ routeConfirmedValue(state.Confirmed) } data-route-location-confirmed/>
 		<input type="hidden" name={ prefix + "_at_last_stop" } value="" data-route-location-last-stop/>
 		<div class="route-location-picker__choices" role="radiogroup" aria-label={ heading + " auswählen" }>
 			for _, location := range locations {
 				<label class="route-location-choice">
-					<input type="radio" name={ prefix + "_selection" } value={ "saved:" + location.ID + ":" + strconv.Itoa(int(location.Version)) } checked?={ location.ID == defaultID } data-route-location-choice data-route-location-kind="saved" data-route-location-id={ location.ID } data-route-location-version={ strconv.Itoa(int(location.Version)) } data-route-location-label={ location.Name } data-route-location-latitude={ location.Latitude } data-route-location-longitude={ location.Longitude }/>
+					<input type="radio" name={ prefix + "_selection" } value={ "saved:" + location.ID + ":" + strconv.Itoa(int(location.Version)) } checked?={ routeLocationChoiceChecked(state.Selection, submitted, "saved:" + location.ID + ":" + strconv.Itoa(int(location.Version)), location.ID == defaultID) } data-route-location-choice data-route-location-kind="saved" data-route-location-id={ location.ID } data-route-location-version={ strconv.Itoa(int(location.Version)) } data-route-location-label={ location.Name } data-route-location-latitude={ location.Latitude } data-route-location-longitude={ location.Longitude }/>
 					<span><strong>{ location.Name }</strong><small>{ location.Address }</small></span>
 				</label>
 			}
 			<label class="route-location-choice route-location-choice--custom">
-				<input type="radio" name={ prefix + "_selection" } value="custom" checked?={ defaultID == "" } data-route-location-choice data-route-location-kind="custom"/>
+				<input type="radio" name={ prefix + "_selection" } value="custom" checked?={ routeLocationChoiceChecked(state.Selection, submitted, "custom", defaultID == "") } data-route-location-choice data-route-location-kind="custom"/>
 				<span><strong>Anderen { heading } verwenden</strong><small>Adresse und Koordinaten werden erst nach Ihrer Bestätigung übernommen.</small></span>
 			</label>
 			if allowLastStop {
 				<label class="route-location-choice route-location-choice--last-stop">
-					<input type="radio" name={ prefix + "_selection" } value="last_stop" data-route-location-choice data-route-location-kind="last-stop"/>
+					<input type="radio" name={ prefix + "_selection" } value="last_stop" checked?={ routeLocationChoiceChecked(state.Selection, submitted, "last_stop", false) } data-route-location-choice data-route-location-kind="last-stop"/>
 					<span><strong>Beim letzten Stopp</strong><small>Die Route endet beim letzten geordneten Auftrag.</small></span>
 				</label>
 			}
 		</div>
 		<div class="route-location-custom" data-route-location-custom>
 			<div class="form-grid">
-				<label>{ heading } bezeichnen<input type="text" name={ prefix + "_custom_label" } maxlength="120" autocomplete="off" placeholder="z. B. Lagerplatz Nord" data-route-location-label/></label>
-				<label>{ heading }-Adresse<input type="text" name={ prefix + "_custom_address" } maxlength="500" autocomplete="street-address" placeholder="Straße, Ort" data-route-location-address/></label>
+				<label>{ heading } bezeichnen<input type="text" name={ prefix + "_custom_label" } maxlength="120" autocomplete="off" placeholder="z. B. Lagerplatz Nord" value={ state.Label } data-route-location-label/></label>
+				<label>{ heading }-Adresse<input type="text" name={ prefix + "_custom_address" } maxlength="500" autocomplete="street-address" placeholder="Straße, Ort" value={ state.Address } data-route-location-address/></label>
 			</div>
 			<div class="location-search" data-route-location-editor>
 				<label for={ prefix + "-route-location-search" }>Adresse suchen</label>
@@ -204,10 +221,10 @@ templ routeLocationChooser(prefix string, heading string, locations []RouteLocat
 				<p class="form-hint location-search__status" data-route-location-search-status aria-live="polite"></p>
 				<ul class="location-search__results" data-route-location-search-results aria-label="Gefundene Adressen" hidden></ul>
 				<div class="coordinate-grid">
-					<label>Breitengrad<input type="text" name={ prefix + "_latitude" } inputmode="decimal" autocomplete="off" placeholder="48,208000" data-route-location-latitude aria-describedby={ prefix + "-custom-hint" }/></label>
-					<label>Längengrad<input type="text" name={ prefix + "_longitude" } inputmode="decimal" autocomplete="off" placeholder="16,373000" data-route-location-longitude aria-describedby={ prefix + "-custom-hint" }/></label>
+					<label>Breitengrad<input type="text" name={ prefix + "_latitude" } inputmode="decimal" autocomplete="off" placeholder="48,208000" value={ state.Latitude } data-route-location-latitude aria-describedby={ prefix + "-custom-hint" }/></label>
+					<label>Längengrad<input type="text" name={ prefix + "_longitude" } inputmode="decimal" autocomplete="off" placeholder="16,373000" value={ state.Longitude } data-route-location-longitude aria-describedby={ prefix + "-custom-hint" }/></label>
 				</div>
-				<label class="check-label route-location-native-confirm"><input type="checkbox" name={ prefix + "_custom_confirmed_native" } value="true" data-route-location-native-confirmed/> Adresse und Koordinaten geprüft</label>
+				<label class="check-label route-location-native-confirm"><input type="checkbox" name={ prefix + "_custom_confirmed_native" } value="true" checked?={ state.Confirmed } data-route-location-native-confirmed/> Adresse und Koordinaten geprüft</label>
 				<div class="route-location-custom__confirm"><button class="button button--quiet" type="button" data-route-location-confirm>Standort übernehmen</button><span id={ prefix + "-custom-hint" } class="form-hint" data-route-location-message aria-live="polite">Bitte Adresse oder Koordinaten prüfen und anschließend übernehmen.</span></div>
 			</div>
 		</div>
@@ -330,18 +347,32 @@ templ routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, no
 	</section>
 }
 
-templ routeDriverOptions(options []planning.RouteDriverOption) {
+templ routeDriverOptions(options []planning.RouteDriverOption, selectedID string) {
 	for _, option := range options {
-		<option value={ option.ID }>{ option.Name }</option>
+		<option value={ option.ID } selected?={ option.ID == selectedID }>{ option.Name }</option>
 	}
 }
 
-templ routeResourceOptions(options []planning.RouteResourceOption, resourceType string) {
+templ routeResourceOptions(options []planning.RouteResourceOption, resourceType string, selectedID string) {
 	for _, option := range options {
 		if option.Type == resourceType {
-			<option value={ option.ID }>{ option.Name }</option>
+			<option value={ option.ID } selected?={ option.ID == selectedID }>{ option.Name }</option>
 		}
 	}
+}
+
+func routeLocationChoiceChecked(selection string, submitted bool, value string, fallback bool) bool {
+	if submitted {
+		return selection == value
+	}
+	return fallback
+}
+
+func routeConfirmedValue(confirmed bool) string {
+	if confirmed {
+		return "true"
+	}
+	return ""
 }
 
 func routePageTitle(data RoutePageData) string {

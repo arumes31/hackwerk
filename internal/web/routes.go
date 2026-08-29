@@ -170,13 +170,94 @@ func renderRoutePlanError(response http.ResponseWriter, request *http.Request, s
 		dependencies.Logger.WarnContext(request.Context(), "route planning context unavailable", slog.String("error_code", planningErrorCode(viewErr)))
 	}
 	status, message := routeError(err)
+	if status == http.StatusUnprocessableEntity {
+		message = routePlanValidationMessage(request, message)
+	}
 	data.Error = message
+	data.Form = routeFormState(request)
+	data.SelectedJobIDs = append([]string(nil), request.Form["job_id"]...)
 	if value := strings.TrimSpace(request.Form.Get("departure")); value != "" {
 		data.Departure = value
 	} else if date, clock := strings.TrimSpace(request.Form.Get("departure_date")), strings.TrimSpace(request.Form.Get("departure_time")); date != "" && clock != "" {
 		data.Departure = date + "T" + clock
 	}
 	render(response, request, templates.Routes(data), status, dependencies.Logger)
+}
+
+func routeFormState(request *http.Request) templates.RouteFormState {
+	return templates.RouteFormState{
+		Submitted:         true,
+		DriverID:          strings.TrimSpace(request.Form.Get("driver_id")),
+		ChipperResourceID: strings.TrimSpace(request.Form.Get("chipper_resource_id")),
+		TransportID:       strings.TrimSpace(request.Form.Get("transport_resource_id")),
+		Start:             routeEndpointFormState(request, "start"),
+		End:               routeEndpointFormState(request, "end"),
+		Optimize:          request.Form.Get("optimize") == "true",
+	}
+}
+
+func routeEndpointFormState(request *http.Request, prefix string) templates.RouteEndpointFormState {
+	return templates.RouteEndpointFormState{
+		Selection: strings.TrimSpace(request.Form.Get(prefix + "_selection")),
+		Label:     strings.TrimSpace(request.Form.Get(prefix + "_custom_label")),
+		Address:   strings.TrimSpace(request.Form.Get(prefix + "_custom_address")),
+		Latitude:  strings.TrimSpace(request.Form.Get(prefix + "_latitude")),
+		Longitude: strings.TrimSpace(request.Form.Get(prefix + "_longitude")),
+		Confirmed: request.Form.Get(prefix+"_custom_confirmed") == "true" ||
+			request.Form.Get(prefix+"_custom_confirmed_native") == "true",
+	}
+}
+
+func routePlanValidationMessage(request *http.Request, fallback string) string {
+	missing := make([]string, 0, 8)
+	if len(request.Form["job_id"]) == 0 {
+		missing = append(missing, "mindestens einen Auftrag auswählen")
+	}
+	missing = append(missing, routeEndpointValidationProblems(request, "start", "Startort", false)...)
+	missing = append(missing, routeEndpointValidationProblems(request, "end", "Endort", true)...)
+	if strings.TrimSpace(request.Form.Get("driver_id")) == "" {
+		missing = append(missing, "Fahrer auswählen")
+	}
+	if strings.TrimSpace(request.Form.Get("chipper_resource_id")) == "" {
+		missing = append(missing, "Hackmaschine auswählen")
+	}
+	departure := strings.TrimSpace(request.Form.Get("departure"))
+	if departure == "" {
+		departure = strings.TrimSpace(request.Form.Get("departure_date")) + "T" + strings.TrimSpace(request.Form.Get("departure_time"))
+	}
+	if _, err := time.ParseInLocation("2006-01-02T15:04", departure, routeLocation()); err != nil {
+		missing = append(missing, "gültiges Abfahrtsdatum und gültige Abfahrtszeit eingeben")
+	}
+	if len(missing) == 0 {
+		return fallback
+	}
+	return "Bitte ergänzen: " + strings.Join(missing, "; ") + "."
+}
+
+func routeEndpointValidationProblems(request *http.Request, prefix, heading string, allowLastStop bool) []string {
+	selection := strings.TrimSpace(request.Form.Get(prefix + "_selection"))
+	if strings.HasPrefix(selection, "saved:") || (selection == "last_stop" && allowLastStop) {
+		return nil
+	}
+	if selection != "custom" {
+		return []string{heading + " auswählen"}
+	}
+	problems := make([]string, 0, 4)
+	confirmed := request.Form.Get(prefix+"_custom_confirmed") == "true" ||
+		request.Form.Get(prefix+"_custom_confirmed_native") == "true"
+	if !confirmed {
+		problems = append(problems, "individuellen "+heading+" ausdrücklich mit „Standort übernehmen“ bestätigen")
+	}
+	if strings.TrimSpace(request.Form.Get(prefix+"_custom_label")) == "" {
+		problems = append(problems, "Bezeichnung für den "+heading+" eingeben")
+	}
+	if strings.TrimSpace(request.Form.Get(prefix+"_custom_address")) == "" {
+		problems = append(problems, "geprüfte Adresse für den "+heading+" eingeben")
+	}
+	if _, err := routePoint(request.Form.Get(prefix+"_latitude"), request.Form.Get(prefix+"_longitude")); err != nil {
+		problems = append(problems, "gültige Koordinaten für den "+heading+" eingeben")
+	}
+	return problems
 }
 
 func assignRoute(service *planning.RouteService, logger *slog.Logger) http.HandlerFunc {

@@ -185,8 +185,15 @@ func TestRouteLocationSaveConfirmsValidDraftAndKeepsNativeFallback(t *testing.T)
 	javascript := string(script)
 	for _, expected := range []string{
 		`editor.querySelector("[data-route-location-native-confirmed]")`,
+		`const custom = editor.closest("[data-route-location-custom]") || editor;`,
+		`const latitude = editor.querySelector("[data-route-location-latitude]");`,
 		`if (confirmLocation()) return;`,
 		`address.value = text;`,
+		`data-route-location-selected-result`,
+		`Adresse ausgewählt. Bitte noch eine Bezeichnung eingeben`,
+		`data-route-form-feedback`,
+		`Bitte mindestens einen Auftrag auswählen.`,
+		`dataset.routeLocationsReady = "true"`,
 		`Die Bezeichnung darf höchstens 120 Zeichen lang sein.`,
 	} {
 		if !strings.Contains(javascript, expected) {

@@ -216,7 +216,7 @@ func TestRouteHTTPPlanRejectsUnconfirmedOrUnavailableEndpoints(t *testing.T) {
 				"departure": {"2026-08-27T08:00"}, "driver_id": {"driver-1"}, "chipper_resource_id": {"resource-1"}, "job_id": {"job-1"},
 				"start_selection": {"custom"}, "start_custom_label": {"Hof Süd"}, "start_custom_address": {"Hofstraße 1"}, "start_latitude": {"48.2"}, "start_longitude": {"14.2"},
 				"end_selection": {"last_stop"},
-			}, status: http.StatusUnprocessableEntity, body: "Start- und Endort auswählen",
+			}, status: http.StatusUnprocessableEntity, body: "individuellen Startort ausdrücklich",
 		},
 		{
 			name: "saved endpoint cannot be forged without configured locations",
@@ -237,6 +237,42 @@ func TestRouteHTTPPlanRejectsUnconfirmedOrUnavailableEndpoints(t *testing.T) {
 				t.Fatalf("response=%d body=%s saved=%+v", response.Code, response.Body.String(), store.savedRoute)
 			}
 		})
+	}
+}
+
+func TestRouteHTTPValidationKeepsSubmittedSelectionAndNamesMissingFields(t *testing.T) {
+	store := routeHTTPFixture()
+	router, session, csrf := routeTestRouter(t, auth.RoleAdmin, "", store)
+	form := url.Values{
+		"csrf_token":           {csrf},
+		"job_id":               {"job-1"},
+		"start_selection":      {"custom"},
+		"start_custom_label":   {"Lagerplatz Süd"},
+		"start_custom_address": {"Hofstraße 1"},
+		"start_latitude":       {"48.200000"},
+		"start_longitude":      {"14.200000"},
+		"end_selection":        {"last_stop"},
+		"departure_date":       {"2026-08-27"},
+		"departure_time":       {"07:00"},
+	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/planning/routes", form, session, csrf))
+	body := response.Body.String()
+	for _, expected := range []string{
+		"Bitte ergänzen:",
+		"individuellen Startort ausdrücklich",
+		"Fahrer auswählen",
+		"Hackmaschine auswählen",
+		`value="job-1" aria-label="HA-2026-0042 für die Route auswählen" checked`,
+		`name="start_selection" value="custom" checked`,
+		`name="start_custom_label" maxlength="120" autocomplete="off" placeholder="z. B. Lagerplatz Nord" value="Lagerplatz Süd"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("validation response missing %q: status=%d body=%s", expected, response.Code, body)
+		}
+	}
+	if response.Code != http.StatusUnprocessableEntity || store.savedRoute.ID != "" {
+		t.Fatalf("validation response=%d saved=%+v", response.Code, store.savedRoute)
 	}
 }
 
