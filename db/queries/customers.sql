@@ -135,7 +135,8 @@ SELECT id::text, job_number, job_type, volume_m3::text, estimated_hack_minutes,
        source, workflow_status, received_at, archived_at, version,
        COALESCE(pile_latitude::text, '')::text AS pile_latitude,
        COALESCE(pile_longitude::text, '')::text AS pile_longitude,
-       COALESCE(pile_location_source, '')::text AS pile_location_source
+       COALESCE(pile_location_source, '')::text AS pile_location_source,
+       COALESCE((SELECT a.id::text FROM appointments a WHERE a.job_id=jobs.id AND a.lifecycle_status IN ('proposal','fixed') ORDER BY a.starts_at DESC, a.id DESC LIMIT 1), '')::text AS active_appointment_id
 FROM jobs WHERE customer_id = sqlc.arg(customer_id)::uuid
 ORDER BY received_at DESC, id DESC;
 
@@ -332,7 +333,9 @@ WHERE id = sqlc.arg(id)::uuid AND version = sqlc.arg(expected_version) AND archi
 
 -- name: ListWaitlist :many
 SELECT w.id::text AS waitlist_id, w.job_id::text, w.entered_at, w.manual_priority, w.version AS waitlist_version,
-       j.job_number, j.job_type, j.volume_m3::text, j.estimated_hack_minutes, j.transport_mode,
+       j.job_number, j.job_type, j.volume_m3::text, j.estimated_hack_minutes, j.estimated_transport_minutes,
+       (j.estimated_hack_minutes+j.estimated_transport_minutes)::integer AS total_minutes,
+       j.transport_mode, j.external_transport_confirmed,
        COALESCE(to_char(j.preferred_start_date, 'YYYY-MM-DD'), '')::text AS preferred_start_date,
        COALESCE(to_char(j.preferred_end_date, 'YYYY-MM-DD'), '')::text AS preferred_end_date,
        COALESCE(j.preference_text, '')::text AS preference_text, j.urgency,
@@ -344,7 +347,10 @@ SELECT w.id::text AS waitlist_id, w.job_id::text, w.entered_at, w.manual_priorit
             WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
             ELSE 'unplanned' END::text AS workflow_status,
        j.updated_at, j.pile_latitude IS NOT NULL AND j.pile_longitude IS NOT NULL AS has_pile_location,
-       EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed'))::boolean AS has_active_appointment
+       (COALESCE(j.pile_location_source::text, '') <> '')::boolean AS has_pile_source,
+       (j.preferred_end_date IS NOT NULL AND j.preferred_end_date < (now() AT TIME ZONE 'Europe/Vienna')::date)::boolean AS overdue,
+       EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed'))::boolean AS has_active_appointment,
+       EXISTS (SELECT 1 FROM appointments a JOIN appointment_drivers ad ON ad.appointment_id=a.id WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed'))::boolean AS has_internal_assignment
 FROM waitlist_entries w
 JOIN jobs j ON j.id = w.job_id
 JOIN customers c ON c.id = j.customer_id
@@ -359,7 +365,11 @@ WHERE w.removed_at IS NULL AND j.archived_at IS NULL AND c.archived_at IS NULL
        WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
        ELSE 'unplanned' END)
   AND (NOT sqlc.arg(missing_location)::boolean OR j.pile_latitude IS NULL OR j.pile_longitude IS NULL)
-  AND (NOT sqlc.arg(duration_issue)::boolean OR j.estimated_hack_minutes<15 OR j.estimated_hack_minutes>720)
+  AND (NOT sqlc.arg(duration_issue)::boolean OR j.estimated_hack_minutes+j.estimated_transport_minutes<sqlc.arg(duration_review_min)::integer OR j.estimated_hack_minutes+j.estimated_transport_minutes>sqlc.arg(duration_review_max)::integer)
+  AND (NOT sqlc.arg(overdue)::boolean OR (j.preferred_end_date IS NOT NULL AND j.preferred_end_date < (now() AT TIME ZONE 'Europe/Vienna')::date))
+  AND (NOT sqlc.arg(unassigned)::boolean OR NOT EXISTS (SELECT 1 FROM appointments a JOIN appointment_drivers ad ON ad.appointment_id=a.id WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed')))
+  AND (NOT sqlc.arg(transport_pending)::boolean OR (j.job_type='chipping_with_transport' AND (j.transport_mode='undecided' OR (j.transport_mode='external' AND NOT j.external_transport_confirmed))))
+  AND (sqlc.arg(duration_group)::text='' OR sqlc.arg(duration_group)::text=CASE WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=120 THEN 'short' WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=360 THEN 'medium' ELSE 'long' END)
 ORDER BY
   CASE WHEN sqlc.arg(sort)::text = 'entered' AND sqlc.arg(direction)::text = 'asc' THEN w.entered_at END ASC,
   CASE WHEN sqlc.arg(sort)::text = 'entered' AND sqlc.arg(direction)::text = 'desc' THEN w.entered_at END DESC,
@@ -377,6 +387,8 @@ ORDER BY
   CASE WHEN sqlc.arg(sort)::text = 'workflow' AND sqlc.arg(direction)::text = 'desc' THEN j.workflow_status END DESC,
   CASE WHEN sqlc.arg(sort)::text = 'updated' AND sqlc.arg(direction)::text = 'asc' THEN j.updated_at END ASC,
   CASE WHEN sqlc.arg(sort)::text = 'updated' AND sqlc.arg(direction)::text = 'desc' THEN j.updated_at END DESC,
+  CASE WHEN sqlc.arg(sort)::text = 'duration' AND sqlc.arg(direction)::text = 'asc' THEN j.estimated_hack_minutes+j.estimated_transport_minutes END ASC,
+  CASE WHEN sqlc.arg(sort)::text = 'duration' AND sqlc.arg(direction)::text = 'desc' THEN j.estimated_hack_minutes+j.estimated_transport_minutes END DESC,
   w.manual_priority DESC, w.entered_at, w.id
 LIMIT sqlc.arg(page_size) OFFSET sqlc.arg(page_offset);
 
@@ -394,7 +406,11 @@ WHERE w.removed_at IS NULL AND j.archived_at IS NULL AND c.archived_at IS NULL
        WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
        ELSE 'unplanned' END)
   AND (NOT sqlc.arg(missing_location)::boolean OR j.pile_latitude IS NULL OR j.pile_longitude IS NULL)
-  AND (NOT sqlc.arg(duration_issue)::boolean OR j.estimated_hack_minutes<15 OR j.estimated_hack_minutes>720);
+  AND (NOT sqlc.arg(duration_issue)::boolean OR j.estimated_hack_minutes+j.estimated_transport_minutes<sqlc.arg(duration_review_min)::integer OR j.estimated_hack_minutes+j.estimated_transport_minutes>sqlc.arg(duration_review_max)::integer)
+  AND (NOT sqlc.arg(overdue)::boolean OR (j.preferred_end_date IS NOT NULL AND j.preferred_end_date < (now() AT TIME ZONE 'Europe/Vienna')::date))
+  AND (NOT sqlc.arg(unassigned)::boolean OR NOT EXISTS (SELECT 1 FROM appointments a JOIN appointment_drivers ad ON ad.appointment_id=a.id WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed')))
+  AND (NOT sqlc.arg(transport_pending)::boolean OR (j.job_type='chipping_with_transport' AND (j.transport_mode='undecided' OR (j.transport_mode='external' AND NOT j.external_transport_confirmed))))
+  AND (sqlc.arg(duration_group)::text='' OR sqlc.arg(duration_group)::text=CASE WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=120 THEN 'short' WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=360 THEN 'medium' ELSE 'long' END);
 
 -- name: UpdateWaitlistPriority :execrows
 UPDATE waitlist_entries SET manual_priority = sqlc.arg(priority), version = version + 1

@@ -70,18 +70,191 @@ document.querySelectorAll("[data-outdoor-toggle]").forEach((button) => {
 });
 applyPresentationPreferences();
 
+let lastSuccessfulConnection = navigator.onLine ? new Date() : null;
 function updateConnectivityBanner() {
   document.querySelectorAll("[data-connectivity-banner]").forEach((banner) => {
     banner.hidden = navigator.onLine;
     banner.textContent = navigator.onLine
       ? "Verbindung wiederhergestellt. Nicht gespeicherte Änderungen können jetzt gesendet werden."
-      : "Offline: Lesen bleibt teilweise möglich, Änderungen werden nicht zwischengespeichert. Bitte erst bei Verbindung speichern.";
+      : `Offline: Lesen bleibt teilweise möglich. Letzte Verbindung${lastSuccessfulConnection ? ` um ${lastSuccessfulConnection.toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" })} Uhr` : " unbekannt"}. Änderungen werden nicht zwischengespeichert.`;
   });
-  if (navigator.onLine) announce("Verbindung wiederhergestellt.");
+  if (navigator.onLine) {
+    lastSuccessfulConnection = new Date();
+    announce("Verbindung wiederhergestellt. Sichere Leseansichten werden aktualisiert.");
+    window.dispatchEvent(new CustomEvent("hackwerk:online"));
+  }
 }
 window.addEventListener("online", updateConnectivityBanner);
 window.addEventListener("offline", updateConnectivityBanner);
 updateConnectivityBanner();
+
+// Keep navigation context without storing customer or job identifiers outside
+// the current browser-history entry.
+const currentHistoryState = { ...(window.history.state || {}) };
+if (Number.isFinite(currentHistoryState.scrollY)) {
+  window.requestAnimationFrame(() => window.scrollTo({ top: currentHistoryState.scrollY, behavior: "auto" }));
+}
+window.addEventListener("pagehide", () => {
+  window.history.replaceState({ ...(window.history.state || {}), scrollY: window.scrollY }, "");
+});
+
+const safeSectionID = (id) => id && !/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i.test(id);
+document.querySelectorAll("details[id]").forEach((details) => {
+  if (!safeSectionID(details.id)) return;
+  const url = new URL(window.location.href);
+  if (url.searchParams.getAll("section").includes(details.id)) details.open = true;
+  details.addEventListener("toggle", () => {
+    const next = new URL(window.location.href);
+    const openSections = Array.from(document.querySelectorAll("details[id][open]"), (item) => item.id).filter(safeSectionID).slice(0, 12);
+    next.searchParams.delete("section");
+    openSections.forEach((id) => next.searchParams.append("section", id));
+    window.history.replaceState(window.history.state, "", next);
+  });
+});
+
+document.querySelectorAll('input[type="tel"]').forEach((input) => {
+  input.inputMode = "tel";
+  const preview = document.createElement("small");
+  preview.className = "field-preview";
+  preview.setAttribute("aria-live", "polite");
+  input.insertAdjacentElement("afterend", preview);
+  const update = () => {
+    const raw = input.value.trim();
+    const compact = raw.replace(/[\s()./-]+/g, "");
+    const normalized = compact.startsWith("00") ? `+${compact.slice(2)}` : compact.startsWith("0") ? `+43${compact.slice(1)}` : compact;
+    preview.textContent = raw ? `Gespeichert als: ${normalized}` : "";
+  };
+  input.addEventListener("input", update); update();
+});
+document.querySelectorAll('input[type="email"]').forEach((input) => {
+  const warning = document.createElement("small");
+  warning.className = "field-preview field-preview--warning";
+  warning.setAttribute("role", "status");
+  input.insertAdjacentElement("afterend", warning);
+  const update = () => { warning.textContent = input.value !== input.value.trim() ? "Leerzeichen am Anfang oder Ende entfernen." : ""; };
+  input.addEventListener("input", update); update();
+});
+document.querySelectorAll("[data-job-type]").forEach((select) => {
+  const help = document.createElement("small"); help.className = "field-preview";
+  select.insertAdjacentElement("afterend", help);
+  const update = () => { help.textContent = select.value === "chipping_with_transport" ? "Mit Transport: Entscheiden Sie danach intern, extern oder noch offen; extern erfordert eine ausdrückliche Bestätigung." : "Nur Hackmaschine: Es wird keine Transportressource eingeplant."; };
+  select.addEventListener("change", update); update();
+});
+document.querySelectorAll("[data-history-filter]").forEach((select) => {
+  const rows = Array.from(document.querySelectorAll("[data-history-event]"));
+  const initial = new URL(window.location.href).searchParams.get("history_event") || "";
+  if (Array.from(select.options).some((option) => option.value === initial)) select.value = initial;
+  const update = () => {
+    rows.forEach((row) => { row.hidden = Boolean(select.value) && row.dataset.historyEvent !== select.value; });
+    const url = new URL(window.location.href);
+    if (select.value) url.searchParams.set("history_event", select.value); else url.searchParams.delete("history_event");
+    window.history.replaceState(window.history.state, "", url);
+  };
+  select.addEventListener("change", update); update();
+});
+document.querySelectorAll("[data-note-input]").forEach((input) => {
+  const warning = document.createElement("small"); warning.className = "field-preview field-preview--warning"; warning.setAttribute("role", "status"); input.insertAdjacentElement("afterend", warning);
+  const update = () => { warning.textContent = input.value.length >= 3200 ? "Sehr lange interne Bemerkung: Bitte auf entscheidungsrelevante Informationen kürzen." : ""; };
+  input.addEventListener("input", update); update();
+});
+
+document.querySelectorAll('input[type="password"]').forEach((input) => {
+  const toggle = document.createElement("button");
+  toggle.type = "button"; toggle.className = "password-reveal";
+  toggle.textContent = "Anzeigen"; toggle.setAttribute("aria-pressed", "false");
+  toggle.setAttribute("aria-label", "Passwort anzeigen");
+  input.insertAdjacentElement("afterend", toggle);
+  const caps = document.createElement("small"); caps.className = "field-preview field-preview--warning"; caps.setAttribute("role", "status");
+  toggle.insertAdjacentElement("afterend", caps);
+  toggle.addEventListener("click", () => {
+    const reveal = input.type === "password";
+    input.type = reveal ? "text" : "password";
+    toggle.textContent = reveal ? "Verbergen" : "Anzeigen";
+    toggle.setAttribute("aria-pressed", String(reveal));
+    toggle.setAttribute("aria-label", reveal ? "Passwort verbergen" : "Passwort anzeigen");
+    input.focus();
+  });
+  const updateCaps = (event) => { caps.textContent = event.getModifierState?.("CapsLock") ? "Feststelltaste ist aktiv." : ""; };
+  input.addEventListener("keydown", updateCaps); input.addEventListener("keyup", updateCaps); input.addEventListener("blur", () => { caps.textContent = ""; });
+});
+
+let installEvent;
+const installPrompt = document.querySelector("[data-install-prompt]");
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault(); installEvent = event;
+  if (safePreferenceGet("hackwerk:install-dismissed") !== "true" && installPrompt) installPrompt.hidden = false;
+});
+installPrompt?.querySelector("[data-install-accept]")?.addEventListener("click", async () => {
+  if (!installEvent) return;
+  await installEvent.prompt(); installPrompt.hidden = true; installEvent = undefined;
+});
+installPrompt?.querySelector("[data-install-dismiss]")?.addEventListener("click", () => {
+  safePreferenceSet("hackwerk:install-dismissed", "true"); installPrompt.hidden = true;
+});
+
+document.querySelectorAll("[data-mobile-menu] a").forEach((link) => link.addEventListener("click", () => { link.closest("details")?.removeAttribute("open"); }));
+if (window.visualViewport) {
+  const updateViewport = () => document.documentElement.style.setProperty("--visual-viewport-height", `${window.visualViewport.height}px`);
+  window.visualViewport.addEventListener("resize", updateViewport); updateViewport();
+}
+const scrollTopButton = document.createElement("button");
+scrollTopButton.type = "button"; scrollTopButton.className = "scroll-top button button--quiet"; scrollTopButton.textContent = "Nach oben"; scrollTopButton.hidden = true;
+scrollTopButton.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+document.body.append(scrollTopButton);
+window.addEventListener("scroll", () => { scrollTopButton.hidden = window.scrollY < 900; }, { passive: true });
+
+document.querySelectorAll("[data-confirmation-form]").forEach((form) => {
+  const summary = form.querySelector("[data-confirmation-summary]");
+  form.querySelectorAll("button[name='action']").forEach((button) => {
+    button.addEventListener("focus", () => { if (summary) summary.textContent = button.dataset.responseLabel; });
+  });
+  form.addEventListener("submit", (event) => {
+    const button = event.submitter;
+    const note = form.elements.namedItem("response_note");
+    if (note?.value.trim() && button?.value !== "declined") {
+      event.preventDefault(); note.focus();
+      if (summary) summary.textContent = "Die Rückrufnotiz kann nur mit einer Ablehnung gesendet werden. Bitte Notiz leeren oder „Termin ablehnen“ wählen.";
+      return;
+    }
+    if (summary && button?.dataset.responseLabel) summary.textContent = `${button.dataset.responseLabel} Jetzt wird die Antwort einmalig gespeichert.`;
+    form.querySelectorAll("button").forEach((control) => { control.disabled = true; });
+  });
+});
+
+document.querySelectorAll("[data-planning-results]").forEach((results) => {
+  const grid = results.querySelector(".suggestion-grid");
+  const cards = Array.from(results.querySelectorAll(".suggestion-card"));
+  const comparison = results.querySelector("[data-suggestion-comparison]");
+  const selected = () => cards.filter((card) => card.querySelector("[data-suggestion-compare]")?.checked);
+  const renderComparison = () => {
+    const values = selected();
+    cards.forEach((card) => card.classList.toggle("suggestion-card--selected", values.includes(card)));
+    if (!comparison) return;
+    comparison.hidden = values.length === 0;
+    comparison.replaceChildren();
+    values.forEach((card) => { const item = document.createElement("p"); item.textContent = card.dataset.suggestionSummary; comparison.append(item); });
+  };
+  cards.forEach((card) => {
+    const checkbox = card.querySelector("[data-suggestion-compare]");
+    checkbox?.addEventListener("change", () => {
+      if (selected().length > 2) { checkbox.checked = false; announce("Es können höchstens zwei Vorschläge verglichen werden."); }
+      renderComparison();
+    });
+    card.querySelector("[data-copy-suggestion]")?.addEventListener("click", async () => {
+      const explanation = Array.from(card.querySelectorAll("h3, .suggestion-facts dd, h4 + ul li, .planning-warning li"), (item) => item.textContent.trim()).join(" · ");
+      await navigator.clipboard.writeText(explanation); announce("Vorschlagserklärung kopiert.");
+    });
+    card.querySelector("[data-suggestion-adopt]")?.closest("form")?.addEventListener("submit", (event) => {
+      if (!window.confirm(`${card.dataset.suggestionSummary}\n\nAls unverbindlichen Vorschlag übernehmen? Es wird nichts fixiert oder versendet.`)) event.preventDefault();
+    });
+  });
+  results.querySelector("[data-suggestion-sort]")?.addEventListener("change", (event) => {
+    const key = event.target.value;
+    const attribute = { travel: "suggestionTravel", start: "suggestionStart", duration: "suggestionDuration", rank: "suggestionRank" }[key];
+    cards.sort((left, right) => key === "start" ? left.dataset[attribute].localeCompare(right.dataset[attribute]) : Number(left.dataset[attribute]) - Number(right.dataset[attribute]));
+    cards.forEach((card) => grid.append(card));
+  });
+});
 
 async function operationFailureMessage(response) {
   if (response.status === 401) {
@@ -279,21 +452,17 @@ document.querySelectorAll("form[data-track-change][data-record-id]").forEach((fo
   form.addEventListener("submit", (event) => {
     queueMicrotask(() => {
       if (event.defaultPrevented) return;
-      try { window.sessionStorage.setItem("hackwerk:changed-record", form.dataset.recordId); } catch { /* Highlight is optional. */ }
+      try { window.sessionStorage.setItem("hackwerk:return-scroll-y", String(Math.max(0, Math.round(window.scrollY)))); } catch { /* Position restoration is optional. */ }
     });
   });
 });
 try {
-  const changedRecord = window.sessionStorage.getItem("hackwerk:changed-record");
-  if (changedRecord) {
-    const changed = document.querySelector(`[data-record-id="${CSS.escape(changedRecord)}"]`);
-    if (changed) {
-      changed.classList.add("row-changed");
-      changed.scrollIntoView({ block: "nearest" });
-      window.sessionStorage.removeItem("hackwerk:changed-record");
-    }
+  const returnScrollY = Number(window.sessionStorage.getItem("hackwerk:return-scroll-y"));
+  if (Number.isFinite(returnScrollY) && returnScrollY > 0) {
+    window.requestAnimationFrame(() => window.scrollTo({ top: returnScrollY, behavior: "auto" }));
   }
-} catch { /* Session-only visual feedback is optional. */ }
+  window.sessionStorage.removeItem("hackwerk:return-scroll-y");
+} catch { /* Session-only position restoration is optional. */ }
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -533,7 +702,7 @@ async function showConflictAlternatives(appointmentID, startsAt, endsAt) {
   (result.Conflicts || result.conflicts || []).forEach((item) => affected.set(item.AppointmentID || item.appointment_id, `${item.JobNumber || item.job_number || "Termin"} · ${item.CustomerName || item.customer_name || "Kunde"} · ${item.SubjectName || item.subject_name || "Belegung"}`));
   if (affected.size) {
     const heading = document.createElement("strong"); heading.textContent = "Betroffen"; block.append(heading);
-    const list = document.createElement("ul"); affected.forEach((label) => { const item = document.createElement("li"); item.textContent = label; list.append(item); }); block.append(list);
+    const list = document.createElement("ul"); affected.forEach((label, appointmentID) => { const item = document.createElement("li"); const link = document.createElement("a"); link.href = `/calendar?appointment=${encodeURIComponent(appointmentID)}`; link.textContent = label; item.append(link); list.append(item); }); block.append(list);
   }
   const alternatives = result.Alternatives || result.alternatives || [];
   if (alternatives.length) {
@@ -787,10 +956,14 @@ async function appointmentDetail(event, loadedProps) {
   const time = new Intl.DateTimeFormat("de-AT", {
     timeZone: "Europe/Vienna", hour: "2-digit", minute: "2-digit",
   });
+  const dateOnly = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Vienna", year: "numeric", month: "2-digit", day: "2-digit",
+  });
   const channels = (props.notification_channels || []).join(" und ") || "Keine automatische Benachrichtigung";
   const rows = [
     ["Status", props.status_label],
     ["Zeit", `${dateTime.format(start)} – ${time.format(end)}`],
+    ["Dauer", `${Math.round((end - start) / 60000)} Minuten${dateOnly.format(start) !== dateOnly.format(end) ? " · endet am Folgetag" : ""}`],
     ["Ort", props.locality], ["Menge", `${props.volume_m3} m³`],
     ["Fahrer", (props.drivers || []).map((item) => item.Name).join(", ") || "Nicht zugewiesen"],
     ["Ressourcen", (props.resources || []).map((item) => item.Name).join(", ") || "Nicht zugewiesen"],
@@ -818,6 +991,7 @@ async function appointmentDetail(event, loadedProps) {
       notificationDateLabel(item.responded_at) ? `Antwort ${notificationDateLabel(item.responded_at)}` : "",
     ].filter(Boolean);
     rows.push([`Versand ${item.channel === "sms" ? "SMS" : "E-Mail"}`, timeline.join(" · ")]);
+    if (item.response_note) rows.push(["Rückrufnotiz zur Ablehnung", item.response_note]);
   });
   const list = document.createElement("dl");
   list.className = "appointment-detail-list";
@@ -828,6 +1002,10 @@ async function appointmentDetail(event, loadedProps) {
     wrapper.append(term, description); list.append(wrapper);
   });
   detail.append(list);
+  const copyTime = document.createElement("button");
+  copyTime.type = "button"; copyTime.className = "button button--quiet"; copyTime.textContent = "Beginn und Ende kopieren";
+  copyTime.addEventListener("click", async () => { await navigator.clipboard.writeText(`${dateTime.format(start)} – ${dateTime.format(end)} · Europe/Vienna`); announce("Terminzeit kopiert."); });
+  detail.append(copyTime);
   if (props.maps_url) {
     const navigation = document.createElement("a");
     navigation.className = "button button--quiet"; navigation.href = props.maps_url;
@@ -841,7 +1019,9 @@ async function appointmentDetail(event, loadedProps) {
     job.dataset.appointmentJobLink = "";
     job.textContent = "Auftrag öffnen";
     detail.append(job);
+    const customer = document.createElement("a"); customer.className = "button button--quiet"; customer.href = `/customers/${encodeURIComponent(props.customer_id)}`; customer.textContent = "Kundenakte öffnen"; detail.append(customer);
   }
+  const permalink = document.createElement("a"); permalink.className = "button button--quiet"; permalink.href = `/calendar?appointment=${encodeURIComponent(event.id)}`; permalink.textContent = "Terminlink"; detail.append(permalink);
   const fix = dialog.querySelector("[data-appointment-fix]");
   const cancel = dialog.querySelector("[data-appointment-cancel]");
   const reschedule = dialog.querySelector("[data-appointment-reschedule]");
@@ -1037,6 +1217,13 @@ document.querySelector("[data-confirmation-reset]")?.addEventListener("click", (
 function calendarMutation(info, action, csrf) {
 	const proposedStart = new Date(info.event.start);
 	const proposedEnd = new Date(info.event.end);
+  const previousStart = new Date(info.oldEvent?.start || info.event.start);
+  const previousEnd = new Date(info.oldEvent?.end || info.event.end);
+  const compareFormat = new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", dateStyle: "short", timeStyle: "short" });
+  const comparison = action === "resize"
+    ? `Dauer ändern: ${Math.round((previousEnd - previousStart) / 60000)} → ${Math.round((proposedEnd - proposedStart) / 60000)} Minuten?`
+    : `Termin verschieben:\nAlt: ${compareFormat.format(previousStart)}–${compareFormat.format(previousEnd)}\nNeu: ${compareFormat.format(proposedStart)}–${compareFormat.format(proposedEnd)}?`;
+  if (!window.confirm(comparison)) { info.revert(); announceCalendar("Änderung abgebrochen."); return; }
   const form = new FormData();
   form.set("csrf_token", csrf);
   form.set("version", info.event.extendedProps.version);
@@ -1120,6 +1307,9 @@ if (calendarElement && window.FullCalendar) {
         .then((response) => response.ok ? response.json() : Promise.reject(new Error("Kalenderdaten nicht verfügbar")))
         .then((events) => {
           success(events);
+          calendarElement.dataset.loadedAt = new Date().toISOString();
+          const freshness = document.querySelector("[data-calendar-freshness]");
+          if (freshness) freshness.textContent = `Zuletzt geladen: ${new Date().toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" })} Uhr`;
           if (calendarElement.dataset.loadFailed === "true") {
             delete calendarElement.dataset.loadFailed;
             announceCalendar("Kalenderdaten wurden wieder geladen.");
@@ -1137,6 +1327,8 @@ if (calendarElement && window.FullCalendar) {
       info.el.tabIndex = 0;
       info.el.setAttribute("role", "button");
       info.el.setAttribute("aria-label", `${info.event.title}, ${info.event.extendedProps.status_label || "Termin"}. Details öffnen`);
+      info.el.title = `${info.event.title} · ${info.event.extendedProps.status_label || "Termin"}`;
+      if (info.event.start && info.event.end && info.event.start.toLocaleDateString("de-AT", { timeZone: "Europe/Vienna" }) !== info.event.end.toLocaleDateString("de-AT", { timeZone: "Europe/Vienna" })) info.el.dataset.crossMidnight = "true";
       info.el.addEventListener("keydown", (event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
@@ -1173,7 +1365,16 @@ if (calendarElement && window.FullCalendar) {
       url.searchParams.set("view", viewParameter(info.view.type));
       url.searchParams.set("weekends", String(calendar.getOption("weekends")));
       url.searchParams.delete("appointment");
-      window.history.replaceState({}, "", url);
+      window.history.replaceState(window.history.state, "", url);
+      const range = document.querySelector("[data-calendar-range]");
+      const rangeFormat = new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
+      const inclusiveEnd = new Date(info.end.getTime() - 1);
+      const label = `${rangeFormat.format(info.start)} bis ${rangeFormat.format(inclusiveEnd)}`;
+      if (range) range.textContent = label;
+      document.title = `${label} – Kalender – HackWerk`;
+      const offsetName = (date) => new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", timeZoneName: "longOffset" }).formatToParts(date).find((part) => part.type === "timeZoneName")?.value;
+      const dstChange = offsetName(info.start) !== offsetName(inclusiveEnd);
+      if (dateInput) dateInput.title = dstChange ? "Dieser Bereich enthält einen Wechsel zwischen Sommer- und Winterzeit." : "Datum direkt auswählen";
     },
   });
   calendar.render();
@@ -1181,6 +1382,9 @@ if (calendarElement && window.FullCalendar) {
   const controls = document.querySelector("[data-calendar-controls]");
   const calendarDate = controls?.querySelector("[data-calendar-date]");
   const weekendToggle = controls?.querySelector("[data-calendar-weekends]");
+  const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const zoneWarning = document.querySelector("[data-calendar-timezone-warning]");
+  if (zoneWarning && browserZone !== "Europe/Vienna") { zoneWarning.hidden = false; zoneWarning.textContent = `Ihr Browser verwendet ${browserZone || "eine andere Zeitzone"}. HackWerk zeigt Termine verbindlich in Europe/Vienna.`; }
   if (weekendToggle) {
     weekendToggle.checked = requestedWeekends;
     weekendToggle.addEventListener("change", () => {
@@ -1501,6 +1705,9 @@ document.querySelectorAll("[data-planning-workbench]").forEach((workbench) => {
     if (current) step.setAttribute("aria-current", "step");
     else step.removeAttribute("aria-current");
   });
+  controls?.querySelector("[data-calendar-reload]")?.addEventListener("click", () => { calendar.refetchEvents(); announceCalendar("Kalender wird neu geladen; Ansicht und Datum bleiben erhalten."); });
+  controls?.querySelector("[data-calendar-share]")?.addEventListener("click", async () => { const link = new URL(window.location.href); link.searchParams.delete("appointment"); await navigator.clipboard.writeText(link.href); announceCalendar("Datenschutzarmer Ansichtslink kopiert."); });
+  window.addEventListener("hackwerk:online", () => { if (calendarElement.dataset.loadFailed === "true") calendar.refetchEvents(); });
   planningSteps.filter((step) => step.matches("a[href^='#']")).forEach((step) => {
     step.addEventListener("click", (event) => {
       const target = document.querySelector(step.hash);
@@ -1641,7 +1848,7 @@ document.querySelectorAll("[data-wake-lock]").forEach((button) => {
     if (lock) { await release(); return; }
     try {
       lock = await navigator.wakeLock.request("screen");
-      lock.addEventListener("release", () => { lock = undefined; update(); }, { once: true });
+      lock.addEventListener("release", () => { lock = undefined; update(); announce("Der Bildschirm darf wieder schlafen. Aktivieren Sie die Wachhaltung bei Bedarf erneut."); }, { once: true });
       announce("Der Bildschirm bleibt für diese geöffnete Route wach.");
     } catch { announce("Der Bildschirm kann in diesem Browser nicht wach gehalten werden."); }
     update();
@@ -1660,6 +1867,14 @@ if (voiceCapture) {
   const timer = voiceCapture.querySelector("[data-voice-timer]");
   const status = voiceCapture.querySelector("[data-voice-status]");
   const uploadForm = voiceCapture.querySelector("[data-voice-upload]");
+  const preview = voiceCapture.querySelector("[data-voice-preview]");
+  const previewAudio = voiceCapture.querySelector("[data-voice-audio]");
+  const sendButton = voiceCapture.querySelector("[data-voice-send]");
+  const discardButton = voiceCapture.querySelector("[data-voice-discard]");
+  const retryButton = voiceCapture.querySelector("[data-voice-retry]");
+  const progress = voiceCapture.querySelector("[data-voice-progress]");
+  const levelWrap = voiceCapture.querySelector("[data-voice-level-wrap]");
+  const level = voiceCapture.querySelector("[data-voice-level]");
   const maxSeconds = Number(voiceCapture.dataset.maxSeconds);
   let recorder;
   let stream;
@@ -1668,6 +1883,12 @@ if (voiceCapture) {
   let segmentStartedAt = 0;
   let interval;
   let cancelled = false;
+  let audioContext;
+  let levelFrame;
+  let peakLevel = 0;
+  let pendingAudio;
+  let pendingDurationMs = 0;
+  let previewURL = "";
 
   const announce = (message) => { status.textContent = message; };
   const resetControls = () => {
@@ -1681,6 +1902,10 @@ if (voiceCapture) {
     stream?.getTracks().forEach((track) => track.stop());
     stream = undefined;
     window.clearInterval(interval);
+    window.cancelAnimationFrame(levelFrame);
+    audioContext?.close().catch(() => {});
+    audioContext = undefined;
+    if (levelWrap) levelWrap.hidden = true;
   };
   const elapsedMs = () => accumulatedMs + (recorder?.state === "recording" && segmentStartedAt ? Date.now() - segmentStartedAt : 0);
   const freezeElapsed = () => {
@@ -1690,26 +1915,64 @@ if (voiceCapture) {
   };
   const updateTimer = () => {
     const elapsed = Math.min(maxSeconds, Math.max(0, Math.ceil(elapsedMs() / 1000)));
-    const minutes = Math.floor(elapsed / 60);
-    const seconds = elapsed % 60;
-    timer.textContent = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    const remaining = Math.max(0, maxSeconds - elapsed);
+    const minutes = Math.floor(remaining / 60);
+    const seconds = remaining % 60;
+    timer.textContent = `Verbleibend: ${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
     if (elapsed >= maxSeconds && recorder?.state !== "inactive") { freezeElapsed(); recorder.stop(); }
   };
-  const uploadAudio = async (blob, durationMs) => {
+  const uploadAudio = (blob, durationMs) => new Promise((resolve, reject) => {
     const form = new FormData();
     form.append("duration_ms", String(Math.max(1, Math.min(maxSeconds * 1000, durationMs))));
     form.append("audio", blob, "aufnahme.webm");
     announce("Aufnahme wird sicher übertragen und für die Verarbeitung eingereiht …");
-    let response;
+    if (progress) { progress.hidden = false; progress.value = 0; }
+    const request = new XMLHttpRequest();
+    request.open("POST", "/api/v1/voice/drafts");
+    request.responseType = "json";
+    request.withCredentials = true;
+    request.setRequestHeader("X-CSRF-Token", voiceCapture.dataset.csrf);
+    request.setRequestHeader("Accept", "application/json");
+    request.upload.addEventListener("progress", (event) => {
+      if (!progress || !event.lengthComputable) return;
+      progress.value = Math.round((event.loaded / event.total) * 100);
+      announce(`Upload: ${progress.value} Prozent.`);
+    });
+    request.addEventListener("load", () => {
+      const payload = request.response || {};
+      if (request.status < 200 || request.status >= 300) {
+        reject(new Error(payload?.error?.message || "Die Aufnahme konnte nicht verarbeitet werden."));
+        return;
+      }
+      dirtyForms.delete(uploadForm);
+      resolve(payload);
+    });
+    request.addEventListener("error", () => reject(new Error("Der Übertragungsstatus ist unbekannt. Die Aufnahme bleibt in diesem Tab erhalten; prüfen Sie zuerst Ihre Entwürfe und senden Sie sie nur kontrolliert erneut.")));
+    request.addEventListener("abort", () => reject(new Error("Der Upload wurde abgebrochen. Die Aufnahme bleibt in diesem Tab erhalten.")));
+    request.send(form);
+  });
+  const clearPreview = () => {
+    pendingAudio = undefined;
+    pendingDurationMs = 0;
+    if (previewURL) URL.revokeObjectURL(previewURL);
+    previewURL = "";
+    previewAudio?.removeAttribute("src");
+    if (preview) preview.hidden = true;
+    if (retryButton) retryButton.hidden = true;
+    if (progress) progress.hidden = true;
+  };
+  const submitPendingAudio = async () => {
+    if (!pendingAudio) return;
+    if (sendButton) sendButton.disabled = true;
+    if (retryButton) retryButton.hidden = true;
     try {
-      response = await fetch("/api/v1/voice/drafts", { method: "POST", headers: { "X-CSRF-Token": voiceCapture.dataset.csrf, Accept: "application/json" }, credentials: "same-origin", body: form });
-    } catch {
-      throw new Error("Der Übertragungsstatus ist unbekannt. Prüfen Sie später Ihre Entwürfe oder fragen Sie einen Administrator, bevor Sie die Aufnahme erneut senden.");
+      const payload = await uploadAudio(pendingAudio, pendingDurationMs);
+      window.location.assign(payload.location);
+    } catch (failure) {
+      announce(failure.message);
+      if (retryButton) retryButton.hidden = false;
+      if (sendButton) sendButton.disabled = false;
     }
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload?.error?.message || "Die Aufnahme konnte nicht verarbeitet werden.");
-    dirtyForms.delete(uploadForm);
-    window.location.assign(payload.location);
   };
   const supportedType = () => ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"].find((type) => window.MediaRecorder?.isTypeSupported(type));
 
@@ -1723,6 +1986,23 @@ if (voiceCapture) {
         chunks = [];
         cancelled = false;
 		accumulatedMs = 0;
+        peakLevel = 0;
+        if (window.AudioContext) {
+          audioContext = new AudioContext();
+          const analyser = audioContext.createAnalyser();
+          analyser.fftSize = 256;
+          audioContext.createMediaStreamSource(stream).connect(analyser);
+          const values = new Uint8Array(analyser.fftSize);
+          const sampleLevel = () => {
+            analyser.getByteTimeDomainData(values);
+            const current = values.reduce((maximum, value) => Math.max(maximum, Math.abs(value - 128) / 128), 0);
+            peakLevel = Math.max(peakLevel, current);
+            if (level) level.value = current;
+            levelFrame = window.requestAnimationFrame(sampleLevel);
+          };
+          if (levelWrap) levelWrap.hidden = false;
+          sampleLevel();
+        }
         recorder = new MediaRecorder(stream, { mimeType: supportedType() });
         recorder.addEventListener("dataavailable", (event) => { if (event.data.size) chunks.push(event.data); });
         recorder.addEventListener("stop", async () => {
@@ -1731,7 +2011,15 @@ if (voiceCapture) {
           const blob = new Blob(chunks, { type: recorder.mimeType });
           stopTracks(); resetControls();
           if (cancelled) return;
-          try { await uploadAudio(blob, durationMs); } catch (failure) { announce(failure.message); }
+          pendingAudio = blob;
+          pendingDurationMs = durationMs;
+          if (previewURL) URL.revokeObjectURL(previewURL);
+          previewURL = URL.createObjectURL(blob);
+          previewAudio.src = previewURL;
+          preview.hidden = false;
+          announce(peakLevel < 0.015
+            ? "Die Aufnahme ist sehr leise oder möglicherweise leer. Hören Sie sie vor dem Upload an und nehmen Sie sie bei Bedarf neu auf."
+            : "Aufnahme beendet. Bitte anhören und erst danach bewusst hochladen oder verwerfen.");
         }, { once: true });
         recorder.start(1000); segmentStartedAt = Date.now(); updateTimer(); interval = window.setInterval(updateTimer, 500);
         startButton.disabled = true; pauseButton.disabled = false; stopButton.disabled = false; cancelButton.disabled = false;
@@ -1746,21 +2034,35 @@ if (voiceCapture) {
     cancelButton.addEventListener("click", () => {
       cancelled = true;
       if (recorder?.state !== "inactive") recorder.stop();
-      chunks = []; stopTracks(); resetControls(); timer.textContent = "00:00"; announce("Aufnahme verworfen; nichts wurde hochgeladen.");
+      chunks = []; stopTracks(); resetControls(); timer.textContent = `Verbleibend: ${String(Math.floor(maxSeconds / 60)).padStart(2, "0")}:${String(maxSeconds % 60).padStart(2, "0")}`; clearPreview(); announce("Aufnahme verworfen; nichts wurde hochgeladen.");
     });
   }
+  sendButton?.addEventListener("click", submitPendingAudio);
+  retryButton?.addEventListener("click", submitPendingAudio);
+  discardButton?.addEventListener("click", () => { clearPreview(); announce("Aufnahme verworfen; nichts wurde hochgeladen."); });
   uploadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const audio = uploadForm.elements.audio.files[0];
     const seconds = Number(uploadForm.elements.duration_seconds.value);
     if (!audio || !Number.isFinite(seconds) || seconds <= 0 || seconds > maxSeconds) { announce("Bitte Datei und gültige Dauer innerhalb des Limits angeben."); return; }
     uploadForm.querySelector("button[type='submit']").disabled = true;
-    try { await uploadAudio(audio, seconds * 1000); } catch (failure) { announce(failure.message); uploadForm.querySelector("button[type='submit']").disabled = false; }
+    pendingAudio = audio;
+    pendingDurationMs = seconds * 1000;
+    try {
+      const payload = await uploadAudio(audio, pendingDurationMs);
+      window.location.assign(payload.location);
+    } catch (failure) {
+      announce(failure.message);
+      preview.hidden = false;
+      retryButton.hidden = false;
+      uploadForm.querySelector("button[type='submit']").disabled = false;
+    }
   });
   window.addEventListener("pagehide", () => {
     cancelled = true;
     if (recorder && recorder.state !== "inactive") recorder.stop();
     chunks = [];
+    clearPreview();
     stopTracks();
   });
   document.addEventListener("visibilitychange", () => {

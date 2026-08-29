@@ -106,6 +106,10 @@ templ appHeader(shell ShellData) {
 		</div>
 	</header>
 	<div class="connectivity-banner" role="status" aria-live="polite" data-connectivity-banner hidden></div>
+	<aside class="install-prompt" data-install-prompt hidden aria-label="HackWerk installieren">
+		<span>HackWerk auf diesem Gerät installieren – schneller erreichbar, ohne Kundendaten lokal zu speichern.</span>
+		<div class="action-row"><button class="button" type="button" data-install-accept>Installieren</button><button class="button button--quiet" type="button" data-install-dismiss>Dauerhaft ausblenden</button></div>
+	</aside>
 	<nav class="mobile-bottom-nav" aria-label="Mobile Hauptnavigation">
 		@navLink(shell, "/dashboard", "Heute")
 		@navLink(shell, "/calendar", "Kalender")
@@ -189,7 +193,7 @@ templ Dashboard(data DashboardData) {
 		<body>
 			@appHeader(data.Shell)
 			<main id="hauptinhalt" class="page dashboard-page">
-				<section class="dashboard-intro"><div><p class="eyebrow">Einsatzübersicht</p><h1>Grüß Gott, { data.Shell.Actor.DisplayName }.</h1><p>Termine, Rückmeldungen und Kapazität auf einen Blick.</p></div><a class="button dashboard-primary-action" href="/customers/new">Neuen Auftrag erfassen</a></section>
+				<section class="dashboard-intro"><div><p class="eyebrow">Einsatzübersicht</p><h1>Grüß Gott, { data.Shell.Actor.DisplayName }.</h1><p>Termine, Rückmeldungen und Kapazität auf einen Blick.</p></div><div class="action-row"><button class="button button--quiet" type="button" data-print-page>Morgenübersicht drucken</button><a class="button dashboard-primary-action" href="/customers/new">Neuen Auftrag erfassen</a></div></section>
 				if data.Error != "" {
 					<section class="empty-state" role="alert"><h2>Übersicht nicht verfügbar</h2><p>{ data.Error }</p><a class="button button--quiet" href="/dashboard">Heute erneut laden</a></section>
 				}
@@ -201,14 +205,20 @@ templ Dashboard(data DashboardData) {
 						<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + data.View.NextDate) } aria-label="Nächster Tag">→</a>
 					</nav>
 					<section class="dashboard-metrics" aria-label="Kennzahlen">
-						@metricCard("Warteliste", data.View.Counts.Waitlist, "/waitlist", "⌛")
-						@metricCard("Termine", data.View.Counts.Appointments, "/calendar", "▣")
-						@metricCard("Offene Antworten", data.View.Counts.Attention, "/calendar", "?")
-						@metricCard("Fahrer", data.View.Counts.ActiveDrivers, driverLink(data.Shell.Actor.Role), "♟")
 						if data.View.Admin {
+							@metricCard("Warteliste", data.View.Counts.Waitlist, "/waitlist", "⌛")
+							@metricCard("Termine", data.View.Counts.Appointments, "/calendar", "▣")
+							@metricCard("Offene Antworten", data.View.Counts.Attention, "/calendar", "?")
+							@metricCard("Eigene Voice-Entwürfe", data.View.Counts.VoiceDrafts, "/voice", "◉")
 							@metricCard("Versandprobleme", data.View.Counts.NotificationIssues, "/admin/notifications", "!")
 							@metricCard("Konflikte/Overrides", data.View.Counts.Overrides, "/calendar", "⚠")
 							@metricCard("Freie Fenster", freeSlotCount(data.View.Capacities), "/calendar", "◷")
+							@metricCard("Fahrer", data.View.Counts.ActiveDrivers, driverLink(data.Shell.Actor.Role), "♟")
+						} else {
+							@metricCard("Termine", data.View.Counts.Appointments, "/calendar", "▣")
+							@metricCard("Eigene Voice-Entwürfe", data.View.Counts.VoiceDrafts, "/voice", "◉")
+							@metricCard("Warteliste", data.View.Counts.Waitlist, "/waitlist", "⌛")
+							@metricCard("Fahrer", data.View.Counts.ActiveDrivers, driverLink(data.Shell.Actor.Role), "♟")
 						}
 					</section>
 					if data.View.Counts.Attention > 0 || data.View.Counts.NotificationIssues > 0 || data.View.Counts.Overrides > 0 || len(data.View.UrgentJobs) > 0 {
@@ -374,7 +384,7 @@ templ Password(data PasswordData) {
 				<section class="form-card">
 					<p class="eyebrow">Kontosicherheit</p>
 					<h1>Passwort ändern</h1>
-					<p>Verwenden Sie mindestens 14 Zeichen. Nach der Änderung melden Sie sich erneut an.</p>
+					<p>Verwenden Sie mindestens 14 Zeichen. Nach der Änderung werden alle bisherigen Sitzungen – einschließlich dieser – sofort widerrufen; anschließend melden Sie sich neu an.</p>
 					if data.Error != "" {
 						<div class="form-alert" role="alert">{ data.Error }</div>
 					}
@@ -431,7 +441,10 @@ templ Users(data UsersData) {
 											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(user.Version) }/>
 											<label><span>Rolle</span><select name="role" aria-label={ "Rolle für " + user.Username }><option value="admin" selected?={ user.Role == auth.RoleAdmin }>Administrator</option><option value="driver" selected?={ user.Role == auth.RoleDriver }>Fahrer</option></select></label>
 											<label class="check-label"><input type="checkbox" name="active" value="true" checked?={ user.Active }/> Zugang aktiv</label>
-											<button class="button button--quiet" type="submit" data-confirm-message="Rolle oder Zugangsstatus wirklich ändern? Aktive Sitzungen können dadurch ihre Berechtigung verlieren.">Zugriff speichern</button>
+											<button class="button button--quiet" type="submit" data-confirm-message="Rolle oder Zugangsstatus wirklich ändern? Beim Deaktivieren werden alle aktiven Sitzungen dieses Zugangs sofort widerrufen.">Zugriff speichern</button>
+											if !user.Active {
+												<p class="field-help">Deaktiviert: Alle bisherigen Sitzungen wurden beim Sperren widerrufen. Ein erneutes Speichern im deaktivierten Zustand widerruft auch zwischenzeitlich entstandene Sitzungen.</p>
+											}
 										</form>
 										<form method="post" action={ "/admin/users/" + user.ID + "/reset-password" } class="form-stack user-manage__panel reset-form">
 											<div><h3>Passwort zurücksetzen</h3><p>Die Person muss das temporäre Passwort beim nächsten Login ändern.</p></div>

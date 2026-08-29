@@ -143,8 +143,25 @@ type Suggestion struct {
 }
 
 type Run struct {
-	ID, JobID   string
-	Suggestions []Suggestion
+	ID, JobID            string
+	Suggestions          []Suggestion
+	CreatedAt, ExpiresAt time.Time
+	Stale                bool
+	Exclusions           []Exclusion
+	HorizonDays          int
+	CandidateLimit       int
+}
+
+type Exclusion struct {
+	Kind, Name, Reason string
+}
+
+// RunSnapshot is the persisted, non-customer run explanation. Config remains
+// available for reproducibility while exclusions explain why active internal
+// capacity did not appear in the top-three result.
+type RunSnapshot struct {
+	Config     Config      `json:"config"`
+	Exclusions []Exclusion `json:"exclusions,omitempty"`
 }
 
 type ClusterEntry struct {
@@ -282,7 +299,11 @@ func (s *Service) ListRun(ctx context.Context, actor auth.Actor, runID string) (
 	if err := actor.Require(auth.PermissionPlanningView); err != nil {
 		return Run{}, err
 	}
-	return s.store.ListRun(ctx, strings.TrimSpace(runID))
+	run, err := s.store.ListRun(ctx, strings.TrimSpace(runID))
+	if err == nil {
+		run.Stale = !run.ExpiresAt.IsZero() && !run.ExpiresAt.After(s.now().UTC())
+	}
+	return run, err
 }
 
 func (s *Service) Adopt(ctx context.Context, actor auth.Actor, suggestionID, requestID string) (string, error) {
@@ -359,6 +380,42 @@ func GenerateWithDefaultStart(ctx context.Context, snapshot Snapshot, router Rou
 		return nil, ErrConfiguration
 	}
 	return generate(ctx, snapshot, router, cfg, defaultStart, now)
+}
+
+func ExplainExclusions(snapshot Snapshot, suggestions []Suggestion, from, to time.Time) []Exclusion {
+	usedDrivers, usedResources := make(map[string]bool), make(map[string]bool)
+	for _, suggestion := range suggestions {
+		usedDrivers[suggestion.DriverID] = true
+		for _, id := range suggestion.ResourceIDs {
+			usedResources[id] = true
+		}
+	}
+	result := make([]Exclusion, 0)
+	for _, driver := range snapshot.Drivers {
+		if usedDrivers[driver.ID] {
+			continue
+		}
+		reason := "keine konfliktfreie Kombination unter den drei bestbewerteten Vorschlägen"
+		if !slices.ContainsFunc(driver.Availability, func(value Interval) bool {
+			return value.Status == "available" && value.StartsAt.Before(to) && value.EndsAt.After(from)
+		}) {
+			reason = "kein Verfügbarkeitsfenster im Suchzeitraum"
+		}
+		result = append(result, Exclusion{Kind: "Fahrer", Name: driver.Name, Reason: reason})
+	}
+	for _, resource := range snapshot.Resources {
+		relevant := resource.Type == "chipper" || (snapshot.Job.Type == "chipping_with_transport" && snapshot.Job.TransportMode == "internal" && resource.Type == "transport_vehicle")
+		if relevant && !usedResources[resource.ID] {
+			result = append(result, Exclusion{Kind: "Ressource", Name: resource.Name, Reason: "keine konfliktfreie Kombination unter den drei bestbewerteten Vorschlägen"})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Kind != result[j].Kind {
+			return result[i].Kind < result[j].Kind
+		}
+		return result[i].Name < result[j].Name
+	})
+	return result
 }
 
 func generate(ctx context.Context, snapshot Snapshot, router Router, cfg Config, defaultStart Point, now time.Time) ([]Suggestion, error) {

@@ -22,7 +22,7 @@ const (
 	EnvironmentDevelopment = "development"
 	EnvironmentTest        = "test"
 	EnvironmentProduction  = "production"
-	CurrentSchemaVersion   = int64(14)
+	CurrentSchemaVersion   = int64(15)
 
 	businessNamePlaceholder                  = "HackWerk – Betreiber noch nicht hinterlegt"
 	businessAddressPlaceholder               = "Ladungsfähige Anschrift noch nicht hinterlegt"
@@ -55,6 +55,7 @@ type Config struct {
 	Mail            Mail
 	SMS             SMS
 	Business        Business
+	Waitlist        Waitlist
 	Dashboard       Dashboard
 	CalendarFeed    CalendarFeed
 	Planning        Planning
@@ -165,6 +166,13 @@ type Dashboard struct {
 	PendingAfter  time.Duration
 	BusinessOpen  string
 	BusinessClose string
+}
+
+// Waitlist configures advisory duration warnings without changing which
+// estimates are valid business data.
+type Waitlist struct {
+	DurationReviewMinMinutes int32
+	DurationReviewMaxMinutes int32
 }
 
 type CalendarFeed struct {
@@ -418,6 +426,7 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 			TradeRules:            valueOrDefault(getenv("BUSINESS_TRADE_RULES"), businessTradeRulesPlaceholder),
 			DataProtectionOfficer: valueOrDefault(getenv("BUSINESS_DATA_PROTECTION_OFFICER"), businessDataProtectionOfficerPlaceholder),
 		},
+		Waitlist:  Waitlist{DurationReviewMinMinutes: 15, DurationReviewMaxMinutes: 12 * 60},
 		Dashboard: Dashboard{HorizonDays: 14, PendingAfter: 15 * time.Minute, BusinessOpen: valueOrDefault(getenv("DASHBOARD_BUSINESS_OPEN"), "07:00"), BusinessClose: valueOrDefault(getenv("DASHBOARD_BUSINESS_CLOSE"), "17:00")},
 		CalendarFeed: CalendarFeed{
 			Enabled:   true,
@@ -593,6 +602,12 @@ func applyOverrides(cfg *Config, getenv func(string) string) error {
 		return err
 	}
 	if cfg.Dashboard.PendingAfter, err = durationValue(getenv, "DASHBOARD_PENDING_AFTER", cfg.Dashboard.PendingAfter); err != nil {
+		return err
+	}
+	if cfg.Waitlist.DurationReviewMinMinutes, err = int32Value(getenv, "WAITLIST_DURATION_REVIEW_MIN_MINUTES", cfg.Waitlist.DurationReviewMinMinutes); err != nil {
+		return err
+	}
+	if cfg.Waitlist.DurationReviewMaxMinutes, err = int32Value(getenv, "WAITLIST_DURATION_REVIEW_MAX_MINUTES", cfg.Waitlist.DurationReviewMaxMinutes); err != nil {
 		return err
 	}
 	if cfg.CalendarFeed.ExportMaxDays, err = intValue(getenv, "CALENDAR_EXPORT_MAX_DAYS", cfg.CalendarFeed.ExportMaxDays); err != nil {
@@ -780,6 +795,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Dashboard.HorizonDays < 1 || cfg.Dashboard.HorizonDays > 31 || cfg.Dashboard.PendingAfter < time.Minute || cfg.Dashboard.PendingAfter > 7*24*time.Hour {
 		return errors.New("config: invalid dashboard limits")
+	}
+	if cfg.Waitlist.DurationReviewMinMinutes < 1 || cfg.Waitlist.DurationReviewMaxMinutes <= cfg.Waitlist.DurationReviewMinMinutes || cfg.Waitlist.DurationReviewMaxMinutes > 7*24*60 {
+		return errors.New("config: invalid waitlist duration review limits")
 	}
 	openAt, openErr := time.Parse("15:04", cfg.Dashboard.BusinessOpen)
 	closeAt, closeErr := time.Parse("15:04", cfg.Dashboard.BusinessClose)

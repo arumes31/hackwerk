@@ -145,6 +145,9 @@ func TestWaitlistFilterNormalizesWorkflowAndReviewFlags(t *testing.T) {
 	if !DurationNeedsReview(14) || DurationNeedsReview(15) || DurationNeedsReview(720) || !DurationNeedsReview(721) {
 		t.Fatal("DurationNeedsReview() boundaries are wrong")
 	}
+	if !DurationNeedsReviewWithin(29, 30, 600) || DurationNeedsReviewWithin(30, 30, 600) || !DurationNeedsReviewWithin(601, 30, 600) {
+		t.Fatal("DurationNeedsReviewWithin() configurable boundaries are wrong")
+	}
 }
 
 func TestCustomerInputValidationCoversContactAndCoordinates(t *testing.T) {

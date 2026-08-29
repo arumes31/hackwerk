@@ -636,7 +636,7 @@ func respondSeedConfirmation(ctx context.Context, pool *pgxpool.Pool, cfg config
 	if err != nil {
 		return err
 	}
-	_, err = confirmationService.Respond(ctx, material.Raw, view.FormNonce, response, "seed-dev")
+	_, err = confirmationService.Respond(ctx, material.Raw, view.FormNonce, response, "", "seed-dev")
 	return err
 }
 

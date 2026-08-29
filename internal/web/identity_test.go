@@ -323,7 +323,7 @@ func TestIdentityHTTPAccountMutationsClearSessionsAndCookies(t *testing.T) {
 
 	changed := httptest.NewRecorder()
 	router.ServeHTTP(changed, request("/password", url.Values{"csrf_token": {"csrf"}, "password": {"Sicheres Passwort 2026"}, "confirmation": {"Sicheres Passwort 2026"}}))
-	if changed.Code != http.StatusSeeOther || changed.Header().Get("Location") != "/login" || len(changed.Result().Cookies()) != 2 {
+	if changed.Code != http.StatusSeeOther || changed.Header().Get("Location") != "/login?password_changed=1" || len(changed.Result().Cookies()) != 2 {
 		t.Fatalf("changed=%d location=%q cookies=%#v", changed.Code, changed.Header().Get("Location"), changed.Result().Cookies())
 	}
 

@@ -31,6 +31,56 @@
   font-synthesis: none;
 }
 
+/* Quick-win interaction primitives: all remain usable without JavaScript. */
+.install-prompt {
+  align-items: center;
+  background: var(--paper, #f6f1e6);
+  border-block: 1px solid var(--line, #c9c0ae);
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: .75rem max(1rem, env(safe-area-inset-right)) .75rem max(1rem, env(safe-area-inset-left));
+}
+.field-preview { display: block; margin-top: .25rem; color: var(--muted, #5e665e); }
+.field-preview--warning { color: var(--danger, #8a2e25); font-weight: 650; }
+.password-reveal { min-height: 44px; margin-top: .35rem; }
+.voice-preview { border: 1px solid var(--line, #c9c0ae); padding: 1rem; margin-block: 1rem; }
+.voice-preview audio, .voice-preview progress { display: block; inline-size: 100%; margin-block: .75rem; }
+.voice-level { display: flex; align-items: center; gap: .75rem; }
+.voice-level meter { min-inline-size: min(18rem, 65vw); }
+.scroll-top { position: fixed; z-index: 30; inset-inline-end: max(1rem, env(safe-area-inset-right)); inset-block-end: calc(5rem + env(safe-area-inset-bottom)); box-shadow: 0 3px 14px #0003; }
+.confirmation-actions .button { min-block-size: 48px; }
+.confirmation-card { overflow-wrap: anywhere; }
+.calendar-range-summary { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; align-items: baseline; margin-block: .5rem; }
+.fc-event[data-cross-midnight="true"] .calendar-event-content::after { content: " · über Mitternacht"; font-size: .75em; font-weight: 700; }
+.appointment-badge--proposal, .fc-event.appointment--proposal { border-style: dashed; font-style: italic; }
+.appointment-badge--fixed, .fc-event.appointment--fixed { border-width: 2px; font-style: normal; font-weight: 800; }
+.appointment-actions > fieldset { border-top: 1px solid var(--line, #c9c0ae); padding-top: 1rem; }
+.appointment-actions .button--danger { margin-top: 1rem; }
+.planning-result-tools { display: flex; flex-wrap: wrap; gap: .75rem; align-items: end; margin-block: 1rem; }
+.planning-comparison { border: 2px solid var(--ink, #203126); padding: 1rem; margin-block: 1rem; }
+.suggestion-card--selected { position: sticky; top: .5rem; z-index: 2; outline: 3px solid var(--accent, #af6b2d); }
+[data-sticky-actions], .appointment-actions { padding-bottom: max(.5rem, env(safe-area-inset-bottom)); }
+dialog { max-block-size: min(92dvh, var(--visual-viewport-height, 92dvh)); }
+input[type="date"], input[type="datetime-local"] { min-inline-size: 0; max-inline-size: 100%; }
+.mobile-more__panel a[aria-current="page"] { border-inline-start: 4px solid currentColor; font-weight: 800; }
+@media (max-width: 720px) {
+  .install-prompt { align-items: stretch; flex-direction: column; }
+  .install-prompt .action-row { display: grid; grid-template-columns: 1fr; }
+  .table-card td[data-label] { order: var(--mobile-order, initial); }
+  .record-card, .suggestion-card { max-block-size: none; }
+  form:has([data-sticky-actions]), .confirmation-page { overscroll-behavior-y: contain; }
+  .site-header__inner, .route-location-card strong { overflow-wrap: anywhere; }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .record-card, .suggestion-card { padding-block: .65rem; }
+  .mobile-bottom-nav { position: static; }
+}
+@media print {
+  .install-prompt, .scroll-top, .password-reveal, .confirmation-actions { display: none !important; }
+  .confirmation-card { border: 0; box-shadow: none; }
+}
+
 .suggestion-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 1rem; }
 .suggestion-card { border: 1px solid var(--line); border-radius: 1rem; padding: 1rem; background: var(--surface); display: flex; flex-direction: column; gap: .75rem; }
 .suggestion-facts { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .6rem; margin: 0; }

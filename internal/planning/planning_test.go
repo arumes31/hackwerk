@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -152,6 +153,22 @@ func TestGenerationAcrossDSTKeepsLocalBusinessTime(t *testing.T) {
 			if local.Hour() < cfg.BusinessOpen/60 || local.Hour() >= cfg.BusinessClose/60 {
 				t.Fatalf("DST candidate outside business hours: %s", local)
 			}
+		}
+	}
+}
+
+func TestExplainExclusionsNamesUnusedCapacityWithoutInternalIDs(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 1, 5, 0, 0, 0, time.UTC)
+	snapshot := testSnapshot(now)
+	suggestions := []Suggestion{{DriverID: snapshot.Drivers[0].ID, ResourceIDs: []string{snapshot.Resources[0].ID}}}
+	exclusions := ExplainExclusions(snapshot, suggestions, now, now.AddDate(0, 0, 7))
+	if len(exclusions) == 0 {
+		t.Fatal("ExplainExclusions() returned no unused capacity")
+	}
+	for _, exclusion := range exclusions {
+		if exclusion.Name == "" || exclusion.Reason == "" || strings.Contains(exclusion.Reason, snapshot.Drivers[0].ID) {
+			t.Fatalf("unsafe or incomplete exclusion = %#v", exclusion)
 		}
 	}
 }

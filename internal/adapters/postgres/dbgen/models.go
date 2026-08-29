@@ -134,6 +134,7 @@ type ConfirmationRequest struct {
 	RevokeReason  *string
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz
+	ResponseNote  *string
 }
 
 type Customer struct {

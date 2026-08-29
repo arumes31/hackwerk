@@ -132,6 +132,7 @@ func (store *NotificationStore) Respond(
 	ctx context.Context,
 	tokenHash, nonceHash []byte,
 	response notification.Response,
+	responseNote string,
 	requestID string,
 	now time.Time,
 ) (notification.Confirmation, error) {
@@ -167,7 +168,7 @@ func (store *NotificationStore) Respond(
 			return notification.ErrResponseLocked
 		}
 		responseValue := string(response)
-		rows, err := queries.SetConfirmationResponse(ctx, dbgen.SetConfirmationResponseParams{Response: &responseValue, ID: mustUUID(row.CrID)})
+		rows, err := queries.SetConfirmationResponse(ctx, dbgen.SetConfirmationResponseParams{Response: &responseValue, ResponseNote: responseNote, ID: mustUUID(row.CrID)})
 		if err != nil {
 			return err
 		}
@@ -183,7 +184,11 @@ func (store *NotificationStore) Respond(
 		}); err != nil {
 			return err
 		}
-		metadata, _ := json.Marshal(map[string][]string{"changed_fields": {"confirmation_status"}})
+		changedFields := []string{"confirmation_status"}
+		if responseNote != "" {
+			changedFields = append(changedFields, "response_note")
+		}
+		metadata, _ := json.Marshal(map[string][]string{"changed_fields": changedFields})
 		if err := queries.InsertAuditEvent(ctx, dbgen.InsertAuditEventParams{
 			ActorType: "public", ActorUserID: "", Action: "confirmation.responded", ObjectType: "appointment",
 			ObjectID: row.CrAppointmentID, RequestID: requestID, Metadata: metadata,
@@ -206,7 +211,7 @@ func (store *NotificationStore) ListAppointment(ctx context.Context, appointment
 		values = append(values, notification.Status{
 			ID: row.NID, AppointmentID: appointmentID, Channel: row.Channel, State: row.Status,
 			Recipient: row.RecipientSnapshot, ErrorCode: row.LastErrorCode,
-			ProviderReference: row.ProviderID, ConfirmationStatus: row.ConfirmationRequestStatus, Response: row.Response,
+			ProviderReference: row.ProviderID, ConfirmationStatus: row.ConfirmationRequestStatus, Response: row.Response, ResponseNote: row.ResponseNote,
 			AttemptCount: row.AttemptCount, MaxAttempts: row.MaxAttempts,
 			AvailableAt: timestampValue(row.AvailableAt), SentAt: timestampValue(row.SentAt),
 			CreatedAt: timestampValue(row.CreatedAt), UpdatedAt: timestampValue(row.UpdatedAt),

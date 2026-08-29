@@ -217,7 +217,11 @@ func loginPage(page templates.PageData, logger *slog.Logger) http.HandlerFunc {
 			http.Redirect(response, request, "/dashboard", http.StatusSeeOther)
 			return
 		}
-		render(response, request, templates.Login(templates.LoginData{Page: page}), http.StatusOK, logger)
+		notice := ""
+		if request.URL.Query().Get("password_changed") == "1" {
+			notice = "Passwort geändert. Alle bisherigen Sitzungen wurden widerrufen; bitte melden Sie sich mit dem neuen Passwort an."
+		}
+		render(response, request, templates.Login(templates.LoginData{Page: page, Notice: notice}), http.StatusOK, logger)
 	}
 }
 
@@ -308,7 +312,7 @@ func changePassword(identity *auth.Service, dependencies Dependencies, page temp
 			return
 		}
 		clearAuthCookies(response, dependencies)
-		http.Redirect(response, request, "/login", http.StatusSeeOther)
+		http.Redirect(response, request, "/login?password_changed=1", http.StatusSeeOther)
 	}
 }
 

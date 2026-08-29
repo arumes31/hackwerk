@@ -21,6 +21,7 @@ type Config struct {
 }
 
 type Window struct {
+	OwnerUserID                               string
 	LocalDate                                 time.Time
 	DayStart, DayEnd, HorizonEnd              time.Time
 	BusinessStart, BusinessEnd, PendingBefore time.Time
@@ -30,7 +31,7 @@ type Window struct {
 }
 
 type Counts struct {
-	Waitlist, Appointments, Attention, NotificationIssues, Overrides, ActiveDrivers int64
+	Waitlist, Appointments, Attention, NotificationIssues, Overrides, ActiveDrivers, VoiceDrafts int64
 }
 
 type Appointment struct {
@@ -139,7 +140,8 @@ func (service *Service) View(ctx context.Context, actor auth.Actor, requestedDat
 	businessStart := time.Date(localDate.Year(), localDate.Month(), localDate.Day(), service.openHour, service.openMinute, 0, 0, service.location)
 	businessEnd := time.Date(localDate.Year(), localDate.Month(), localDate.Day(), service.closeHour, service.closeMinute, 0, 0, service.location)
 	window := Window{
-		LocalDate: localDate, DayStart: dayStart.UTC(), DayEnd: dayEnd.UTC(), HorizonEnd: dayStart.AddDate(0, 0, service.horizonDays).UTC(),
+		OwnerUserID: actor.UserID,
+		LocalDate:   localDate, DayStart: dayStart.UTC(), DayEnd: dayEnd.UTC(), HorizonEnd: dayStart.AddDate(0, 0, service.horizonDays).UTC(),
 		BusinessStart: businessStart.UTC(), BusinessEnd: businessEnd.UTC(), PendingBefore: now.Add(-service.pendingAfter).UTC(),
 		OldBefore: now.AddDate(0, 0, -30).UTC(), PreferredBefore: localDate.AddDate(0, 0, service.horizonDays), ISOWeekday: isoWeekday(localDate.Weekday()),
 	}

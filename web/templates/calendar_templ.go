@@ -385,7 +385,7 @@ func Calendar(data CalendarData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<section class=\"calendar-board\" aria-label=\"Terminplan\"><div class=\"calendar-quick-controls\" data-calendar-controls aria-label=\"Kalender schnell steuern\"><button class=\"button button--quiet\" type=\"button\" data-calendar-jump=\"today\">Heute</button> <button class=\"button button--quiet\" type=\"button\" data-calendar-jump=\"tomorrow\">Morgen</button> <button class=\"button button--quiet\" type=\"button\" data-calendar-jump=\"next-week\">Nächste Woche</button> <label>Datum <input type=\"date\" data-calendar-date aria-label=\"Kalenderdatum wählen\"></label> <label class=\"check-label\"><input type=\"checkbox\" data-calendar-weekends checked> Wochenende</label></div><div class=\"calendar-legend\" aria-label=\"Kalenderlegende\"><span><i class=\"appointment-badge--proposal\" aria-hidden=\"true\"></i> Vorschlag</span> <span><i class=\"appointment-badge--fixed\" aria-hidden=\"true\"></i> Fixiert</span> <span><i class=\"appointment-badge--cancelled\" aria-hidden=\"true\"></i> Abgesagt</span> <span><i class=\"calendar-legend__now\" aria-hidden=\"true\"></i> Aktuelle Zeit</span> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<section class=\"calendar-board\" aria-label=\"Terminplan\"><div class=\"calendar-quick-controls\" data-calendar-controls aria-label=\"Kalender schnell steuern\"><button class=\"button button--quiet\" type=\"button\" data-calendar-jump=\"today\">Heute</button> <button class=\"button button--quiet\" type=\"button\" data-calendar-jump=\"tomorrow\">Morgen</button> <button class=\"button button--quiet\" type=\"button\" data-calendar-jump=\"next-week\">Nächste Woche</button> <label>Datum <input type=\"date\" data-calendar-date aria-label=\"Kalenderdatum wählen\"></label> <label class=\"check-label\"><input type=\"checkbox\" data-calendar-weekends checked> Wochenende</label> <button class=\"button button--quiet\" type=\"button\" data-calendar-reload>Neu laden</button> <button class=\"button button--quiet\" type=\"button\" data-calendar-share>Ansicht kopieren</button> <button class=\"button button--quiet\" type=\"button\" data-print-page>Drucken</button></div><div class=\"calendar-range-summary\"><strong data-calendar-range>Datumsbereich wird geladen</strong><span data-calendar-freshness></span><span data-calendar-timezone>Anzeige: Europe/Vienna</span></div><div class=\"form-alert form-alert--warning\" data-calendar-timezone-warning hidden></div><div class=\"calendar-legend\" aria-label=\"Kalenderlegende\"><span><i class=\"appointment-badge--proposal\" aria-hidden=\"true\"></i> Vorschlag</span> <span><i class=\"appointment-badge--fixed\" aria-hidden=\"true\"></i> Fixiert</span> <span><i class=\"appointment-badge--cancelled\" aria-hidden=\"true\"></i> Abgesagt</span> <span><i class=\"calendar-legend__now\" aria-hidden=\"true\"></i> Aktuelle Zeit</span> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -402,7 +402,7 @@ func Calendar(data CalendarData) templ.Component {
 		var templ_7745c5c3_Var21 string
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 106, Col: 94}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 111, Col: 94}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 		if templ_7745c5c3_Err != nil {
@@ -415,7 +415,7 @@ func Calendar(data CalendarData) templ.Component {
 		var templ_7745c5c3_Var22 string
 		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(data.Shell.Actor.Role == auth.RoleAdmin))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 106, Col: 164}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 111, Col: 164}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
@@ -548,7 +548,7 @@ func CalendarPlan(data CalendarPlanData) templ.Component {
 		var templ_7745c5c3_Var25 string
 		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(data.Job.CustomerName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 152, Col: 61}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 157, Col: 61}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 		if templ_7745c5c3_Err != nil {
@@ -561,7 +561,7 @@ func CalendarPlan(data CalendarPlanData) templ.Component {
 		var templ_7745c5c3_Var26 string
 		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(data.Job.JobNumber)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 152, Col: 87}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 157, Col: 87}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 		if templ_7745c5c3_Err != nil {
@@ -574,7 +574,7 @@ func CalendarPlan(data CalendarPlanData) templ.Component {
 		var templ_7745c5c3_Var27 string
 		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(data.Job.VolumeM3)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 153, Col: 27}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 158, Col: 27}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 		if templ_7745c5c3_Err != nil {
@@ -587,7 +587,7 @@ func CalendarPlan(data CalendarPlanData) templ.Component {
 		var templ_7745c5c3_Var28 string
 		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(data.Job.Locality)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 153, Col: 56}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 158, Col: 56}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 		if templ_7745c5c3_Err != nil {
@@ -600,7 +600,7 @@ func CalendarPlan(data CalendarPlanData) templ.Component {
 		var templ_7745c5c3_Var29 string
 		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(calendarJobTypeLabel(data.Job.JobType))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 153, Col: 102}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 158, Col: 102}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 		if templ_7745c5c3_Err != nil {
@@ -658,7 +658,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 		var templ_7745c5c3_Var31 string
 		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue(values.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 167, Col: 64}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 172, Col: 64}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 		if templ_7745c5c3_Err != nil {
@@ -671,7 +671,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 		var templ_7745c5c3_Var32 string
 		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(values.JobID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 168, Col: 56}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 173, Col: 56}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 		if templ_7745c5c3_Err != nil {
@@ -699,7 +699,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(formError.Message)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 172, Col: 25}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 177, Col: 25}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 			if templ_7745c5c3_Err != nil {
@@ -717,7 +717,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 				var templ_7745c5c3_Var34 templ.SafeURL
 				templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinURLErrs("#" + formError.FieldID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 174, Col: 37}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 179, Col: 37}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 				if templ_7745c5c3_Err != nil {
@@ -745,7 +745,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 		var templ_7745c5c3_Var35 string
 		templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue(values.StartsAt)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 181, Col: 141}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 186, Col: 141}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 		if templ_7745c5c3_Err != nil {
@@ -758,7 +758,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 		var templ_7745c5c3_Var36 string
 		templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue(planningFieldInvalid(formError, "planning-start"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 181, Col: 237}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 186, Col: 237}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 		if templ_7745c5c3_Err != nil {
@@ -771,7 +771,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 		var templ_7745c5c3_Var37 string
 		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(planningFieldErrorID(formError, "planning-start"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 181, Col: 309}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 186, Col: 309}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 		if templ_7745c5c3_Err != nil {
@@ -784,7 +784,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 		var templ_7745c5c3_Var38 string
 		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.ResolveAttributeValue(values.DurationMinutes)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 182, Col: 147}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 187, Col: 147}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
 		if templ_7745c5c3_Err != nil {
@@ -797,7 +797,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 		var templ_7745c5c3_Var39 string
 		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue(planningFieldInvalid(formError, "planning-duration"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 182, Col: 280}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 187, Col: 280}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 		if templ_7745c5c3_Err != nil {
@@ -810,7 +810,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 		var templ_7745c5c3_Var40 string
 		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue(planningFieldErrorID(formError, "planning-duration"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 182, Col: 355}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 187, Col: 355}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 		if templ_7745c5c3_Err != nil {
@@ -828,7 +828,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 			var templ_7745c5c3_Var41 string
 			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.ResolveAttributeValue("planning-driver-" + item.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 188, Col: 65}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 193, Col: 65}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
 			if templ_7745c5c3_Err != nil {
@@ -841,7 +841,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 			var templ_7745c5c3_Var42 string
 			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.ResolveAttributeValue("planning-driver-" + item.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 188, Col: 108}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 193, Col: 108}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
 			if templ_7745c5c3_Err != nil {
@@ -854,7 +854,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 			var templ_7745c5c3_Var43 string
 			templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.ResolveAttributeValue(item.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 188, Col: 159}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 193, Col: 159}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
 			if templ_7745c5c3_Err != nil {
@@ -877,7 +877,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 			var templ_7745c5c3_Var44 string
 			templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(item.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 188, Col: 231}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 193, Col: 231}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 			if templ_7745c5c3_Err != nil {
@@ -895,7 +895,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 		var templ_7745c5c3_Var45 string
 		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue(planningFieldInvalid(formError, "planning-primary-driver"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 193, Col: 147}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 198, Col: 147}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
 		if templ_7745c5c3_Err != nil {
@@ -908,7 +908,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 		var templ_7745c5c3_Var46 string
 		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.ResolveAttributeValue(planningFieldErrorID(formError, "planning-primary-driver"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 193, Col: 228}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 198, Col: 228}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var46)
 		if templ_7745c5c3_Err != nil {
@@ -926,7 +926,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 			var templ_7745c5c3_Var47 string
 			templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.ResolveAttributeValue(item.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 196, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 201, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var47)
 			if templ_7745c5c3_Err != nil {
@@ -949,7 +949,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 			var templ_7745c5c3_Var48 string
 			templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs(item.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 196, Col: 90}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 201, Col: 90}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
 			if templ_7745c5c3_Err != nil {
@@ -967,7 +967,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 		var templ_7745c5c3_Var49 string
 		templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.ResolveAttributeValue(planningFieldInvalid(formError, "planning-chipper-resource"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 206, Col: 154}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 211, Col: 154}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var49)
 		if templ_7745c5c3_Err != nil {
@@ -980,7 +980,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 		var templ_7745c5c3_Var50 string
 		templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.ResolveAttributeValue(planningFieldErrorID(formError, "planning-chipper-resource"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 206, Col: 237}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 211, Col: 237}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50)
 		if templ_7745c5c3_Err != nil {
@@ -999,7 +999,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 				var templ_7745c5c3_Var51 string
 				templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.ResolveAttributeValue(item.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 210, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 215, Col: 30}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
 				if templ_7745c5c3_Err != nil {
@@ -1022,7 +1022,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 				var templ_7745c5c3_Var52 string
 				templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinStringErrs(item.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 210, Col: 94}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 215, Col: 94}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
 				if templ_7745c5c3_Err != nil {
@@ -1066,7 +1066,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 		var templ_7745c5c3_Var53 string
 		templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.ResolveAttributeValue(planningFieldInvalid(formError, "planning-transport-resource"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 221, Col: 200}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 226, Col: 200}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var53)
 		if templ_7745c5c3_Err != nil {
@@ -1079,7 +1079,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 		var templ_7745c5c3_Var54 string
 		templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.ResolveAttributeValue(planningFieldErrorID(formError, "planning-transport-resource"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 221, Col: 285}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 226, Col: 285}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var54)
 		if templ_7745c5c3_Err != nil {
@@ -1098,7 +1098,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 				var templ_7745c5c3_Var55 string
 				templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.ResolveAttributeValue(item.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 225, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 230, Col: 30}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var55)
 				if templ_7745c5c3_Err != nil {
@@ -1121,7 +1121,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 				var templ_7745c5c3_Var56 string
 				templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(item.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 225, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 230, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
 				if templ_7745c5c3_Err != nil {
@@ -1171,7 +1171,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 				var templ_7745c5c3_Var57 string
 				templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.ResolveAttributeValue(item.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 247, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 252, Col: 30}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57)
 				if templ_7745c5c3_Err != nil {
@@ -1194,7 +1194,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 				var templ_7745c5c3_Var58 string
 				templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(item.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 247, Col: 94}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 252, Col: 94}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
 				if templ_7745c5c3_Err != nil {
@@ -1213,7 +1213,7 @@ func planningFormFields(options appointment.PlanningOptions, values PlanningForm
 		var templ_7745c5c3_Var59 string
 		templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(values.OverrideReason)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 254, Col: 202}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 259, Col: 202}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
 		if templ_7745c5c3_Err != nil {
@@ -1279,7 +1279,7 @@ func appointmentDialog(csrf string, admin bool) templ.Component {
 		var templ_7745c5c3_Var61 string
 		templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.ResolveAttributeValue(csrf)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 319, Col: 35}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 324, Col: 35}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var61)
 		if templ_7745c5c3_Err != nil {
@@ -1361,7 +1361,7 @@ func agendaCard(event appointment.CalendarEvent) templ.Component {
 		var templ_7745c5c3_Var67 string
 		templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.JoinStringErrs(AppointmentStatusLabel(event.Lifecycle, event.Confirmation))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 325, Col: 150}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 330, Col: 150}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var67))
 		if templ_7745c5c3_Err != nil {
@@ -1374,7 +1374,7 @@ func agendaCard(event appointment.CalendarEvent) templ.Component {
 		var templ_7745c5c3_Var68 string
 		templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.JoinStringErrs(event.CustomerName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 325, Col: 183}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 330, Col: 183}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var68))
 		if templ_7745c5c3_Err != nil {
@@ -1387,7 +1387,7 @@ func agendaCard(event appointment.CalendarEvent) templ.Component {
 		var templ_7745c5c3_Var69 string
 		templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.JoinStringErrs(event.JobNumber)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 325, Col: 206}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 330, Col: 206}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var69))
 		if templ_7745c5c3_Err != nil {
@@ -1400,7 +1400,7 @@ func agendaCard(event appointment.CalendarEvent) templ.Component {
 		var templ_7745c5c3_Var70 string
 		templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.JoinStringErrs(calendarLocalDateTime(event.StartsAt))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 325, Col: 263}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 330, Col: 263}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var70))
 		if templ_7745c5c3_Err != nil {
@@ -1413,7 +1413,7 @@ func agendaCard(event appointment.CalendarEvent) templ.Component {
 		var templ_7745c5c3_Var71 string
 		templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.JoinStringErrs(calendarLocalTime(event.EndsAt))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 325, Col: 301}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 330, Col: 301}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var71))
 		if templ_7745c5c3_Err != nil {
@@ -1426,7 +1426,7 @@ func agendaCard(event appointment.CalendarEvent) templ.Component {
 		var templ_7745c5c3_Var72 string
 		templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.JoinStringErrs(event.VolumeM3)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 325, Col: 332}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 330, Col: 332}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var72))
 		if templ_7745c5c3_Err != nil {
@@ -1439,7 +1439,7 @@ func agendaCard(event appointment.CalendarEvent) templ.Component {
 		var templ_7745c5c3_Var73 string
 		templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.JoinStringErrs(event.Locality)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 325, Col: 358}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 330, Col: 358}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var73))
 		if templ_7745c5c3_Err != nil {
@@ -1452,7 +1452,7 @@ func agendaCard(event appointment.CalendarEvent) templ.Component {
 		var templ_7745c5c3_Var74 string
 		templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.JoinStringErrs(namesDrivers(event.Drivers))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 325, Col: 396}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 330, Col: 396}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var74))
 		if templ_7745c5c3_Err != nil {
@@ -1465,7 +1465,7 @@ func agendaCard(event appointment.CalendarEvent) templ.Component {
 		var templ_7745c5c3_Var75 string
 		templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.JoinStringErrs(namesResources(event.Resources))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 325, Col: 435}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 330, Col: 435}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var75))
 		if templ_7745c5c3_Err != nil {
@@ -1478,7 +1478,7 @@ func agendaCard(event appointment.CalendarEvent) templ.Component {
 		var templ_7745c5c3_Var76 templ.SafeURL
 		templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.JoinURLErrs(event.MapsURL)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 326, Col: 78}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 331, Col: 78}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var76))
 		if templ_7745c5c3_Err != nil {
@@ -1491,7 +1491,7 @@ func agendaCard(event appointment.CalendarEvent) templ.Component {
 		var templ_7745c5c3_Var77 templ.SafeURL
 		templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.JoinURLErrs("/customers/" + event.CustomerID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 326, Col: 208}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar.templ`, Line: 331, Col: 208}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var77))
 		if templ_7745c5c3_Err != nil {

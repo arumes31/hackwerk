@@ -89,7 +89,7 @@ FOR UPDATE;
 
 -- name: SetConfirmationResponse :execrows
 UPDATE confirmation_requests
-SET response=sqlc.arg(response), responded_at=now(), updated_at=now()
+SET response=sqlc.arg(response), response_note=NULLIF(sqlc.arg(response_note)::text, ''), responded_at=now(), updated_at=now()
 WHERE id=sqlc.arg(id)::uuid AND status='active'
   AND (response IS NULL OR (response='callback_requested' AND sqlc.arg(response)::text IN ('confirmed','declined')));
 
@@ -194,7 +194,7 @@ SELECT n.id::text, n.channel, n.status, n.recipient_snapshot, n.attempt_count, n
        COALESCE(n.last_error_code, '')::text AS last_error_code,
        COALESCE(n.provider_id, '')::text AS provider_id,
        n.available_at, n.sent_at, n.created_at, n.updated_at,
-       cr.status AS confirmation_request_status, COALESCE(cr.response, '')::text AS response,
+       cr.status AS confirmation_request_status, COALESCE(cr.response, '')::text AS response, COALESCE(cr.response_note, '')::text AS response_note,
        cr.responded_at, cr.expires_at, n.reviewed_at
 FROM notifications n
 JOIN confirmation_requests cr ON cr.id=n.confirmation_request_id

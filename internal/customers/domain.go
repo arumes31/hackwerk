@@ -280,15 +280,16 @@ func MapsURL(customer CustomerInput) string {
 }
 
 type WaitlistFilter struct {
-	Query, JobType, Region, Urgency, PreferredMonth, Workflow, Sort, Direction string
-	MissingLocation, DurationIssue                                             bool
-	Page, PageSize                                                             int
+	Query, JobType, Region, Urgency, PreferredMonth, Workflow, DurationGroup, Sort, Direction string
+	MissingLocation, DurationIssue, Overdue, Unassigned, TransportPending                     bool
+	Page, PageSize                                                                            int
+	DurationReviewMinMinutes, DurationReviewMaxMinutes                                        int32
 }
 
 func (filter *WaitlistFilter) Normalize() {
 	allowedSort := map[string]bool{
 		"entered": true, "preferred": true, "urgency": true, "volume": true,
-		"region": true, "customer": true, "workflow": true, "updated": true,
+		"region": true, "customer": true, "workflow": true, "updated": true, "duration": true,
 	}
 	if !allowedSort[filter.Sort] {
 		filter.Sort = "entered"
@@ -318,13 +319,20 @@ func (filter *WaitlistFilter) Normalize() {
 	if filter.Workflow != "unplanned" && filter.Workflow != "proposal" && filter.Workflow != "scheduled" {
 		filter.Workflow = ""
 	}
+	if filter.DurationGroup != "short" && filter.DurationGroup != "medium" && filter.DurationGroup != "long" {
+		filter.DurationGroup = ""
+	}
 }
 
 // DurationNeedsReview centralizes the intentionally conservative duration
 // signal used by list filters. Values remain valid domain data; the flag only
 // asks a human to check unusually short or long estimates.
 func DurationNeedsReview(minutes int32) bool {
-	return minutes < 15 || minutes > 12*60
+	return DurationNeedsReviewWithin(minutes, 15, 12*60)
+}
+
+func DurationNeedsReviewWithin(minutes, minimum, maximum int32) bool {
+	return minutes < minimum || minutes > maximum
 }
 
 func parseOptionalDate(value string) (time.Time, error) {

@@ -487,7 +487,9 @@ func waitlistFilterFromRequest(request *http.Request) customers.WaitlistFilter {
 		Urgency: request.FormValue("urgency"), PreferredMonth: request.FormValue("month"),
 		Workflow: request.FormValue("workflow"), Sort: request.FormValue("sort"), Direction: request.FormValue("direction"),
 		MissingLocation: request.FormValue("missing_location") == "1",
-		DurationIssue:   request.FormValue("duration_issue") == "1", Page: queryPage(request), PageSize: 25,
+		DurationIssue:   request.FormValue("duration_issue") == "1", Overdue: request.FormValue("overdue") == "1",
+		Unassigned: request.FormValue("unassigned") == "1", TransportPending: request.FormValue("transport_pending") == "1",
+		DurationGroup: request.FormValue("duration_group"), Page: queryPage(request), PageSize: 25,
 	}
 	filter.Normalize()
 	return filter
@@ -497,7 +499,7 @@ func waitlistFilterLocation(filter customers.WaitlistFilter) string {
 	values := url.Values{}
 	for key, value := range map[string]string{
 		"type": filter.JobType, "region": filter.Region, "urgency": filter.Urgency, "month": filter.PreferredMonth,
-		"workflow": filter.Workflow, "sort": filter.Sort, "direction": filter.Direction,
+		"workflow": filter.Workflow, "duration_group": filter.DurationGroup, "sort": filter.Sort, "direction": filter.Direction,
 	} {
 		if value != "" {
 			values.Set(key, value)
@@ -508,6 +510,15 @@ func waitlistFilterLocation(filter customers.WaitlistFilter) string {
 	}
 	if filter.DurationIssue {
 		values.Set("duration_issue", "1")
+	}
+	if filter.Overdue {
+		values.Set("overdue", "1")
+	}
+	if filter.Unassigned {
+		values.Set("unassigned", "1")
+	}
+	if filter.TransportPending {
+		values.Set("transport_pending", "1")
 	}
 	if encoded := values.Encode(); encoded != "" {
 		return "/waitlist?" + encoded

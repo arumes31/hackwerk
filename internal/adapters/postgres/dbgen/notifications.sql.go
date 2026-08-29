@@ -444,7 +444,7 @@ SELECT n.id::text, n.channel, n.status, n.recipient_snapshot, n.attempt_count, n
        COALESCE(n.last_error_code, '')::text AS last_error_code,
        COALESCE(n.provider_id, '')::text AS provider_id,
        n.available_at, n.sent_at, n.created_at, n.updated_at,
-       cr.status AS confirmation_request_status, COALESCE(cr.response, '')::text AS response,
+       cr.status AS confirmation_request_status, COALESCE(cr.response, '')::text AS response, COALESCE(cr.response_note, '')::text AS response_note,
        cr.responded_at, cr.expires_at, n.reviewed_at
 FROM notifications n
 JOIN confirmation_requests cr ON cr.id=n.confirmation_request_id
@@ -467,6 +467,7 @@ type ListAppointmentNotificationsRow struct {
 	UpdatedAt                 pgtype.Timestamptz
 	ConfirmationRequestStatus string
 	Response                  string
+	ResponseNote              string
 	RespondedAt               pgtype.Timestamptz
 	ExpiresAt                 pgtype.Timestamptz
 	ReviewedAt                pgtype.Timestamptz
@@ -496,6 +497,7 @@ func (q *Queries) ListAppointmentNotifications(ctx context.Context, appointmentI
 			&i.UpdatedAt,
 			&i.ConfirmationRequestStatus,
 			&i.Response,
+			&i.ResponseNote,
 			&i.RespondedAt,
 			&i.ExpiresAt,
 			&i.ReviewedAt,
@@ -945,18 +947,19 @@ func (q *Queries) SetAppointmentNotificationOverride(ctx context.Context, arg Se
 
 const setConfirmationResponse = `-- name: SetConfirmationResponse :execrows
 UPDATE confirmation_requests
-SET response=$1, responded_at=now(), updated_at=now()
-WHERE id=$2::uuid AND status='active'
+SET response=$1, response_note=NULLIF($2::text, ''), responded_at=now(), updated_at=now()
+WHERE id=$3::uuid AND status='active'
   AND (response IS NULL OR (response='callback_requested' AND $1::text IN ('confirmed','declined')))
 `
 
 type SetConfirmationResponseParams struct {
-	Response *string
-	ID       pgtype.UUID
+	Response     *string
+	ResponseNote string
+	ID           pgtype.UUID
 }
 
 func (q *Queries) SetConfirmationResponse(ctx context.Context, arg SetConfirmationResponseParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setConfirmationResponse, arg.Response, arg.ID)
+	result, err := q.db.Exec(ctx, setConfirmationResponse, arg.Response, arg.ResponseNote, arg.ID)
 	if err != nil {
 		return 0, err
 	}

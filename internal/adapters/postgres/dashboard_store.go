@@ -20,6 +20,7 @@ func NewDashboardStore(pool *pgxpool.Pool) *DashboardStore {
 func (store *DashboardStore) Load(ctx context.Context, window dashboard.Window) (dashboard.Snapshot, error) {
 	counts, err := store.queries.GetDashboardCounts(ctx, dbgen.GetDashboardCountsParams{
 		DayStart: timestamp(window.DayStart), DayEnd: timestamp(window.DayEnd), HorizonEnd: timestamp(window.HorizonEnd), PendingBefore: timestamp(window.PendingBefore),
+		OwnerUserID: mustUUID(window.OwnerUserID),
 	})
 	if err != nil {
 		return dashboard.Snapshot{}, err
@@ -51,7 +52,7 @@ func (store *DashboardStore) Load(ctx context.Context, window dashboard.Window) 
 
 	result := dashboard.Snapshot{Counts: dashboard.Counts{
 		Waitlist: counts.WaitlistCount, Appointments: counts.AppointmentCount, Attention: counts.AttentionCount,
-		NotificationIssues: counts.NotificationIssueCount, Overrides: counts.OverrideCount, ActiveDrivers: counts.ActiveDriverCount,
+		NotificationIssues: counts.NotificationIssueCount, Overrides: counts.OverrideCount, ActiveDrivers: counts.ActiveDriverCount, VoiceDrafts: counts.VoiceDraftCount,
 	}}
 	result.Appointments = make([]dashboard.Appointment, 0, len(appointmentRows))
 	for _, row := range appointmentRows {

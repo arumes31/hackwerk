@@ -289,6 +289,9 @@ func TestCustomerServiceRejectsInvalidArgumentsBeforeStore(t *testing.T) {
 	if _, err := NewService(nil); err == nil {
 		t.Fatal("NewService(nil) accepted a nil store")
 	}
+	if _, err := NewService(&storeStub{}, WithDurationReviewThresholds(90, 60)); err == nil {
+		t.Fatal("NewService accepted inverted duration review thresholds")
+	}
 	service, _ := NewService(&storeStub{})
 	driver := auth.Actor{UserID: "driver-1", Role: auth.RoleDriver}
 	admin := auth.Actor{UserID: "admin-1", Role: auth.RoleAdmin}
@@ -324,6 +327,22 @@ func TestCustomerServiceRejectsInvalidArgumentsBeforeStore(t *testing.T) {
 	}
 	if err := PrepareIntake(nil); !errors.Is(err, ErrValidation) {
 		t.Fatalf("PrepareIntake(nil) = %v", err)
+	}
+}
+
+func TestCustomerServiceAppliesConfiguredDurationReviewThresholds(t *testing.T) {
+	t.Parallel()
+	store := &storeStub{}
+	service, err := NewService(store, WithDurationReviewThresholds(30, 600))
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := auth.Actor{UserID: "driver-1", Role: auth.RoleDriver}
+	if _, err := service.ListWaitlist(t.Context(), actor, WaitlistFilter{}); err != nil {
+		t.Fatal(err)
+	}
+	if store.waitlistFilter.DurationReviewMinMinutes != 30 || store.waitlistFilter.DurationReviewMaxMinutes != 600 {
+		t.Fatalf("configured thresholds = %#v", store.waitlistFilter)
 	}
 }
 

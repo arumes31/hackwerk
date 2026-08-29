@@ -6,6 +6,7 @@ type LoginData struct {
 	Page     PageData
 	Username string
 	Error    string
+	Notice   string
 }
 
 func loginBuildVersion(displayVersion string) string {
@@ -47,6 +48,9 @@ templ Login(data LoginData) {
 					if data.Error != "" {
 						<div id="login-error" class="login-alert" role="alert" tabindex="-1">{ data.Error }</div>
 					}
+					if data.Notice != "" {
+						<div class="form-alert form-alert--info" role="status">{ data.Notice }</div>
+					}
 					<form method="post" action="/login" class="login-form">
 						<div class="login-field">
 							<label for="username">Benutzername</label>
@@ -54,7 +58,7 @@ templ Login(data LoginData) {
 						</div>
 						<div class="login-field">
 							<label for="password">Passwort</label>
-							<input id="password" name="password" type="password" autocomplete="current-password" placeholder="Passwort eingeben" required/>
+							<input id="password" name="password" type="password" autocomplete="current-password" placeholder="Passwort eingeben" data-password-input required/>
 						</div>
 						<button class="login-submit" type="submit">
 							<span>Anmelden</span>

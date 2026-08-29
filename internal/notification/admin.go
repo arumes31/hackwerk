@@ -30,6 +30,7 @@ type Status struct {
 	ProviderReference  string    `json:"provider_reference,omitempty"`
 	ConfirmationStatus string    `json:"confirmation_status,omitempty"`
 	Response           string    `json:"response,omitempty"`
+	ResponseNote       string    `json:"response_note,omitempty"`
 	AttemptCount       int32     `json:"attempt_count"`
 	MaxAttempts        int32     `json:"max_attempts"`
 	AvailableAt        time.Time `json:"available_at,omitempty"`

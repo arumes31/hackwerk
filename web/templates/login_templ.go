@@ -14,6 +14,7 @@ type LoginData struct {
 	Page     PageData
 	Username string
 	Error    string
+	Notice   string
 }
 
 func loginBuildVersion(displayVersion string) string {
@@ -68,7 +69,7 @@ func Login(data LoginData) templ.Component {
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(data.Page.AppName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 42, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 43, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
@@ -86,7 +87,7 @@ func Login(data LoginData) templ.Component {
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(data.Error)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 48, Col: 87}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 49, Col: 87}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
@@ -97,46 +98,65 @@ func Login(data LoginData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<form method=\"post\" action=\"/login\" class=\"login-form\"><div class=\"login-field\"><label for=\"username\">Benutzername</label> <input id=\"username\" name=\"username\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
+		if data.Notice != "" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"form-alert form-alert--info\" role=\"status\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var4 string
+			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(data.Notice)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 52, Col: 74}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		}
-		var templ_7745c5c3_Var4 string
-		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Username)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 53, Col: 65}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" autocomplete=\"username\" autocapitalize=\"none\" spellcheck=\"false\" placeholder=\"Einsatz-ID oder Name\" required autofocus></div><div class=\"login-field\"><label for=\"password\">Passwort</label> <input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Passwort eingeben\" required></div><button class=\"login-submit\" type=\"submit\"><span>Anmelden</span> <svg viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 3.5a7.5 7.5 0 0 0-7.5 7.5m15 0A7.5 7.5 0 0 0 12 3.5m-4.7 8.1A4.7 4.7 0 0 1 12 6.9a4.7 4.7 0 0 1 4.7 4.7m-7.2 1.1A2.5 2.5 0 0 1 12 10.2a2.5 2.5 0 0 1 2.5 2.5c0 3.5-1 6-2.5 7.8m-5.1-6.9c.2 3.2 1 5.6 2.4 7m7.8-7c-.2 3.2-1 5.6-2.4 7\"></path></svg></button></form></section></main><footer class=\"login-meta\" aria-label=\"Buildinformationen\"><span>HWK-SYS // V ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<form method=\"post\" action=\"/login\" class=\"login-form\"><div class=\"login-field\"><label for=\"username\">Benutzername</label> <input id=\"username\" name=\"username\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var5 string
-		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(loginBuildVersion(data.Page.BuildVersion))
+		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Username)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 69, Col: 66}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 57, Col: 65}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, " · ID: ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" autocomplete=\"username\" autocapitalize=\"none\" spellcheck=\"false\" placeholder=\"Einsatz-ID oder Name\" required autofocus></div><div class=\"login-field\"><label for=\"password\">Passwort</label> <input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Passwort eingeben\" data-password-input required></div><button class=\"login-submit\" type=\"submit\"><span>Anmelden</span> <svg viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 3.5a7.5 7.5 0 0 0-7.5 7.5m15 0A7.5 7.5 0 0 0 12 3.5m-4.7 8.1A4.7 4.7 0 0 1 12 6.9a4.7 4.7 0 0 1 4.7 4.7m-7.2 1.1A2.5 2.5 0 0 1 12 10.2a2.5 2.5 0 0 1 2.5 2.5c0 3.5-1 6-2.5 7.8m-5.1-6.9c.2 3.2 1 5.6 2.4 7m7.8-7c-.2 3.2-1 5.6-2.4 7\"></path></svg></button></form></section></main><footer class=\"login-meta\" aria-label=\"Buildinformationen\"><span>HWK-SYS // V ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 string
-		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(loginBuildID(data.Page.BuildVersion))
+		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(loginBuildVersion(data.Page.BuildVersion))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 69, Col: 114}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 73, Col: 66}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</span><nav aria-label=\"Rechtliche Informationen\"><a href=\"/impressum\">Impressum</a> <a href=\"/datenschutz\">Datenschutz</a> <a href=\"/cookies\">Cookies</a> <button type=\"button\" data-privacy-notice-open>Cookie-Hinweis</button></nav></footer>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, " · ID: ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var7 string
+		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(loginBuildID(data.Page.BuildVersion))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 73, Col: 114}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</span><nav aria-label=\"Rechtliche Informationen\"><a href=\"/impressum\">Impressum</a> <a href=\"/datenschutz\">Datenschutz</a> <a href=\"/cookies\">Cookies</a> <button type=\"button\" data-privacy-notice-open>Cookie-Hinweis</button></nav></footer>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -144,7 +164,7 @@ func Login(data LoginData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<div class=\"visually-hidden\" aria-live=\"polite\" data-live-status></div></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<div class=\"visually-hidden\" aria-live=\"polite\" data-live-status></div></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

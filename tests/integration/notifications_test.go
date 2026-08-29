@@ -63,11 +63,11 @@ func TestFixCreatesHashOnlyConfirmationAndIdempotentResponses(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			first, err := confirmationService.Respond(fixture.ctx, material.Raw, view.FormNonce, wantedResponse, "public-first")
+			first, err := confirmationService.Respond(fixture.ctx, material.Raw, view.FormNonce, wantedResponse, "", "public-first")
 			if err != nil {
 				t.Fatal(err)
 			}
-			second, err := confirmationService.Respond(fixture.ctx, material.Raw, view.FormNonce, wantedResponse, "public-repeat")
+			second, err := confirmationService.Respond(fixture.ctx, material.Raw, view.FormNonce, wantedResponse, "", "public-repeat")
 			if err != nil || first.Response != wantedResponse || second.Response != wantedResponse {
 				t.Fatalf("idempotent response first=%+v second=%+v err=%v", first, second, err)
 			}
@@ -153,7 +153,7 @@ func TestMoveRevokesOldTokenAndPlansNewVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	confirmed, err := confirmationService.Respond(fixture.ctx, oldMaterial.Raw, view.FormNonce, notification.ResponseConfirmed, "confirm")
+	confirmed, err := confirmationService.Respond(fixture.ctx, oldMaterial.Raw, view.FormNonce, notification.ResponseConfirmed, "", "confirm")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestAdminCanResetResponseAndReissueTokenWithReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	confirmed, err := confirmationService.Respond(fixture.ctx, oldMaterial.Raw, view.FormNonce, notification.ResponseConfirmed, "confirm")
+	confirmed, err := confirmationService.Respond(fixture.ctx, oldMaterial.Raw, view.FormNonce, notification.ResponseConfirmed, "", "confirm")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -80,7 +80,7 @@ func (s *PlanningStore) SaveRun(ctx context.Context, actor auth.Actor, snapshot 
 	if err != nil {
 		return planning.Run{}, planning.ErrValidation
 	}
-	configJSON, err := json.Marshal(cfg)
+	configJSON, err := json.Marshal(planning.RunSnapshot{Config: cfg, Exclusions: planning.ExplainExclusions(snapshot, suggestions, from, to)})
 	if err != nil {
 		return planning.Run{}, err
 	}
@@ -153,7 +153,20 @@ func (s *PlanningStore) ListRun(ctx context.Context, runID string) (planning.Run
 	if len(rows) == 0 {
 		return planning.Run{}, planning.ErrNotFound
 	}
-	result := planning.Run{ID: runID, JobID: rows[0].RJobID}
+	result := planning.Run{ID: runID, JobID: rows[0].RJobID, CreatedAt: rows[0].CreatedAt.Time.UTC(), ExpiresAt: rows[0].ExpiresAt.Time.UTC()}
+	var runSnapshot planning.RunSnapshot
+	if err := json.Unmarshal(rows[0].ConfigSnapshot, &runSnapshot); err != nil {
+		return planning.Run{}, errors.New("planning: invalid stored run snapshot")
+	}
+	// Runs created before the explanatory envelope stored Config directly.
+	if runSnapshot.Config.HorizonDays == 0 {
+		if err := json.Unmarshal(rows[0].ConfigSnapshot, &runSnapshot.Config); err != nil {
+			return planning.Run{}, errors.New("planning: invalid stored config")
+		}
+	}
+	result.Exclusions = runSnapshot.Exclusions
+	result.HorizonDays = runSnapshot.Config.HorizonDays
+	result.CandidateLimit = runSnapshot.Config.CandidateLimit
 	for _, row := range rows {
 		var component planning.Component
 		if json.Unmarshal(row.Components, &component) != nil {

@@ -63,20 +63,20 @@ type Customer struct {
 }
 
 type Job struct {
-	ID, JobNumber, VolumeM3, PreferredStartDate, PreferredEndDate       string
-	PreferenceText, Region, WorkflowStatus                              string
-	JobType                                                             JobType
-	TransportMode                                                       TransportMode
-	Urgency                                                             Urgency
-	Source                                                              Source
-	EstimatedHackMinutes, EstimatedTransportMinutes, TransportTripCount int32
-	ExternalTransportConfirmed                                          bool
-	ReceivedAt                                                          time.Time
-	ArchivedAt                                                          *time.Time
-	Version                                                             int32
-	PileLatitude, PileLongitude                                         *float64
-	PileLocationSource                                                  PileLocationSource
-	PileMapsURL                                                         string
+	ID, JobNumber, VolumeM3, PreferredStartDate, PreferredEndDate, ActiveAppointmentID string
+	PreferenceText, Region, WorkflowStatus                                             string
+	JobType                                                                            JobType
+	TransportMode                                                                      TransportMode
+	Urgency                                                                            Urgency
+	Source                                                                             Source
+	EstimatedHackMinutes, EstimatedTransportMinutes, TransportTripCount                int32
+	ExternalTransportConfirmed                                                         bool
+	ReceivedAt                                                                         time.Time
+	ArchivedAt                                                                         *time.Time
+	Version                                                                            int32
+	PileLatitude, PileLongitude                                                        *float64
+	PileLocationSource                                                                 PileLocationSource
+	PileMapsURL                                                                        string
 }
 
 type Note struct {
@@ -102,17 +102,17 @@ type CustomerDetail struct {
 type Duplicate struct{ ID, FirstName, LastName, CompanyName, Locality string }
 
 type WaitlistItem struct {
-	WaitlistID, JobID, JobNumber, VolumeM3, PreferredStartDate, PreferredEndDate   string
-	PreferenceText, Region, CustomerID, FirstName, LastName, CompanyName, Locality string
-	NoteExcerpt                                                                    string
-	JobType                                                                        JobType
-	TransportMode                                                                  TransportMode
-	Urgency                                                                        Urgency
-	EnteredAt                                                                      time.Time
-	ManualPriority, WaitlistVersion, EstimatedHackMinutes, AgeDays                 int32
-	WorkflowStatus, NextStep                                                       string
-	UpdatedAt                                                                      time.Time
-	HasPileLocation, HasActiveAppointment, DurationIssue                           bool
+	WaitlistID, JobID, JobNumber, VolumeM3, PreferredStartDate, PreferredEndDate                                                    string
+	PreferenceText, Region, CustomerID, FirstName, LastName, CompanyName, Locality                                                  string
+	NoteExcerpt                                                                                                                     string
+	JobType                                                                                                                         JobType
+	TransportMode                                                                                                                   TransportMode
+	Urgency                                                                                                                         Urgency
+	EnteredAt                                                                                                                       time.Time
+	ManualPriority, WaitlistVersion, EstimatedHackMinutes, EstimatedTransportMinutes, TotalMinutes, AgeDays                         int32
+	WorkflowStatus, NextStep                                                                                                        string
+	UpdatedAt                                                                                                                       time.Time
+	HasPileLocation, HasPileSource, HasActiveAppointment, HasInternalAssignment, ExternalTransportConfirmed, DurationIssue, Overdue bool
 }
 
 type JobDraft struct {
@@ -237,13 +237,37 @@ func (service *Service) ArchiveJob(ctx context.Context, actor auth.Actor, id str
 	return service.store.ArchiveJob(ctx, actor, id, version, requestID)
 }
 
-type Service struct{ store Store }
+type Service struct {
+	store                                              Store
+	durationReviewMinMinutes, durationReviewMaxMinutes int32
+}
 
-func NewService(store Store) (*Service, error) {
+type ServiceOption func(*Service) error
+
+func WithDurationReviewThresholds(minimum, maximum int32) ServiceOption {
+	return func(service *Service) error {
+		if minimum < 1 || maximum <= minimum {
+			return errors.New("customers: invalid duration review thresholds")
+		}
+		service.durationReviewMinMinutes, service.durationReviewMaxMinutes = minimum, maximum
+		return nil
+	}
+}
+
+func NewService(store Store, options ...ServiceOption) (*Service, error) {
 	if store == nil {
 		return nil, errors.New("customers: store is required")
 	}
-	return &Service{store: store}, nil
+	service := &Service{store: store, durationReviewMinMinutes: 15, durationReviewMaxMinutes: 12 * 60}
+	for _, option := range options {
+		if option == nil {
+			return nil, errors.New("customers: service option is required")
+		}
+		if err := option(service); err != nil {
+			return nil, err
+		}
+	}
+	return service, nil
 }
 
 func (service *Service) CreateIntake(ctx context.Context, actor auth.Actor, input IntakeInput, requestID string) (CreatedIntake, error) {
@@ -421,6 +445,8 @@ func (service *Service) ListWaitlist(ctx context.Context, actor auth.Actor, filt
 		return Page[WaitlistItem]{}, err
 	}
 	filter.Normalize()
+	filter.DurationReviewMinMinutes = service.durationReviewMinMinutes
+	filter.DurationReviewMaxMinutes = service.durationReviewMaxMinutes
 	return service.store.ListWaitlist(ctx, filter)
 }
 

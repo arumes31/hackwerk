@@ -92,7 +92,12 @@ templ Calendar(data CalendarData) {
 							<button class="button button--quiet" type="button" data-calendar-jump="next-week">Nächste Woche</button>
 							<label>Datum <input type="date" data-calendar-date aria-label="Kalenderdatum wählen"/></label>
 							<label class="check-label"><input type="checkbox" data-calendar-weekends checked/> Wochenende</label>
+							<button class="button button--quiet" type="button" data-calendar-reload>Neu laden</button>
+							<button class="button button--quiet" type="button" data-calendar-share>Ansicht kopieren</button>
+							<button class="button button--quiet" type="button" data-print-page>Drucken</button>
 						</div>
+						<div class="calendar-range-summary"><strong data-calendar-range>Datumsbereich wird geladen</strong><span data-calendar-freshness></span><span data-calendar-timezone>Anzeige: Europe/Vienna</span></div>
+						<div class="form-alert form-alert--warning" data-calendar-timezone-warning hidden></div>
 						<div class="calendar-legend" aria-label="Kalenderlegende">
 							<span><i class="appointment-badge--proposal" aria-hidden="true"></i> Vorschlag</span>
 							<span><i class="appointment-badge--fixed" aria-hidden="true"></i> Fixiert</span>

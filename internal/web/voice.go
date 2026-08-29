@@ -476,7 +476,7 @@ func voiceRecordingAudio(service *voice.Service, logger *slog.Logger) http.Handl
 		}
 		response.Header().Set("Cache-Control", "private, no-store")
 		response.Header().Set("Content-Type", recording.ContentType)
-		response.Header().Set("Content-Disposition", "inline; filename=aufnahme"+mediaExtension(recording.ContentType))
+		response.Header().Set("Content-Disposition", `inline; filename="aufnahme`+mediaExtension(recording.ContentType)+`"`)
 		response.Header().Set("X-Content-Type-Options", "nosniff")
 		http.ServeContent(response, request, "", recording.RecordedAt, bytes.NewReader(recording.Bytes))
 	}

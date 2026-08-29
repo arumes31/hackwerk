@@ -515,13 +515,13 @@ templ CustomerDetail(data CustomerDetailData) {
 					</article>
 					<article class="record-card">
 						<div>
-							<h2>Terminhistorie</h2>
+							<h2>Terminhistorie</h2><label>Ereignistyp filtern<select data-history-filter><option value="">Alle Ereignisse</option><option value="proposal">Vorschläge</option><option value="fixed">Fixierte Termine</option><option value="completed">Erledigte Termine</option><option value="cancelled">Abgesagte Termine</option></select></label>
 							if len(data.Detail.Appointments) == 0 {
 								<p>Noch keine Termine angelegt.</p>
 							} else {
 								<ul class="history-list">
 									for _, item := range data.Detail.Appointments {
-										<li><span><strong>{ item.JobNumber }</strong> · { customerLocalDateTime(item.StartsAt) }–{ customerLocalTime(item.EndsAt) }</span><span class="status-badge">{ customerAppointmentStatus(item) }</span></li>
+										<li data-history-event={ item.Lifecycle }><span><strong>{ item.JobNumber }</strong> · { customerLocalDateTime(item.StartsAt) }–{ customerLocalTime(item.EndsAt) }</span><span class="status-badge">{ customerAppointmentStatus(item) }</span></li>
 									}
 								</ul>
 							}
@@ -554,7 +554,14 @@ templ CustomerDetail(data CustomerDetailData) {
 									<span class="compact-row__action">{ jobActionLabel(job.WorkflowStatus, job.ArchivedAt != nil) }</span>
 								</summary>
 								<div class="compact-job-row__body">
-									<div class="action-row"><a class="button button--quiet" href={ "/jobs/" + job.ID + "/duplicate" }>Als neuen Entwurf duplizieren</a><form method="post" action={ "/recent/jobs/" + job.ID }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Als zuletzt geöffnet merken</button></form></div>
+									<div class="action-row">
+										<a class="button button--quiet" href={ "/waitlist?q=" + url.QueryEscape(job.JobNumber) }>In Warteliste fokussieren</a>
+										if job.ActiveAppointmentID != "" {
+											<a class="button button--quiet" href={ "/calendar?appointment=" + url.QueryEscape(job.ActiveAppointmentID) }>Blockierenden Termin öffnen</a>
+										}
+										<a class="button button--quiet" href={ "/jobs/" + job.ID + "/duplicate" }>Als neuen Entwurf duplizieren</a>
+										<form method="post" action={ "/recent/jobs/" + job.ID }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Als zuletzt geöffnet merken</button></form>
+									</div>
 									if job.ArchivedAt == nil && jobWorkflowEditable(job.WorkflowStatus) {
 										<form method="post" action={ "/jobs/" + job.ID } class="form-grid compact-form" data-transport-form data-track-change data-record-id={ job.ID }>
 											if job.WorkflowStatus == "scheduled" {
@@ -664,17 +671,17 @@ templ JobForm(data JobFormData) {
 templ Waitlist(data WaitlistData) {
 	<!DOCTYPE html>
 	<html lang="de-AT">
-		@documentHead(data.Shell.Page, "Warteliste – "+data.Shell.Page.AppName)
+		@documentHead(data.Shell.Page, fmt.Sprintf("%d Treffer – Warteliste – %s", data.Page.Total, data.Shell.Page.AppName))
 		<body>
 			@appHeader(data.Shell)
 			<main id="hauptinhalt" class="page compact-page waitlist-page">
-				<div class="page-heading"><div><p class="eyebrow">Arbeitsvorrat</p><h1>Warteliste</h1><p>{ fmt.Sprint(data.Page.Total) } aktive Aufträge</p></div><a class="button" href="/customers/new">Neuen Auftrag erfassen</a></div>
+				<div class="page-heading"><div><p class="eyebrow">Arbeitsvorrat</p><h1>Warteliste</h1><p>{ fmt.Sprint(data.Page.Total) } aktive Aufträge. Die Position ist relativ zu Filtern, Priorität und Sortierung – keine dauerhaft feste Rangnummer.</p></div><a class="button" href="/customers/new">Neuen Auftrag erfassen</a></div>
 				if data.Error != "" {
 					<div class="form-alert" role="alert">{ data.Error }</div>
 				}
 				<details class="compact-filter-panel">
 					<summary>Filter &amp; Sortierung</summary>
-					<form method="get" action="/waitlist" class="filter-grid"><label>Suche<input name="q" value={ data.Filter.Query } data-primary-search/></label><label>Typ<select name="type"><option value="">Alle</option><option value="chipping_only" selected?={ data.Filter.JobType == "chipping_only" }>Nur Hackmaschine</option><option value="chipping_with_transport" selected?={ data.Filter.JobType == "chipping_with_transport" }>Mit Transport</option></select></label><label>Region<input name="region" value={ data.Filter.Region }/></label><label>Dringlichkeit<select name="urgency"><option value="">Alle</option><option value="low" selected?={ data.Filter.Urgency == "low" }>Niedrig</option><option value="normal" selected?={ data.Filter.Urgency == "normal" }>Normal</option><option value="high" selected?={ data.Filter.Urgency == "high" }>Hoch</option><option value="urgent" selected?={ data.Filter.Urgency == "urgent" }>Dringend</option></select></label><label>Planungsstand<select name="workflow"><option value="">Alle</option><option value="unplanned" selected?={ data.Filter.Workflow == "unplanned" }>Ungeplant</option><option value="proposal" selected?={ data.Filter.Workflow == "proposal" }>Vorschlag</option><option value="scheduled" selected?={ data.Filter.Workflow == "scheduled" }>Eingeplant</option></select></label><label>Wunschmonat<input name="month" type="month" value={ data.Filter.PreferredMonth }/></label><label class="check-label"><input name="missing_location" type="checkbox" value="1" checked?={ data.Filter.MissingLocation }/> Haufenstandort fehlt</label><label class="check-label"><input name="duration_issue" type="checkbox" value="1" checked?={ data.Filter.DurationIssue }/> Dauer prüfen</label><label>Sortierung<select name="sort"><option value="entered" selected?={ data.Filter.Sort == "entered" }>Eingang</option><option value="preferred" selected?={ data.Filter.Sort == "preferred" }>Wunschzeitraum</option><option value="urgency" selected?={ data.Filter.Sort == "urgency" }>Dringlichkeit</option><option value="volume" selected?={ data.Filter.Sort == "volume" }>Holzmenge</option><option value="region" selected?={ data.Filter.Sort == "region" }>Region</option><option value="customer" selected?={ data.Filter.Sort == "customer" }>Kunde</option><option value="workflow" selected?={ data.Filter.Sort == "workflow" }>Planungsstand</option><option value="updated" selected?={ data.Filter.Sort == "updated" }>Zuletzt geändert</option></select></label><label>Richtung<select name="direction"><option value="asc" selected?={ data.Filter.Direction == "asc" }>Aufsteigend</option><option value="desc" selected?={ data.Filter.Direction == "desc" }>Absteigend</option></select></label><button class="button button--quiet" type="submit">Anwenden</button><a class="button button--quiet" href="/waitlist">Alle Filter zurücksetzen</a></form>
+					<form method="get" action="/waitlist" class="filter-grid"><label>Suche<input name="q" value={ data.Filter.Query } data-primary-search/></label><label>Typ<select name="type"><option value="">Alle</option><option value="chipping_only" selected?={ data.Filter.JobType == "chipping_only" }>Nur Hackmaschine</option><option value="chipping_with_transport" selected?={ data.Filter.JobType == "chipping_with_transport" }>Mit Transport</option></select></label><label>Region<input name="region" value={ data.Filter.Region }/></label><label>Dringlichkeit<select name="urgency"><option value="">Alle</option><option value="low" selected?={ data.Filter.Urgency == "low" }>Niedrig</option><option value="normal" selected?={ data.Filter.Urgency == "normal" }>Normal</option><option value="high" selected?={ data.Filter.Urgency == "high" }>Hoch</option><option value="urgent" selected?={ data.Filter.Urgency == "urgent" }>Dringend</option></select></label><label>Planungsstand<select name="workflow"><option value="">Alle</option><option value="unplanned" selected?={ data.Filter.Workflow == "unplanned" }>Ungeplant</option><option value="proposal" selected?={ data.Filter.Workflow == "proposal" }>Vorschlag</option><option value="scheduled" selected?={ data.Filter.Workflow == "scheduled" }>Eingeplant</option></select></label><label>Wunschmonat<input name="month" type="month" value={ data.Filter.PreferredMonth }/></label><label>Dauergruppe<select name="duration_group"><option value="">Alle</option><option value="short" selected?={ data.Filter.DurationGroup == "short" }>bis 2 Stunden</option><option value="medium" selected?={ data.Filter.DurationGroup == "medium" }>2–6 Stunden</option><option value="long" selected?={ data.Filter.DurationGroup == "long" }>über 6 Stunden</option></select></label><label class="check-label"><input name="missing_location" type="checkbox" value="1" checked?={ data.Filter.MissingLocation }/> Haufenstandort fehlt</label><label class="check-label"><input name="duration_issue" type="checkbox" value="1" checked?={ data.Filter.DurationIssue }/> Dauer prüfen</label><label class="check-label"><input name="overdue" type="checkbox" value="1" checked?={ data.Filter.Overdue }/> Wunschzeitraum überfällig</label><label class="check-label"><input name="unassigned" type="checkbox" value="1" checked?={ data.Filter.Unassigned }/> ohne interne Zuständigkeit</label><label class="check-label"><input name="transport_pending" type="checkbox" value="1" checked?={ data.Filter.TransportPending }/> Transport unbestätigt</label><label>Sortierung<select name="sort"><option value="entered" selected?={ data.Filter.Sort == "entered" }>Eingang</option><option value="preferred" selected?={ data.Filter.Sort == "preferred" }>Wunschzeitraum</option><option value="urgency" selected?={ data.Filter.Sort == "urgency" }>Dringlichkeit</option><option value="volume" selected?={ data.Filter.Sort == "volume" }>Holzmenge</option><option value="duration" selected?={ data.Filter.Sort == "duration" }>Gesamtdauer</option><option value="region" selected?={ data.Filter.Sort == "region" }>Region</option><option value="customer" selected?={ data.Filter.Sort == "customer" }>Kunde</option><option value="workflow" selected?={ data.Filter.Sort == "workflow" }>Planungsstand</option><option value="updated" selected?={ data.Filter.Sort == "updated" }>Zuletzt geändert</option></select></label><label>Richtung<select name="direction"><option value="asc" selected?={ data.Filter.Direction == "asc" }>Aufsteigend</option><option value="desc" selected?={ data.Filter.Direction == "desc" }>Absteigend</option></select></label><button class="button button--quiet" type="submit">Anwenden</button><a class="button button--quiet" href="/waitlist">Alle Filter zurücksetzen</a></form>
 				</details>
 				if waitlistHasFilters(data.Filter) {
 					<div class="action-row waitlist-filter-chips" aria-label="Aktive Filter">
@@ -732,15 +739,22 @@ templ Waitlist(data WaitlistData) {
 											}
 										</td>
 										<td data-label="Menge / Dauer">
-											<strong>{ item.VolumeM3 } m³</strong><small>{ durationLabel(item.EstimatedHackMinutes) } · { jobTypeLabel(item.JobType) }</small>
+											<strong>{ item.VolumeM3 } m³ · { durationLabel(item.TotalMinutes) }</strong><small>Hacken { durationLabel(item.EstimatedHackMinutes) } · Transport { durationLabel(item.EstimatedTransportMinutes) } · { jobTypeLabel(item.JobType) }</small>
 											if item.DurationIssue {
 												<span class="status-badge">Dauer prüfen</span>
 											}
-											if !item.HasPileLocation {
-												<span class="status-badge">Standort fehlt</span>
+											if !item.HasPileSource {
+												<span class="status-badge">Haufenadresse/Standortquelle fehlt</span>
+											} else if !item.HasPileLocation {
+												<span class="status-badge">Koordinaten fehlen</span>
 											}
 										</td>
-										<td data-label="Region / Wunsch">{ fallback(item.Region) }<small>{ fallback(item.PreferenceText) }</small></td>
+										<td data-label="Region / Wunsch">
+											{ fallback(item.Region) }<small>{ preferredRangeLabel(item.PreferredStartDate, item.PreferredEndDate) } · { fallback(item.PreferenceText) }</small>
+											if item.Overdue {
+												<span class="status-badge status-badge--failed">Wunschzeitraum überfällig</span>
+											}
+										</td>
 										<td data-label="Nächster Schritt"><strong>{ item.NextStep }</strong><small>{ urgencyLabel(item.Urgency) } · { workflowFilterLabel(item.WorkflowStatus) }</small></td>
 										<td data-label="Prio">{ fmt.Sprint(item.ManualPriority) }</td>
 										<td data-label="Aktionen">
@@ -792,12 +806,21 @@ templ pagination(base string, page int, total int, query string) {
 }
 
 templ waitlistHiddenFilter(filter customers.WaitlistFilter) {
-	<input type="hidden" name="type" value={ filter.JobType }/><input type="hidden" name="region" value={ filter.Region }/><input type="hidden" name="urgency" value={ filter.Urgency }/><input type="hidden" name="month" value={ filter.PreferredMonth }/><input type="hidden" name="workflow" value={ filter.Workflow }/><input type="hidden" name="sort" value={ filter.Sort }/><input type="hidden" name="direction" value={ filter.Direction }/>
+	<input type="hidden" name="type" value={ filter.JobType }/><input type="hidden" name="region" value={ filter.Region }/><input type="hidden" name="urgency" value={ filter.Urgency }/><input type="hidden" name="month" value={ filter.PreferredMonth }/><input type="hidden" name="workflow" value={ filter.Workflow }/><input type="hidden" name="duration_group" value={ filter.DurationGroup }/><input type="hidden" name="sort" value={ filter.Sort }/><input type="hidden" name="direction" value={ filter.Direction }/>
 	if filter.MissingLocation {
 		<input type="hidden" name="missing_location" value="1"/>
 	}
 	if filter.DurationIssue {
 		<input type="hidden" name="duration_issue" value="1"/>
+	}
+	if filter.Overdue {
+		<input type="hidden" name="overdue" value="1"/>
+	}
+	if filter.Unassigned {
+		<input type="hidden" name="unassigned" value="1"/>
+	}
+	if filter.TransportPending {
+		<input type="hidden" name="transport_pending" value="1"/>
 	}
 }
 
@@ -882,18 +905,28 @@ func waitlistQuery(filter customers.WaitlistFilter) string {
 	values.Set("urgency", filter.Urgency)
 	values.Set("month", filter.PreferredMonth)
 	values.Set("workflow", filter.Workflow)
+	values.Set("duration_group", filter.DurationGroup)
 	if filter.MissingLocation {
 		values.Set("missing_location", "1")
 	}
 	if filter.DurationIssue {
 		values.Set("duration_issue", "1")
 	}
+	if filter.Overdue {
+		values.Set("overdue", "1")
+	}
+	if filter.Unassigned {
+		values.Set("unassigned", "1")
+	}
+	if filter.TransportPending {
+		values.Set("transport_pending", "1")
+	}
 	values.Set("sort", filter.Sort)
 	values.Set("direction", filter.Direction)
 	return values.Encode()
 }
 func waitlistHasFilters(filter customers.WaitlistFilter) bool {
-	return filter.Query != "" || filter.JobType != "" || filter.Region != "" || filter.Urgency != "" || filter.PreferredMonth != "" || filter.Workflow != "" || filter.MissingLocation || filter.DurationIssue
+	return filter.Query != "" || filter.JobType != "" || filter.Region != "" || filter.Urgency != "" || filter.PreferredMonth != "" || filter.Workflow != "" || filter.DurationGroup != "" || filter.MissingLocation || filter.DurationIssue || filter.Overdue || filter.Unassigned || filter.TransportPending
 }
 func waitlistWithout(filter customers.WaitlistFilter, key string) string {
 	switch key {
@@ -909,6 +942,12 @@ func waitlistWithout(filter customers.WaitlistFilter, key string) string {
 		filter.MissingLocation = false
 	case "duration_issue":
 		filter.DurationIssue = false
+	case "overdue":
+		filter.Overdue = false
+	case "unassigned":
+		filter.Unassigned = false
+	case "transport_pending":
+		filter.TransportPending = false
 	}
 	return "/waitlist?" + waitlistQuery(filter)
 }

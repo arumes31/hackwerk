@@ -119,7 +119,7 @@ SELECT s.id::text, s.run_id::text, s.rank, s.starts_at, s.ends_at,
        s.score::text,
        s.components, s.reasons, s.warnings, s.routing_source,
        s.distance_meters, s.duration_seconds, s.status, r.job_id::text, r.job_version,
-       r.waitlist_version, r.created_at, r.expires_at
+       r.waitlist_version, r.created_at, r.expires_at, r.config_snapshot
 FROM planning_suggestions s
 JOIN planning_runs r ON r.id=s.run_id
 JOIN drivers d ON d.id=s.driver_id

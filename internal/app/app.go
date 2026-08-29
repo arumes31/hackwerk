@@ -43,7 +43,7 @@ func Serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	customerService, err := CustomerService(pool)
+	customerService, err := CustomerService(pool, cfg.Waitlist.DurationReviewMinMinutes, cfg.Waitlist.DurationReviewMaxMinutes)
 	if err != nil {
 		return err
 	}

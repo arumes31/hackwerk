@@ -16,7 +16,9 @@ SELECT
     (SELECT count(*) FROM appointments a
      WHERE a.starts_at < sqlc.arg(horizon_end)::timestamptz AND a.ends_at > sqlc.arg(day_start)::timestamptz
        AND a.lifecycle_status IN ('proposal','fixed') AND a.availability_override_reason IS NOT NULL)::bigint AS override_count,
-    (SELECT count(*) FROM drivers d WHERE d.active)::bigint AS active_driver_count;
+    (SELECT count(*) FROM drivers d WHERE d.active)::bigint AS active_driver_count,
+    (SELECT count(*) FROM voice_drafts v
+     WHERE v.owner_user_id=sqlc.arg(owner_user_id)::uuid AND v.status='needs_review' AND v.expires_at>now())::bigint AS voice_draft_count;
 
 -- name: ListDashboardAppointments :many
 SELECT a.id::text, a.job_id::text, j.customer_id::text AS customer_id, j.job_number, a.lifecycle_status, a.confirmation_status,

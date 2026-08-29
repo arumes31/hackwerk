@@ -591,6 +591,9 @@ func (store *CustomerStore) ListWaitlist(ctx context.Context, filter customers.W
 		Search: filter.Query, JobTypeFilter: filter.JobType, RegionFilter: filter.Region,
 		UrgencyFilter: filter.Urgency, MonthFilter: filter.PreferredMonth, WorkflowFilter: filter.Workflow,
 		MissingLocation: filter.MissingLocation, DurationIssue: filter.DurationIssue,
+		Overdue: filter.Overdue, Unassigned: filter.Unassigned, TransportPending: filter.TransportPending,
+		DurationGroup:     filter.DurationGroup,
+		DurationReviewMin: filter.DurationReviewMinMinutes, DurationReviewMax: filter.DurationReviewMaxMinutes,
 		Sort: filter.Sort, Direction: filter.Direction,
 		PageOffset: pageOffset, PageSize: pageSize,
 	}
@@ -607,11 +610,14 @@ func (store *CustomerStore) ListWaitlist(ctx context.Context, filter customers.W
 			FirstName: row.FirstName, LastName: row.LastName, CompanyName: row.CompanyName, Locality: row.Locality,
 			NoteExcerpt: row.NoteExcerpt, JobType: customers.JobType(row.JobType), TransportMode: customers.TransportMode(row.TransportMode),
 			Urgency: customers.Urgency(row.Urgency), EnteredAt: row.EnteredAt.Time, ManualPriority: row.ManualPriority,
-			WaitlistVersion: row.WaitlistVersion, EstimatedHackMinutes: row.EstimatedHackMinutes, AgeDays: row.AgeDays,
+			WaitlistVersion: row.WaitlistVersion, EstimatedHackMinutes: row.EstimatedHackMinutes,
+			EstimatedTransportMinutes: row.EstimatedTransportMinutes, TotalMinutes: row.TotalMinutes, AgeDays: row.AgeDays,
 			WorkflowStatus: row.WorkflowStatus, UpdatedAt: row.UpdatedAt.Time,
-			HasPileLocation: boolPointerValue(row.HasPileLocation), HasActiveAppointment: row.HasActiveAppointment,
+			HasPileLocation: boolPointerValue(row.HasPileLocation), HasPileSource: row.HasPileSource,
+			HasActiveAppointment: row.HasActiveAppointment, HasInternalAssignment: row.HasInternalAssignment,
+			ExternalTransportConfirmed: row.ExternalTransportConfirmed, Overdue: row.Overdue,
 		}
-		item.DurationIssue = customers.DurationNeedsReview(item.EstimatedHackMinutes)
+		item.DurationIssue = customers.DurationNeedsReviewWithin(item.TotalMinutes, filter.DurationReviewMinMinutes, filter.DurationReviewMaxMinutes)
 		item.NextStep = waitlistNextStep(item)
 		items = append(items, item)
 	}
@@ -619,6 +625,9 @@ func (store *CustomerStore) ListWaitlist(ctx context.Context, filter customers.W
 		Search: filter.Query, JobTypeFilter: filter.JobType, RegionFilter: filter.Region,
 		UrgencyFilter: filter.Urgency, MonthFilter: filter.PreferredMonth, WorkflowFilter: filter.Workflow,
 		MissingLocation: filter.MissingLocation, DurationIssue: filter.DurationIssue,
+		Overdue: filter.Overdue, Unassigned: filter.Unassigned, TransportPending: filter.TransportPending,
+		DurationGroup:     filter.DurationGroup,
+		DurationReviewMin: filter.DurationReviewMinMinutes, DurationReviewMax: filter.DurationReviewMaxMinutes,
 	})
 	if err != nil {
 		return customers.Page[customers.WaitlistItem]{}, err
@@ -841,7 +850,8 @@ func jobFromRow(row dbgen.ListCustomerJobsRow) customers.Job {
 		Region: row.Region, Source: customers.Source(row.Source), WorkflowStatus: row.WorkflowStatus,
 		ReceivedAt: row.ReceivedAt.Time, ArchivedAt: optionalTime(row.ArchivedAt), Version: row.Version,
 		PileLatitude: parseFloat(row.PileLatitude), PileLongitude: parseFloat(row.PileLongitude),
-		PileLocationSource: customers.PileLocationSource(row.PileLocationSource),
+		PileLocationSource:  customers.PileLocationSource(row.PileLocationSource),
+		ActiveAppointmentID: row.ActiveAppointmentID,
 	}
 	job.PileMapsURL = customers.PointMapsURL(job.PileLatitude, job.PileLongitude)
 	return job

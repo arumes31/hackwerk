@@ -29,7 +29,9 @@ SELECT
     (SELECT count(*) FROM appointments a
      WHERE a.starts_at < $3::timestamptz AND a.ends_at > $2::timestamptz
        AND a.lifecycle_status IN ('proposal','fixed') AND a.availability_override_reason IS NOT NULL)::bigint AS override_count,
-    (SELECT count(*) FROM drivers d WHERE d.active)::bigint AS active_driver_count
+    (SELECT count(*) FROM drivers d WHERE d.active)::bigint AS active_driver_count,
+    (SELECT count(*) FROM voice_drafts v
+     WHERE v.owner_user_id=$5::uuid AND v.status='needs_review' AND v.expires_at>now())::bigint AS voice_draft_count
 `
 
 type GetDashboardCountsParams struct {
@@ -37,6 +39,7 @@ type GetDashboardCountsParams struct {
 	DayStart      pgtype.Timestamptz
 	HorizonEnd    pgtype.Timestamptz
 	PendingBefore pgtype.Timestamptz
+	OwnerUserID   pgtype.UUID
 }
 
 type GetDashboardCountsRow struct {
@@ -46,6 +49,7 @@ type GetDashboardCountsRow struct {
 	NotificationIssueCount int64
 	OverrideCount          int64
 	ActiveDriverCount      int64
+	VoiceDraftCount        int64
 }
 
 func (q *Queries) GetDashboardCounts(ctx context.Context, arg GetDashboardCountsParams) (GetDashboardCountsRow, error) {
@@ -54,6 +58,7 @@ func (q *Queries) GetDashboardCounts(ctx context.Context, arg GetDashboardCounts
 		arg.DayStart,
 		arg.HorizonEnd,
 		arg.PendingBefore,
+		arg.OwnerUserID,
 	)
 	var i GetDashboardCountsRow
 	err := row.Scan(
@@ -63,6 +68,7 @@ func (q *Queries) GetDashboardCounts(ctx context.Context, arg GetDashboardCounts
 		&i.NotificationIssueCount,
 		&i.OverrideCount,
 		&i.ActiveDriverCount,
+		&i.VoiceDraftCount,
 	)
 	return i, err
 }

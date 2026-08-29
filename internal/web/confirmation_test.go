@@ -34,7 +34,7 @@ func (store *confirmationHTTPStore) Lookup(context.Context, []byte) (notificatio
 	return store.value, nil
 }
 
-func (store *confirmationHTTPStore) Respond(_ context.Context, _, _ []byte, response notification.Response, _ string, _ time.Time) (notification.Confirmation, error) {
+func (store *confirmationHTTPStore) Respond(_ context.Context, _, _ []byte, response notification.Response, _, _ string, _ time.Time) (notification.Confirmation, error) {
 	store.respondCalls++
 	if store.respondErr != nil {
 		return notification.Confirmation{}, store.respondErr

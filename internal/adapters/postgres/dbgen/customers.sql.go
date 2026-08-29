@@ -86,18 +86,28 @@ WHERE w.removed_at IS NULL AND j.archived_at IS NULL AND c.archived_at IS NULL
        WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
        ELSE 'unplanned' END)
   AND (NOT $7::boolean OR j.pile_latitude IS NULL OR j.pile_longitude IS NULL)
-  AND (NOT $8::boolean OR j.estimated_hack_minutes<15 OR j.estimated_hack_minutes>720)
+  AND (NOT $8::boolean OR j.estimated_hack_minutes+j.estimated_transport_minutes<$9::integer OR j.estimated_hack_minutes+j.estimated_transport_minutes>$10::integer)
+  AND (NOT $11::boolean OR (j.preferred_end_date IS NOT NULL AND j.preferred_end_date < (now() AT TIME ZONE 'Europe/Vienna')::date))
+  AND (NOT $12::boolean OR NOT EXISTS (SELECT 1 FROM appointments a JOIN appointment_drivers ad ON ad.appointment_id=a.id WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed')))
+  AND (NOT $13::boolean OR (j.job_type='chipping_with_transport' AND (j.transport_mode='undecided' OR (j.transport_mode='external' AND NOT j.external_transport_confirmed))))
+  AND ($14::text='' OR $14::text=CASE WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=120 THEN 'short' WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=360 THEN 'medium' ELSE 'long' END)
 `
 
 type CountWaitlistParams struct {
-	Search          string
-	JobTypeFilter   string
-	RegionFilter    string
-	UrgencyFilter   string
-	MonthFilter     string
-	WorkflowFilter  string
-	MissingLocation bool
-	DurationIssue   bool
+	Search            string
+	JobTypeFilter     string
+	RegionFilter      string
+	UrgencyFilter     string
+	MonthFilter       string
+	WorkflowFilter    string
+	MissingLocation   bool
+	DurationIssue     bool
+	DurationReviewMin int32
+	DurationReviewMax int32
+	Overdue           bool
+	Unassigned        bool
+	TransportPending  bool
+	DurationGroup     string
 }
 
 func (q *Queries) CountWaitlist(ctx context.Context, arg CountWaitlistParams) (int64, error) {
@@ -110,6 +120,12 @@ func (q *Queries) CountWaitlist(ctx context.Context, arg CountWaitlistParams) (i
 		arg.WorkflowFilter,
 		arg.MissingLocation,
 		arg.DurationIssue,
+		arg.DurationReviewMin,
+		arg.DurationReviewMax,
+		arg.Overdue,
+		arg.Unassigned,
+		arg.TransportPending,
+		arg.DurationGroup,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -646,7 +662,8 @@ SELECT id::text, job_number, job_type, volume_m3::text, estimated_hack_minutes,
        source, workflow_status, received_at, archived_at, version,
        COALESCE(pile_latitude::text, '')::text AS pile_latitude,
        COALESCE(pile_longitude::text, '')::text AS pile_longitude,
-       COALESCE(pile_location_source, '')::text AS pile_location_source
+       COALESCE(pile_location_source, '')::text AS pile_location_source,
+       COALESCE((SELECT a.id::text FROM appointments a WHERE a.job_id=jobs.id AND a.lifecycle_status IN ('proposal','fixed') ORDER BY a.starts_at DESC, a.id DESC LIMIT 1), '')::text AS active_appointment_id
 FROM jobs WHERE customer_id = $1::uuid
 ORDER BY received_at DESC, id DESC
 `
@@ -674,6 +691,7 @@ type ListCustomerJobsRow struct {
 	PileLatitude               string
 	PileLongitude              string
 	PileLocationSource         string
+	ActiveAppointmentID        string
 }
 
 func (q *Queries) ListCustomerJobs(ctx context.Context, customerID pgtype.UUID) ([]ListCustomerJobsRow, error) {
@@ -708,6 +726,7 @@ func (q *Queries) ListCustomerJobs(ctx context.Context, customerID pgtype.UUID) 
 			&i.PileLatitude,
 			&i.PileLongitude,
 			&i.PileLocationSource,
+			&i.ActiveAppointmentID,
 		); err != nil {
 			return nil, err
 		}
@@ -942,7 +961,9 @@ func (q *Queries) ListRecentRecords(ctx context.Context, arg ListRecentRecordsPa
 
 const listWaitlist = `-- name: ListWaitlist :many
 SELECT w.id::text AS waitlist_id, w.job_id::text, w.entered_at, w.manual_priority, w.version AS waitlist_version,
-       j.job_number, j.job_type, j.volume_m3::text, j.estimated_hack_minutes, j.transport_mode,
+       j.job_number, j.job_type, j.volume_m3::text, j.estimated_hack_minutes, j.estimated_transport_minutes,
+       (j.estimated_hack_minutes+j.estimated_transport_minutes)::integer AS total_minutes,
+       j.transport_mode, j.external_transport_confirmed,
        COALESCE(to_char(j.preferred_start_date, 'YYYY-MM-DD'), '')::text AS preferred_start_date,
        COALESCE(to_char(j.preferred_end_date, 'YYYY-MM-DD'), '')::text AS preferred_end_date,
        COALESCE(j.preference_text, '')::text AS preference_text, j.urgency,
@@ -954,7 +975,10 @@ SELECT w.id::text AS waitlist_id, w.job_id::text, w.entered_at, w.manual_priorit
             WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
             ELSE 'unplanned' END::text AS workflow_status,
        j.updated_at, j.pile_latitude IS NOT NULL AND j.pile_longitude IS NOT NULL AS has_pile_location,
-       EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed'))::boolean AS has_active_appointment
+       (COALESCE(j.pile_location_source::text, '') <> '')::boolean AS has_pile_source,
+       (j.preferred_end_date IS NOT NULL AND j.preferred_end_date < (now() AT TIME ZONE 'Europe/Vienna')::date)::boolean AS overdue,
+       EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed'))::boolean AS has_active_appointment,
+       EXISTS (SELECT 1 FROM appointments a JOIN appointment_drivers ad ON ad.appointment_id=a.id WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed'))::boolean AS has_internal_assignment
 FROM waitlist_entries w
 JOIN jobs j ON j.id = w.job_id
 JOIN customers c ON c.id = j.customer_id
@@ -969,70 +993,88 @@ WHERE w.removed_at IS NULL AND j.archived_at IS NULL AND c.archived_at IS NULL
        WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
        ELSE 'unplanned' END)
   AND (NOT $7::boolean OR j.pile_latitude IS NULL OR j.pile_longitude IS NULL)
-  AND (NOT $8::boolean OR j.estimated_hack_minutes<15 OR j.estimated_hack_minutes>720)
+  AND (NOT $8::boolean OR j.estimated_hack_minutes+j.estimated_transport_minutes<$9::integer OR j.estimated_hack_minutes+j.estimated_transport_minutes>$10::integer)
+  AND (NOT $11::boolean OR (j.preferred_end_date IS NOT NULL AND j.preferred_end_date < (now() AT TIME ZONE 'Europe/Vienna')::date))
+  AND (NOT $12::boolean OR NOT EXISTS (SELECT 1 FROM appointments a JOIN appointment_drivers ad ON ad.appointment_id=a.id WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed')))
+  AND (NOT $13::boolean OR (j.job_type='chipping_with_transport' AND (j.transport_mode='undecided' OR (j.transport_mode='external' AND NOT j.external_transport_confirmed))))
+  AND ($14::text='' OR $14::text=CASE WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=120 THEN 'short' WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=360 THEN 'medium' ELSE 'long' END)
 ORDER BY
-  CASE WHEN $9::text = 'entered' AND $10::text = 'asc' THEN w.entered_at END ASC,
-  CASE WHEN $9::text = 'entered' AND $10::text = 'desc' THEN w.entered_at END DESC,
-  CASE WHEN $9::text = 'preferred' AND $10::text = 'asc' THEN j.preferred_start_date END ASC NULLS LAST,
-  CASE WHEN $9::text = 'preferred' AND $10::text = 'desc' THEN j.preferred_start_date END DESC NULLS LAST,
-  CASE WHEN $9::text = 'urgency' AND $10::text = 'asc' THEN array_position(ARRAY['low','normal','high','urgent'], j.urgency) END ASC,
-  CASE WHEN $9::text = 'urgency' AND $10::text = 'desc' THEN array_position(ARRAY['low','normal','high','urgent'], j.urgency) END DESC,
-  CASE WHEN $9::text = 'volume' AND $10::text = 'asc' THEN j.volume_m3 END ASC,
-  CASE WHEN $9::text = 'volume' AND $10::text = 'desc' THEN j.volume_m3 END DESC,
-  CASE WHEN $9::text = 'region' AND $10::text = 'asc' THEN lower(w.region_snapshot) END ASC,
-  CASE WHEN $9::text = 'region' AND $10::text = 'desc' THEN lower(w.region_snapshot) END DESC,
-  CASE WHEN $9::text = 'customer' AND $10::text = 'asc' THEN lower(concat_ws(' ', c.company_name, c.last_name, c.first_name)) END ASC,
-  CASE WHEN $9::text = 'customer' AND $10::text = 'desc' THEN lower(concat_ws(' ', c.company_name, c.last_name, c.first_name)) END DESC,
-  CASE WHEN $9::text = 'workflow' AND $10::text = 'asc' THEN j.workflow_status END ASC,
-  CASE WHEN $9::text = 'workflow' AND $10::text = 'desc' THEN j.workflow_status END DESC,
-  CASE WHEN $9::text = 'updated' AND $10::text = 'asc' THEN j.updated_at END ASC,
-  CASE WHEN $9::text = 'updated' AND $10::text = 'desc' THEN j.updated_at END DESC,
+  CASE WHEN $15::text = 'entered' AND $16::text = 'asc' THEN w.entered_at END ASC,
+  CASE WHEN $15::text = 'entered' AND $16::text = 'desc' THEN w.entered_at END DESC,
+  CASE WHEN $15::text = 'preferred' AND $16::text = 'asc' THEN j.preferred_start_date END ASC NULLS LAST,
+  CASE WHEN $15::text = 'preferred' AND $16::text = 'desc' THEN j.preferred_start_date END DESC NULLS LAST,
+  CASE WHEN $15::text = 'urgency' AND $16::text = 'asc' THEN array_position(ARRAY['low','normal','high','urgent'], j.urgency) END ASC,
+  CASE WHEN $15::text = 'urgency' AND $16::text = 'desc' THEN array_position(ARRAY['low','normal','high','urgent'], j.urgency) END DESC,
+  CASE WHEN $15::text = 'volume' AND $16::text = 'asc' THEN j.volume_m3 END ASC,
+  CASE WHEN $15::text = 'volume' AND $16::text = 'desc' THEN j.volume_m3 END DESC,
+  CASE WHEN $15::text = 'region' AND $16::text = 'asc' THEN lower(w.region_snapshot) END ASC,
+  CASE WHEN $15::text = 'region' AND $16::text = 'desc' THEN lower(w.region_snapshot) END DESC,
+  CASE WHEN $15::text = 'customer' AND $16::text = 'asc' THEN lower(concat_ws(' ', c.company_name, c.last_name, c.first_name)) END ASC,
+  CASE WHEN $15::text = 'customer' AND $16::text = 'desc' THEN lower(concat_ws(' ', c.company_name, c.last_name, c.first_name)) END DESC,
+  CASE WHEN $15::text = 'workflow' AND $16::text = 'asc' THEN j.workflow_status END ASC,
+  CASE WHEN $15::text = 'workflow' AND $16::text = 'desc' THEN j.workflow_status END DESC,
+  CASE WHEN $15::text = 'updated' AND $16::text = 'asc' THEN j.updated_at END ASC,
+  CASE WHEN $15::text = 'updated' AND $16::text = 'desc' THEN j.updated_at END DESC,
+  CASE WHEN $15::text = 'duration' AND $16::text = 'asc' THEN j.estimated_hack_minutes+j.estimated_transport_minutes END ASC,
+  CASE WHEN $15::text = 'duration' AND $16::text = 'desc' THEN j.estimated_hack_minutes+j.estimated_transport_minutes END DESC,
   w.manual_priority DESC, w.entered_at, w.id
-LIMIT $12 OFFSET $11
+LIMIT $18 OFFSET $17
 `
 
 type ListWaitlistParams struct {
-	Search          string
-	JobTypeFilter   string
-	RegionFilter    string
-	UrgencyFilter   string
-	MonthFilter     string
-	WorkflowFilter  string
-	MissingLocation bool
-	DurationIssue   bool
-	Sort            string
-	Direction       string
-	PageOffset      int32
-	PageSize        int32
+	Search            string
+	JobTypeFilter     string
+	RegionFilter      string
+	UrgencyFilter     string
+	MonthFilter       string
+	WorkflowFilter    string
+	MissingLocation   bool
+	DurationIssue     bool
+	DurationReviewMin int32
+	DurationReviewMax int32
+	Overdue           bool
+	Unassigned        bool
+	TransportPending  bool
+	DurationGroup     string
+	Sort              string
+	Direction         string
+	PageOffset        int32
+	PageSize          int32
 }
 
 type ListWaitlistRow struct {
-	WaitlistID           string
-	WJobID               string
-	EnteredAt            pgtype.Timestamptz
-	ManualPriority       int32
-	WaitlistVersion      int32
-	JobNumber            string
-	JobType              string
-	JVolumeM3            string
-	EstimatedHackMinutes int32
-	TransportMode        string
-	PreferredStartDate   string
-	PreferredEndDate     string
-	PreferenceText       string
-	Urgency              string
-	Region               string
-	CustomerID           string
-	FirstName            string
-	LastName             string
-	CompanyName          string
-	Locality             string
-	NoteExcerpt          string
-	AgeDays              int32
-	WorkflowStatus       string
-	UpdatedAt            pgtype.Timestamptz
-	HasPileLocation      *bool
-	HasActiveAppointment bool
+	WaitlistID                 string
+	WJobID                     string
+	EnteredAt                  pgtype.Timestamptz
+	ManualPriority             int32
+	WaitlistVersion            int32
+	JobNumber                  string
+	JobType                    string
+	JVolumeM3                  string
+	EstimatedHackMinutes       int32
+	EstimatedTransportMinutes  int32
+	TotalMinutes               int32
+	TransportMode              string
+	ExternalTransportConfirmed bool
+	PreferredStartDate         string
+	PreferredEndDate           string
+	PreferenceText             string
+	Urgency                    string
+	Region                     string
+	CustomerID                 string
+	FirstName                  string
+	LastName                   string
+	CompanyName                string
+	Locality                   string
+	NoteExcerpt                string
+	AgeDays                    int32
+	WorkflowStatus             string
+	UpdatedAt                  pgtype.Timestamptz
+	HasPileLocation            *bool
+	HasPileSource              bool
+	Overdue                    bool
+	HasActiveAppointment       bool
+	HasInternalAssignment      bool
 }
 
 func (q *Queries) ListWaitlist(ctx context.Context, arg ListWaitlistParams) ([]ListWaitlistRow, error) {
@@ -1045,6 +1087,12 @@ func (q *Queries) ListWaitlist(ctx context.Context, arg ListWaitlistParams) ([]L
 		arg.WorkflowFilter,
 		arg.MissingLocation,
 		arg.DurationIssue,
+		arg.DurationReviewMin,
+		arg.DurationReviewMax,
+		arg.Overdue,
+		arg.Unassigned,
+		arg.TransportPending,
+		arg.DurationGroup,
 		arg.Sort,
 		arg.Direction,
 		arg.PageOffset,
@@ -1067,7 +1115,10 @@ func (q *Queries) ListWaitlist(ctx context.Context, arg ListWaitlistParams) ([]L
 			&i.JobType,
 			&i.JVolumeM3,
 			&i.EstimatedHackMinutes,
+			&i.EstimatedTransportMinutes,
+			&i.TotalMinutes,
 			&i.TransportMode,
+			&i.ExternalTransportConfirmed,
 			&i.PreferredStartDate,
 			&i.PreferredEndDate,
 			&i.PreferenceText,
@@ -1083,7 +1134,10 @@ func (q *Queries) ListWaitlist(ctx context.Context, arg ListWaitlistParams) ([]L
 			&i.WorkflowStatus,
 			&i.UpdatedAt,
 			&i.HasPileLocation,
+			&i.HasPileSource,
+			&i.Overdue,
 			&i.HasActiveAppointment,
+			&i.HasInternalAssignment,
 		); err != nil {
 			return nil, err
 		}

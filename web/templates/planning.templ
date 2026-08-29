@@ -36,7 +36,7 @@ templ Planning(data PlanningData) {
 			<main id="hauptinhalt" class="page compact-page planning-page" data-planning-workbench data-planning-radius-latitude={ data.RadiusLatitude } data-planning-radius-longitude={ data.RadiusLongitude }>
 				<div class="page-heading"><div><p class="eyebrow">Disposition</p><h1>Planungswerkbank</h1><p>Aufträge auswählen, prüfen und als Einzelvorschlag oder Tagesroute bearbeiten. Jede Übernahme bleibt unverbindlich.</p></div><div class="action-row"><a class="button button--quiet" href={ data.ReturnTo }>Zurück zur Warteliste</a><span class="status-badge">Keine automatische Fixierung</span></div></div>
 				if data.Error != "" {
-					<div class="form-alert" role="alert">{ data.Error }</div>
+					<div class="form-alert" role="alert"><strong>Planung nicht möglich</strong><p>{ data.Error }</p><ul><li>Pflichtdaten und Haufenstandort prüfen</li><li>Fahrer-Verfügbarkeit und Ressourcen im Suchzeitraum prüfen</li><li>Transportmodus beziehungsweise externe Bestätigung prüfen</li></ul></div>
 				}
 				<nav class="planning-mode-tabs" aria-label="Planungsmodus"><a class="button" href="/planning" aria-current="page">Einzelauftrag</a><a class="button button--quiet" href="/planning/routes">Tagesroute</a><a class="button button--quiet" href="/availability">Kapazität</a></nav>
 				<ol class="planning-progress" aria-label="Planungsfortschritt">
@@ -141,15 +141,33 @@ templ Planning(data PlanningData) {
 				}
 				if data.Run != nil {
 					<section id="planung-vorschlaege" class="module-card planning-results" aria-labelledby="suggestions-title" tabindex="-1" data-planning-results>
-						<div class="section-heading"><div><p class="eyebrow">Berechnung { planningShortID(data.Run.ID) }</p><h2 id="suggestions-title">Bis zu drei valide Optionen</h2></div><form method="post" action="/planning/suggestions"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="return_to" value={ data.ReturnTo }/><input type="hidden" name="job_id" value={ data.Run.JobID }/><button class="button button--quiet" type="submit">Neu berechnen</button></form></div>
+						<div class="section-heading"><div><p class="eyebrow">Berechnung { planningShortID(data.Run.ID) }</p><h2 id="suggestions-title">Bis zu drei valide Optionen</h2><p>Datenstand: { planningLocal(data.Run.CreatedAt) } · gültig bis { planningLocal(data.Run.ExpiresAt) }</p></div><form method="post" action="/planning/suggestions"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="return_to" value={ data.ReturnTo }/><input type="hidden" name="job_id" value={ data.Run.JobID }/><button class="button button--quiet" type="submit">Neu berechnen</button></form></div>
+						if data.Run.Stale {
+							<div class="form-alert form-alert--warning"><strong>Vorschläge sind veraltet.</strong> Bitte neu berechnen; eine Übernahme wird serverseitig zusätzlich revalidiert.</div>
+						}
+						<p class="form-hint">Kapazitätsgrenzen: maximal drei Vorschläge aus höchstens { fmt.Sprint(data.Run.CandidateLimit) } geprüften Kombinationen innerhalb von { fmt.Sprint(data.Run.HorizonDays) } Tagen. Exklusive Ressourcen dürfen sich nicht überschneiden.</p>
+						if len(data.Run.Exclusions) > 0 {
+							<details class="compact-filter-panel">
+								<summary>Ausgeschlossene Fahrer und Ressourcen mit Grund</summary>
+								<ul>
+									for _, exclusion := range data.Run.Exclusions {
+										<li><strong>{ exclusion.Kind } { exclusion.Name }:</strong> { exclusion.Reason }</li>
+									}
+								</ul>
+							</details>
+						}
+						<details class="compact-filter-panel" id="planung-kriterien"><summary>Planungskriterien und Standardgewichtungen</summary><p>Berücksichtigt werden Wunschzeitraum, Fahrweg, Fahrer, Ressourcen, Tagesauslastung, Dringlichkeit und Region. Wunschzeitraum, Verfügbarkeit und Konfliktfreiheit wirken vorrangig; die Punktzahl ist eine Entscheidungshilfe, keine Garantie.</p><button class="button button--quiet" type="button" data-planning-reset-weights>Standardbeschreibung wiederherstellen</button></details>
+						<div class="planning-result-tools"><label>Sortieren<select data-suggestion-sort><option value="rank">Bewertung</option><option value="travel">Fahrzeit</option><option value="start">Startzeit</option><option value="duration">Gesamtdauer</option></select></label><button class="button button--quiet" type="button" data-print-page>Vorschläge drucken</button><span class="form-hint">Bis zu zwei Optionen für den Direktvergleich markieren.</span></div>
+						<div class="planning-comparison" data-suggestion-comparison hidden aria-live="polite"></div>
 						<div id="planung-uebernahme" class="planning-adoption-intro" tabindex="-1"><div><p class="eyebrow">Schritt 4 · Übernahme</p><h3>Option prüfen und übernehmen</h3></div><p>Die Übernahme revalidiert den aktuellen Datenstand und erzeugt ausschließlich einen unverbindlichen Terminvorschlag.</p></div>
 						<div class="suggestion-grid">
 							for _, item := range data.Run.Suggestions {
-								<article class="suggestion-card" data-suggestion-rank={ fmt.Sprint(item.Rank) }>
+								<article class="suggestion-card" data-suggestion-rank={ fmt.Sprint(item.Rank) } data-suggestion-start={ item.StartsAt.Format(time.RFC3339) } data-suggestion-travel={ fmt.Sprint(item.DurationSeconds) } data-suggestion-duration={ fmt.Sprint(int(item.EndsAt.Sub(item.StartsAt) / time.Minute)) } data-suggestion-summary={ planningLocal(item.StartsAt) + "–" + planningLocalTime(item.EndsAt) + "; Fahrer " + item.DriverName + "; Ressourcen " + planningList(item.ResourceNames) }>
 									<div class="job-card__heading"><div><p class="eyebrow">Option { fmt.Sprint(item.Rank) }</p><h3>{ planningLocal(item.StartsAt) }–{ planningLocalTime(item.EndsAt) }</h3></div><span class="status-badge">{ fmt.Sprintf("%.1f / 100", item.Score) }</span></div>
 									if item.Rank == 1 {
 										<p class="best-option"><span aria-hidden="true">★</span> Beste berechnete Option – keine Garantie</p>
 									}
+									<label class="check-label"><input type="checkbox" data-suggestion-compare/> Option vergleichen</label>
 									<dl class="suggestion-facts"><div><dt>Dauer</dt><dd>{ planningDuration(item.StartsAt,item.EndsAt) }</dd></div><div><dt>Fahrer</dt><dd>{ item.DriverName }</dd></div><div><dt>Ressourcen</dt><dd>{ planningList(item.ResourceNames) }</dd></div><div><dt>Transport</dt><dd>{ planningTransport(item.ResourcePurposes) }</dd></div><div><dt>Distanzquelle</dt><dd>{ planningSource(item.RoutingSource) }</dd></div></dl>
 									<p class="preference-fit" data-fit={ planningPreferenceClass(item.Components.Preference) }><strong>Wunschzeitraum:</strong> { planningPreferenceLabel(item.Components.Preference) }</p>
 									<h4>Warum diese Option?</h4>
@@ -168,7 +186,7 @@ templ Planning(data PlanningData) {
 											</ul>
 										</div>
 									}
-									<div class="action-row"><form method="post" action={ "/planning/suggestions/" + item.ID + "/adopt" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="return_to" value={ data.ReturnTo }/><input type="hidden" name="run_id" value={ data.Run.ID }/><input type="hidden" name="job_id" value={ data.Run.JobID }/><button class="button" type="submit" disabled?={ item.Status != "pending" }>Vorschlag übernehmen</button></form><a class="button button--quiet" href={ "/calendar?date=" + item.StartsAt.In(viennaLocation()).Format(time.DateOnly) }>Im Kalender ansehen</a></div><small>Status: { planningStatus(item.Status) } · gültig bis { planningLocal(item.ExpiresAt) }</small>
+									<div class="action-row"><form method="post" action={ "/planning/suggestions/" + item.ID + "/adopt" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="return_to" value={ data.ReturnTo }/><input type="hidden" name="run_id" value={ data.Run.ID }/><input type="hidden" name="job_id" value={ data.Run.JobID }/><button class="button" type="submit" data-suggestion-adopt disabled?={ item.Status != "pending" || data.Run.Stale }>Vorschlag übernehmen</button></form><button class="button button--quiet" type="button" data-copy-suggestion>Erklärung kopieren</button><a class="button button--quiet" href={ "/calendar?date=" + item.StartsAt.In(viennaLocation()).Format(time.DateOnly) }>Im Kalender ansehen</a></div><small>Status: { planningStatus(item.Status) } · gültig bis { planningLocal(item.ExpiresAt) }</small>
 								</article>
 							}
 						</div>

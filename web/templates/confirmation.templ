@@ -10,6 +10,8 @@ type ConfirmationData struct {
 	Token         string
 	Value         notification.Confirmation
 	Invalid       bool
+	Expired       bool
+	Revoked       bool
 	Retryable     bool
 	AlreadyStored bool
 	Result        string
@@ -24,12 +26,28 @@ templ ConfirmationPage(data ConfirmationData) {
 			<meta name="robots" content="noindex,nofollow,noarchive"/>
 			<title>Terminantwort – { data.Page.AppName }</title>
 			<link rel="stylesheet" href={ data.Page.CSSPath }/>
+			<script type="module" src={ data.Page.JSPath } defer></script>
 		</head>
 		<body>
 			<main class="page confirmation-page">
-				<section class="confirmation-card" aria-labelledby="confirmation-title">
-					<p class="eyebrow">{ data.Page.AppName }</p>
-					if data.Invalid {
+				<section class="confirmation-card" aria-labelledby="confirmation-title" data-confirmation-card>
+					<p class="eyebrow">{ data.Page.Legal.OperatorName }</p>
+					<address class="confirmation-contact">
+						<strong>{ data.Page.Legal.OperatorName }</strong>
+						if customerPhoneURL(data.Page.Legal.Phone) != "" {
+							<span>· </span><a href={ customerPhoneURL(data.Page.Legal.Phone) }>{ data.Page.Legal.Phone }</a>
+						}
+						if data.Page.Legal.Email != "" {
+							<span>· </span><a href={ "mailto:" + data.Page.Legal.Email }>{ data.Page.Legal.Email }</a>
+						}
+					</address>
+					if data.Expired {
+						<h1 id="confirmation-title">Link abgelaufen</h1>
+						<p>Die Antwortfrist dieses Links ist beendet. Bitte kontaktieren Sie den Betrieb direkt, um den Termin abzustimmen.</p>
+					} else if data.Revoked {
+						<h1 id="confirmation-title">Link widerrufen</h1>
+						<p>Dieser gültig ausgestellte Link wurde ersetzt oder bewusst widerrufen. Verwenden Sie gegebenenfalls die neueste Nachricht oder kontaktieren Sie den Betrieb.</p>
+					} else if data.Invalid {
 						<h1 id="confirmation-title">Link nicht verfügbar</h1>
 						<p>Dieser Bestätigungslink ist nicht mehr gültig. Bitte kontaktieren Sie den Betrieb, wenn Sie Ihren Termin abstimmen möchten.</p>
 					} else if data.Retryable {
@@ -48,21 +66,25 @@ templ ConfirmationPage(data ConfirmationData) {
 						<h1 id="confirmation-title">Antwort gespeichert</h1>
 						<p>{ data.Result }</p>
 						<p>Danke. Der Betrieb sieht Ihre Rückmeldung unmittelbar in der Terminplanung.</p>
+						<button class="button button--quiet" type="button" data-print-page>Bestätigung drucken</button>
 					} else {
 						<h1 id="confirmation-title">Ihr Termin</h1>
 						<p>Guten Tag { data.Value.CustomerName },</p>
 						<dl class="appointment-detail-list">
 							<div><dt>Auftrag</dt><dd>{ data.Value.JobNumber }</dd></div>
-							<div><dt>Zeit</dt><dd>{ confirmationDateTime(data.Value.StartsAt) }–{ confirmationTime(data.Value.EndsAt) }</dd></div>
+							<div><dt>Zeit</dt><dd>{ confirmationDateTime(data.Value.StartsAt) }–{ confirmationTime(data.Value.EndsAt) } Uhr</dd></div>
+							<div><dt>Zeitzone</dt><dd>Europe/Vienna (österreichische Ortszeit)</dd></div>
 							<div><dt>Ort</dt><dd>{ data.Value.Locality }</dd></div>
 							<div><dt>Menge</dt><dd>{ data.Value.VolumeM3 } m³</dd></div>
 						</dl>
 						<p>Bitte wählen Sie genau eine Rückmeldung. Sie können den Termin hier nicht verschieben oder stornieren.</p>
-						<form method="post" action={ "/termin/" + data.Token + "/antwort" } class="confirmation-actions">
+						<form method="post" action={ "/termin/" + data.Token + "/antwort" } class="confirmation-actions" data-confirmation-form>
 							<input type="hidden" name="form_nonce" value={ data.Value.FormNonce }/>
-							<button class="button" type="submit" name="action" value="confirmed">Termin bestätigen</button>
-							<button class="button button--danger" type="submit" name="action" value="declined">Termin ablehnen</button>
-							<button class="button button--quiet" type="submit" name="action" value="callback_requested">Rückruf wünschen</button>
+							<label>Optionale Rückrufnotiz bei Ablehnung<textarea name="response_note" maxlength="500" rows="3" placeholder="z. B. Bitte vormittags zurückrufen"></textarea><small>Maximal 500 Zeichen; nur zusammen mit „Termin ablehnen“.</small></label>
+							<p class="form-hint" data-confirmation-summary>Die gewählte Antwort wird unmittelbar und einmalig gespeichert.</p>
+							<button class="button" type="submit" name="action" value="confirmed" data-response-label="Sie bestätigen den angezeigten Termin.">Termin bestätigen</button>
+							<button class="button button--quiet" type="submit" name="action" value="declined" data-response-label="Sie lehnen den angezeigten Termin ab.">Termin ablehnen</button>
+							<button class="button button--quiet" type="submit" name="action" value="callback_requested" data-response-label="Sie bitten den Betrieb um einen Rückruf.">Rückruf wünschen</button>
 						</form>
 					}
 				</section>
@@ -72,6 +94,8 @@ templ ConfirmationPage(data ConfirmationData) {
 }
 
 func confirmationDateTime(value time.Time) string {
-	return value.In(viennaLocation()).Format("Mo, 02.01.2006 · 15:04")
+	local := value.In(viennaLocation())
+	weekdays := [...]string{"Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"}
+	return weekdays[local.Weekday()] + ", " + local.Format("02.01.2006 · 15:04")
 }
 func confirmationTime(value time.Time) string { return value.In(viennaLocation()).Format("15:04") }

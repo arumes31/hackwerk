@@ -23,6 +23,7 @@ func TestLoad(t *testing.T) {
 		{name: "invalid duration", values: map[string]string{"APP_SHUTDOWN_TIMEOUT": "later"}, expectError: "duration"},
 		{name: "invalid dashboard hours", values: map[string]string{"DASHBOARD_BUSINESS_OPEN": "18:00", "DASHBOARD_BUSINESS_CLOSE": "07:00"}, expectError: "dashboard business hours"},
 		{name: "unbounded dashboard horizon", values: map[string]string{"DASHBOARD_HORIZON_DAYS": "90"}, expectError: "dashboard limits"},
+		{name: "invalid waitlist review limits", values: map[string]string{"WAITLIST_DURATION_REVIEW_MIN_MINUTES": "90", "WAITLIST_DURATION_REVIEW_MAX_MINUTES": "60"}, expectError: "waitlist duration review limits"},
 		{name: "invalid calendar feed domain", values: map[string]string{"CALENDAR_UID_DOMAIN": "bad domain"}, expectError: "calendar feed"},
 		{name: "invalid planning horizon", values: map[string]string{"PLANNING_HORIZON_DAYS": "91"}, expectError: "planning settings"},
 		{name: "enabled voice needs transcriber", values: map[string]string{"VOICE_ENABLED": "true"}, expectError: "active transcriber"},

@@ -30,7 +30,13 @@ func confirmationPage(service *notification.ConfirmationService, limiter *confir
 		}
 		token := chi.URLParam(request, "confirmationToken")
 		value, err := service.View(request.Context(), token)
-		data := templates.ConfirmationData{Page: page, Token: token, Value: value, Invalid: err != nil}
+		data := templates.ConfirmationData{Page: page, Token: token, Value: value, Invalid: err != nil,
+			Expired: errors.Is(err, notification.ErrConfirmationExpired), Revoked: errors.Is(err, notification.ErrConfirmationRevoked)}
+		data.Invalid = err != nil && !data.Expired && !data.Revoked
+		if err == nil && value.Response != "" {
+			data.AlreadyStored = true
+			data.Result = confirmationResult(value.Response)
+		}
 		render(response, request, templates.ConfirmationPage(data), http.StatusOK, logger)
 	}
 }
@@ -48,9 +54,13 @@ func confirmationResponse(service *notification.ConfirmationService, limiter *co
 			return
 		}
 		token := chi.URLParam(request, "confirmationToken")
-		value, err := service.Respond(request.Context(), token, request.Form.Get("form_nonce"), notification.Response(request.Form.Get("action")), middleware.GetReqID(request.Context()))
+		value, err := service.Respond(request.Context(), token, request.Form.Get("form_nonce"), notification.Response(request.Form.Get("action")), request.Form.Get("response_note"), middleware.GetReqID(request.Context()))
 		if err != nil {
 			switch {
+			case errors.Is(err, notification.ErrConfirmationExpired):
+				render(response, request, templates.ConfirmationPage(templates.ConfirmationData{Page: page, Expired: true}), http.StatusOK, logger)
+			case errors.Is(err, notification.ErrConfirmationRevoked):
+				render(response, request, templates.ConfirmationPage(templates.ConfirmationData{Page: page, Revoked: true}), http.StatusOK, logger)
 			case errors.Is(err, notification.ErrConfirmationUnavailable):
 				render(response, request, templates.ConfirmationPage(templates.ConfirmationData{Page: page, Invalid: true}), http.StatusOK, logger)
 			case errors.Is(err, notification.ErrResponseLocked):
