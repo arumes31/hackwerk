@@ -28,6 +28,8 @@ func TestLoad(t *testing.T) {
 		{name: "enabled voice needs transcriber", values: map[string]string{"VOICE_ENABLED": "true"}, expectError: "active transcriber"},
 		{name: "OpenAI voice needs secret", values: map[string]string{"VOICE_ENABLED": "true", "VOICE_TRANSCRIBER": "openai"}, expectError: "API key"},
 		{name: "local whisper accepts small", values: map[string]string{"VOICE_ENABLED": "true", "VOICE_TRANSCRIBER": "whisper-local"}, expectedEnv: EnvironmentDevelopment},
+		{name: "tailscale whisper accepts fixed numeric endpoint", values: map[string]string{"VOICE_ENABLED": "true", "VOICE_TRANSCRIBER": "whisper-tailscale", "VOICE_WHISPER_URL": "http://100.115.58.99:8080"}, expectedEnv: EnvironmentDevelopment},
+		{name: "tailscale whisper rejects arbitrary endpoint", values: map[string]string{"VOICE_TRANSCRIBER": "whisper-tailscale", "VOICE_WHISPER_URL": "http://10.0.0.1:8080"}, expectError: "Tailscale whisper"},
 		{name: "local whisper rejects other model", values: map[string]string{"VOICE_TRANSCRIBER": "whisper-local", "VOICE_WHISPER_MODEL": "large"}, expectError: "small model"},
 		{name: "voice timeout remains bounded", values: map[string]string{"VOICE_PROVIDER_TIMEOUT": "16m"}, expectError: "voice limits"},
 		{name: "production rejects fake voice", values: map[string]string{"APP_ENV": "production", "APP_BASE_URL": "https://hackwerk.example", "SESSION_COOKIE_SECURE": "true", "DATABASE_URL": "postgres://secure@example/hackwerk", "CONFIRMATION_TOKEN_KEY_ID": "production", "CONFIRMATION_TOKEN_KEYS": `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`, "VOICE_TRANSCRIBER": "fake"}, expectError: "fake voice"},

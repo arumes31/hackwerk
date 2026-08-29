@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"errors"
@@ -26,9 +27,12 @@ func registerVoiceRoutes(router chi.Router, dependencies Dependencies, page temp
 	csrfCookie := dependencies.Config.Auth.CSRFCookieName
 	router.Get("/voice", voicePage(dependencies.Voice, dependencies.Config, page, csrfCookie, dependencies.Logger))
 	router.Post("/api/v1/voice/drafts", uploadVoice(dependencies.Voice, dependencies.Config.Voice, dependencies.Logger))
+	router.Get("/api/v1/voice/drafts/{draftID}", voiceDraftStatus(dependencies.Voice))
 	router.Get("/voice/drafts/{draftID}", voiceReview(dependencies.Voice, page, csrfCookie, dependencies.Logger))
 	router.Post("/voice/drafts/{draftID}/commit", commitVoice(dependencies.Voice, page, csrfCookie, dependencies.Logger))
 	router.Post("/voice/drafts/{draftID}/discard", discardVoice(dependencies.Voice, dependencies.Logger))
+	router.With(requirePermission(auth.PermissionAuditView, page, dependencies.Logger)).Get("/admin/voice-recordings", voiceRecordingsPage(dependencies.Voice, page, csrfCookie, dependencies.Logger))
+	router.With(requirePermission(auth.PermissionAuditView, page, dependencies.Logger)).Get("/admin/voice-recordings/{recordingID}/audio", voiceRecordingAudio(dependencies.Voice, dependencies.Logger))
 }
 
 func voicePage(service *voice.Service, cfg config.Config, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
@@ -41,7 +45,7 @@ func voiceCaptureData(request *http.Request, service *voice.Service, cfg config.
 	return templates.VoiceCaptureData{
 		Shell: shell(request, page, csrfCookie), Enabled: service.Enabled(), MaxBytes: cfg.Voice.MaxBytes,
 		MaxSeconds: int(cfg.Voice.MaxDuration.Seconds()), ExternalProvider: cfg.Voice.Transcriber == "openai" || cfg.Voice.Extractor == "openai",
-		LocalProvider: cfg.Voice.Transcriber == "whisper-local", ProcessingMinutes: int(cfg.Voice.ProviderTimeout.Minutes()),
+		LocalProvider: cfg.Voice.Transcriber == "whisper-local" || cfg.Voice.Transcriber == "whisper-tailscale", ProcessingMinutes: int(cfg.Voice.ProviderTimeout.Minutes()),
 		ProviderNotice: cfg.Voice.ExternalProviderNote, Error: message,
 	}
 }
@@ -84,7 +88,7 @@ func uploadVoice(service *voice.Service, cfg config.Voice, logger *slog.Logger) 
 		}
 		location := "/voice/drafts/" + draft.ID
 		response.Header().Set("Location", location)
-		writeJSON(response, http.StatusCreated, map[string]any{"draft_id": draft.ID, "status": draft.Status, "location": location})
+		writeJSON(response, http.StatusAccepted, map[string]any{"draft_id": draft.ID, "status": draft.Status, "location": location})
 	}
 }
 
@@ -102,9 +106,7 @@ func cleanupVoiceFile(ctx context.Context, file *os.File, logger *slog.Logger) {
 
 func processVoiceUpload(request *http.Request, service *voice.Service, cfg config.Voice, file *os.File, duration time.Duration, mediaType string) (voice.Draft, error) {
 	session, _ := sessionFromContext(request.Context())
-	ctx, cancel := context.WithTimeout(request.Context(), cfg.ProviderTimeout+5*time.Second)
-	defer cancel()
-	return service.ProcessPrepared(ctx, session.Actor, func() (voice.Audio, voice.Metadata, error) {
+	return service.EnqueuePrepared(request.Context(), session.Actor, func() (voice.Audio, voice.Metadata, error) {
 		actualDuration, err := inspectAudioDuration(file, mediaType)
 		if err != nil {
 			return voice.Audio{}, voice.Metadata{}, errVoiceType
@@ -404,8 +406,79 @@ func voiceReview(service *voice.Service, page templates.PageData, csrfCookie str
 			renderVoiceError(response, request, page, logger, err)
 			return
 		}
-		duplicates, _ := service.Duplicates(request.Context(), session.Actor, draft)
+		var duplicates []customers.Duplicate
+		if draft.Status == voice.StatusNeedsReview {
+			duplicates, _ = service.Duplicates(request.Context(), session.Actor, draft)
+		}
 		render(response, request, templates.VoiceReview(templates.VoiceReviewData{Shell: shell(request, page, csrfCookie), Draft: draft, Values: voiceValues(draft), Duplicates: duplicates}), http.StatusOK, logger)
+	}
+}
+
+func voiceDraftStatus(service *voice.Service) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		draft, err := service.Get(request.Context(), session.Actor, chi.URLParam(request, "draftID"))
+		if err != nil {
+			status, code, message := mapVoiceError(err)
+			if errors.Is(err, voice.ErrNotFound) {
+				status, code, message = http.StatusNotFound, "voice_not_found", "Der Entwurf wurde nicht gefunden."
+			}
+			writeVoiceError(response, request, status, code, message)
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"status": draft.Status, "version": draft.Version})
+	}
+}
+
+func voiceRecordingsPage(service *voice.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		const pageSize = int32(50)
+		pageNumber := 1
+		if raw := strings.TrimSpace(request.URL.Query().Get("page")); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 1 || parsed > 20_000 {
+				http.Error(response, "Ungültige Seite.", http.StatusBadRequest)
+				return
+			}
+			pageNumber = parsed
+		}
+		session, _ := sessionFromContext(request.Context())
+		offset := int32(pageNumber-1) * pageSize
+		recordings, err := service.ListRecordings(request.Context(), session.Actor, pageSize+1, offset)
+		if err != nil {
+			renderVoiceError(response, request, page, logger, err)
+			return
+		}
+		hasNext := len(recordings) > int(pageSize)
+		if hasNext {
+			recordings = recordings[:pageSize]
+		}
+		render(response, request, templates.VoiceRecordings(templates.VoiceRecordingsData{Shell: shell(request, page, csrfCookie), Recordings: recordings, Page: pageNumber, HasPrevious: pageNumber > 1, HasNext: hasNext}), http.StatusOK, logger)
+	}
+}
+
+func voiceRecordingAudio(service *voice.Service, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		recording, err := service.RecordingAudio(request.Context(), session.Actor, chi.URLParam(request, "recordingID"))
+		if err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, voice.ErrNotFound) {
+				status = http.StatusNotFound
+			} else if errors.Is(err, auth.ErrForbidden) {
+				status = http.StatusForbidden
+			}
+			http.Error(response, http.StatusText(status), status)
+			if status >= 500 {
+				logger.ErrorContext(request.Context(), "voice recording playback failed", slog.String("error_code", "voice_recording_playback_failed"))
+			}
+			return
+		}
+		response.Header().Set("Cache-Control", "private, no-store")
+		response.Header().Set("Content-Type", recording.ContentType)
+		response.Header().Set("Content-Disposition", "inline; filename=aufnahme"+mediaExtension(recording.ContentType))
+		response.Header().Set("X-Content-Type-Options", "nosniff")
+		http.ServeContent(response, request, "", recording.RecordedAt, bytes.NewReader(recording.Bytes))
 	}
 }
 

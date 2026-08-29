@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -183,6 +184,85 @@ func TestVoiceProviderTimeoutPersistsOnlyFailureCode(t *testing.T) {
 	}
 	if transcript != "" || fields != "{}" {
 		t.Fatalf("persisted transcript/fields=%q/%q", transcript, fields)
+	}
+}
+
+func TestVoiceRecordingQueueClaimsOnceAndDeletesAfterThirtyDays(t *testing.T) {
+	ctx, pool, service, driver, _ := voiceFixture(t)
+	for _, payload := range []string{"audio-one", "audio-two"} {
+		_, err := service.EnqueuePrepared(ctx, driver, func() (voice.Audio, voice.Metadata, error) {
+			return voice.Audio{Reader: bytes.NewReader([]byte(payload)), Size: int64(len(payload)), ContentType: "audio/webm"}, voice.Metadata{RecordedAt: time.Now().UTC(), Duration: time.Second}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stores := []*postgres.VoiceStore{postgres.NewVoiceStore(pool), postgres.NewVoiceStore(pool)}
+	claimed := make(chan voice.ClaimedRecording, len(stores))
+	errs := make(chan error, len(stores))
+	var wg sync.WaitGroup
+	now := time.Now().UTC()
+	for index, store := range stores {
+		wg.Add(1)
+		go func(index int, store *postgres.VoiceStore) {
+			defer wg.Done()
+			job, found, err := store.ClaimRecording(context.Background(), fmt.Sprintf("voice-worker-%d", index), now, now.Add(time.Minute))
+			if err != nil {
+				errs <- err
+				return
+			}
+			if !found {
+				errs <- errors.New("voice recording was not claimed")
+				return
+			}
+			claimed <- job
+		}(index, store)
+	}
+	wg.Wait()
+	close(claimed)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	for job := range claimed {
+		if seen[job.RecordingID] {
+			t.Fatalf("recording %s claimed twice", job.RecordingID)
+		}
+		seen[job.RecordingID] = true
+	}
+	if len(seen) != 2 {
+		t.Fatalf("claimed recordings = %d, want 2", len(seen))
+	}
+
+	admin := auth.Actor{UserID: driver.UserID, Role: auth.RoleAdmin}
+	recordings, err := service.ListRecordings(ctx, admin, 100, 0)
+	if err != nil || len(recordings) != 2 {
+		t.Fatalf("admin recordings/error = %#v/%v", recordings, err)
+	}
+	if _, err = service.ListRecordings(ctx, driver, 100, 0); !errors.Is(err, auth.ErrForbidden) {
+		t.Fatalf("driver recording list error = %v", err)
+	}
+	var retentionSeconds int64
+	if err = pool.QueryRow(ctx, "SELECT EXTRACT(EPOCH FROM (expires_at-created_at))::bigint FROM voice_recordings LIMIT 1").Scan(&retentionSeconds); err != nil {
+		t.Fatal(err)
+	}
+	wantRetentionSeconds := int64((30 * 24 * time.Hour) / time.Second)
+	if retentionSeconds < wantRetentionSeconds-5 || retentionSeconds > wantRetentionSeconds {
+		t.Fatalf("recording retention seconds = %d", retentionSeconds)
+	}
+	firstID := recordings[0].ID
+	if _, err = pool.Exec(ctx, "UPDATE voice_recordings SET created_at=now()-interval '31 days', expires_at=now()-interval '1 second' WHERE id=$1", firstID); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := service.Cleanup(ctx); err != nil || count != 1 {
+		t.Fatalf("recording cleanup count/error = %d/%v", count, err)
+	}
+	if _, err = service.RecordingAudio(ctx, admin, firstID); !errors.Is(err, voice.ErrNotFound) {
+		t.Fatalf("expired recording playback error = %v", err)
 	}
 }
 

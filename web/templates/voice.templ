@@ -42,7 +42,7 @@ templ VoiceCapture(data VoiceCaptureData) {
 						}
 						<div class="privacy-notice">
 							<h2>Vor der Aufnahme</h2>
-							<p>Maximal { fmt.Sprint(data.MaxSeconds) } Sekunden und { fmt.Sprint(data.MaxBytes / (1 << 20)) } MiB. Audio liegt nur im begrenzten temporären Speicher und wird nach dem Transkriptionsversuch gelöscht.</p>
+							<p>Maximal { fmt.Sprint(data.MaxSeconds) } Sekunden und { fmt.Sprint(data.MaxBytes / (1 << 20)) } MiB. Die Originalaufnahme ist ausschließlich für Administratoren zugänglich und wird spätestens 30 Tage nach dem Upload automatisch gelöscht.</p>
 							if data.ExternalProvider {
 								<p><strong>Externer Anbieter:</strong> { data.ProviderNotice }</p>
 							}
@@ -52,7 +52,7 @@ templ VoiceCapture(data VoiceCaptureData) {
 							<div class="voice-info__body">
 								if data.LocalProvider {
 									<p>Die Aufnahme wird primär als deutsche Sprache im internen CPU-Dienst mit dem multilingualen Modell „small“ verarbeitet. Sie wird nicht an einen externen KI-Anbieter übertragen.</p>
-									<p>Je nach Aufnahmelänge und Serverauslastung kann die Verarbeitung bis zu { fmt.Sprint(data.ProcessingMinutes) } Minuten dauern. Lassen Sie diese Seite währenddessen geöffnet.</p>
+									<p>Je nach Aufnahmelänge und Serverauslastung kann die Verarbeitung bis zu { fmt.Sprint(data.ProcessingMinutes) } Minuten dauern. Sie können in dieser Zeit weiterarbeiten; der Entwurf zeigt den aktuellen Stand.</p>
 								} else if data.ExternalProvider {
 									<p>{ data.ProviderNotice }</p>
 								}
@@ -92,8 +92,15 @@ templ VoiceReview(data VoiceReviewData) {
 					<div><p class="eyebrow">Menschliche Prüfung erforderlich</p><h1>Sprachentwurf prüfen</h1><p>Status: <span class="status-badge">{ voiceStatusLabel(data.Draft.Status) }</span> · Ablauf { data.Draft.ExpiresAt.In(viennaLocation()).Format("02.01.2006 15:04") }</p></div>
 					<a class="button button--quiet" href="/customers/new">Stattdessen manuell erfassen</a>
 				</div>
-				if data.Draft.Status == voice.StatusFailed {
-					<div class="form-alert" role="alert">Die Transkription ist fehlgeschlagen. Audio wurde gelöscht. Sie können bewusst neu aufnehmen oder manuell erfassen.</div>
+				if data.Draft.Status == voice.StatusRecorded || data.Draft.Status == voice.StatusTranscribing {
+					<section class="form-card voice-processing" data-voice-processing data-status-url={ "/api/v1/voice/drafts/" + data.Draft.ID }>
+						<p class="eyebrow">Verarbeitung läuft</p>
+						<h2>Die Aufnahme wird im Hintergrund transkribiert</h2>
+						<p role="status" data-voice-processing-message>Sie können diese Seite geöffnet lassen oder später zu diesem Entwurf zurückkehren. Es wird nichts automatisch gespeichert oder eingeplant.</p>
+						<a class="button button--quiet" href={ "/voice/drafts/" + data.Draft.ID }>Status aktualisieren</a>
+					</section>
+				} else if data.Draft.Status == voice.StatusFailed {
+					<div class="form-alert" role="alert">Die Transkription ist nach mehreren Versuchen fehlgeschlagen. Die geschützte Originalaufnahme bleibt bis zum Ablauf der 30-Tage-Frist für Administratoren verfügbar.</div>
 					<a class="button" href="/voice">Neu aufnehmen</a>
 				} else if data.Draft.Status == voice.StatusExpired {
 					<div class="form-alert form-alert--warning" role="alert">Dieser Entwurf ist abgelaufen und enthält keine weiter nutzbaren Daten.</div>
@@ -214,7 +221,7 @@ templ confidence(field voice.Field) {
 }
 
 func voiceStatusLabel(status voice.Status) string {
-	return map[voice.Status]string{voice.StatusTranscribing: "Transkription", voice.StatusNeedsReview: "Prüfung erforderlich", voice.StatusFailed: "Fehlgeschlagen", voice.StatusCommitted: "Übernommen", voice.StatusExpired: "Abgelaufen"}[status]
+	return map[voice.Status]string{voice.StatusRecorded: "Wartet auf Verarbeitung", voice.StatusTranscribing: "Transkription", voice.StatusNeedsReview: "Prüfung erforderlich", voice.StatusFailed: "Fehlgeschlagen", voice.StatusCommitted: "Übernommen", voice.StatusExpired: "Abgelaufen"}[status]
 }
 
 func duplicateName(value customers.Duplicate) string {

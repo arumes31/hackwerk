@@ -136,7 +136,7 @@ func NewRouter(dependencies Dependencies) (http.Handler, error) {
 			GeocodingEnabled:      dependencies.Geocoder != nil,
 			RoutingMode:           dependencies.Config.Planning.Router,
 			ExternalVoiceEnabled:  dependencies.Config.Voice.Transcriber == "openai" || dependencies.Config.Voice.Extractor == "openai",
-			LocalVoiceEnabled:     dependencies.Config.Voice.Transcriber == "whisper-local",
+			LocalVoiceEnabled:     dependencies.Config.Voice.Transcriber == "whisper-local" || dependencies.Config.Voice.Transcriber == "whisper-tailscale",
 		},
 	}
 

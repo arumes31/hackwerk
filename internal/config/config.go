@@ -22,7 +22,7 @@ const (
 	EnvironmentDevelopment = "development"
 	EnvironmentTest        = "test"
 	EnvironmentProduction  = "production"
-	CurrentSchemaVersion   = int64(13)
+	CurrentSchemaVersion   = int64(14)
 )
 
 // Config contains the startup settings shared by serve, worker, and CLI modes.
@@ -231,6 +231,7 @@ type Voice struct {
 	Transcriber           string
 	Extractor             string
 	WhisperModel          string
+	WhisperURL            string
 	OpenAIAPIKey          string
 	OpenAIModel           string
 	OpenAIExtractionModel string
@@ -238,6 +239,7 @@ type Voice struct {
 	MaxDuration           time.Duration
 	MaxBytes              int
 	DraftRetention        time.Duration
+	RecordingRetention    time.Duration
 	ProviderTimeout       time.Duration
 	MaxResponseBytes      int
 	TempDir               string
@@ -264,7 +266,6 @@ func LoadForCommand(command string) (Config, error) {
 		validation.Mail.Enabled = false
 		validation.SMS.Enabled = false
 	case "worker":
-		validation.Voice.Enabled = false
 		validation.Map = Map{TileURL: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", Attribution: "unused", Timeout: time.Second, MaxResponseBytes: 16 << 10, MaxZoom: 1}
 	case "migrate", "seed-dev", "admin", "healthcheck":
 		validation.Mail.Enabled = false
@@ -433,8 +434,9 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 		Voice: Voice{
 			Transcriber: valueOrDefault(getenv("VOICE_TRANSCRIBER"), "disabled"), Extractor: valueOrDefault(getenv("VOICE_EXTRACTOR"), "rules"),
 			WhisperModel: valueOrDefault(getenv("VOICE_WHISPER_MODEL"), "small"),
+			WhisperURL:   strings.TrimSpace(getenv("VOICE_WHISPER_URL")),
 			OpenAIAPIKey: openAIKey, OpenAIModel: valueOrDefault(getenv("VOICE_OPENAI_MODEL"), "gpt-4o-mini-transcribe"), OpenAIExtractionModel: valueOrDefault(getenv("VOICE_OPENAI_EXTRACTION_MODEL"), "gpt-5-mini"), FakeTranscript: strings.TrimSpace(getenv("VOICE_FAKE_TRANSCRIPT")),
-			MaxDuration: 90 * time.Second, MaxBytes: 15 << 20, DraftRetention: 24 * time.Hour, ProviderTimeout: 30 * time.Second, MaxResponseBytes: 1 << 20,
+			MaxDuration: 90 * time.Second, MaxBytes: 15 << 20, DraftRetention: 24 * time.Hour, RecordingRetention: 30 * 24 * time.Hour, ProviderTimeout: 30 * time.Second, MaxResponseBytes: 1 << 20,
 			TempDir: valueOrDefault(getenv("VOICE_TEMP_DIR"), "/tmp/hackwerk-voice"), RateLimitPerMinute: 10, ConcurrentPerUser: 2,
 			ExternalProviderNote: valueOrDefault(getenv("VOICE_EXTERNAL_PROVIDER_NOTICE"), "Bei aktivem externem Sprachdienst verlassen Audio und/oder Transkript zur Verarbeitung die HackWerk-Infrastruktur."),
 		},
@@ -451,7 +453,7 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 	if err := applyOverrides(&cfg, getenv); err != nil {
 		return Config{}, err
 	}
-	if cfg.Voice.Transcriber == "whisper-local" && strings.TrimSpace(getenv("VOICE_PROVIDER_TIMEOUT")) == "" {
+	if (cfg.Voice.Transcriber == "whisper-local" || cfg.Voice.Transcriber == "whisper-tailscale") && strings.TrimSpace(getenv("VOICE_PROVIDER_TIMEOUT")) == "" {
 		cfg.Voice.ProviderTimeout = 10 * time.Minute
 	}
 	if validate {
@@ -599,7 +601,7 @@ func applyOverrides(cfg *Config, getenv func(string) string) error {
 			return err
 		}
 	}
-	for name, target := range map[string]*time.Duration{"VOICE_MAX_DURATION": &cfg.Voice.MaxDuration, "VOICE_DRAFT_RETENTION": &cfg.Voice.DraftRetention, "VOICE_PROVIDER_TIMEOUT": &cfg.Voice.ProviderTimeout} {
+	for name, target := range map[string]*time.Duration{"VOICE_MAX_DURATION": &cfg.Voice.MaxDuration, "VOICE_DRAFT_RETENTION": &cfg.Voice.DraftRetention, "VOICE_RECORDING_RETENTION": &cfg.Voice.RecordingRetention, "VOICE_PROVIDER_TIMEOUT": &cfg.Voice.ProviderTimeout} {
 		if *target, err = durationValue(getenv, name, *target); err != nil {
 			return err
 		}
@@ -815,13 +817,13 @@ func (cfg Config) Validate() error {
 			return errors.New("config: invalid planning weights")
 		}
 	}
-	if cfg.Voice.Transcriber != "disabled" && cfg.Voice.Transcriber != "fake" && cfg.Voice.Transcriber != "openai" && cfg.Voice.Transcriber != "whisper-local" {
-		return errors.New("config: voice transcriber must be disabled, fake, openai or whisper-local")
+	if cfg.Voice.Transcriber != "disabled" && cfg.Voice.Transcriber != "fake" && cfg.Voice.Transcriber != "openai" && cfg.Voice.Transcriber != "whisper-local" && cfg.Voice.Transcriber != "whisper-tailscale" {
+		return errors.New("config: voice transcriber must be disabled, fake, openai, whisper-local or whisper-tailscale")
 	}
 	if cfg.Voice.Extractor != "rules" && cfg.Voice.Extractor != "openai" {
 		return errors.New("config: voice extractor must be rules or openai")
 	}
-	if cfg.Voice.MaxDuration < time.Second || cfg.Voice.MaxDuration > 5*time.Minute || cfg.Voice.MaxBytes < 1024 || cfg.Voice.MaxBytes > 50<<20 || cfg.Voice.DraftRetention < 5*time.Minute || cfg.Voice.DraftRetention > 7*24*time.Hour || cfg.Voice.ProviderTimeout < time.Second || cfg.Voice.ProviderTimeout > 15*time.Minute || cfg.Voice.MaxResponseBytes < 1024 || cfg.Voice.MaxResponseBytes > 4<<20 || strings.TrimSpace(cfg.Voice.TempDir) == "" || cfg.Voice.RateLimitPerMinute < 1 || cfg.Voice.RateLimitPerMinute > 100 || cfg.Voice.ConcurrentPerUser < 1 || cfg.Voice.ConcurrentPerUser > 5 {
+	if cfg.Voice.MaxDuration < time.Second || cfg.Voice.MaxDuration > 5*time.Minute || cfg.Voice.MaxBytes < 1024 || cfg.Voice.MaxBytes > 15<<20 || cfg.Voice.DraftRetention < 5*time.Minute || cfg.Voice.DraftRetention > 7*24*time.Hour || cfg.Voice.RecordingRetention < 24*time.Hour || cfg.Voice.RecordingRetention > 30*24*time.Hour || cfg.Voice.ProviderTimeout < time.Second || cfg.Voice.ProviderTimeout > 15*time.Minute || cfg.Voice.MaxResponseBytes < 1024 || cfg.Voice.MaxResponseBytes > 4<<20 || strings.TrimSpace(cfg.Voice.TempDir) == "" || cfg.Voice.RateLimitPerMinute < 1 || cfg.Voice.RateLimitPerMinute > 100 || cfg.Voice.ConcurrentPerUser < 1 || cfg.Voice.ConcurrentPerUser > 5 {
 		return errors.New("config: invalid voice limits")
 	}
 	if cfg.Voice.Enabled && cfg.Voice.Transcriber == "disabled" {
@@ -830,8 +832,11 @@ func (cfg Config) Validate() error {
 	if cfg.Voice.Transcriber == "openai" && (len(cfg.Voice.OpenAIAPIKey) < 16 || strings.TrimSpace(cfg.Voice.OpenAIModel) == "") {
 		return errors.New("config: OpenAI voice transcriber requires API key and model")
 	}
-	if cfg.Voice.Transcriber == "whisper-local" && cfg.Voice.WhisperModel != "small" {
+	if (cfg.Voice.Transcriber == "whisper-local" || cfg.Voice.Transcriber == "whisper-tailscale") && cfg.Voice.WhisperModel != "small" {
 		return errors.New("config: local whisper transcriber requires the small model")
+	}
+	if cfg.Voice.Transcriber == "whisper-tailscale" && !validTailscaleVoiceURL(cfg.Voice.WhisperURL) {
+		return errors.New("config: Tailscale whisper requires a numeric http://100.64.0.0/10:8080 endpoint")
 	}
 	if cfg.Voice.Extractor == "openai" && (len(cfg.Voice.OpenAIAPIKey) < 16 || strings.TrimSpace(cfg.Voice.OpenAIExtractionModel) == "") {
 		return errors.New("config: OpenAI voice extractor requires API key and model")
@@ -963,6 +968,19 @@ func validTailscaleRoutingURL(raw string) bool {
 		return false
 	}
 	return parsed.Host == net.JoinHostPort(address.String(), "5000")
+}
+
+func validTailscaleVoiceURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" ||
+		parsed.RawPath != "" || parsed.Opaque != "" || parsed.Path != "" || parsed.Scheme != "http" {
+		return false
+	}
+	address, err := netip.ParseAddr(parsed.Hostname())
+	if err != nil || !address.Is4() || !netip.MustParsePrefix("100.64.0.0/10").Contains(address) {
+		return false
+	}
+	return parsed.Host == net.JoinHostPort(address.String(), "8080")
 }
 
 func validAllowedHost(host string) bool {
@@ -1123,7 +1141,8 @@ func (cfg Config) Diagnostic() map[string]any {
 		"mail_enabled": cfg.Mail.Enabled, "mail_username": configured(cfg.Mail.Username), "mail_password": configured(cfg.Mail.Password),
 		"sms_enabled": cfg.SMS.Enabled, "sms_provider": cfg.SMS.Provider, "sendberry_api_url": configured(cfg.SMS.SendberryURL),
 		"sendberry_api_key": configured(cfg.SMS.SendberryKey), "sendberry_access_name": configured(cfg.SMS.SendberryName), "sendberry_access_password": configured(cfg.SMS.SendberryPassword),
-		"voice_enabled": cfg.Voice.Enabled, "voice_provider_key": configured(cfg.Voice.OpenAIAPIKey), "calendar_enabled": cfg.CalendarFeed.Enabled,
+		"voice_enabled": cfg.Voice.Enabled, "voice_transcriber": cfg.Voice.Transcriber, "voice_whisper_url": configured(cfg.Voice.WhisperURL),
+		"voice_recording_retention": cfg.Voice.RecordingRetention.String(), "voice_provider_key": configured(cfg.Voice.OpenAIAPIKey), "calendar_enabled": cfg.CalendarFeed.Enabled,
 		"routing_provider": cfg.Planning.Router, "map_tile_url": configured(cfg.Map.TileURL), "map_tile_token": configured(cfg.Map.TileToken),
 		"geocoding_enabled": cfg.Geocoding.Enabled, "geocoding_search_url": configured(cfg.Geocoding.SearchURL),
 		"confirmation_key_count": len(cfg.Confirmation.TokenKeys), "maintenance_mode": cfg.MaintenanceMode,

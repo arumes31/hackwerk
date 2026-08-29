@@ -16,7 +16,9 @@ type Querier interface {
 	ArchiveJob(ctx context.Context, arg ArchiveJobParams) (int64, error)
 	BumpAppointmentVersion(ctx context.Context, arg BumpAppointmentVersionParams) (int64, error)
 	ClaimNotificationOutbox(ctx context.Context, arg ClaimNotificationOutboxParams) ([]ClaimNotificationOutboxRow, error)
+	ClaimVoiceRecording(ctx context.Context, arg ClaimVoiceRecordingParams) (ClaimVoiceRecordingRow, error)
 	CleanupExpiredVoiceDrafts(ctx context.Context) (int64, error)
+	CleanupExpiredVoiceRecordings(ctx context.Context, nowUtc pgtype.Timestamptz) (int64, error)
 	ClearAvailabilityRulesForDay(ctx context.Context, arg ClearAvailabilityRulesForDayParams) (int64, error)
 	ClearLoginFailures(ctx context.Context, keyHash []byte) error
 	ClearRouteLocationEndDefaultForCreate(ctx context.Context) error
@@ -24,6 +26,7 @@ type Querier interface {
 	ClearRouteLocationStartDefaultForCreate(ctx context.Context) error
 	ClearRouteLocationStartDefaultForUpdate(ctx context.Context, id pgtype.UUID) error
 	CommitVoiceDraft(ctx context.Context, arg CommitVoiceDraftParams) (int64, error)
+	CompleteClaimedVoiceRecording(ctx context.Context, arg CompleteClaimedVoiceRecordingParams) (int64, error)
 	CompleteVoiceDraft(ctx context.Context, arg CompleteVoiceDraftParams) (int64, error)
 	CountActiveAdmins(ctx context.Context) (int64, error)
 	CountCustomers(ctx context.Context, arg CountCustomersParams) (int64, error)
@@ -46,6 +49,7 @@ type Querier interface {
 	DiscardOtherPlanningSuggestions(ctx context.Context, arg DiscardOtherPlanningSuggestionsParams) error
 	DriverCanCompleteAppointment(ctx context.Context, arg DriverCanCompleteAppointmentParams) (bool, error)
 	ExpireVoiceDraft(ctx context.Context, arg ExpireVoiceDraftParams) (int64, error)
+	FailClaimedVoiceRecording(ctx context.Context, arg FailClaimedVoiceRecordingParams) (string, error)
 	FailVoiceDraft(ctx context.Context, arg FailVoiceDraftParams) (int64, error)
 	FindAppointmentConflicts(ctx context.Context, arg FindAppointmentConflictsParams) ([]FindAppointmentConflictsRow, error)
 	FindDuplicateCustomers(ctx context.Context, arg FindDuplicateCustomersParams) ([]FindDuplicateCustomersRow, error)
@@ -77,6 +81,7 @@ type Querier interface {
 	GetRouteDraft(ctx context.Context, id pgtype.UUID) (GetRouteDraftRow, error)
 	GetRouteLocationForUpdate(ctx context.Context, id pgtype.UUID) (GetRouteLocationForUpdateRow, error)
 	GetVoiceDraftForOwner(ctx context.Context, arg GetVoiceDraftForOwnerParams) (GetVoiceDraftForOwnerRow, error)
+	GetVoiceRecordingAudio(ctx context.Context, id pgtype.UUID) (GetVoiceRecordingAudioRow, error)
 	HasActiveDriverReservations(ctx context.Context, driverID pgtype.UUID) (bool, error)
 	HasActiveResourceReservations(ctx context.Context, resourceID pgtype.UUID) (bool, error)
 	InsertAdoptedProposal(ctx context.Context, arg InsertAdoptedProposalParams) (string, error)
@@ -106,6 +111,7 @@ type Querier interface {
 	InsertSession(ctx context.Context, arg InsertSessionParams) (string, error)
 	InsertUser(ctx context.Context, arg InsertUserParams) (string, error)
 	InsertVoiceDraft(ctx context.Context, arg InsertVoiceDraftParams) (InsertVoiceDraftRow, error)
+	InsertVoiceRecording(ctx context.Context, arg InsertVoiceRecordingParams) (string, error)
 	InsertWaitlistEntry(ctx context.Context, arg InsertWaitlistEntryParams) (string, error)
 	JobHasActiveAppointment(ctx context.Context, jobID pgtype.UUID) (bool, error)
 	LatestAppliedMigration(ctx context.Context) (int64, error)
@@ -150,6 +156,7 @@ type Querier interface {
 	ListRouteStopPhones(ctx context.Context, jobIds []pgtype.UUID) ([]ListRouteStopPhonesRow, error)
 	ListRouteStops(ctx context.Context, routeDraftID pgtype.UUID) ([]ListRouteStopsRow, error)
 	ListUsers(ctx context.Context) ([]ListUsersRow, error)
+	ListVoiceRecordingsForAdmin(ctx context.Context, arg ListVoiceRecordingsForAdminParams) ([]ListVoiceRecordingsForAdminRow, error)
 	ListWaitlist(ctx context.Context, arg ListWaitlistParams) ([]ListWaitlistRow, error)
 	ListWaitlistFilterFavorites(ctx context.Context, userID pgtype.UUID) ([]ListWaitlistFilterFavoritesRow, error)
 	ListWaitlistForPlanning(ctx context.Context) ([]ListWaitlistForPlanningRow, error)

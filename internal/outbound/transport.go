@@ -49,7 +49,7 @@ func InternalServiceTransport(host, port string) *http.Transport {
 // resolution so the configured peer cannot be changed at request time.
 func TailscaleServiceTransport(host, port string) (*http.Transport, error) {
 	address, err := netip.ParseAddr(host)
-	if err != nil || !address.Is4() || !tailscaleIPv4Prefix.Contains(address) || port != "5000" {
+	if err != nil || !address.Is4() || !tailscaleIPv4Prefix.Contains(address) || (port != "5000" && port != "8080") {
 		return nil, fmt.Errorf("%w: tailscale service endpoint", ErrRestrictedAddress)
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()

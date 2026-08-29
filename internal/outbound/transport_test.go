@@ -174,6 +174,10 @@ func TestTailscaleServiceTransportValidatesEndpointAndDisablesProxy(t *testing.T
 	if transport.Proxy != nil {
 		t.Fatal("tailscale service transport allows a proxy resolution path")
 	}
+	voiceTransport, err := TailscaleServiceTransport("100.115.58.99", "8080")
+	if err != nil || voiceTransport.Proxy != nil {
+		t.Fatalf("Tailscale voice transport/error = %#v/%v", voiceTransport, err)
+	}
 	for _, endpoint := range [][2]string{
 		{"router", "5000"}, {"100.63.255.255", "5000"}, {"100.128.0.0", "5000"},
 		{"10.0.0.1", "5000"}, {"100.115.58.99", "80"},

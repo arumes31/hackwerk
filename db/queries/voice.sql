@@ -3,6 +3,125 @@ INSERT INTO voice_drafts (owner_user_id, status, expires_at)
 VALUES (sqlc.arg(owner_user_id)::uuid, 'transcribing', sqlc.arg(expires_at))
 RETURNING id::text, version;
 
+-- name: InsertVoiceRecording :one
+WITH draft AS (
+    INSERT INTO voice_drafts (owner_user_id, status, expires_at)
+    VALUES (sqlc.arg(owner_user_id)::uuid, 'recorded', sqlc.arg(draft_expires_at)::timestamptz)
+    RETURNING id, version
+)
+INSERT INTO voice_recordings (
+    draft_id, owner_user_id, content_type, audio_bytes, byte_size, duration_ms,
+    recorded_at, expires_at, available_at
+)
+SELECT id, sqlc.arg(owner_user_id)::uuid, sqlc.arg(content_type), sqlc.arg(audio_bytes),
+       sqlc.arg(byte_size), sqlc.arg(duration_ms), sqlc.arg(recorded_at)::timestamptz,
+       sqlc.arg(recording_expires_at)::timestamptz, now()
+FROM draft
+RETURNING draft_id::text;
+
+-- name: ClaimVoiceRecording :one
+WITH candidate AS (
+    SELECT recording.id
+    FROM voice_recordings recording
+    JOIN voice_drafts draft ON draft.id = recording.draft_id
+    WHERE recording.expires_at > sqlc.arg(now_utc)::timestamptz
+      AND draft.expires_at > sqlc.arg(now_utc)::timestamptz
+      AND recording.attempt_count < recording.max_attempts
+      AND (
+          (draft.status = 'recorded' AND recording.available_at <= sqlc.arg(now_utc)::timestamptz AND recording.claimed_by IS NULL)
+          OR
+          (draft.status = 'transcribing' AND recording.lease_until <= sqlc.arg(now_utc)::timestamptz)
+      )
+    ORDER BY recording.available_at, recording.created_at, recording.id
+    FOR UPDATE OF recording, draft SKIP LOCKED
+    LIMIT 1
+), claimed AS (
+    UPDATE voice_recordings recording
+    SET claimed_by = sqlc.arg(worker_id), lease_until = sqlc.arg(lease_until)::timestamptz,
+        attempt_count = recording.attempt_count + 1, failure_code = '', updated_at = sqlc.arg(now_utc)::timestamptz
+    FROM candidate
+    WHERE recording.id = candidate.id
+    RETURNING recording.id, recording.draft_id, recording.owner_user_id, recording.content_type,
+              recording.audio_bytes, recording.byte_size, recording.duration_ms, recording.recorded_at,
+              recording.attempt_count, recording.max_attempts
+)
+UPDATE voice_drafts draft
+SET status = 'transcribing', retry_count = claimed.attempt_count,
+    version = version + CASE WHEN draft.status = 'recorded' THEN 1 ELSE 0 END,
+    updated_at = sqlc.arg(now_utc)::timestamptz
+FROM claimed
+WHERE draft.id = claimed.draft_id
+RETURNING claimed.id::text AS recording_id, claimed.draft_id::text, claimed.owner_user_id::text,
+          claimed.content_type, claimed.audio_bytes, claimed.byte_size, claimed.duration_ms,
+          claimed.recorded_at, claimed.attempt_count, claimed.max_attempts;
+
+-- name: CompleteClaimedVoiceRecording :execrows
+WITH released AS (
+    UPDATE voice_recordings
+    SET claimed_by = NULL, lease_until = NULL, failure_code = '', updated_at = sqlc.arg(now_utc)::timestamptz
+    WHERE id = sqlc.arg(recording_id)::uuid AND claimed_by = sqlc.arg(worker_id)
+      AND lease_until > sqlc.arg(now_utc)::timestamptz
+    RETURNING draft_id
+)
+UPDATE voice_drafts draft SET
+    status = 'needs_review', transcript = sqlc.arg(transcript),
+    extracted_fields = sqlc.arg(extracted_fields), warnings = sqlc.arg(warnings),
+    overall_confidence = sqlc.arg(overall_confidence)::numeric,
+    provider_name = sqlc.arg(provider_name), provider_version = sqlc.arg(provider_version),
+    parser_version = sqlc.arg(parser_version), failure_code = '',
+    version = version + 1, updated_at = sqlc.arg(now_utc)::timestamptz
+FROM released
+WHERE draft.id = released.draft_id AND draft.status = 'transcribing' AND draft.expires_at > sqlc.arg(now_utc)::timestamptz;
+
+-- name: FailClaimedVoiceRecording :one
+WITH released AS (
+    UPDATE voice_recordings recording
+    SET claimed_by = NULL, lease_until = NULL,
+        available_at = CASE WHEN sqlc.arg(retry)::boolean THEN sqlc.arg(available_at)::timestamptz ELSE recording.available_at END,
+        attempt_count = CASE WHEN sqlc.arg(retry)::boolean THEN recording.attempt_count ELSE recording.max_attempts END,
+        failure_code = sqlc.arg(failure_code), updated_at = sqlc.arg(now_utc)::timestamptz
+    WHERE recording.id = sqlc.arg(recording_id)::uuid AND recording.claimed_by = sqlc.arg(worker_id)
+      AND recording.lease_until > sqlc.arg(now_utc)::timestamptz
+    RETURNING recording.draft_id, recording.attempt_count, recording.max_attempts
+)
+UPDATE voice_drafts draft
+SET status = CASE WHEN sqlc.arg(retry)::boolean AND released.attempt_count < released.max_attempts THEN 'recorded' ELSE 'failed' END,
+    failure_code = sqlc.arg(failure_code), retry_count = released.attempt_count,
+    version = version + 1, updated_at = sqlc.arg(now_utc)::timestamptz
+FROM released
+WHERE draft.id = released.draft_id AND draft.status = 'transcribing'
+RETURNING draft.status;
+
+-- name: ListVoiceRecordingsForAdmin :many
+SELECT recording.id::text, recording.draft_id::text, recording.content_type, recording.byte_size,
+       recording.duration_ms, recording.recorded_at, recording.expires_at, recording.created_at,
+       draft.status, owner.display_name AS owner_display_name
+FROM voice_recordings recording
+JOIN voice_drafts draft ON draft.id = recording.draft_id
+JOIN users owner ON owner.id = recording.owner_user_id
+WHERE recording.expires_at > now()
+ORDER BY recording.created_at DESC, recording.id DESC
+LIMIT sqlc.arg(result_limit)
+OFFSET sqlc.arg(result_offset);
+
+-- name: GetVoiceRecordingAudio :one
+SELECT id::text, content_type, audio_bytes, byte_size, duration_ms, recorded_at, expires_at
+FROM voice_recordings
+WHERE id = sqlc.arg(id)::uuid AND expires_at > now();
+
+-- name: CleanupExpiredVoiceRecordings :execrows
+WITH expired AS (
+    SELECT id
+    FROM voice_recordings
+    WHERE expires_at <= sqlc.arg(now_utc)::timestamptz
+    ORDER BY expires_at, id
+    LIMIT 100
+    FOR UPDATE SKIP LOCKED
+)
+DELETE FROM voice_recordings recording
+USING expired
+WHERE recording.id = expired.id;
+
 -- name: CompleteVoiceDraft :execrows
 UPDATE voice_drafts SET
     status = 'needs_review', transcript = sqlc.arg(transcript),

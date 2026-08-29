@@ -29,6 +29,12 @@ func VoiceService(cfg config.Config, pool *pgxpool.Pool, observers ...voice.Obse
 			return nil, err
 		}
 		transcriber = provider
+	case "whisper-tailscale":
+		provider, err := voice.NewWhisperCPPTailscaleTranscriber(cfg.Voice.WhisperModel, cfg.Voice.WhisperURL, cfg.Voice.ProviderTimeout, int64(cfg.Voice.MaxResponseBytes))
+		if err != nil {
+			return nil, err
+		}
+		transcriber = provider
 	default:
 		return nil, errors.New("app: unsupported voice transcriber")
 	}
@@ -48,5 +54,5 @@ func VoiceService(cfg config.Config, pool *pgxpool.Pool, observers ...voice.Obse
 	for _, observer := range observers {
 		options = append(options, voice.WithObserver(observer))
 	}
-	return voice.New(postgres.NewVoiceStore(pool), transcriber, extractor, voice.Config{Enabled: cfg.Voice.Enabled, Retention: cfg.Voice.DraftRetention, RateLimitPerMinute: cfg.Voice.RateLimitPerMinute, ConcurrentPerUser: cfg.Voice.ConcurrentPerUser, Timezone: location}, time.Now, options...)
+	return voice.New(postgres.NewVoiceStore(pool), transcriber, extractor, voice.Config{Enabled: cfg.Voice.Enabled, Retention: cfg.Voice.DraftRetention, RecordingRetention: cfg.Voice.RecordingRetention, RateLimitPerMinute: cfg.Voice.RateLimitPerMinute, ConcurrentPerUser: cfg.Voice.ConcurrentPerUser, Timezone: location}, time.Now, options...)
 }

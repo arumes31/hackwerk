@@ -2,6 +2,7 @@
 package voice
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -27,6 +28,7 @@ var (
 type Status string
 
 const (
+	StatusRecorded     Status = "recorded"
 	StatusTranscribing Status = "transcribing"
 	StatusNeedsReview  Status = "needs_review"
 	StatusFailed       Status = "failed"
@@ -84,6 +86,31 @@ type Metadata struct {
 	Duration   time.Duration
 }
 
+type Recording struct {
+	ID, DraftID, ContentType, OwnerDisplayName string
+	ByteSize                                   int
+	Duration                                   time.Duration
+	RecordedAt, CreatedAt, ExpiresAt           time.Time
+	DraftStatus                                Status
+}
+
+type RecordingAudio struct {
+	ID, ContentType       string
+	Bytes                 []byte
+	ByteSize              int
+	Duration              time.Duration
+	RecordedAt, ExpiresAt time.Time
+}
+
+type ClaimedRecording struct {
+	RecordingID, DraftID, OwnerUserID, ContentType string
+	AudioBytes                                     []byte
+	ByteSize                                       int
+	Duration                                       time.Duration
+	RecordedAt                                     time.Time
+	Attempt, MaxAttempts                           int16
+}
+
 // AudioPreparation performs bounded validation after service admission.
 type AudioPreparation func() (Audio, Metadata, error)
 
@@ -112,9 +139,20 @@ type Store interface {
 	Cleanup(context.Context) (int64, error)
 }
 
+type RecordingStore interface {
+	CreateRecording(context.Context, auth.Actor, []byte, string, Metadata, time.Time, time.Time) (Draft, error)
+	ClaimRecording(context.Context, string, time.Time, time.Time) (ClaimedRecording, bool, error)
+	CompleteRecording(context.Context, string, ClaimedRecording, Transcript, Fields, []string, float64, string, time.Time) error
+	FailRecording(context.Context, string, ClaimedRecording, string, bool, time.Time, time.Time) error
+	ListRecordings(context.Context, int32, int32) ([]Recording, error)
+	GetRecordingAudio(context.Context, string) (RecordingAudio, error)
+	CleanupRecordings(context.Context, time.Time) (int64, error)
+}
+
 type Config struct {
 	Enabled            bool
 	Retention          time.Duration
+	RecordingRetention time.Duration
 	RateLimitPerMinute int
 	ConcurrentPerUser  int
 	Timezone           *time.Location
@@ -149,7 +187,10 @@ func New(store Store, transcriber Transcriber, extractor Extractor, cfg Config, 
 	if store == nil || transcriber == nil || extractor == nil || cfg.Timezone == nil || now == nil {
 		return nil, errors.New("voice: missing dependency")
 	}
-	if cfg.Retention < 5*time.Minute || cfg.Retention > 7*24*time.Hour || cfg.RateLimitPerMinute < 1 || cfg.ConcurrentPerUser < 1 {
+	if cfg.RecordingRetention == 0 {
+		cfg.RecordingRetention = 30 * 24 * time.Hour
+	}
+	if cfg.Retention < 5*time.Minute || cfg.Retention > 7*24*time.Hour || cfg.RecordingRetention < 24*time.Hour || cfg.RecordingRetention > 30*24*time.Hour || cfg.RateLimitPerMinute < 1 || cfg.ConcurrentPerUser < 1 {
 		return nil, errors.New("voice: invalid configuration")
 	}
 	service := &Service{store: store, transcriber: transcriber, extractor: extractor, config: cfg, now: now, limiter: newUserLimiter(cfg.RateLimitPerMinute, cfg.ConcurrentPerUser)}
@@ -160,6 +201,101 @@ func New(store Store, transcriber Transcriber, extractor Extractor, cfg Config, 
 }
 
 func (service *Service) Enabled() bool { return service.config.Enabled }
+
+const maxStoredAudioBytes = 15 << 20
+
+// EnqueuePrepared validates and stores an audio recording for asynchronous processing.
+func (service *Service) EnqueuePrepared(ctx context.Context, actor auth.Actor, prepare AudioPreparation) (Draft, error) {
+	for _, permission := range []auth.Permission{auth.PermissionCustomerCreate, auth.PermissionJobCreate, auth.PermissionWaitlistAdd} {
+		if err := actor.Require(permission); err != nil {
+			return Draft{}, err
+		}
+	}
+	if !service.config.Enabled {
+		return Draft{}, ErrDisabled
+	}
+	if prepare == nil {
+		return Draft{}, fmt.Errorf("%w: missing audio preparation", ErrValidation)
+	}
+	release, ok := service.limiter.acquire(actor.UserID, service.now())
+	if !ok {
+		return Draft{}, ErrRateLimit
+	}
+	defer release()
+	audio, metadata, err := prepare()
+	if err != nil {
+		return Draft{}, err
+	}
+	if audio.Reader == nil || audio.Size <= 0 || audio.Size > maxStoredAudioBytes {
+		return Draft{}, fmt.Errorf("%w: invalid audio size", ErrValidation)
+	}
+	payload, err := io.ReadAll(io.LimitReader(audio.Reader, maxStoredAudioBytes+1))
+	if err != nil {
+		return Draft{}, fmt.Errorf("voice: reading prepared audio: %w", err)
+	}
+	if len(payload) == 0 || len(payload) > maxStoredAudioBytes || int64(len(payload)) != audio.Size {
+		return Draft{}, fmt.Errorf("%w: inconsistent audio size", ErrValidation)
+	}
+	queue, ok := service.store.(RecordingStore)
+	if !ok {
+		return Draft{}, errors.New("voice: recording store unavailable")
+	}
+	now := service.now().UTC()
+	return queue.CreateRecording(ctx, actor, payload, audio.ContentType, metadata, now.Add(service.config.Retention), now.Add(service.config.RecordingRetention))
+}
+
+// ProcessNext claims and processes at most one queued recording.
+func (service *Service) ProcessNext(ctx context.Context, workerID string, lease time.Duration) (bool, error) {
+	if !service.config.Enabled {
+		return false, nil
+	}
+	queue, ok := service.store.(RecordingStore)
+	if !ok {
+		return false, errors.New("voice: recording store unavailable")
+	}
+	now := service.now().UTC()
+	job, found, err := queue.ClaimRecording(ctx, workerID, now, now.Add(lease))
+	if err != nil || !found {
+		return found, err
+	}
+	audio := Audio{Reader: bytes.NewReader(job.AudioBytes), Filename: "aufnahme" + recordingExtension(job.ContentType), ContentType: job.ContentType, Size: int64(job.ByteSize)}
+	metadata := Metadata{RecordedAt: job.RecordedAt, Duration: job.Duration}
+	transcript, err := service.transcriber.Transcribe(ctx, audio, "de", metadata)
+	if err != nil {
+		return true, service.failRecording(ctx, queue, workerID, job, "transcription_failed", true)
+	}
+	transcript.Text = strings.TrimSpace(transcript.Text)
+	if transcript.Text == "" || len([]rune(transcript.Text)) > 12000 {
+		return true, service.failRecording(ctx, queue, workerID, job, "invalid_transcript", false)
+	}
+	fields, warnings, confidence := service.extractor.Extract(ctx, transcript.Text, metadata.RecordedAt, service.config.Timezone)
+	if err := queue.CompleteRecording(ctx, workerID, job, transcript, fields, warnings, confidence, service.extractor.Version(), service.now().UTC()); err != nil {
+		return true, fmt.Errorf("voice: completing queued recording: %w", err)
+	}
+	return true, nil
+}
+
+func (service *Service) failRecording(ctx context.Context, queue RecordingStore, workerID string, job ClaimedRecording, code string, retry bool) error {
+	now := service.now().UTC()
+	backoff := time.Duration(job.Attempt*job.Attempt) * 30 * time.Second
+	if err := queue.FailRecording(ctx, workerID, job, code, retry, now, now.Add(backoff)); err != nil {
+		return fmt.Errorf("voice: failing queued recording: %w", err)
+	}
+	return ErrProvider
+}
+
+func recordingExtension(contentType string) string {
+	switch contentType {
+	case "audio/webm":
+		return ".webm"
+	case "audio/ogg":
+		return ".ogg"
+	case "audio/wav":
+		return ".wav"
+	default:
+		return ".bin"
+	}
+}
 
 func (service *Service) Process(ctx context.Context, actor auth.Actor, audio Audio, metadata Metadata) (result Draft, resultErr error) {
 	return service.ProcessPrepared(ctx, actor, func() (Audio, Metadata, error) {
@@ -302,7 +438,48 @@ func (service *Service) Discard(ctx context.Context, actor auth.Actor, id string
 }
 
 func (service *Service) Cleanup(ctx context.Context) (int64, error) {
-	return service.store.Cleanup(ctx)
+	queue, ok := service.store.(RecordingStore)
+	if !ok {
+		return service.store.Cleanup(ctx)
+	}
+	var recordings int64
+	for {
+		deleted, recordingErr := queue.CleanupRecordings(ctx, service.now().UTC())
+		recordings += deleted
+		if recordingErr != nil {
+			return recordings, recordingErr
+		}
+		if deleted == 0 {
+			break
+		}
+	}
+	drafts, draftErr := service.store.Cleanup(ctx)
+	return recordings + drafts, draftErr
+}
+
+func (service *Service) ListRecordings(ctx context.Context, actor auth.Actor, limit, offset int32) ([]Recording, error) {
+	if err := actor.Require(auth.PermissionAuditView); err != nil {
+		return nil, err
+	}
+	if limit < 1 || limit > 200 || offset < 0 || offset > 1_000_000 {
+		return nil, ErrValidation
+	}
+	queue, ok := service.store.(RecordingStore)
+	if !ok {
+		return nil, errors.New("voice: recording store unavailable")
+	}
+	return queue.ListRecordings(ctx, limit, offset)
+}
+
+func (service *Service) RecordingAudio(ctx context.Context, actor auth.Actor, id string) (RecordingAudio, error) {
+	if err := actor.Require(auth.PermissionAuditView); err != nil {
+		return RecordingAudio{}, err
+	}
+	queue, ok := service.store.(RecordingStore)
+	if !ok {
+		return RecordingAudio{}, errors.New("voice: recording store unavailable")
+	}
+	return queue.GetRecordingAudio(ctx, strings.TrimSpace(id))
 }
 
 func CustomerFromFields(fields Fields) customers.CustomerInput {

@@ -20,11 +20,16 @@ import (
 	"example.invalid/hackplan/internal/config"
 	"example.invalid/hackplan/internal/customers"
 	"example.invalid/hackplan/internal/voice"
+	"github.com/go-chi/chi/v5"
 )
 
 type webVoiceStore struct {
-	draft   voice.Draft
-	creates int
+	draft          voice.Draft
+	recordingAudio voice.RecordingAudio
+	recordings     []voice.Recording
+	listLimit      int32
+	listOffset     int32
+	creates        int
 }
 
 type webVoiceTranscriber struct {
@@ -41,6 +46,31 @@ func (store *webVoiceStore) Create(_ context.Context, actor auth.Actor, expires 
 	store.draft = voice.Draft{ID: "voice-draft", OwnerUserID: actor.UserID, Status: voice.StatusTranscribing, Version: 1, ExpiresAt: expires}
 	return store.draft, nil
 }
+func (store *webVoiceStore) CreateRecording(_ context.Context, actor auth.Actor, _ []byte, _ string, _ voice.Metadata, expires, _ time.Time) (voice.Draft, error) {
+	store.creates++
+	store.draft = voice.Draft{ID: "voice-draft", OwnerUserID: actor.UserID, Status: voice.StatusRecorded, Version: 1, ExpiresAt: expires}
+	return store.draft, nil
+}
+func (*webVoiceStore) ClaimRecording(context.Context, string, time.Time, time.Time) (voice.ClaimedRecording, bool, error) {
+	return voice.ClaimedRecording{}, false, nil
+}
+func (*webVoiceStore) CompleteRecording(context.Context, string, voice.ClaimedRecording, voice.Transcript, voice.Fields, []string, float64, string, time.Time) error {
+	return nil
+}
+func (*webVoiceStore) FailRecording(context.Context, string, voice.ClaimedRecording, string, bool, time.Time, time.Time) error {
+	return nil
+}
+func (store *webVoiceStore) ListRecordings(_ context.Context, limit, offset int32) ([]voice.Recording, error) {
+	store.listLimit, store.listOffset = limit, offset
+	return store.recordings, nil
+}
+func (store *webVoiceStore) GetRecordingAudio(context.Context, string) (voice.RecordingAudio, error) {
+	if store.recordingAudio.ID == "" {
+		return voice.RecordingAudio{}, voice.ErrNotFound
+	}
+	return store.recordingAudio, nil
+}
+func (*webVoiceStore) CleanupRecordings(context.Context, time.Time) (int64, error) { return 0, nil }
 func (store *webVoiceStore) Complete(_ context.Context, _ auth.Actor, _ string, transcript voice.Transcript, fields voice.Fields, warnings []string, confidence float64, parser string) error {
 	store.draft.Status = voice.StatusNeedsReview
 	store.draft.Version = 2
@@ -162,7 +192,7 @@ func TestNativeVoiceUploadFallbackAndAPIRemainSecure(t *testing.T) {
 		{name: "native missing csrf", path: "/voice/upload", duration: "3", audioType: "audio/wav", wantStatus: http.StatusForbidden, wantBody: "Sicherheitsmerkmal"},
 		{name: "native invalid csrf", path: "/voice/upload", csrfField: "wrong", duration: "3", audioType: "audio/wav", wantStatus: http.StatusForbidden, wantBody: "Sicherheitsmerkmal"},
 		{name: "native validation error", path: "/voice/upload", csrfField: "csrf-token", duration: "0", audioType: "audio/wav", wantStatus: http.StatusUnprocessableEntity, wantBody: "Aufnahmedauer"},
-		{name: "api json success", path: "/api/v1/voice/drafts", csrfHeader: "csrf-token", duration: "3000", audioType: "audio/wav", wantStatus: http.StatusCreated, wantCreates: 1, wantBody: `"location":"/voice/drafts/voice-draft"`},
+		{name: "api json success", path: "/api/v1/voice/drafts", csrfHeader: "csrf-token", duration: "3000", audioType: "audio/wav", wantStatus: http.StatusAccepted, wantCreates: 1, wantBody: `"location":"/voice/drafts/voice-draft"`},
 		{name: "api still requires csrf header", path: "/api/v1/voice/drafts", csrfField: "csrf-token", duration: "3000", audioType: "audio/wav", wantStatus: http.StatusForbidden, wantBody: "Request-Header"},
 	}
 	for _, test := range tests {
@@ -222,6 +252,37 @@ func TestNativeVoiceUploadRejectsCrossSiteBeforeReadingBody(t *testing.T) {
 	entries, err := os.ReadDir(tempDir)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("temporary upload files remain: %v, err=%v", entries, err)
+	}
+}
+
+func TestVoiceRecordingPlaybackIsAdminOnlyAndNotCacheable(t *testing.T) {
+	store := &webVoiceStore{recordingAudio: voice.RecordingAudio{
+		ID: "recording", ContentType: "audio/wav", Bytes: wavFixture(time.Second),
+		RecordedAt: time.Date(2026, 8, 29, 8, 0, 0, 0, time.UTC),
+	}}
+	location, _ := time.LoadLocation("Europe/Vienna")
+	service, err := voice.New(store, voice.FakeTranscriber{Text: "fixture"}, voice.RuleExtractor{}, voice.Config{Enabled: true, Retention: time.Hour, RecordingRetention: 30 * 24 * time.Hour, RateLimitPerMinute: 10, ConcurrentPerUser: 1, Timezone: location}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := voiceRecordingAudio(service, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	for _, test := range []struct {
+		role       auth.Role
+		wantStatus int
+	}{{auth.RoleDriver, http.StatusForbidden}, {auth.RoleAdmin, http.StatusOK}} {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.test/admin/voice-recordings/recording/audio", nil)
+		routeContext := chi.NewRouteContext()
+		routeContext.URLParams.Add("recordingID", "recording")
+		ctx := context.WithValue(request.Context(), chi.RouteCtxKey, routeContext)
+		ctx = context.WithValue(ctx, sessionContextKey{}, auth.Session{Actor: auth.Actor{UserID: "user", Role: test.role}})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request.WithContext(ctx))
+		if response.Code != test.wantStatus {
+			t.Fatalf("role %s status = %d, want %d", test.role, response.Code, test.wantStatus)
+		}
+		if test.role == auth.RoleAdmin && (response.Header().Get("Cache-Control") != "private, no-store" || response.Header().Get("X-Content-Type-Options") != "nosniff" || response.Header().Get("Content-Type") != "audio/wav") {
+			t.Fatalf("playback headers = %#v", response.Header())
+		}
 	}
 }
 

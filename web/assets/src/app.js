@@ -1699,8 +1699,13 @@ if (voiceCapture) {
     const form = new FormData();
     form.append("duration_ms", String(Math.max(1, Math.min(maxSeconds * 1000, durationMs))));
     form.append("audio", blob, "aufnahme.webm");
-    announce("Aufnahme wird sicher übertragen und verarbeitet …");
-    const response = await fetch("/api/v1/voice/drafts", { method: "POST", headers: { "X-CSRF-Token": voiceCapture.dataset.csrf, Accept: "application/json" }, credentials: "same-origin", body: form });
+    announce("Aufnahme wird sicher übertragen und für die Verarbeitung eingereiht …");
+    let response;
+    try {
+      response = await fetch("/api/v1/voice/drafts", { method: "POST", headers: { "X-CSRF-Token": voiceCapture.dataset.csrf, Accept: "application/json" }, credentials: "same-origin", body: form });
+    } catch {
+      throw new Error("Der Übertragungsstatus ist unbekannt. Prüfen Sie später Ihre Entwürfe oder fragen Sie einen Administrator, bevor Sie die Aufnahme erneut senden.");
+    }
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload?.error?.message || "Die Aufnahme konnte nicht verarbeitet werden.");
     dirtyForms.delete(uploadForm);
@@ -1726,7 +1731,7 @@ if (voiceCapture) {
           const blob = new Blob(chunks, { type: recorder.mimeType });
           stopTracks(); resetControls();
           if (cancelled) return;
-          try { await uploadAudio(blob, durationMs); } catch (failure) { announce(`${failure.message} Audio wurde nicht dauerhaft gespeichert; manuelle Erfassung bleibt möglich.`); }
+          try { await uploadAudio(blob, durationMs); } catch (failure) { announce(failure.message); }
         }, { once: true });
         recorder.start(1000); segmentStartedAt = Date.now(); updateTimer(); interval = window.setInterval(updateTimer, 500);
         startButton.disabled = true; pauseButton.disabled = false; stopButton.disabled = false; cancelButton.disabled = false;
@@ -1750,9 +1755,14 @@ if (voiceCapture) {
     const seconds = Number(uploadForm.elements.duration_seconds.value);
     if (!audio || !Number.isFinite(seconds) || seconds <= 0 || seconds > maxSeconds) { announce("Bitte Datei und gültige Dauer innerhalb des Limits angeben."); return; }
     uploadForm.querySelector("button[type='submit']").disabled = true;
-    try { await uploadAudio(audio, seconds * 1000); } catch (failure) { announce(`${failure.message} Bitte manuell erfassen oder eine andere Datei wählen.`); uploadForm.querySelector("button[type='submit']").disabled = false; }
+    try { await uploadAudio(audio, seconds * 1000); } catch (failure) { announce(failure.message); uploadForm.querySelector("button[type='submit']").disabled = false; }
   });
-  window.addEventListener("pagehide", stopTracks);
+  window.addEventListener("pagehide", () => {
+    cancelled = true;
+    if (recorder?.state !== "inactive") recorder.stop();
+    chunks = [];
+    stopTracks();
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden && recorder?.state === "recording") {
       freezeElapsed(); recorder.pause(); pauseButton.textContent = "Fortsetzen"; updateTimer(); announce("Aufnahme beim Tabwechsel pausiert.");
@@ -2120,6 +2130,40 @@ function initializeJobLocationEditor(editor, maplibregl) {
   });
 
   if (!map) markMapUnavailable(canvas);
+}
+
+const voiceProcessing = document.querySelector("[data-voice-processing]");
+if (voiceProcessing) {
+  const message = voiceProcessing.querySelector("[data-voice-processing-message]");
+  const statusURL = voiceProcessing.dataset.statusUrl;
+  let stopped = false;
+  const poll = async () => {
+    if (stopped || !statusURL) return;
+    try {
+      const response = await fetch(statusURL, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
+      if ([401, 403, 404].includes(response.status)) {
+        stopped = true;
+        if (message) message.textContent = response.status === 404
+          ? "Der Entwurf ist nicht mehr verfügbar. Öffnen Sie die Spracheingabe erneut."
+          : "Ihre Sitzung ist abgelaufen. Laden Sie die Seite neu und melden Sie sich erneut an.";
+        return;
+      }
+      if (!response.ok) throw new Error("status unavailable");
+      const payload = await response.json();
+      if (["needs_review", "failed", "expired", "committed"].includes(payload.status)) {
+        window.location.reload();
+        return;
+      }
+      if (message) message.textContent = payload.status === "transcribing"
+        ? "Die Aufnahme wird gerade transkribiert. Sie können währenddessen weiterarbeiten."
+        : "Die Aufnahme wartet auf den lokalen Sprachdienst. Sie können währenddessen weiterarbeiten.";
+    } catch {
+      if (message) message.textContent = "Der Status konnte gerade nicht aktualisiert werden. Die Verarbeitung läuft im Hintergrund weiter; versuchen Sie es später erneut.";
+    }
+    window.setTimeout(poll, 3000);
+  };
+  window.addEventListener("pagehide", () => { stopped = true; }, { once: true });
+  window.setTimeout(poll, 1500);
 }
 
 function markRouteLocationMapUnavailable(canvas) {

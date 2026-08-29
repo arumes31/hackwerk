@@ -49,7 +49,7 @@ paths:
   /api/v1/voice/drafts:
     post:
       operationId: createVoiceDraft
-      description: Validiert und verarbeitet eine begrenzte Audiodatei zu einem eigentümergebundenen, ablaufenden Review-Entwurf. Legt weder Kunde, Auftrag, Wartelisteneintrag noch Termin an.
+      description: Validiert eine begrenzte Audiodatei und speichert sie atomar als eigentümergebundenen Queue-Entwurf. Die asynchrone Verarbeitung legt weder Kunde, Auftrag, Wartelisteneintrag noch Termin an.
       security: [{ sessionCookie: [] }]
       parameters:
         - name: X-CSRF-Token
@@ -68,8 +68,8 @@ paths:
                 audio: { type: string, format: binary, description: WebM, Ogg, WAV oder MP4; serverseitig auf Container und Größe geprüft. }
                 duration_ms: { type: integer, minimum: 1, maximum: 90000 }
       responses:
-        "201":
-          description: Review-Entwurf oder sicher fehlgeschlagener Entwurf erzeugt; Audio wurde nach dem Versuch gelöscht.
+        "202":
+          description: Aufnahme sicher zur asynchronen Verarbeitung angenommen.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/VoiceDraftCreated" }
@@ -79,6 +79,30 @@ paths:
         "422": { description: Datei ist leer oder die angegebene Dauer ungültig. }
         "429": { description: Benutzerbezogenes Rate- oder Parallelitätslimit erreicht. }
         "503": { description: Spracheingabe administrativ deaktiviert. }
+  /api/v1/voice/drafts/{draftID}:
+    get:
+      operationId: getVoiceDraftStatus
+      description: Liefert dem Besitzer ausschließlich Status und Version seines Entwurfs für das begrenzte Browser-Polling.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: draftID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Aktueller Entwurfsstatus.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status, version]
+                properties:
+                  status: { type: string, enum: [recorded, transcribing, needs_review, failed, committed, expired] }
+                  version: { type: integer, minimum: 1 }
+        "403": { description: Session oder Rolle ungültig. }
+        "404": { description: Entwurf fehlt oder gehört einem anderen Benutzer. }
   /voice/upload:
     post:
       operationId: createVoiceDraftNative
@@ -1209,7 +1233,7 @@ components:
       required: [draft_id, status, location]
       properties:
         draft_id: { type: string, format: uuid }
-        status: { type: string, enum: [needs_review, failed] }
+        status: { type: string, enum: [recorded] }
         location: { type: string, pattern: "^/voice/drafts/[0-9a-f-]+$" }
     CalendarEvent:
       type: object

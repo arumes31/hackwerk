@@ -17,51 +17,6 @@ services:
       - ./scripts/postgres/init.sql:/docker-entrypoint-initdb.d/10-hackplan.sql:ro
     networks: [backend]
 
-  whisper:
-    build:
-      context: .
-      dockerfile: Dockerfile.whisper
-    image: ${WHISPER_IMAGE:-hackwerk-whisper:small}
-    entrypoint: ["/app/build/bin/whisper-server"]
-    command:
-      - --model
-      - /app/models/ggml-small.bin
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8080"
-      - --threads
-      - "${WHISPER_THREADS:-2}"
-      - --processors
-      - "1"
-      - --language
-      - de
-      - --convert
-      - --tmp-dir
-      - /tmp
-      - --no-gpu
-      - --suppress-nst
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8080/"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 60s
-    read_only: true
-    user: "65532:65532"
-    tmpfs:
-      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
-    security_opt:
-      - no-new-privileges:true
-    cap_drop: [ALL]
-    pids_limit: 128
-    networks: [voice]
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: {cpus: "2.00", memory: 2G, pids: 128}
-        reservations: {memory: 768M}
-
   migrate:
     build: &hackwerk-build
       context: .
@@ -165,10 +120,11 @@ services:
       GEOCODING_MIN_INTERVAL: ${GEOCODING_MIN_INTERVAL:-1s}
       GEOCODING_CACHE_TTL: ${GEOCODING_CACHE_TTL:-24h}
       GEOCODING_CACHE_ENTRIES: ${GEOCODING_CACHE_ENTRIES:-512}
-      VOICE_ENABLED: ${VOICE_ENABLED:-true}
-      VOICE_TRANSCRIBER: ${VOICE_TRANSCRIBER:-whisper-local}
+      VOICE_ENABLED: ${VOICE_ENABLED:-false}
+      VOICE_TRANSCRIBER: ${VOICE_TRANSCRIBER:-disabled}
       VOICE_EXTRACTOR: ${VOICE_EXTRACTOR:-rules}
       VOICE_WHISPER_MODEL: ${VOICE_WHISPER_MODEL:-small}
+      VOICE_WHISPER_URL: ${VOICE_WHISPER_URL:-}
       VOICE_OPENAI_API_KEY: ${VOICE_OPENAI_API_KEY:-}
       VOICE_OPENAI_MODEL: ${VOICE_OPENAI_MODEL:-gpt-4o-mini-transcribe}
       VOICE_OPENAI_EXTRACTION_MODEL: ${VOICE_OPENAI_EXTRACTION_MODEL:-gpt-5-mini}
@@ -176,6 +132,7 @@ services:
       VOICE_MAX_DURATION: ${VOICE_MAX_DURATION:-90s}
       VOICE_MAX_BYTES: ${VOICE_MAX_BYTES:-15728640}
       VOICE_DRAFT_RETENTION: ${VOICE_DRAFT_RETENTION:-24h}
+      VOICE_RECORDING_RETENTION: ${VOICE_RECORDING_RETENTION:-720h}
       VOICE_PROVIDER_TIMEOUT: ${VOICE_PROVIDER_TIMEOUT:-10m}
       VOICE_MAX_RESPONSE_BYTES: ${VOICE_MAX_RESPONSE_BYTES:-1048576}
       VOICE_TEMP_DIR: ${VOICE_TEMP_DIR:-/tmp/hackwerk-voice}
@@ -185,8 +142,6 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      whisper:
-        condition: service_healthy
     ports:
       - "18533:18533"
     healthcheck:
@@ -201,7 +156,7 @@ services:
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
-    networks: [backend, public, voice]
+    networks: [backend, public]
     restart: unless-stopped
 
   worker:
@@ -258,5 +213,3 @@ networks:
     internal: true
   public:
   egress:
-  voice:
-    internal: true

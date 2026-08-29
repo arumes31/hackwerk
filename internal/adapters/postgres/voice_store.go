@@ -27,6 +27,118 @@ func NewVoiceStore(pool *pgxpool.Pool) *VoiceStore {
 	return &VoiceStore{pool: pool, queries: dbgen.New(pool), now: time.Now}
 }
 
+func (store *VoiceStore) CreateRecording(ctx context.Context, actor auth.Actor, audio []byte, contentType string, metadata voice.Metadata, draftExpiresAt, recordingExpiresAt time.Time) (voice.Draft, error) {
+	if len(audio) == 0 || len(audio) > 15<<20 || metadata.Duration <= 0 || metadata.Duration > 5*time.Minute {
+		return voice.Draft{}, voice.ErrValidation
+	}
+	// #nosec G115 -- the validation above bounds the payload far below MaxInt32.
+	byteSize := int32(len(audio))
+	// #nosec G115 -- the validation above bounds duration to at most 300,000 ms.
+	durationMS := int32(metadata.Duration / time.Millisecond)
+	draftID, err := store.queries.InsertVoiceRecording(ctx, dbgen.InsertVoiceRecordingParams{
+		OwnerUserID: mustUUID(actor.UserID), ContentType: contentType, AudioBytes: audio,
+		ByteSize: byteSize, DurationMs: durationMS,
+		RecordedAt: timestamp(metadata.RecordedAt.UTC()), RecordingExpiresAt: timestamp(recordingExpiresAt.UTC()),
+		DraftExpiresAt: timestamp(draftExpiresAt.UTC()),
+	})
+	if err != nil {
+		return voice.Draft{}, err
+	}
+	return voice.Draft{ID: draftID, OwnerUserID: actor.UserID, Status: voice.StatusRecorded, Version: 1, ExpiresAt: draftExpiresAt.UTC()}, nil
+}
+
+func (store *VoiceStore) ClaimRecording(ctx context.Context, workerID string, now, leaseUntil time.Time) (voice.ClaimedRecording, bool, error) {
+	row, err := store.queries.ClaimVoiceRecording(ctx, dbgen.ClaimVoiceRecordingParams{
+		NowUtc: timestamp(now.UTC()), WorkerID: &workerID, LeaseUntil: timestamp(leaseUntil.UTC()),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return voice.ClaimedRecording{}, false, nil
+	}
+	if err != nil {
+		return voice.ClaimedRecording{}, false, err
+	}
+	return voice.ClaimedRecording{
+		RecordingID: row.RecordingID, DraftID: row.ClaimedDraftID, OwnerUserID: row.ClaimedOwnerUserID,
+		ContentType: row.ContentType, AudioBytes: row.AudioBytes, ByteSize: int(row.ByteSize),
+		Duration: time.Duration(row.DurationMs) * time.Millisecond, RecordedAt: row.RecordedAt.Time.UTC(),
+		Attempt: row.AttemptCount, MaxAttempts: row.MaxAttempts,
+	}, true, nil
+}
+
+func (store *VoiceStore) CompleteRecording(ctx context.Context, workerID string, job voice.ClaimedRecording, transcript voice.Transcript, fields voice.Fields, warnings []string, confidence float64, parserVersion string, now time.Time) error {
+	payload, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	var numeric pgtype.Numeric
+	if err = numeric.Scan(strconv.FormatFloat(confidence, 'f', 3, 64)); err != nil {
+		return err
+	}
+	rows, err := store.queries.CompleteClaimedVoiceRecording(ctx, dbgen.CompleteClaimedVoiceRecordingParams{
+		Transcript: &transcript.Text, ExtractedFields: payload, Warnings: warnings, OverallConfidence: numeric,
+		ProviderName: transcript.Provider, ProviderVersion: transcript.Version, ParserVersion: parserVersion,
+		NowUtc: timestamp(now.UTC()), RecordingID: mustUUID(job.RecordingID), WorkerID: &workerID,
+	})
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return voice.ErrConflict
+	}
+	return nil
+}
+
+func (store *VoiceStore) FailRecording(ctx context.Context, workerID string, job voice.ClaimedRecording, code string, retry bool, now, availableAt time.Time) error {
+	_, err := store.queries.FailClaimedVoiceRecording(ctx, dbgen.FailClaimedVoiceRecordingParams{
+		Retry: retry, FailureCode: code, NowUtc: timestamp(now.UTC()), AvailableAt: timestamp(availableAt.UTC()),
+		RecordingID: mustUUID(job.RecordingID), WorkerID: &workerID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return voice.ErrConflict
+	}
+	return err
+}
+
+func (store *VoiceStore) ListRecordings(ctx context.Context, limit, offset int32) ([]voice.Recording, error) {
+	rows, err := store.queries.ListVoiceRecordingsForAdmin(ctx, dbgen.ListVoiceRecordingsForAdminParams{ResultLimit: limit, ResultOffset: offset})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]voice.Recording, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, voice.Recording{
+			ID: row.RecordingID, DraftID: row.RecordingDraftID, ContentType: row.ContentType,
+			OwnerDisplayName: row.OwnerDisplayName, ByteSize: int(row.ByteSize),
+			Duration: time.Duration(row.DurationMs) * time.Millisecond, DraftStatus: voice.Status(row.Status),
+			RecordedAt: row.RecordedAt.Time.UTC(), CreatedAt: row.CreatedAt.Time.UTC(), ExpiresAt: row.ExpiresAt.Time.UTC(),
+		})
+	}
+	return result, nil
+}
+
+func (store *VoiceStore) GetRecordingAudio(ctx context.Context, id string) (voice.RecordingAudio, error) {
+	parsed, err := uuid(id)
+	if err != nil {
+		return voice.RecordingAudio{}, voice.ErrNotFound
+	}
+	row, err := store.queries.GetVoiceRecordingAudio(ctx, parsed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return voice.RecordingAudio{}, voice.ErrNotFound
+	}
+	if err != nil {
+		return voice.RecordingAudio{}, err
+	}
+	return voice.RecordingAudio{
+		ID: row.ID, ContentType: row.ContentType, Bytes: row.AudioBytes, ByteSize: int(row.ByteSize),
+		Duration:   time.Duration(row.DurationMs) * time.Millisecond,
+		RecordedAt: row.RecordedAt.Time.UTC(), ExpiresAt: row.ExpiresAt.Time.UTC(),
+	}, nil
+}
+
+func (store *VoiceStore) CleanupRecordings(ctx context.Context, now time.Time) (int64, error) {
+	return store.queries.CleanupExpiredVoiceRecordings(ctx, timestamp(now.UTC()))
+}
+
 func (store *VoiceStore) Create(ctx context.Context, actor auth.Actor, expiresAt time.Time) (voice.Draft, error) {
 	row, err := store.queries.InsertVoiceDraft(ctx, dbgen.InsertVoiceDraftParams{OwnerUserID: mustUUID(actor.UserID), ExpiresAt: timestamp(expiresAt.UTC())})
 	if err != nil {

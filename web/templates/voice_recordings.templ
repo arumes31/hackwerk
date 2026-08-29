@@ -1,0 +1,63 @@
+package templates
+
+import (
+	"example.invalid/hackplan/internal/voice"
+	"fmt"
+	"time"
+)
+
+type VoiceRecordingsData struct {
+	Shell       ShellData
+	Recordings  []voice.Recording
+	Page        int
+	HasPrevious bool
+	HasNext     bool
+}
+
+templ VoiceRecordings(data VoiceRecordingsData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data.Shell.Page, "Sprachaufnahmen – "+data.Shell.Page.AppName)
+		<body>
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page compact-page voice-recordings-page">
+				<div class="page-heading">
+					<div><p class="eyebrow">Administration · Datenschutz</p><h1>Originale Sprachaufnahmen</h1><p>Nur Administratoren können diese Aufnahmen anhören. Jede Aufnahme wird spätestens 30 Tage nach dem Upload automatisch gelöscht.</p></div>
+					<span class="status-badge">{ fmt.Sprint(len(data.Recordings)) } aktiv</span>
+				</div>
+				<div class="form-alert form-alert--warning" role="note"><strong>Vertrauliche Daten:</strong> Spielen Sie Aufnahmen nur ab, wenn dies für Prüfung, Fehlerklärung oder Qualitätssicherung erforderlich ist. Audio wird nicht vorgeladen und nicht vom Browser zwischengespeichert.</div>
+				if len(data.Recordings) == 0 {
+					<section class="empty-state"><h2>Keine Aufnahme vorhanden</h2><p>Aktive Originalaufnahmen erscheinen hier bis zum Ende ihrer Aufbewahrungsfrist.</p></section>
+				} else {
+					<div class="voice-recording-list">
+						for _, recording := range data.Recordings {
+							<article class="form-card voice-recording-card">
+								<header><div><h2>{ recording.OwnerDisplayName }</h2><p>{ recording.RecordedAt.In(viennaLocation()).Format("02.01.2006 15:04") } · { fmt.Sprintf("%.1f MiB", float64(recording.ByteSize)/(1<<20)) } · { formatVoiceDuration(recording.Duration) }</p></div><span class="status-badge">{ voiceStatusLabel(recording.DraftStatus) }</span></header>
+								<audio controls preload="none" src={ "/admin/voice-recordings/" + recording.ID + "/audio" }>Ihr Browser kann diese Aufnahme nicht direkt wiedergeben.</audio>
+								<p class="field-help">Automatische Löschung: { recording.ExpiresAt.In(viennaLocation()).Format("02.01.2006 15:04") }</p>
+							</article>
+						}
+					</div>
+				}
+				if data.HasPrevious || data.HasNext {
+					<nav class="action-row" aria-label="Seiten der Sprachaufnahmen">
+						if data.HasPrevious {
+							<a class="button button--quiet" href={ fmt.Sprintf("/admin/voice-recordings?page=%d", data.Page-1) }>Neuere Aufnahmen</a>
+						}
+						<span class="status-badge">Seite { fmt.Sprint(data.Page) }</span>
+						if data.HasNext {
+							<a class="button button--quiet" href={ fmt.Sprintf("/admin/voice-recordings?page=%d", data.Page+1) }>Ältere Aufnahmen</a>
+						}
+					</nav>
+				}
+			</main>
+			@appFooter(data.Shell.Page)
+		</body>
+	</html>
+}
+
+func formatVoiceDuration(value time.Duration) string {
+	minutes := int(value / time.Minute)
+	seconds := int(value/time.Second) % 60
+	return fmt.Sprintf("%d:%02d Min.", minutes, seconds)
+}

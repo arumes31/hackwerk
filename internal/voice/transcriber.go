@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -45,13 +46,32 @@ type WhisperCPPTranscriber struct {
 }
 
 func NewWhisperCPPTranscriber(model string, timeout time.Duration, maxResponse int64) (*WhisperCPPTranscriber, error) {
+	return newWhisperCPPTranscriber(model, whisperCPPInferenceURL, false, timeout, maxResponse)
+}
+
+func NewWhisperCPPTailscaleTranscriber(model, endpoint string, timeout time.Duration, maxResponse int64) (*WhisperCPPTranscriber, error) {
+	return newWhisperCPPTranscriber(model, strings.TrimRight(strings.TrimSpace(endpoint), "/")+"/inference", true, timeout, maxResponse)
+}
+
+func newWhisperCPPTranscriber(model, endpoint string, tailscale bool, timeout time.Duration, maxResponse int64) (*WhisperCPPTranscriber, error) {
 	if model != "small" || timeout <= 0 || maxResponse < 1024 || maxResponse > 4<<20 {
 		return nil, errors.New("voice: invalid local whisper transcriber configuration")
 	}
+	transport := http.RoundTripper(outbound.InternalServiceTransport("whisper", "8080"))
+	if tailscale {
+		parsed, err := url.Parse(endpoint)
+		if err != nil || parsed.Scheme != "http" || parsed.Port() != "8080" || parsed.Path != "/inference" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+			return nil, errors.New("voice: invalid Tailscale whisper endpoint")
+		}
+		transport, err = outbound.TailscaleServiceTransport(parsed.Hostname(), parsed.Port())
+		if err != nil {
+			return nil, errors.New("voice: invalid Tailscale whisper endpoint")
+		}
+	}
 	return &WhisperCPPTranscriber{
-		model: model, endpoint: whisperCPPInferenceURL,
+		model: model, endpoint: endpoint,
 		client: &http.Client{
-			Transport: outbound.InternalServiceTransport("whisper", "8080"), Timeout: timeout,
+			Transport: transport, Timeout: timeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 		maxResponse: maxResponse,

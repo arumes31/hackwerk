@@ -426,6 +426,26 @@ type VoiceDraft struct {
 	UpdatedAt           pgtype.Timestamptz
 }
 
+type VoiceRecording struct {
+	ID           pgtype.UUID
+	DraftID      pgtype.UUID
+	OwnerUserID  pgtype.UUID
+	ContentType  string
+	AudioBytes   []byte
+	ByteSize     int32
+	DurationMs   int32
+	RecordedAt   pgtype.Timestamptz
+	ExpiresAt    pgtype.Timestamptz
+	AvailableAt  pgtype.Timestamptz
+	ClaimedBy    *string
+	LeaseUntil   pgtype.Timestamptz
+	AttemptCount int16
+	MaxAttempts  int16
+	FailureCode  string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
 type WaitlistEntry struct {
 	ID             pgtype.UUID
 	JobID          pgtype.UUID

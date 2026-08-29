@@ -33,7 +33,9 @@ x-runtime-environment: &runtime-environment
   VOICE_TRANSCRIBER: ${VOICE_TRANSCRIBER:-disabled}
   VOICE_EXTRACTOR: ${VOICE_EXTRACTOR:-rules}
   VOICE_WHISPER_MODEL: ${VOICE_WHISPER_MODEL:-small}
+  VOICE_WHISPER_URL: ${VOICE_WHISPER_URL:-}
   VOICE_PROVIDER_TIMEOUT: ${VOICE_PROVIDER_TIMEOUT:-10m}
+  VOICE_RECORDING_RETENTION: ${VOICE_RECORDING_RETENTION:-720h}
   VOICE_CONCURRENT_PER_USER: ${VOICE_CONCURRENT_PER_USER:-1}
   VOICE_TEMP_DIR: /tmp/hackwerk-voice
   CALENDAR_ENABLED: ${CALENDAR_ENABLED:-true}
@@ -78,29 +80,6 @@ services:
     pids_limit: 256
     restart: unless-stopped
 
-  whisper:
-    image: ${WHISPER_IMAGE:-hackwerk-whisper:small}
-    entrypoint: ["/app/build/bin/whisper-server"]
-    command: ["--model", "/app/models/ggml-small.bin", "--host", "0.0.0.0", "--port", "8080", "--threads", "${WHISPER_THREADS:-2}", "--processors", "1", "--language", "de", "--convert", "--tmp-dir", "/tmp", "--no-gpu", "--suppress-nst"]
-    networks: [voice]
-    read_only: true
-    user: "65532:65532"
-    tmpfs: ["/tmp:size=64m,mode=1777,noexec,nosuid,nodev"]
-    security_opt: [no-new-privileges:true]
-    cap_drop: [ALL]
-    pids_limit: 128
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: {cpus: "2.00", memory: 2G, pids: 128}
-        reservations: {memory: 768M}
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8080/"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 60s
-
   migrate:
     image: ${HACKWERK_IMAGE:?HACKWERK_IMAGE setzen}
     command: ["migrate", "up"]
@@ -132,12 +111,10 @@ services:
     secrets: [database_url, confirmation_token_keys, voice_openai_api_key, map_tile_token]
     depends_on:
       postgres: {condition: service_healthy}
-      whisper: {condition: service_healthy}
     ports: ["127.0.0.1:18533:18533"]
     networks:
       frontend: {ipv4_address: 172.30.0.10}
       backend: {}
-      voice: {}
       egress: {}
       monitoring: {ipv4_address: 172.33.0.10}
     tmpfs: ["/tmp:size=64m,mode=1777,noexec,nosuid,nodev"]
@@ -158,7 +135,7 @@ services:
     command: ["worker"]
     environment:
       <<: *runtime-environment
-      VOICE_ENABLED: "false"
+      VOICE_OPENAI_API_KEY_FILE: /run/secrets/voice_openai_api_key
       MAIL_SMTP_HOST: ${MAIL_SMTP_HOST:-}
       MAIL_SMTP_PORT: ${MAIL_SMTP_PORT:-587}
       MAIL_SMTP_TLS: ${MAIL_SMTP_TLS:-starttls}
@@ -186,6 +163,7 @@ services:
       - sendberry_access_name
       - sendberry_access_password
       - sms_webhook_hmac_secret
+      - voice_openai_api_key
     depends_on:
       postgres: {condition: service_healthy}
     networks: [backend, egress]
@@ -230,8 +208,6 @@ networks:
   backend:
     internal: true
   egress:
-  voice:
-    internal: true
   monitoring:
     internal: true
     ipam:

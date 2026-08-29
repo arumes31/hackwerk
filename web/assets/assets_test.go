@@ -1,10 +1,35 @@
 package assets
 
 import (
+	"os"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+func TestVoiceCaptureCancelsNavigationUploadAndUsesAmbiguousDeliveryMessage(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("src/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(source)
+	for _, contract := range []string{
+		`Der Übertragungsstatus ist unbekannt.`,
+		`[401, 403, 404].includes(response.status)`,
+	} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("voice capture script does not preserve %q", contract)
+		}
+	}
+	if strings.Contains(javascript, "Audio wurde nicht dauerhaft gespeichert") {
+		t.Fatal("voice capture still claims ambiguous network failures were not stored")
+	}
+	if !regexp.MustCompile(`(?s)window\.addEventListener\("pagehide", \(\) => \{\s*cancelled = true;`).MatchString(javascript) {
+		t.Fatal("voice capture does not cancel the pending recorder upload before navigation")
+	}
+}
 
 func TestLoadPathsReturnsContentVersionedURLs(t *testing.T) {
 	t.Parallel()
@@ -78,6 +103,28 @@ func TestEmbeddedStylesDefineFeedbackAndOverlayContracts(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRouteLocationCardsAndFooterKeepStableLayoutContracts(t *testing.T) {
+	t.Parallel()
+
+	contents, err := Files.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stylesheet := string(contents)
+	for _, contract := range []string{
+		".site-footer__inner { min-height: 60px; padding-block: .5rem;",
+		".site-footer__meta { display: flex;",
+		".route-location-card { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr);",
+		".route-location-card > .form-grid { min-width: 0; width: 100%;",
+		".route-location-card > .form-grid > .route-location-native-confirm,",
+		".route-location-card__actions { width: 100%;",
+	} {
+		if !strings.Contains(stylesheet, contract) {
+			t.Errorf("application stylesheet does not preserve %q", contract)
+		}
 	}
 }
 

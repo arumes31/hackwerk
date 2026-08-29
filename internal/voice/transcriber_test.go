@@ -79,3 +79,15 @@ func TestWhisperCPPTranscriberUsesGermanLocalInferenceRequest(t *testing.T) {
 		t.Fatalf("multipart body contains unexpected data: %q", body)
 	}
 }
+
+func TestWhisperCPPTailscaleTranscriberAcceptsOnlyPinnedPeer(t *testing.T) {
+	provider, err := NewWhisperCPPTailscaleTranscriber("small", "http://100.115.58.99:8080", time.Minute, 1024)
+	if err != nil || provider.endpoint != "http://100.115.58.99:8080/inference" || provider.client.Transport.(*http.Transport).Proxy != nil {
+		t.Fatalf("provider/error = %#v/%v", provider, err)
+	}
+	for _, endpoint := range []string{"http://router:8080", "http://10.0.0.1:8080", "http://100.115.58.99:5000", "https://100.115.58.99:8080"} {
+		if _, err := NewWhisperCPPTailscaleTranscriber("small", endpoint, time.Minute, 1024); err == nil {
+			t.Fatalf("unsafe endpoint %q accepted", endpoint)
+		}
+	}
+}

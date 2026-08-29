@@ -19,6 +19,7 @@ import (
 	"example.invalid/hackplan/internal/notification"
 	"example.invalid/hackplan/internal/observability"
 	"example.invalid/hackplan/internal/routelocation"
+	"example.invalid/hackplan/internal/voice"
 	"example.invalid/hackplan/internal/web"
 )
 
@@ -260,11 +261,14 @@ func Worker(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	voiceService, err := VoiceService(cfg, pool)
+	if err != nil {
+		return err
+	}
 
 	logger.InfoContext(ctx, "worker started", slog.Int("batch_size", cfg.Worker.BatchSize))
 	ticker := time.NewTicker(cfg.Worker.PollInterval)
 	defer ticker.Stop()
-	voiceStore := postgres.NewVoiceStore(pool)
 	nextVoiceCleanup := time.Time{}
 	heartbeatInterval := min(cfg.Metrics.WorkerStaleAfter/3, 30*time.Second)
 	if heartbeatInterval < 5*time.Second {
@@ -272,13 +276,19 @@ func Worker(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 	heartbeatTicker := time.NewTicker(heartbeatInterval)
 	heartbeatDone := make(chan struct{})
+	voiceDone := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)
 		runWorkerHeartbeat(ctx, operations, workerID, startedAt, heartbeatTicker.C, logger)
 	}()
+	go func() {
+		defer close(voiceDone)
+		runVoiceWorker(ctx, voiceService, workerID, cfg.Worker.PollInterval, cfg.Voice.ProviderTimeout+30*time.Second, logger)
+	}()
 	defer func() {
 		heartbeatTicker.Stop()
 		<-heartbeatDone
+		<-voiceDone
 	}()
 
 	for {
@@ -286,15 +296,30 @@ func Worker(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			logger.WarnContext(ctx, "notification batch failed", slog.String("error_code", "notification_batch_failed"))
 		}
 		if now := time.Now(); !now.Before(nextVoiceCleanup) {
-			if _, cleanupErr := voiceStore.Cleanup(ctx); cleanupErr != nil && ctx.Err() == nil {
-				logger.WarnContext(ctx, "voice draft cleanup failed", slog.String("error_code", "voice_cleanup_failed"))
+			if _, err := voiceService.Cleanup(ctx); err != nil && ctx.Err() == nil {
+				logger.WarnContext(ctx, "voice data cleanup failed", slog.String("error_code", "voice_cleanup_failed"))
 			}
-			nextVoiceCleanup = now.Add(time.Hour)
+			nextVoiceCleanup = now.Add(time.Minute)
 		}
 		select {
 		case <-ctx.Done():
 			logger.Info("worker stopped")
 			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func runVoiceWorker(ctx context.Context, service *voice.Service, workerID string, pollInterval, lease time.Duration, logger *slog.Logger) {
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		if _, err := service.ProcessNext(ctx, workerID, lease); err != nil && ctx.Err() == nil {
+			logger.WarnContext(ctx, "voice recording processing failed", slog.String("error_code", "voice_processing_failed"))
+		}
+		select {
+		case <-ctx.Done():
+			return
 		case <-ticker.C:
 		}
 	}
