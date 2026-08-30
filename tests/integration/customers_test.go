@@ -253,6 +253,79 @@ func TestCustomersPersistence(t *testing.T) {
 		}
 	})
 
+	t.Run("customer list filters and count are applied server side", func(t *testing.T) {
+		ctx, _, service, admin, _ := customerFixture(t)
+
+		activeEmail := customerIntake("Erika", "Aktiv", "60", customers.UrgencyNormal, "Nord")
+		activeEmail.Customer.Locality = "Nordstadt"
+		activeEmail.Customer.Email = "erika.aktiv@example.test"
+		activeEmail.Customer.NotificationPreference = customers.NotifyEmail
+		if _, err := service.CreateIntake(ctx, admin, activeEmail, "request-customer-filter-active"); err != nil {
+			t.Fatal(err)
+		}
+
+		missing := customerIntake("Konrad", "Fehlt", "40", customers.UrgencyNormal, "Süd")
+		missing.Customer.Street = ""
+		missing.Customer.PostalCode = ""
+		missing.Customer.Locality = "Südort"
+		missing.Customer.NotificationPreference = customers.NotifyNone
+		if _, err := service.CreateIntake(ctx, admin, missing, "request-customer-filter-missing"); err != nil {
+			t.Fatal(err)
+		}
+
+		historicalSMS := customerIntake("Heidi", "Historisch", "30", customers.UrgencyNormal, "Nord")
+		historicalSMS.Customer.Locality = "Westdorf"
+		historicalSMS.Customer.PhoneRaw = "0664 1234567"
+		historicalSMS.Customer.NotificationPreference = customers.NotifySMS
+		historical, err := service.CreateIntake(ctx, admin, historicalSMS, "request-customer-filter-historical")
+		if err != nil {
+			t.Fatal(err)
+		}
+		detail, err := service.CustomerDetail(ctx, admin, historical.CustomerID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := service.ArchiveJob(ctx, admin, historical.JobID, detail.Jobs[0].Version, "request-customer-filter-archive"); err != nil {
+			t.Fatal(err)
+		}
+
+		tests := []struct {
+			name   string
+			filter customers.CustomerListFilter
+			want   []string
+		}{
+			{name: "missing contact", filter: customers.CustomerListFilter{MissingContact: true}, want: []string{"Fehlt"}},
+			{name: "incomplete address", filter: customers.CustomerListFilter{IncompleteAddress: true}, want: []string{"Fehlt"}},
+			{name: "active jobs", filter: customers.CustomerListFilter{JobActivity: customers.CustomerJobsActive}, want: []string{"Aktiv", "Fehlt"}},
+			{name: "without active job", filter: customers.CustomerListFilter{JobActivity: customers.CustomerJobsNone}, want: []string{"Historisch"}},
+			{name: "email preference", filter: customers.CustomerListFilter{NotificationPreference: customers.NotifyEmail}, want: []string{"Aktiv"}},
+			{name: "no notification", filter: customers.CustomerListFilter{NotificationPreference: customers.NotifyNone}, want: []string{"Fehlt"}},
+			{name: "sms preference", filter: customers.CustomerListFilter{NotificationPreference: customers.NotifySMS}, want: []string{"Historisch"}},
+			{name: "locality", filter: customers.CustomerListFilter{Locality: "nord"}, want: []string{"Aktiv"}},
+			{name: "region", filter: customers.CustomerListFilter{Region: "nord"}, want: []string{"Aktiv", "Historisch"}},
+			{name: "combined gaps", filter: customers.CustomerListFilter{MissingContact: true, IncompleteAddress: true, JobActivity: customers.CustomerJobsActive}, want: []string{"Fehlt"}},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				test.filter.Sort = "name"
+				test.filter.Direction = "asc"
+				test.filter.Page = 1
+				test.filter.PageSize = 25
+				page, listErr := service.ListCustomers(ctx, admin, test.filter)
+				if listErr != nil {
+					t.Fatal(listErr)
+				}
+				got := make([]string, 0, len(page.Items))
+				for _, item := range page.Items {
+					got = append(got, item.LastName)
+				}
+				if fmt.Sprint(got) != fmt.Sprint(test.want) || page.Total != int64(len(test.want)) {
+					t.Fatalf("ListCustomers() names/total = %v/%d, want %v/%d", got, page.Total, test.want, len(test.want))
+				}
+			})
+		}
+	})
+
 	t.Run("preference mode and priority reason survive persistence constraints", func(t *testing.T) {
 		ctx, pool, service, admin, _ := customerFixture(t)
 		created, err := service.CreateIntake(ctx, admin, customerIntake("Petra", "Planbar", "60", customers.UrgencyNormal, "Nord"), "request-preference")

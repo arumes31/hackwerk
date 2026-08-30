@@ -177,8 +177,9 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 
 	var compactDesktopOverflow, compactMobileOverflow bool
 	var waitlistLayout struct {
-		SelectionWidth, NextStepWidth, ActionsWidth, MaxRowHeight float64
-		BreaksInsideWords                                         bool
+		SelectionWidth, NextStepWidth, ActionsWidth, MaxRowHeight                  float64
+		CheckboxWidth, CheckboxHeight, SelectionTargetWidth, SelectionTargetHeight float64
+		BreaksInsideWords                                                          bool
 	}
 	var driverCreateOpen bool
 	if err := runBrowserStep(browser, "compact driver list",
@@ -200,12 +201,18 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 			const cell = label => table.querySelector('tbody td[data-label="' + label + '"]');
 			const rows = Array.from(table.tBodies[0]?.rows || []);
 			const nextStep = cell('Nächster Schritt');
+			const checkbox = table.querySelector('[data-waitlist-select]');
+			const selectionTarget = checkbox.closest('.waitlist-select-control');
 			const style = getComputedStyle(nextStep);
 			return {
 				SelectionWidth: cell('Auswahl').getBoundingClientRect().width,
 				NextStepWidth: nextStep.getBoundingClientRect().width,
 				ActionsWidth: cell('Aktionen').getBoundingClientRect().width,
 				MaxRowHeight: Math.max(0, ...rows.map(row => row.getBoundingClientRect().height)),
+				CheckboxWidth: checkbox.getBoundingClientRect().width,
+				CheckboxHeight: checkbox.getBoundingClientRect().height,
+				SelectionTargetWidth: selectionTarget.getBoundingClientRect().width,
+				SelectionTargetHeight: selectionTarget.getBoundingClientRect().height,
 				BreaksInsideWords: style.overflowWrap === 'anywhere' || style.wordBreak === 'break-all'
 			};
 		})()`, &waitlistLayout),
@@ -222,8 +229,8 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	if driverCreateOpen || compactDesktopOverflow || compactMobileOverflow {
 		t.Fatalf("compact default/create/desktop-overflow/mobile-overflow=%v/%v/%v", driverCreateOpen, compactDesktopOverflow, compactMobileOverflow)
 	}
-	if waitlistLayout.SelectionWidth > 90 || waitlistLayout.NextStepWidth < 180 || waitlistLayout.ActionsWidth < 100 || waitlistLayout.MaxRowHeight > 280 || waitlistLayout.BreaksInsideWords {
-		t.Fatalf("waitlist desktop layout selection/next/actions/row/breaks=%.0f/%.0f/%.0f/%.0f/%v", waitlistLayout.SelectionWidth, waitlistLayout.NextStepWidth, waitlistLayout.ActionsWidth, waitlistLayout.MaxRowHeight, waitlistLayout.BreaksInsideWords)
+	if waitlistLayout.SelectionWidth > 90 || waitlistLayout.NextStepWidth < 180 || waitlistLayout.ActionsWidth < 100 || waitlistLayout.MaxRowHeight > 280 || waitlistLayout.CheckboxWidth > 20 || waitlistLayout.CheckboxHeight > 20 || waitlistLayout.SelectionTargetWidth < 44 || waitlistLayout.SelectionTargetHeight < 44 || waitlistLayout.BreaksInsideWords {
+		t.Fatalf("waitlist desktop layout selection/next/actions/row/checkbox/target/breaks=%.0f/%.0f/%.0f/%.0f/%.0fx%.0f/%.0fx%.0f/%v", waitlistLayout.SelectionWidth, waitlistLayout.NextStepWidth, waitlistLayout.ActionsWidth, waitlistLayout.MaxRowHeight, waitlistLayout.CheckboxWidth, waitlistLayout.CheckboxHeight, waitlistLayout.SelectionTargetWidth, waitlistLayout.SelectionTargetHeight, waitlistLayout.BreaksInsideWords)
 	}
 
 	var desktopOverflow, smallDesktopTarget, selectedByMap, selectedByCard, selectedMarkerState, deselectedByKeyboard, candidateSemantics, mapReady bool

@@ -181,6 +181,48 @@ func TestDriverCannotIncludeArchivedCustomers(t *testing.T) {
 	}
 }
 
+func TestCustomerListFilterNormalizeAllowlistAndTextFilters(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		filter CustomerListFilter
+		want   CustomerListFilter
+	}{
+		{
+			name: "valid filters survive",
+			filter: CustomerListFilter{
+				Search: "  Huber ", Locality: " Linz  ", Region: " Nord ",
+				JobActivity: CustomerJobsActive, NotificationPreference: NotifyEmail,
+				MissingContact: true, IncompleteAddress: true, Sort: "name", Direction: "desc",
+				Page: 2, PageSize: 50,
+			},
+			want: CustomerListFilter{
+				Search: "Huber", Locality: "Linz", Region: "Nord",
+				JobActivity: CustomerJobsActive, NotificationPreference: NotifyEmail,
+				MissingContact: true, IncompleteAddress: true, Sort: "name", Direction: "desc",
+				Page: 2, PageSize: 50,
+			},
+		},
+		{
+			name: "unknown selections return to safe defaults",
+			filter: CustomerListFilter{
+				JobActivity: "historical", NotificationPreference: "fax", Sort: "sql", Direction: "sideways",
+				Page: -2, PageSize: 1000,
+			},
+			want: CustomerListFilter{Sort: "recent", Direction: "desc", Page: 1, PageSize: 25},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			test.filter.Normalize()
+			if test.filter != test.want {
+				t.Fatalf("Normalize() = %#v, want %#v", test.filter, test.want)
+			}
+		})
+	}
+}
+
 func TestFilterFavoriteDropsPersonalSearchAndNormalizesAllowlist(t *testing.T) {
 	t.Parallel()
 	store := &storeStub{}

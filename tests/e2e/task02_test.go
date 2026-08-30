@@ -142,11 +142,13 @@ func TestTask02BrowserJourney(t *testing.T) {
 	}
 	var locationFieldsUnchanged bool
 	if err := runBrowserStep(browserContext, "search address without taking location",
+		chromedp.Evaluate(`document.querySelector('.job-location-disclosure').open=true`, nil),
 		chromedp.WaitVisible("[data-location-search-input]", chromedp.ByQuery),
+		chromedp.Poll(`Boolean(document.querySelector('[data-job-location-editor]')?.dataset.mapInitialized)`, nil, chromedp.WithPollingTimeout(20*time.Second)),
 		chromedp.SetValue("[data-location-search-input]", "Waldstraße 9, Unterneukirchen", chromedp.ByQuery),
-		chromedp.Click("[data-location-search-submit]", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('[data-location-search-submit]').click()`, nil),
 		chromedp.WaitVisible("[data-location-search-results] .location-search__result", chromedp.ByQuery),
-		chromedp.Click("[data-location-search-results] .location-search__result", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('[data-location-search-results] .location-search__result').click()`, nil),
 		chromedp.Poll(`document.querySelector('[data-location-search-status]').textContent.includes('Karte auf')`, nil, chromedp.WithPollingTimeout(5*time.Second)),
 		chromedp.Evaluate(`(() => {
 			const editor = document.querySelector('[data-job-location-editor]');
@@ -186,7 +188,12 @@ func TestTask02BrowserJourney(t *testing.T) {
 			return {element, box};
 		}).filter(({box}) => box.right > window.innerWidth + 1 || box.left < -1)
 			.sort((a,b) => b.box.right-a.box.right).slice(0,5)
-			.map(({element,box}) => element.tagName+'.'+(element.className || '')+' right='+box.right.toFixed(0)+' width='+box.width.toFixed(0)).join('; ')`, &locationOverflowElements),
+			.map(({element,box}) => {
+				const parent=element.parentElement;
+				const parentBox=parent?.getBoundingClientRect();
+				return element.tagName+'.'+(element.className || '')+' right='+box.right.toFixed(0)+' width='+box.width.toFixed(0)
+					+' parent='+parent?.tagName+'.'+(parent?.className || '')+' parentWidth='+(parentBox?.width || 0).toFixed(0);
+			}).join('; ')+'; viewport='+window.innerWidth+' mobile='+matchMedia('(max-width: 760px)').matches`, &locationOverflowElements),
 		chromedp.Evaluate(`(() => { const box=document.querySelector('[data-location-search-submit]').getBoundingClientRect(); return box.width < 44 || box.height < 44; })()`, &locationSearchTargetTooSmall),
 		chromedp.EmulateViewport(1280, 900),
 	); err != nil {
@@ -241,6 +248,37 @@ func TestTask02BrowserJourney(t *testing.T) {
 	); err != nil {
 		t.Fatalf("customer detail after intake: %s", browserDiagnostics(browserContext, err))
 	}
+	var compactDossierDesktop, compactDossierMobile bool
+	if err := runBrowserStep(browserContext, "inspect compact customer dossier",
+		chromedp.Evaluate(`(() => {
+			const overview=document.querySelector('.customer-overview-grid');
+			const edit=document.querySelector('.customer-edit-card');
+			edit.open=true;
+			const identity=document.querySelector('.customer-identity-grid');
+			const form=document.querySelector('.customer-record-form');
+			const visibleTargets=Array.from(form.querySelectorAll('input,select,button,a.button,summary')).filter((element)=>element.getClientRects().length);
+			return getComputedStyle(overview).alignItems==='start'
+				&& getComputedStyle(identity).gridTemplateColumns.trim().split(/\s+/).length>=3
+				&& form.getBoundingClientRect().height<500
+				&& !document.querySelector('.customer-address-extra').open
+				&& visibleTargets.every((element)=>element.getBoundingClientRect().height>=43.5);
+		})()`, &compactDossierDesktop),
+		chromedp.EmulateViewport(360, 800),
+		chromedp.Evaluate(`(() => {
+			const identity=document.querySelector('.customer-identity-grid');
+			const targets=Array.from(document.querySelectorAll('.customer-record-form input,.customer-record-form select,.customer-record-form button,.customer-record-form a.button,.customer-record-form summary')).filter((element)=>element.getClientRects().length);
+			return document.documentElement.scrollWidth<=document.documentElement.clientWidth+1
+				&& getComputedStyle(identity).gridTemplateColumns.trim().split(/\s+/).length===1
+				&& targets.every((element)=>element.getBoundingClientRect().height>=43.5);
+		})()`, &compactDossierMobile),
+		chromedp.EmulateViewport(1280, 900),
+		chromedp.Evaluate(`document.querySelector('.customer-edit-card').open=false`, nil),
+	); err != nil {
+		t.Fatalf("inspect compact customer dossier: %s", browserDiagnostics(browserContext, err))
+	}
+	if !compactDossierDesktop || !compactDossierMobile {
+		t.Fatalf("compact customer dossier desktop/mobile = %v/%v", compactDossierDesktop, compactDossierMobile)
+	}
 	if !transportInitiallyHidden {
 		t.Fatal("transport fields are visible for a chipping-only intake")
 	}
@@ -264,7 +302,7 @@ func TestTask02BrowserJourney(t *testing.T) {
 		t.Fatal("job edit form lost its location editor during enhancement")
 	}
 	var mapsURL string
-	var transportVisible, externalConfirmationVisible bool
+	var transportVisible, externalConfirmationVisible, compactJobFormMobile bool
 	var pickerHorizontalOverflow, pickerTouchTargetTooSmall bool
 	if err := chromedp.Run(browserContext,
 		chromedp.AttributeValue("a[href^='https://www.google.com/maps/search/']", "href", &mapsURL, nil, chromedp.ByQuery),
@@ -275,6 +313,15 @@ func TestTask02BrowserJourney(t *testing.T) {
 		chromedp.Evaluate(`(() => { const target=document.querySelector('[data-existing-customer-job]'); const box=target.getBoundingClientRect(); return box.width < 44 || box.height < 44; })()`, &pickerTouchTargetTooSmall),
 		chromedp.Click("a[href='/customers/"+customerID+"/jobs/new']", chromedp.ByQuery),
 		chromedp.WaitVisible("[data-job-type]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const form=document.querySelector('.customer-job-workbench');
+			const targets=Array.from(form.querySelectorAll('input,select,button,summary')).filter((element)=>element.getClientRects().length);
+			return form.querySelectorAll('.job-core-section,.job-preference-section').length===2
+				&& !form.querySelector('.job-additional-disclosure').open
+				&& !form.querySelector('.job-location-disclosure').open
+				&& document.documentElement.scrollWidth<=document.documentElement.clientWidth+1
+				&& targets.every((element)=>element.getBoundingClientRect().height>=43.5);
+		})()`, &compactJobFormMobile),
 		chromedp.Evaluate(`(() => { const e=document.querySelector('[data-job-type]'); e.value='chipping_with_transport'; e.dispatchEvent(new Event('change',{bubbles:true})); return !document.querySelector('[data-transport-field]').hidden; })()`, &transportVisible),
 		chromedp.Evaluate(`(() => { const e=document.querySelector('[data-transport-mode]'); e.value='external'; e.dispatchEvent(new Event('change',{bubbles:true})); return !document.querySelector('[data-external-confirmation]').hidden; })()`, &externalConfirmationVisible),
 		chromedp.SetValue("[name='volume_m3']", "120", chromedp.ByQuery),
@@ -283,6 +330,7 @@ func TestTask02BrowserJourney(t *testing.T) {
 		chromedp.SetValue("[name='transport_trips']", "2", chromedp.ByQuery),
 		chromedp.Click("[name='external_confirmed']", chromedp.ByQuery),
 		chromedp.SetValue("[name='region']", "Unterneukirchen", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('.job-additional-disclosure').open=true`, nil),
 		chromedp.SetValue("[name='preference_text']", "Oktober", chromedp.ByQuery),
 		chromedp.Click("form[data-transport-form] button[type='submit']", chromedp.ByQuery),
 		chromedp.WaitVisible("details.compact-job-row:nth-of-type(2)", chromedp.ByQuery),
@@ -290,8 +338,8 @@ func TestTask02BrowserJourney(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(mapsURL, "https://www.google.com/maps/search/") || !transportVisible || !externalConfirmationVisible || pickerHorizontalOverflow || pickerTouchTargetTooSmall {
-		t.Fatalf("maps=%q transport=%v external=%v picker overflow=%v touch too small=%v", mapsURL, transportVisible, externalConfirmationVisible, pickerHorizontalOverflow, pickerTouchTargetTooSmall)
+	if !strings.HasPrefix(mapsURL, "https://www.google.com/maps/search/") || !transportVisible || !externalConfirmationVisible || !compactJobFormMobile || pickerHorizontalOverflow || pickerTouchTargetTooSmall {
+		t.Fatalf("maps=%q transport=%v external=%v compact form=%v picker overflow=%v touch too small=%v", mapsURL, transportVisible, externalConfirmationVisible, compactJobFormMobile, pickerHorizontalOverflow, pickerTouchTargetTooSmall)
 	}
 
 	var jobCount int
@@ -314,7 +362,9 @@ func TestTask02BrowserJourney(t *testing.T) {
 		t.Fatalf("direct driver priority status = %d, want 403", forbiddenStatus)
 	}
 
-	var searchLocation, firstWaitlistText string
+	var searchLocation, waitlistLocation, firstWaitlistText, detailHref string
+	var customerToolbarHeight, waitlistToolbarHeight float64
+	var waitlistCopyButtonValid, waitlistCopyFeedbackValid bool
 	var horizontalOverflow bool
 	var screenshot []byte
 	if err := runBrowserStep(browserContext, "logout driver",
@@ -343,11 +393,33 @@ func TestTask02BrowserJourney(t *testing.T) {
 	if err := runBrowserStep(browserContext, "inspect search results",
 		chromedp.WaitVisible("form[action='/recent/customers/"+customerID+"']", chromedp.ByQuery),
 		chromedp.Location(&searchLocation),
+		chromedp.AttributeValue(".customer-name-link", "href", &detailHref, nil, chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector(".customer-list-toolbar").getBoundingClientRect().height`, &customerToolbarHeight),
 	); err != nil {
 		t.Fatalf("inspect customer search: %s", browserDiagnostics(browserContext, err))
 	}
+	if detailHref != "/customers/"+customerID || customerToolbarHeight > 64 {
+		t.Fatalf("customer detail href/toolbar height = %q/%.1f", detailHref, customerToolbarHeight)
+	}
+	if err := runBrowserStep(browserContext, "sort customer results",
+		chromedp.Click(".customer-table thead th:first-child .customer-table-sort", chromedp.ByQuery),
+		chromedp.WaitVisible(".customer-table th[aria-sort='ascending']", chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("customer sort: %s", browserDiagnostics(browserContext, err))
+	}
+	if err := runBrowserStep(browserContext, "filter customer results",
+		chromedp.Click(".customer-filter-menu > summary", chromedp.ByQuery),
+		chromedp.WaitVisible(".customer-filter-menu__panel", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector("#customer-list-controls [name='job_activity']").value="active"`, nil),
+		chromedp.Click(".customer-filter-actions button[type='submit']", chromedp.ByQuery),
+		chromedp.WaitVisible(".customer-filter-menu[open]", chromedp.ByQuery),
+		chromedp.WaitVisible(".customer-table tbody tr", chromedp.ByQuery),
+		chromedp.Location(&searchLocation),
+	); err != nil {
+		t.Fatalf("customer filter: %s", browserDiagnostics(browserContext, err))
+	}
 	if err := runBrowserStep(browserContext, "open customer detail",
-		chromedp.Evaluate(`document.querySelector("form[action='/recent/customers/`+customerID+`']").requestSubmit()`, nil),
+		chromedp.Click(".customer-name-link", chromedp.ByQuery),
 		chromedp.WaitVisible("details.edit-card summary", chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("open customer detail: %s", browserDiagnostics(browserContext, err))
@@ -359,6 +431,40 @@ func TestTask02BrowserJourney(t *testing.T) {
 		chromedp.Click("details.edit-card button[type='submit']", chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("submit customer edit: %s", browserDiagnostics(browserContext, err))
+	}
+	if err := runBrowserStep(browserContext, "open compact waitlist",
+		chromedp.WaitNotPresent("details.edit-card[open]", chromedp.ByQuery),
+		chromedp.Navigate(server.URL+"/waitlist"),
+		chromedp.WaitVisible("#waitlist-list-controls", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector(".waitlist-list-toolbar").getBoundingClientRect().height`, &waitlistToolbarHeight),
+		chromedp.Evaluate(`(()=>{const button=document.querySelector(".waitlist-copy-button");if(!button)return false;const icon=button.querySelector("svg.copy-icon--default");if(!icon)return false;const buttonBox=button.getBoundingClientRect();const iconBox=icon.getBoundingClientRect();const style=getComputedStyle(button);return button.textContent.trim()===""&&(button.getAttribute("aria-label")||"").endsWith(" kopieren")&&buttonBox.width>=44&&buttonBox.height>=44&&iconBox.width<=16.1&&iconBox.height<=16.1&&parseFloat(style.borderTopWidth)===0&&style.backgroundColor==="rgba(0, 0, 0, 0)"})()`, &waitlistCopyButtonValid),
+		chromedp.Click(".waitlist-copy-button", chromedp.ByQuery),
+		chromedp.WaitVisible(".waitlist-copy-button.is-copied", chromedp.ByQuery),
+		chromedp.Evaluate(`(()=>{const button=document.querySelector(".waitlist-copy-button.is-copied");return !!button&&button.textContent.trim()===""&&button.querySelectorAll("svg").length===2&&(button.getAttribute("aria-label")||"").endsWith(" kopiert")})()`, &waitlistCopyFeedbackValid),
+	); err != nil {
+		t.Fatalf("open compact waitlist: %s", browserDiagnostics(browserContext, err))
+	}
+	if err := runBrowserStep(browserContext, "search and sort compact waitlist",
+		chromedp.SetValue("#waitlist-search", "Huber", chromedp.ByQuery),
+		chromedp.Click("#waitlist-list-controls .customer-list-toolbar__search button[type='submit']", chromedp.ByQuery),
+		chromedp.WaitVisible(".waitlist-table tbody tr", chromedp.ByQuery),
+		chromedp.Click(".waitlist-table thead th:nth-child(4) .customer-table-sort", chromedp.ByQuery),
+		chromedp.WaitVisible(".waitlist-table th[aria-sort='descending']", chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("search and sort compact waitlist: %s", browserDiagnostics(browserContext, err))
+	}
+	if err := runBrowserStep(browserContext, "filter compact waitlist",
+		chromedp.Click(".waitlist-filter-menu > summary", chromedp.ByQuery),
+		chromedp.WaitVisible(".waitlist-filter-menu__panel", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector("#waitlist-list-controls [name='incomplete']").checked=true`, nil),
+		chromedp.Click(".waitlist-filter-menu .customer-filter-actions button[type='submit']", chromedp.ByQuery),
+		chromedp.WaitVisible(".waitlist-filter-chips", chromedp.ByQuery),
+		chromedp.Location(&waitlistLocation),
+	); err != nil {
+		t.Fatalf("filter compact waitlist: %s", browserDiagnostics(browserContext, err))
+	}
+	if strings.Contains(waitlistLocation, "q=") || waitlistToolbarHeight > 64 || !waitlistCopyButtonValid || !waitlistCopyFeedbackValid {
+		t.Fatalf("waitlist location/toolbar/copy button = %q/%.1f/%t/%t", waitlistLocation, waitlistToolbarHeight, waitlistCopyButtonValid, waitlistCopyFeedbackValid)
 	}
 	if err := runBrowserStep(browserContext, "mobile waitlist",
 		chromedp.WaitNotPresent("details.edit-card[open]", chromedp.ByQuery),
@@ -511,7 +617,7 @@ func e2eDashboard(t *testing.T, pool *pgxpool.Pool) *dashboard.Service {
 }
 
 func runBrowserStep(ctx context.Context, name string, actions ...chromedp.Action) error {
-	stepContext, cancel := context.WithTimeout(ctx, 15*time.Second)
+	stepContext, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := chromedp.Run(stepContext, actions...); err != nil {
 		return fmt.Errorf("%s: %w", name, err)

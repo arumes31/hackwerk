@@ -131,6 +131,58 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	if calendarTimezone != "Europe/Vienna" || !dragReady || !strings.Contains(toolbarText, "Heute") || !strings.Contains(toolbarText, "Woche") || !strings.Contains(toolbarText, "Monat") || adminReadOnlyNotices != 0 || calendarFeedButtons != 1 {
 		t.Fatalf("calendar timezone/drag/toolbar/admin read-only/feed button = %q/%v/%q/%d/%d", calendarTimezone, dragReady, toolbarText, adminReadOnlyNotices, calendarFeedButtons)
 	}
+	var compactCalendarAudit struct {
+		PageWidth, HeadingHeight, BoardTop, ControlsHeight, CalendarOffset float64
+		RangeHeight, WarningHeight, LegendHeight, MessageHeight            float64
+		MinimumButtonGap, TallestWaitlistCard                              float64
+		SmallTargets, ControlRows                                          int
+		Overlap, PageOverflow                                              bool
+	}
+	if err := chromedp.Run(browserContext,
+		chromedp.EmulateViewport(1440, 900),
+		chromedp.Poll(`document.querySelector('.calendar-page').getBoundingClientRect().width>1380`, nil),
+		chromedp.Evaluate(`(() => {
+		const page=document.querySelector('.calendar-page');
+		const heading=page.querySelector('.page-heading');
+		const controls=page.querySelector('[data-calendar-controls]');
+		const groups=[...controls.querySelectorAll('.calendar-control-group')];
+		const targets=[...controls.querySelectorAll('button,input[type=date],label.check-label')];
+		const gaps=groups.flatMap(group=>{
+			const buttons=[...group.querySelectorAll('button')].map(node=>node.getBoundingClientRect());
+			return buttons.slice(1).map((rect,index)=>rect.left-buttons[index].right);
+		});
+		const rects=groups.map(node=>node.getBoundingClientRect());
+		const overlap=rects.some((left,index)=>rects.slice(index+1).some(right=>left.left<right.right&&left.right>right.left&&left.top<right.bottom&&left.bottom>right.top));
+		const cards=[...page.querySelectorAll('.calendar-waitlist-item')].map(node=>node.getBoundingClientRect().height);
+		return {
+			PageWidth:page.getBoundingClientRect().width,
+			HeadingHeight:heading.getBoundingClientRect().height,
+			BoardTop:page.querySelector('.calendar-board').getBoundingClientRect().top,
+			ControlsHeight:controls.getBoundingClientRect().height,
+			CalendarOffset:page.querySelector('[data-calendar]').getBoundingClientRect().top-page.getBoundingClientRect().top,
+			RangeHeight:page.querySelector('.calendar-range-summary').getBoundingClientRect().height,
+			WarningHeight:page.querySelector('[data-calendar-timezone-warning]').getBoundingClientRect().height,
+			LegendHeight:page.querySelector('.calendar-legend').getBoundingClientRect().height,
+			MessageHeight:page.querySelector('[data-calendar-message]').getBoundingClientRect().height,
+			MinimumButtonGap:gaps.length?Math.min(...gaps):999,
+			TallestWaitlistCard:cards.length?Math.max(...cards):0,
+			SmallTargets:targets.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<44||rect.height<44}).length,
+			ControlRows:rects.reduce((rows,rect)=>{
+				const row=rows.find(item=>rect.top<item.bottom&&rect.bottom>item.top);
+				if(row){row.top=Math.min(row.top,rect.top);row.bottom=Math.max(row.bottom,rect.bottom);}else{rows.push({top:rect.top,bottom:rect.bottom});}
+				return rows;
+			},[]).length,
+			Overlap:overlap,
+			PageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth
+		};
+	})()`, &compactCalendarAudit)); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if compactCalendarAudit.PageWidth < 1380 || compactCalendarAudit.HeadingHeight > 115 || compactCalendarAudit.ControlsHeight > 76 ||
+		compactCalendarAudit.CalendarOffset > 255 || compactCalendarAudit.MinimumButtonGap < 6 || compactCalendarAudit.TallestWaitlistCard > 140 ||
+		compactCalendarAudit.SmallTargets != 0 || compactCalendarAudit.ControlRows != 1 || compactCalendarAudit.Overlap || compactCalendarAudit.PageOverflow {
+		t.Fatalf("compact calendar desktop audit = %+v", compactCalendarAudit)
+	}
 	var calendarLoadMessage string
 	if err := runBrowserStep(browserContext, "calendar load failure is recoverable",
 		chromedp.Evaluate(`window.__hackWerkFetch=window.fetch;window.fetch=(input,...args)=>String(input).includes('/api/v1/calendar?')?Promise.resolve(new Response('',{status:503})):window.__hackWerkFetch(input,...args);window.hackWerkCalendar.refetchEvents()`, nil),
@@ -159,14 +211,35 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	if draggedJob != dragJobID {
 		t.Fatalf("external drag opened job %q, want %q", draggedJob, dragJobID)
 	}
+	var mobileCalendarAudit struct {
+		ControlRows, SmallTargets int
+		Overlap, PageOverflow     bool
+	}
 	if err := runBrowserStep(browserContext, "open mobile proposal form",
 		chromedp.Evaluate(`localStorage.setItem('hackwerk:install-dismissed','true');document.querySelector('[data-install-prompt]').hidden=true`, nil),
 		chromedp.EmulateViewport(360, 820),
 		chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetTimezoneOverride("UTC").Do(ctx) }),
+		chromedp.Evaluate(`window.dispatchEvent(new Event('resize'))`, nil),
+		chromedp.Poll(`window.hackWerkCalendar.view.type==='listWeek'`, nil),
+		chromedp.Evaluate(`(() => {
+			const controls=document.querySelector('[data-calendar-controls]');
+			const groups=[...controls.querySelectorAll('.calendar-control-group')];
+			const rects=groups.map(node=>node.getBoundingClientRect());
+			const targets=[...controls.querySelectorAll('button,input[type=date],label.check-label')];
+			return {
+				ControlRows:new Set(rects.map(rect=>Math.round(rect.top))).size,
+				SmallTargets:targets.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<44||rect.height<44}).length,
+				Overlap:rects.some((left,index)=>rects.slice(index+1).some(right=>left.left<right.right&&left.right>right.left&&left.top<right.bottom&&left.bottom>right.top)),
+				PageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth
+			};
+		})()`, &mobileCalendarAudit),
 		chromedp.Evaluate(fmt.Sprintf(`document.querySelector('[data-plan-job=%q]').click()`, jobID), nil),
 		chromedp.WaitVisible("[data-planning-dialog]", chromedp.ByQuery),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if mobileCalendarAudit.ControlRows != 3 || mobileCalendarAudit.SmallTargets != 0 || mobileCalendarAudit.Overlap || mobileCalendarAudit.PageOverflow {
+		t.Fatalf("compact calendar mobile audit = %+v", mobileCalendarAudit)
 	}
 	var defaultPlanningStart string
 	if err := chromedp.Run(browserContext,

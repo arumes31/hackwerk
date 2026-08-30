@@ -1778,10 +1778,12 @@ if (calendarElement && window.FullCalendar) {
   const compact = window.matchMedia("(max-width: 680px)").matches;
   const calendarParameters = new URLSearchParams(window.location.search);
   const requestedAppointment = calendarParameters.get("appointment");
-  const requestedView = { day: "timeGridDay", week: "timeGridWeek", month: "dayGridMonth", agenda: "listWeek" }[calendarParameters.get("view")]
+  const requestedViewName = calendarParameters.get("view");
+  const requestedView = (compact && requestedViewName === "week" ? "listWeek" : { day: "timeGridDay", week: "timeGridWeek", month: "dayGridMonth", agenda: "listWeek" }[requestedViewName])
     || (compact ? "timeGridDay" : "timeGridWeek");
   const requestedWeekends = calendarParameters.get("weekends") !== "false";
   const viewParameter = (view) => ({ timeGridDay: "day", timeGridWeek: "week", dayGridMonth: "month", listWeek: "agenda" }[view] || "week");
+  const toolbarForWidth = (narrow) => ({ start: "prev,next today", center: "title", end: narrow ? "timeGridDay,dayGridMonth,listWeek" : "timeGridDay,timeGridWeek,dayGridMonth,listWeek" });
   const calendar = new FullCalendar.Calendar(calendarElement, {
     themeSystem: "classic",
     locale: "de-AT",
@@ -1807,7 +1809,7 @@ if (calendarElement && window.FullCalendar) {
     snapDuration: "00:15:00",
     dayMaxEvents: compact ? 1 : 3,
     moreLinkText: (count) => `+${count} weitere`,
-    headerToolbar: { start: "prev,next today", center: "title", end: compact ? "timeGridDay,dayGridMonth,listWeek" : "timeGridDay,timeGridWeek,dayGridMonth,listWeek" },
+    headerToolbar: toolbarForWidth(compact),
     buttons: {
       today: { text: "Heute" },
       timeGridDay: { text: "Tag" },
@@ -1894,6 +1896,17 @@ if (calendarElement && window.FullCalendar) {
     },
   });
   calendar.render();
+  let calendarNarrow = compact;
+  window.addEventListener("resize", () => {
+    const narrow = window.matchMedia("(max-width: 680px)").matches;
+    if (narrow === calendarNarrow) return;
+    calendarNarrow = narrow;
+    calendar.setOption("headerToolbar", toolbarForWidth(narrow));
+    if (narrow && calendar.view.type === "timeGridWeek") {
+      calendar.changeView("listWeek");
+      announceCalendar("Die Wochenansicht wird auf diesem Bildschirm als kompakte Agenda angezeigt.");
+    }
+  });
   window.hackWerkCalendar = calendar;
   const controls = document.querySelector("[data-calendar-controls]");
   const calendarDate = controls?.querySelector("[data-calendar-date]");
@@ -2001,10 +2014,29 @@ document.querySelectorAll("[data-copy-value]").forEach((button) => {
     const value = String(button.dataset.copyValue || "").trim();
     if (!value) return;
     const original = button.textContent;
+    const iconOnly = button.hasAttribute("data-copy-icon");
+    const originalLabel = button.getAttribute("aria-label");
+    const originalTitle = button.getAttribute("title");
     if (await copyText(value)) {
-      button.textContent = "Kopiert";
+      if (iconOnly) {
+        button.classList.add("is-copied");
+        button.setAttribute("aria-label", originalLabel?.replace(/kopieren$/i, "kopiert") || "Kopiert");
+        button.setAttribute("title", "Kopiert");
+      } else {
+        button.textContent = "Kopiert";
+      }
       announce("In die Zwischenablage kopiert.");
-      window.setTimeout(() => { button.textContent = original; }, 1800);
+      window.setTimeout(() => {
+        if (iconOnly) {
+          button.classList.remove("is-copied");
+          if (originalLabel === null) button.removeAttribute("aria-label");
+          else button.setAttribute("aria-label", originalLabel);
+          if (originalTitle === null) button.removeAttribute("title");
+          else button.setAttribute("title", originalTitle);
+        } else {
+          button.textContent = original;
+        }
+      }, 1800);
     }
   });
 });

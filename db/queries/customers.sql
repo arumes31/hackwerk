@@ -71,6 +71,46 @@ WHERE (sqlc.arg(include_archived)::boolean OR c.archived_at IS NULL)
       (sqlc.arg(search_phone)::text <> '' AND c.phone_normalized = sqlc.arg(search_phone)::text) OR
       EXISTS (SELECT 1 FROM jobs sj WHERE sj.customer_id = c.id AND sj.job_number ILIKE '%' || sqlc.arg(search)::text || '%')
   )
+  AND (
+      NOT sqlc.arg(missing_contact)::boolean OR
+      (NULLIF(btrim(COALESCE(c.phone_raw, '')), '') IS NULL AND NULLIF(btrim(COALESCE(c.email::text, '')), '') IS NULL)
+  )
+  AND (
+      NOT sqlc.arg(incomplete_address)::boolean OR
+      NOT (
+          NULLIF(btrim(COALESCE(c.address_freeform, '')), '') IS NOT NULL OR
+          (
+              NULLIF(btrim(c.street), '') IS NOT NULL AND
+              NULLIF(btrim(c.postal_code), '') IS NOT NULL AND
+              NULLIF(btrim(c.locality), '') IS NOT NULL
+          )
+      )
+  )
+  AND (
+      sqlc.arg(job_activity)::text = '' OR
+      (
+          sqlc.arg(job_activity)::text = 'active' AND
+          EXISTS (
+              SELECT 1 FROM jobs aj
+              WHERE aj.customer_id = c.id AND aj.archived_at IS NULL
+                AND aj.workflow_status IN ('waitlist','planning','scheduled')
+          )
+      ) OR
+      (
+          sqlc.arg(job_activity)::text = 'none' AND
+          NOT EXISTS (
+              SELECT 1 FROM jobs aj
+              WHERE aj.customer_id = c.id AND aj.archived_at IS NULL
+                AND aj.workflow_status IN ('waitlist','planning','scheduled')
+          )
+      )
+  )
+  AND (
+      sqlc.arg(notification_filter)::text = '' OR
+      c.notification_preference = sqlc.arg(notification_filter)::text
+  )
+  AND (sqlc.arg(locality_filter)::text = '' OR c.locality ILIKE '%' || sqlc.arg(locality_filter)::text || '%')
+  AND (sqlc.arg(region_filter)::text = '' OR c.region ILIKE '%' || sqlc.arg(region_filter)::text || '%')
 GROUP BY c.id
 ORDER BY
   CASE WHEN sqlc.arg(sort)::text='name' AND sqlc.arg(direction)::text='asc' THEN lower(c.last_name) END ASC,
@@ -92,7 +132,47 @@ WHERE (sqlc.arg(include_archived)::boolean OR c.archived_at IS NULL)
       concat_ws(' ', c.first_name, c.last_name, c.company_name, c.locality) ILIKE '%' || sqlc.arg(search)::text || '%' OR
       (sqlc.arg(search_phone)::text <> '' AND c.phone_normalized = sqlc.arg(search_phone)::text) OR
       EXISTS (SELECT 1 FROM jobs sj WHERE sj.customer_id = c.id AND sj.job_number ILIKE '%' || sqlc.arg(search)::text || '%')
-  );
+  )
+  AND (
+      NOT sqlc.arg(missing_contact)::boolean OR
+      (NULLIF(btrim(COALESCE(c.phone_raw, '')), '') IS NULL AND NULLIF(btrim(COALESCE(c.email::text, '')), '') IS NULL)
+  )
+  AND (
+      NOT sqlc.arg(incomplete_address)::boolean OR
+      NOT (
+          NULLIF(btrim(COALESCE(c.address_freeform, '')), '') IS NOT NULL OR
+          (
+              NULLIF(btrim(c.street), '') IS NOT NULL AND
+              NULLIF(btrim(c.postal_code), '') IS NOT NULL AND
+              NULLIF(btrim(c.locality), '') IS NOT NULL
+          )
+      )
+  )
+  AND (
+      sqlc.arg(job_activity)::text = '' OR
+      (
+          sqlc.arg(job_activity)::text = 'active' AND
+          EXISTS (
+              SELECT 1 FROM jobs aj
+              WHERE aj.customer_id = c.id AND aj.archived_at IS NULL
+                AND aj.workflow_status IN ('waitlist','planning','scheduled')
+          )
+      ) OR
+      (
+          sqlc.arg(job_activity)::text = 'none' AND
+          NOT EXISTS (
+              SELECT 1 FROM jobs aj
+              WHERE aj.customer_id = c.id AND aj.archived_at IS NULL
+                AND aj.workflow_status IN ('waitlist','planning','scheduled')
+          )
+      )
+  )
+  AND (
+      sqlc.arg(notification_filter)::text = '' OR
+      c.notification_preference = sqlc.arg(notification_filter)::text
+  )
+  AND (sqlc.arg(locality_filter)::text = '' OR c.locality ILIKE '%' || sqlc.arg(locality_filter)::text || '%')
+  AND (sqlc.arg(region_filter)::text = '' OR c.region ILIKE '%' || sqlc.arg(region_filter)::text || '%');
 
 -- name: GetCustomer :one
 SELECT id::text, first_name, last_name, COALESCE(company_name, '')::text AS company_name,

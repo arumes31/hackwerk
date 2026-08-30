@@ -71,16 +71,72 @@ WHERE ($1::boolean OR c.archived_at IS NULL)
       ($3::text <> '' AND c.phone_normalized = $3::text) OR
       EXISTS (SELECT 1 FROM jobs sj WHERE sj.customer_id = c.id AND sj.job_number ILIKE '%' || $2::text || '%')
   )
+  AND (
+      NOT $4::boolean OR
+      (NULLIF(btrim(COALESCE(c.phone_raw, '')), '') IS NULL AND NULLIF(btrim(COALESCE(c.email::text, '')), '') IS NULL)
+  )
+  AND (
+      NOT $5::boolean OR
+      NOT (
+          NULLIF(btrim(COALESCE(c.address_freeform, '')), '') IS NOT NULL OR
+          (
+              NULLIF(btrim(c.street), '') IS NOT NULL AND
+              NULLIF(btrim(c.postal_code), '') IS NOT NULL AND
+              NULLIF(btrim(c.locality), '') IS NOT NULL
+          )
+      )
+  )
+  AND (
+      $6::text = '' OR
+      (
+          $6::text = 'active' AND
+          EXISTS (
+              SELECT 1 FROM jobs aj
+              WHERE aj.customer_id = c.id AND aj.archived_at IS NULL
+                AND aj.workflow_status IN ('waitlist','planning','scheduled')
+          )
+      ) OR
+      (
+          $6::text = 'none' AND
+          NOT EXISTS (
+              SELECT 1 FROM jobs aj
+              WHERE aj.customer_id = c.id AND aj.archived_at IS NULL
+                AND aj.workflow_status IN ('waitlist','planning','scheduled')
+          )
+      )
+  )
+  AND (
+      $7::text = '' OR
+      c.notification_preference = $7::text
+  )
+  AND ($8::text = '' OR c.locality ILIKE '%' || $8::text || '%')
+  AND ($9::text = '' OR c.region ILIKE '%' || $9::text || '%')
 `
 
 type CountCustomersParams struct {
-	IncludeArchived bool
-	Search          string
-	SearchPhone     string
+	IncludeArchived    bool
+	Search             string
+	SearchPhone        string
+	MissingContact     bool
+	IncompleteAddress  bool
+	JobActivity        string
+	NotificationFilter string
+	LocalityFilter     string
+	RegionFilter       string
 }
 
 func (q *Queries) CountCustomers(ctx context.Context, arg CountCustomersParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countCustomers, arg.IncludeArchived, arg.Search, arg.SearchPhone)
+	row := q.db.QueryRow(ctx, countCustomers,
+		arg.IncludeArchived,
+		arg.Search,
+		arg.SearchPhone,
+		arg.MissingContact,
+		arg.IncompleteAddress,
+		arg.JobActivity,
+		arg.NotificationFilter,
+		arg.LocalityFilter,
+		arg.RegionFilter,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -794,28 +850,74 @@ WHERE ($1::boolean OR c.archived_at IS NULL)
       ($3::text <> '' AND c.phone_normalized = $3::text) OR
       EXISTS (SELECT 1 FROM jobs sj WHERE sj.customer_id = c.id AND sj.job_number ILIKE '%' || $2::text || '%')
   )
+  AND (
+      NOT $4::boolean OR
+      (NULLIF(btrim(COALESCE(c.phone_raw, '')), '') IS NULL AND NULLIF(btrim(COALESCE(c.email::text, '')), '') IS NULL)
+  )
+  AND (
+      NOT $5::boolean OR
+      NOT (
+          NULLIF(btrim(COALESCE(c.address_freeform, '')), '') IS NOT NULL OR
+          (
+              NULLIF(btrim(c.street), '') IS NOT NULL AND
+              NULLIF(btrim(c.postal_code), '') IS NOT NULL AND
+              NULLIF(btrim(c.locality), '') IS NOT NULL
+          )
+      )
+  )
+  AND (
+      $6::text = '' OR
+      (
+          $6::text = 'active' AND
+          EXISTS (
+              SELECT 1 FROM jobs aj
+              WHERE aj.customer_id = c.id AND aj.archived_at IS NULL
+                AND aj.workflow_status IN ('waitlist','planning','scheduled')
+          )
+      ) OR
+      (
+          $6::text = 'none' AND
+          NOT EXISTS (
+              SELECT 1 FROM jobs aj
+              WHERE aj.customer_id = c.id AND aj.archived_at IS NULL
+                AND aj.workflow_status IN ('waitlist','planning','scheduled')
+          )
+      )
+  )
+  AND (
+      $7::text = '' OR
+      c.notification_preference = $7::text
+  )
+  AND ($8::text = '' OR c.locality ILIKE '%' || $8::text || '%')
+  AND ($9::text = '' OR c.region ILIKE '%' || $9::text || '%')
 GROUP BY c.id
 ORDER BY
-  CASE WHEN $4::text='name' AND $5::text='asc' THEN lower(c.last_name) END ASC,
-  CASE WHEN $4::text='name' AND $5::text='desc' THEN lower(c.last_name) END DESC,
-  CASE WHEN $4::text='locality' AND $5::text='asc' THEN lower(c.locality) END ASC,
-  CASE WHEN $4::text='locality' AND $5::text='desc' THEN lower(c.locality) END DESC,
-  CASE WHEN $4::text='jobs' AND $5::text='asc' THEN count(j.id) FILTER (WHERE j.archived_at IS NULL AND j.workflow_status IN ('waitlist','planning','scheduled')) END ASC,
-  CASE WHEN $4::text='jobs' AND $5::text='desc' THEN count(j.id) FILTER (WHERE j.archived_at IS NULL AND j.workflow_status IN ('waitlist','planning','scheduled')) END DESC,
-  CASE WHEN $4::text='recent' AND $5::text='asc' THEN GREATEST(c.updated_at, COALESCE(max(j.updated_at), c.updated_at)) END ASC,
-  CASE WHEN $4::text='recent' AND $5::text='desc' THEN GREATEST(c.updated_at, COALESCE(max(j.updated_at), c.updated_at)) END DESC,
+  CASE WHEN $10::text='name' AND $11::text='asc' THEN lower(c.last_name) END ASC,
+  CASE WHEN $10::text='name' AND $11::text='desc' THEN lower(c.last_name) END DESC,
+  CASE WHEN $10::text='locality' AND $11::text='asc' THEN lower(c.locality) END ASC,
+  CASE WHEN $10::text='locality' AND $11::text='desc' THEN lower(c.locality) END DESC,
+  CASE WHEN $10::text='jobs' AND $11::text='asc' THEN count(j.id) FILTER (WHERE j.archived_at IS NULL AND j.workflow_status IN ('waitlist','planning','scheduled')) END ASC,
+  CASE WHEN $10::text='jobs' AND $11::text='desc' THEN count(j.id) FILTER (WHERE j.archived_at IS NULL AND j.workflow_status IN ('waitlist','planning','scheduled')) END DESC,
+  CASE WHEN $10::text='recent' AND $11::text='asc' THEN GREATEST(c.updated_at, COALESCE(max(j.updated_at), c.updated_at)) END ASC,
+  CASE WHEN $10::text='recent' AND $11::text='desc' THEN GREATEST(c.updated_at, COALESCE(max(j.updated_at), c.updated_at)) END DESC,
   lower(c.last_name), lower(c.first_name), c.id
-LIMIT $7 OFFSET $6
+LIMIT $13 OFFSET $12
 `
 
 type ListCustomersParams struct {
-	IncludeArchived bool
-	Search          string
-	SearchPhone     string
-	Sort            string
-	Direction       string
-	PageOffset      int32
-	PageSize        int32
+	IncludeArchived    bool
+	Search             string
+	SearchPhone        string
+	MissingContact     bool
+	IncompleteAddress  bool
+	JobActivity        string
+	NotificationFilter string
+	LocalityFilter     string
+	RegionFilter       string
+	Sort               string
+	Direction          string
+	PageOffset         int32
+	PageSize           int32
 }
 
 type ListCustomersRow struct {
@@ -847,6 +949,12 @@ func (q *Queries) ListCustomers(ctx context.Context, arg ListCustomersParams) ([
 		arg.IncludeArchived,
 		arg.Search,
 		arg.SearchPhone,
+		arg.MissingContact,
+		arg.IncompleteAddress,
+		arg.JobActivity,
+		arg.NotificationFilter,
+		arg.LocalityFilter,
+		arg.RegionFilter,
 		arg.Sort,
 		arg.Direction,
 		arg.PageOffset,

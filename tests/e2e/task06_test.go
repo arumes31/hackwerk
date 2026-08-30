@@ -102,55 +102,95 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 			t.Fatalf("admin dashboard missing %q: %s", wanted, adminText)
 		}
 	}
+	var compactLayoutAudit struct {
+		ButtonRows, ControlRows, SmallTargets int
+		ControlsHeight, IntroButtonGap        float64
+		ControlSectionGap, ControlMetricGap   float64
+		Overlap                               bool
+	}
+	if err := chromedp.Run(browserContext, chromedp.Evaluate(`(() => {
+		const intro=document.querySelector('.dashboard-intro');
+		const introButtons=[...intro.querySelectorAll('.button')].map(node=>node.getBoundingClientRect());
+		const controls=document.querySelector('.dashboard-control-bar');
+		const controlSections=[...controls.children].map(node=>node.getBoundingClientRect());
+		const controlButtons=[...controls.querySelectorAll('.button')].map(node=>node.getBoundingClientRect());
+		const metrics=document.querySelector('.dashboard-metrics').getBoundingClientRect();
+		const controlBottom=Math.max(...controlSections.map(rect=>rect.bottom));
+		return {
+			ButtonRows:new Set(introButtons.map(rect=>Math.round(rect.top))).size,
+			ControlRows:new Set(controlSections.map(rect=>Math.round(rect.top))).size,
+			SmallTargets:controlButtons.filter(rect=>rect.width<44||rect.height<44).length,
+			ControlsHeight:controls.getBoundingClientRect().height,
+			IntroButtonGap:introButtons[1].left-introButtons[0].right,
+			ControlSectionGap:controlSections[1].left-controlSections[0].right,
+			ControlMetricGap:metrics.top-controlBottom,
+			Overlap:controlSections.some(rect=>rect.bottom>metrics.top||rect.right>window.innerWidth)
+		};
+	})()`, &compactLayoutAudit)); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if compactLayoutAudit.ButtonRows != 1 || compactLayoutAudit.ControlRows != 1 || compactLayoutAudit.SmallTargets != 0 ||
+		compactLayoutAudit.ControlsHeight > 64 || compactLayoutAudit.IntroButtonGap < 8 || compactLayoutAudit.ControlSectionGap < 8 ||
+		compactLayoutAudit.ControlMetricGap < 8 || compactLayoutAudit.Overlap {
+		t.Fatalf("compact dashboard layout audit = %+v", compactLayoutAudit)
+	}
 	var noteHref string
 	if err := chromedp.Run(browserContext, chromedp.AttributeValue(".dashboard-actions a[href*='#notes-']", "href", &noteHref, nil, chromedp.ByQuery)); err != nil || !strings.Contains(noteHref, "/customers/") {
 		t.Fatalf("dashboard note action = %q: %s", noteHref, browserDiagnostics(browserContext, err))
 	}
-	var quickMenuAudit struct {
-		OutsideViewport, RawLink, SmallTarget, VisibleText bool
-		Columns, AccessibleName, Title                     string
-		IconCount                                          int
+	var commandMenuAudit struct {
+		OutsideViewport, RawLink, SmallTarget, MissingAction bool
+		QuickMenuCount, SectionCount                         int
+		Columns, AccessibleName, Title                       string
+		TriggerWidth, TriggerHeight                          float64
 	}
 	var presentationToggleAudit struct {
 		Comfortable, Outdoor, DensityPressed, OutdoorPressed bool
 		DensityStored, OutdoorStored                         string
 	}
 	if err := chromedp.Run(browserContext,
-		chromedp.Click("[data-quick-menu] summary", chromedp.ByQuery),
-		chromedp.WaitVisible("[data-quick-menu] .nav-menu__panel", chromedp.ByQuery),
+		chromedp.Click("[data-command-open]", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-command-palette]", chromedp.ByQuery),
 		chromedp.Evaluate(`(() => {
-			const trigger=document.querySelector('[data-quick-menu] summary');
-			const panel=document.querySelector('[data-quick-menu] .nav-menu__panel');
-			const rect=panel.getBoundingClientRect();
-			const actions=[...panel.querySelectorAll(':scope > a,:scope > button')];
+			const trigger=document.querySelector('[data-command-open]');
+			const palette=document.querySelector('[data-command-palette]');
+			const rect=palette.getBoundingClientRect();
+			const actions=[...palette.querySelectorAll('[data-command-actions] a,[data-command-actions] button')];
+			const hrefs=[...palette.querySelectorAll('[data-command-actions] a')].map(node=>node.getAttribute('href'));
+			const expected=['/customers/new','/voice','/calendar','/planning/routes','/dashboard','/waitlist?incomplete=1','/planning','/admin/notifications'];
+			const triggerRect=trigger.getBoundingClientRect();
 			return {OutsideViewport:rect.left<0||rect.right>window.innerWidth,
 				RawLink:actions.some(node=>getComputedStyle(node).textDecorationLine!=='none'),
 				SmallTarget:actions.some(node=>node.getBoundingClientRect().height<44),
-				VisibleText:[...trigger.childNodes].some(node=>node.nodeType===Node.TEXT_NODE&&node.textContent.trim()!==''),
-				Columns:getComputedStyle(panel).gridTemplateColumns,
+				MissingAction:expected.some(href=>!hrefs.includes(href)),
+				QuickMenuCount:document.querySelectorAll('[data-quick-menu],.quick-menu').length,
+				SectionCount:palette.querySelectorAll('.command-section').length,
+				Columns:getComputedStyle(palette.querySelector('.command-grid')).gridTemplateColumns,
 				AccessibleName:trigger.getAttribute('aria-label')||'',Title:trigger.getAttribute('title')||'',
-				IconCount:trigger.querySelectorAll('svg.nav-menu__icon[aria-hidden=true]').length};
-		})()`, &quickMenuAudit),
-		chromedp.Click("[data-quick-menu] [data-density-toggle]", chromedp.ByQuery),
-		chromedp.Click("[data-quick-menu] [data-outdoor-toggle]", chromedp.ByQuery),
+				TriggerWidth:triggerRect.width,TriggerHeight:triggerRect.height};
+		})()`, &commandMenuAudit),
+		chromedp.Click("[data-command-palette] [data-density-toggle]", chromedp.ByQuery),
+		chromedp.Click("[data-command-palette] [data-outdoor-toggle]", chromedp.ByQuery),
 		chromedp.Evaluate(`(() => ({
 			Comfortable:document.documentElement.classList.contains('density-comfortable'),
 			Outdoor:document.documentElement.classList.contains('outdoor-contrast'),
-			DensityPressed:document.querySelector('[data-quick-menu] [data-density-toggle]').getAttribute('aria-pressed')==='true',
-			OutdoorPressed:document.querySelector('[data-quick-menu] [data-outdoor-toggle]').getAttribute('aria-pressed')==='true',
+			DensityPressed:document.querySelector('[data-command-palette] [data-density-toggle]').getAttribute('aria-pressed')==='true',
+			OutdoorPressed:document.querySelector('[data-command-palette] [data-outdoor-toggle]').getAttribute('aria-pressed')==='true',
 			DensityStored:localStorage.getItem('hackwerk:density')||'',
 			OutdoorStored:localStorage.getItem('hackwerk:outdoor')||''
 		}))()`, &presentationToggleAudit),
-		chromedp.Click("[data-quick-menu] [data-density-toggle]", chromedp.ByQuery),
-		chromedp.Click("[data-quick-menu] [data-outdoor-toggle]", chromedp.ByQuery),
-		chromedp.Click("[data-quick-menu] summary", chromedp.ByQuery),
+		chromedp.Click("[data-command-palette] [data-density-toggle]", chromedp.ByQuery),
+		chromedp.Click("[data-command-palette] [data-outdoor-toggle]", chromedp.ByQuery),
+		chromedp.Click("[data-command-close]", chromedp.ByQuery),
+		chromedp.WaitNotVisible("[data-command-palette]", chromedp.ByQuery),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
-	if quickMenuAudit.OutsideViewport || quickMenuAudit.RawLink || quickMenuAudit.SmallTarget || quickMenuAudit.VisibleText ||
-		quickMenuAudit.AccessibleName != "Schnellzugriff" || quickMenuAudit.Title != "Schnellzugriff" || quickMenuAudit.IconCount != 1 ||
-		!strings.Contains(quickMenuAudit.Columns, " ") {
-		t.Fatalf("quick menu CSS audit = %+v", quickMenuAudit)
+	if commandMenuAudit.OutsideViewport || commandMenuAudit.RawLink || commandMenuAudit.SmallTarget || commandMenuAudit.MissingAction ||
+		commandMenuAudit.QuickMenuCount != 0 || commandMenuAudit.SectionCount != 3 ||
+		commandMenuAudit.AccessibleName != "Globale Suche und Kommandos öffnen" || commandMenuAudit.Title != "Kommandos (Strg/⌘ K)" ||
+		commandMenuAudit.TriggerWidth < 44 || commandMenuAudit.TriggerHeight < 44 || !strings.Contains(commandMenuAudit.Columns, " ") {
+		t.Fatalf("command menu CSS audit = %+v", commandMenuAudit)
 	}
 	if !presentationToggleAudit.Comfortable || !presentationToggleAudit.Outdoor || !presentationToggleAudit.DensityPressed ||
 		!presentationToggleAudit.OutdoorPressed || presentationToggleAudit.DensityStored != "comfortable" || presentationToggleAudit.OutdoorStored != "true" {

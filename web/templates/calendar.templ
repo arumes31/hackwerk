@@ -107,14 +107,20 @@ templ Calendar(data CalendarData) {
 					}
 					<section class="calendar-board" aria-label="Terminplan">
 						<div class="calendar-quick-controls" data-calendar-controls aria-label="Kalender schnell steuern">
-							<button class="button button--quiet" type="button" data-calendar-jump="today">Heute</button>
-							<button class="button button--quiet" type="button" data-calendar-jump="tomorrow">Morgen</button>
-							<button class="button button--quiet" type="button" data-calendar-jump="next-week">Nächste Woche</button>
-							<label>Datum <input type="date" data-calendar-date aria-label="Kalenderdatum wählen"/></label>
-							<label class="check-label"><input type="checkbox" data-calendar-weekends checked/> Wochenende</label>
-							<button class="button button--quiet" type="button" data-calendar-reload>Neu laden</button>
-							<button class="button button--quiet" type="button" data-calendar-share>Ansicht kopieren</button>
-							<button class="button button--quiet" type="button" data-print-page>Drucken</button>
+							<div class="calendar-control-group" role="group" aria-label="Schnell zu einem Zeitraum wechseln">
+								<button class="button button--quiet" type="button" data-calendar-jump="today">Heute</button>
+								<button class="button button--quiet" type="button" data-calendar-jump="tomorrow">Morgen</button>
+								<button class="button button--quiet" type="button" data-calendar-jump="next-week">Nächste Woche</button>
+							</div>
+							<div class="calendar-control-group calendar-control-group--date" role="group" aria-label="Datum und Wochenenden">
+								<label>Datum <input type="date" data-calendar-date aria-label="Kalenderdatum wählen"/></label>
+								<label class="check-label"><input type="checkbox" data-calendar-weekends checked/> Wochenende</label>
+							</div>
+							<div class="calendar-control-group calendar-control-group--utilities" role="group" aria-label="Kalenderansicht verwenden">
+								<button class="button button--quiet" type="button" data-calendar-reload>Neu laden</button>
+								<button class="button button--quiet" type="button" data-calendar-share>Ansicht kopieren</button>
+								<button class="button button--quiet" type="button" data-print-page>Drucken</button>
+							</div>
 						</div>
 						<div class="calendar-range-summary"><strong data-calendar-range>Datumsbereich wird geladen</strong><span data-calendar-freshness></span><span data-calendar-timezone>Anzeige: Europe/Vienna</span></div>
 						<div class="form-alert form-alert--warning" data-calendar-timezone-warning hidden></div>

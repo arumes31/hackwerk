@@ -60,26 +60,6 @@ templ appHeader(shell ShellData) {
 			</nav>
 			<div class="shell-tools">
 				<button class="nav-menu__icon-trigger" type="button" data-command-open aria-label="Globale Suche und Kommandos öffnen" title="Kommandos (Strg/⌘ K)">⌘</button>
-				<details class="nav-menu quick-menu" data-popover-menu data-quick-menu>
-					<summary class="nav-menu__icon-trigger" aria-label="Schnellzugriff" title="Schnellzugriff">
-						@quickActionsIcon()
-					</summary>
-					<div class="nav-menu__panel">
-						<span class="nav-menu__label">Neue Aufgabe</span>
-						<a href="/customers/new">Auftrag erfassen</a>
-						<a href="/voice">Sprachentwurf</a>
-						if shell.Actor.Role == auth.RoleAdmin {
-							<a href="/calendar">Termin vorschlagen</a>
-							<a href="/planning/routes">Route planen</a>
-						} else if shell.Actor.DriverID != "" {
-							<a href="/my-route">Meine Route</a>
-							<a href="/availability">Verfügbarkeit</a>
-						}
-						<span class="nav-menu__label">Darstellung</span>
-						<button class="nav-menu__action" type="button" data-density-toggle>Komfortable Dichte</button>
-						<button class="nav-menu__action" type="button" data-outdoor-toggle>Outdoor-Kontrast</button>
-					</div>
-				</details>
 				if shell.Actor.Role == auth.RoleAdmin {
 					<details class="nav-menu" data-popover-menu data-admin-menu>
 						<summary class="nav-menu__icon-trigger" aria-label="Verwaltung" title="Verwaltung">
@@ -117,18 +97,45 @@ templ appHeader(shell ShellData) {
 	</header>
 	<dialog class="command-palette" data-command-palette aria-labelledby="command-palette-title">
 		<div class="dialog-heading"><div><p class="eyebrow">Navigation &amp; Suche</p><h2 id="command-palette-title">Kommandos</h2></div><button class="icon-button" type="button" data-command-close aria-label="Kommandos schließen">×</button></div>
-		<form method="post" action="/search" class="form-stack" data-global-search-form><input type="hidden" name="csrf_token" value={ shell.CSRFToken }/><label>Global suchen<input name="q" type="search" minlength="2" maxlength="120" autocomplete="off" placeholder="Kunde, Auftragsnummer oder Termin" data-global-search-input required/></label><button class="button" type="submit">Suchen</button></form>
+		<form method="post" action="/search" class="command-search" data-global-search-form><input type="hidden" name="csrf_token" value={ shell.CSRFToken }/><label>Global suchen<input name="q" type="search" minlength="2" maxlength="120" autocomplete="off" placeholder="Kunde, Auftragsnummer oder Termin" data-global-search-input required/></label><button class="button" type="submit">Suchen</button></form>
 		<div class="command-results" data-global-search-results aria-live="polite"></div>
-		<nav class="command-links" aria-label="Sichere Schnellnavigation">
-			<a href="/dashboard">Heute öffnen</a>
-			<a href="/calendar">Kalender öffnen</a>
-			<a href="/waitlist?incomplete=1">Prüfwarteschlange öffnen</a>
-			<a href="/customers/new">Auftrag erfassen</a>
-			if shell.Actor.Role == auth.RoleAdmin {
-				<a href="/planning">Planung öffnen</a>
-				<a href="/admin/notifications">Versand prüfen</a>
-			}
-		</nav>
+		<div class="command-grid" data-command-actions>
+			<section class="command-section" aria-labelledby="command-work-title">
+				<h3 id="command-work-title">Arbeiten</h3>
+				<nav class="command-links" aria-label="Schnellaktionen">
+					<a href="/customers/new">Auftrag erfassen</a>
+					<a href="/voice">Sprachentwurf</a>
+					if shell.Actor.Role == auth.RoleAdmin {
+						<a href="/calendar">Kalender / Termin vorschlagen</a>
+						<a href="/planning/routes">Route planen</a>
+					} else {
+						<a href="/calendar">Kalender öffnen</a>
+						if shell.Actor.DriverID != "" {
+							<a href="/my-route">Meine Route</a>
+							<a href="/availability">Verfügbarkeit</a>
+						}
+					}
+				</nav>
+			</section>
+			<section class="command-section" aria-labelledby="command-open-title">
+				<h3 id="command-open-title">Öffnen &amp; prüfen</h3>
+				<nav class="command-links" aria-label="Sichere Schnellnavigation">
+					<a href="/dashboard">Heute öffnen</a>
+					<a href="/waitlist?incomplete=1">Prüfwarteschlange öffnen</a>
+					if shell.Actor.Role == auth.RoleAdmin {
+						<a href="/planning">Planung öffnen</a>
+						<a href="/admin/notifications">Versand prüfen</a>
+					}
+				</nav>
+			</section>
+			<section class="command-section command-section--wide" aria-labelledby="command-view-title">
+				<h3 id="command-view-title">Darstellung</h3>
+				<div class="command-preferences">
+					<button class="button button--quiet" type="button" data-density-toggle>Komfortable Dichte</button>
+					<button class="button button--quiet" type="button" data-outdoor-toggle>Outdoor-Kontrast</button>
+				</div>
+			</section>
+		</div>
 		<button class="button button--quiet" type="button" data-shortcuts-open>Tastaturkürzel anzeigen</button>
 	</dialog>
 	<dialog class="shortcut-help" data-shortcuts-dialog aria-labelledby="shortcut-help-title"><div class="dialog-heading"><div><p class="eyebrow">Tastatur</p><h2 id="shortcut-help-title">Kürzel</h2></div><button class="icon-button" type="button" data-shortcuts-close aria-label="Kürzel schließen">×</button></div><dl class="shortcut-list"><div><dt><kbd>Strg</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd></dt><dd>Kommandos und globale Suche</dd></div><div><dt><kbd>/</kbd></dt><dd>Seitensuche fokussieren</dd></div><div><dt><kbd>?</kbd></dt><dd>Diese Übersicht öffnen</dd></div><div><dt><kbd>Esc</kbd></dt><dd>Dialog schließen</dd></div></dl><p>Kürzel werden in Eingabefeldern nicht ausgelöst.</p></dialog>
@@ -175,13 +182,6 @@ templ appHeader(shell ShellData) {
 	</nav>
 }
 
-templ quickActionsIcon() {
-	<svg class="nav-menu__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-		<path d="M12.8 2.5 5.4 13h6L10 21.5 18.6 10h-6.1l.3-7.5Z"></path>
-		<path d="M18.5 3.5v4m-2-2h4"></path>
-	</svg>
-}
-
 templ administrationIcon() {
 	<svg class="nav-menu__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
 		<path d="M4 6h9m4 0h3M4 12h3m4 0h9M4 18h8m4 0h4"></path>
@@ -225,15 +225,17 @@ templ Dashboard(data DashboardData) {
 					<section class="empty-state" role="alert"><h2>Übersicht nicht verfügbar</h2><p>{ data.Error }</p><a class="button button--quiet" href="/dashboard">Heute erneut laden</a></section>
 				}
 				if data.Error == "" {
-					<nav class="dashboard-date-nav" aria-label="Tag auswählen">
-						<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + data.View.PreviousDate) } aria-label="Vorheriger Tag">←</a>
-						<div><span class="eyebrow">Tag</span><h2>{ data.View.DateLabel }</h2><small>Aktualisiert um { data.View.UpdatedLabel } Uhr</small></div>
-						<a class="button button--quiet" href="/dashboard">Heute</a>
-						<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + data.View.NextDate) } aria-label="Nächster Tag">→</a>
-					</nav>
-					if data.View.Admin {
-						<div class="action-row dashboard-mode" aria-label="Dashboardansicht"><a class={ dashboardModeClass(!data.View.ExceptionsOnly) } href={ templ.SafeURL("/dashboard?date=" + data.View.Date) }>Alle Einsätze</a><a class={ dashboardModeClass(data.View.ExceptionsOnly) } href={ templ.SafeURL("/dashboard?date=" + data.View.Date + "&mode=exceptions") }>Nur Ausnahmen</a></div>
-					}
+					<div class="dashboard-control-bar">
+						<nav class="dashboard-date-nav" aria-label="Tag auswählen">
+							<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + data.View.PreviousDate) } aria-label="Vorheriger Tag">←</a>
+							<div><span class="eyebrow">Tag</span><h2>{ data.View.DateLabel }</h2><small>Aktualisiert um { data.View.UpdatedLabel } Uhr</small></div>
+							<a class="button button--quiet" href="/dashboard">Heute</a>
+							<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + data.View.NextDate) } aria-label="Nächster Tag">→</a>
+						</nav>
+						if data.View.Admin {
+							<div class="action-row dashboard-mode" aria-label="Dashboardansicht"><a class={ dashboardModeClass(!data.View.ExceptionsOnly) } href={ templ.SafeURL("/dashboard?date=" + data.View.Date) }>Alle Einsätze</a><a class={ dashboardModeClass(data.View.ExceptionsOnly) } href={ templ.SafeURL("/dashboard?date=" + data.View.Date + "&mode=exceptions") }>Nur Ausnahmen</a></div>
+						}
+					</div>
 					<section class="dashboard-metrics" aria-label="Kennzahlen">
 						if data.View.Admin {
 							@metricCard("Warteliste", data.View.Counts.Waitlist, "/waitlist", "⌛")

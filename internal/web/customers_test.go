@@ -28,10 +28,11 @@ type customerHTTPStore struct {
 	waitlist customers.Page[customers.WaitlistItem]
 	list     customers.Page[customers.CustomerSummary]
 
-	created    customers.CreatedIntake
-	input      customers.IntakeInput
-	jobEdit    customers.UpdateJobInput
-	listFilter customers.CustomerListFilter
+	created        customers.CreatedIntake
+	input          customers.IntakeInput
+	jobEdit        customers.UpdateJobInput
+	listFilter     customers.CustomerListFilter
+	waitlistFilter customers.WaitlistFilter
 
 	createCalls          int
 	updateCustomerCalls  int
@@ -41,6 +42,7 @@ type customerHTTPStore struct {
 	priorityCalls        int
 	removeCalls          int
 	listCalls            int
+	waitlistCalls        int
 	listSearch           string
 	searchResults        []customers.SearchResult
 	searchErr            error
@@ -111,7 +113,9 @@ func (store *customerHTTPStore) ArchiveCustomer(context.Context, auth.Actor, str
 	return nil
 }
 
-func (store *customerHTTPStore) ListWaitlist(context.Context, customers.WaitlistFilter) (customers.Page[customers.WaitlistItem], error) {
+func (store *customerHTTPStore) ListWaitlist(_ context.Context, filter customers.WaitlistFilter) (customers.Page[customers.WaitlistItem], error) {
+	store.waitlistCalls++
+	store.waitlistFilter = filter
 	return store.waitlist, nil
 }
 func (store *customerHTTPStore) ListWaitlistFilterFavorites(context.Context, string) ([]customers.WaitlistFilterFavorite, error) {
@@ -294,7 +298,7 @@ func TestCustomerHTTPStaleEditReturnsConflict(t *testing.T) {
 	body := response.Body.String()
 	if response.Code != http.StatusConflict || !strings.Contains(body, "zwischenzeitlich geändert") ||
 		!strings.Contains(body, `value="Maria"`) || !strings.Contains(body, `href="/customers/`+testCustomerID+`"`) ||
-		!strings.Contains(body, `<details class="edit-card" open`) {
+		!strings.Contains(body, `<details class="edit-card customer-edit-card" open`) {
 		t.Fatalf("stale response = %d %q", response.Code, response.Body.String())
 	}
 	if store.updateCustomerCalls != 1 {
@@ -312,7 +316,7 @@ func TestCustomerHTTPEditValidationKeepsValuesAndFieldErrors(t *testing.T) {
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/customers/"+testCustomerID, form, sessionToken, csrfToken))
 	body := response.Body.String()
-	for _, expected := range []string{`value="Eigener Wert"`, `value="ungueltig"`, `aria-invalid="true"`, `id="email-error"`, "Ihre Eingaben wurden beibehalten"} {
+	for _, expected := range []string{`value="Eigener Wert"`, `value="ungueltig"`, `aria-invalid="true"`, `id="email-error"`, `class="customer-record-form"`, `class="customer-field-grid customer-contact-grid"`, "Ihre Eingaben wurden beibehalten"} {
 		if !strings.Contains(body, expected) {
 			t.Errorf("edit validation missing %q in %q", expected, body)
 		}
@@ -360,14 +364,52 @@ func TestCustomerHTTPJobEditValidationAndConflictRenderStructuredForm(t *testing
 	})
 }
 
-func TestCustomerHTTPArchivedFlagSurvivesSortAndPagination(t *testing.T) {
-	store := &customerHTTPStore{list: customers.Page[customers.CustomerSummary]{Page: 2, PageSize: 25, Total: 75, TotalPages: 3}}
+func TestCustomerHTTPFiltersSortAndPaginationStayInPOSTBody(t *testing.T) {
+	store := &customerHTTPStore{list: customers.Page[customers.CustomerSummary]{
+		Page: 2, PageSize: 25, Total: 75, TotalPages: 3,
+		Items: []customers.CustomerSummary{{
+			ID: testCustomerID, FirstName: "Maria", LastName: "Maier", Locality: "Linz", Region: "Nord",
+			NotificationPreference: customers.NotifyNone, HasContact: true, AddressComplete: true,
+		}, {
+			ID: "10000000-0000-0000-0000-000000000002", FirstName: "Ohne", LastName: "Kontakt",
+			NotificationPreference: customers.NotifyNone, AddressComplete: true,
+		}},
+	}}
 	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleAdmin, store)
+	form := url.Values{
+		"csrf_token": {csrfToken}, "q": {"Maier"}, "sort": {"name"}, "direction": {"asc"},
+		"order": {"jobs:desc"}, "archived": {"1"}, "missing_contact": {"1"},
+		"incomplete_address": {"1"}, "job_activity": {"active"}, "notification": {"none"},
+		"locality": {"Linz"}, "region": {"Nord"}, "page": {"2"},
+	}
 	response := httptest.NewRecorder()
-	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodGet, "/customers?archived=1&sort=name&direction=asc&page=2&q=Maier", nil, sessionToken, csrfToken))
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/customers/search", form, sessionToken, csrfToken))
 	body := response.Body.String()
-	if response.Code != http.StatusOK || !store.listFilter.IncludeArchived || store.listSearch != "Maier" || !strings.Contains(body, `href="/customers?archived=1&amp;direction=desc&amp;q=Maier&amp;sort=jobs"`) || strings.Count(body, `name="archived" value="1"`) < 2 {
+	if response.Code != http.StatusOK || !store.listFilter.IncludeArchived || store.listSearch != "Maier" ||
+		store.listFilter.Sort != "jobs" || store.listFilter.Direction != "desc" ||
+		!store.listFilter.MissingContact || !store.listFilter.IncompleteAddress ||
+		store.listFilter.JobActivity != customers.CustomerJobsActive || store.listFilter.NotificationPreference != customers.NotifyNone ||
+		store.listFilter.Locality != "Linz" || store.listFilter.Region != "Nord" {
 		t.Fatalf("archived list status/filter/body=%d/%#v/%q", response.Code, store.listFilter, body)
+	}
+	for _, required := range []string{
+		`class="customer-sort-button is-active"`, `aria-sort="descending"`,
+		`href="/customers/` + testCustomerID + `"`, `Kundenakte öffnen`,
+		`Kundenliste mit Kontaktstatus`, `Keine Benachrichtigung`, `Kontaktdaten fehlen`,
+		`name="missing_contact" value="1"`, `name="incomplete_address" value="1"`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("customer list missing %q: %s", required, body)
+		}
+	}
+	if strings.Contains(body, `href="/customers?`) || strings.Contains(body, `q=Maier`) {
+		t.Fatalf("customer list leaked search/filter state into a URL: %s", body)
+	}
+
+	redirect := httptest.NewRecorder()
+	router.ServeHTTP(redirect, authenticatedCustomerRequest(t, http.MethodGet, "/customers?q=%2B436601234567", nil, sessionToken, csrfToken))
+	if redirect.Code != http.StatusSeeOther || redirect.Header().Get("Location") != "/customers" || store.listCalls != 1 {
+		t.Fatalf("sensitive GET status/location/calls = %d/%q/%d", redirect.Code, redirect.Header().Get("Location"), store.listCalls)
 	}
 }
 
@@ -427,6 +469,47 @@ func TestCustomerHTTPDetailProvidesSafeContactActions(t *testing.T) {
 	for _, link := range []string{`href="tel:+436601234567"`, `href="mailto:maria.maier@example.test"`} {
 		if !strings.Contains(body, link) {
 			t.Fatalf("customer detail is missing safe contact link %q: %s", link, body)
+		}
+	}
+	for _, expected := range []string{`class="detail-grid customer-overview-grid"`, `class="customer-card-heading"`, `Standort gefunden`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("customer detail is missing compact overview %q: %s", expected, body)
+		}
+	}
+}
+
+func TestCustomerHTTPDetailOpensRelevantOptionalFormSections(t *testing.T) {
+	latitude, longitude := 48.216667, 13.9
+	store := &customerHTTPStore{detail: customers.CustomerDetail{
+		Customer: customers.Customer{
+			ID: testCustomerID, FirstName: "Maria", LastName: "Maier", AddressFreeform: "Zufahrt beim Stadl",
+			CountryCode: "AT", NotificationPreference: customers.NotifyNone, GeocodingStatus: "not_requested", Version: 1,
+		},
+		Jobs: []customers.Job{{
+			ID: testJobID, JobNumber: "HA-2026-0001", JobType: customers.JobTypeChippingOnly,
+			VolumeM3: "80.00", EstimatedHackMinutes: 180, TransportMode: customers.TransportNone,
+			Urgency: customers.UrgencyNormal, Source: customers.SourcePhone, WorkflowStatus: "waitlist",
+			PreferenceText: "Nur vormittags", PileLatitude: &latitude, PileLongitude: &longitude,
+			PileLocationSource: customers.PileSourceCoordinates, Version: 1,
+		}},
+		Notes: map[string][]customers.Note{},
+	}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodGet, "/customers/"+testCustomerID, nil, sessionToken, csrfToken))
+	body := response.Body.String()
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", response.Code, body)
+	}
+	for _, expected := range []string{
+		`class="form-disclosure customer-address-extra" open`,
+		`class="form-disclosure job-additional-disclosure" open`,
+		`class="form-disclosure job-location-disclosure" open`,
+		`Noch nicht geprüft`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("customer detail optional sections are missing %q: %s", expected, body)
 		}
 	}
 }
@@ -540,11 +623,67 @@ func TestCustomerHTTPDriverWaitlistIsNotCachedAndHidesAdminPlanningControls(t *t
 		t.Fatalf("waitlist status = %d, cache-control = %q", response.Code, response.Header().Get("Cache-Control"))
 	}
 	body := response.Body.String()
-	if !strings.Contains(body, `class="compact-table responsive-table waitlist-table"`) || !strings.Contains(body, `Auftrag bearbeiten`) {
+	if !strings.Contains(body, `class="compact-table responsive-table waitlist-table"`) || !strings.Contains(body, `Auftrag bearbeiten`) ||
+		!strings.Contains(body, `class="customer-list-toolbar waitlist-list-toolbar"`) || !strings.Contains(body, `action="/waitlist/search"`) ||
+		!strings.Contains(body, `class="button waitlist-copy-button"`) || !strings.Contains(body, `data-copy-icon`) ||
+		!strings.Contains(body, `aria-label="Auftragsnummer HW-2026-000001 kopieren"`) {
 		t.Fatalf("driver waitlist misses compact table or existing-job action: %s", body)
 	}
 	if strings.Contains(body, ">Einplanen<") || strings.Contains(body, "data-drag-source") || strings.Contains(body, "/priority") || strings.Contains(body, "/remove") {
 		t.Fatalf("driver waitlist contains admin-only planning controls: %s", response.Body.String())
+	}
+}
+
+func TestCustomerHTTPWaitlistSearchUsesPOSTWithoutURLLeaks(t *testing.T) {
+	store := &customerHTTPStore{waitlist: customers.Page[customers.WaitlistItem]{
+		Page: 2, PageSize: 25, Total: 1, UnfilteredTotal: 4, TotalPages: 3,
+		Items: []customers.WaitlistItem{{
+			WaitlistID: testWaitlistID, JobID: testJobID, CustomerID: testCustomerID,
+			JobNumber: "HW-2026-000001", FirstName: "Franz", LastName: "Huber", Region: "Nord",
+			VolumeM3: "80.00", EstimatedHackMinutes: 180, JobType: customers.JobTypeChippingOnly,
+			TransportMode: customers.TransportNone, Urgency: customers.UrgencyNormal,
+		}},
+	}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleAdmin, store)
+	form := url.Values{
+		"csrf_token": {csrfToken}, "q": {"Franz Huber"}, "region": {"Nord"}, "incomplete": {"1"},
+		"sort": {"entered"}, "direction": {"asc"}, "order": {"volume:desc"}, "page": {"2"},
+	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/waitlist/search", form, sessionToken, csrfToken))
+	body := response.Body.String()
+
+	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" || store.waitlistCalls != 1 {
+		t.Fatalf("waitlist search status/cache/calls = %d/%q/%d", response.Code, response.Header().Get("Cache-Control"), store.waitlistCalls)
+	}
+	if store.waitlistFilter.Query != "Franz Huber" || store.waitlistFilter.Region != "Nord" || !store.waitlistFilter.Incomplete ||
+		store.waitlistFilter.Sort != "volume" || store.waitlistFilter.Direction != "desc" || store.waitlistFilter.Page != 2 {
+		t.Fatalf("waitlist filter = %#v", store.waitlistFilter)
+	}
+	for _, required := range []string{
+		`id="waitlist-list-controls"`, `id="waitlist-search"`, `1 von 4 Aufträgen`,
+		`class="customer-sort-button is-active"`, `aria-sort="descending"`,
+		`name="clear" value="region"`, `Warteliste mit Auftrag, Kunde`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("waitlist search missing %q: %s", required, body)
+		}
+	}
+	if strings.Contains(body, `q=Franz`) || strings.Contains(body, `href="/waitlist?`) && strings.Contains(body, "Franz+Huber") {
+		t.Fatalf("waitlist search leaked query into URL: %s", body)
+	}
+	withoutCSRF := form.Clone()
+	withoutCSRF.Del("csrf_token")
+	blocked := httptest.NewRecorder()
+	router.ServeHTTP(blocked, authenticatedCustomerRequest(t, http.MethodPost, "/waitlist/search", withoutCSRF, sessionToken, csrfToken))
+	if blocked.Code != http.StatusForbidden || store.waitlistCalls != 1 {
+		t.Fatalf("waitlist search without CSRF status/calls = %d/%d", blocked.Code, store.waitlistCalls)
+	}
+
+	redirect := httptest.NewRecorder()
+	router.ServeHTTP(redirect, authenticatedCustomerRequest(t, http.MethodGet, "/waitlist?q=Franz+Huber", nil, sessionToken, csrfToken))
+	if redirect.Code != http.StatusSeeOther || redirect.Header().Get("Location") != "/waitlist" || store.waitlistCalls != 1 {
+		t.Fatalf("sensitive GET status/location/calls = %d/%q/%d", redirect.Code, redirect.Header().Get("Location"), store.waitlistCalls)
 	}
 }
 
@@ -676,13 +815,19 @@ func TestCustomerPresentationHelpers(t *testing.T) {
 	if empty := jobDraftValues(customers.JobInput{}); empty.TransportDuration != "" || empty.Trips != "" || empty.PileLatitude != "" || empty.PileLongitude != "" {
 		t.Fatalf("empty job draft values = %#v", empty)
 	}
-
-	filter := customers.WaitlistFilter{JobType: "chipping_only", Region: "Nord", Urgency: "urgent", PreferredMonth: "2026-09", Workflow: "open", Sort: "priority", Direction: "desc", MissingLocation: true, DurationIssue: true}
+	filter := customers.WaitlistFilter{Query: "Franz Huber", JobType: "chipping_only", Region: "Nord", Urgency: "urgent", PreferredMonth: "2026-09", Workflow: "open", Sort: "priority", Direction: "desc", MissingLocation: true, DurationIssue: true}
 	location := waitlistFilterLocation(filter)
 	for _, fragment := range []string{"type=chipping_only", "region=Nord", "missing_location=1", "duration_issue=1"} {
 		if !strings.Contains(location, fragment) {
 			t.Fatalf("filter location %q misses %q", location, fragment)
 		}
+	}
+	if strings.Contains(location, "q=") || strings.Contains(location, "Franz") {
+		t.Fatalf("filter location leaks search text: %q", location)
+	}
+	clearWaitlistFilter(&filter, "region")
+	if filter.Region != "" || filter.Query != "Franz Huber" {
+		t.Fatalf("cleared waitlist filter = %#v", filter)
 	}
 	if location := waitlistFilterLocation(customers.WaitlistFilter{}); location != "/waitlist" {
 		t.Fatalf("empty filter location = %q", location)

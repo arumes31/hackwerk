@@ -38,6 +38,7 @@ func registerCustomerRoutes(router chi.Router, dependencies Dependencies, page t
 	router.Post("/jobs/{jobID}", updateJob(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/jobs/{jobID}/archive", archiveJob(service, dependencies.Logger))
 	router.Get("/waitlist", waitlistPage(service, page, csrfCookie, dependencies.Logger))
+	router.Post("/waitlist/search", waitlistSearch(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/waitlist/{waitlistID}/priority", updateWaitlistPriority(service, dependencies.Logger))
 	router.Post("/waitlist/{waitlistID}/remove", removeWaitlist(service, dependencies.Logger))
 	router.Post("/waitlist/filter-favorites", saveWaitlistFilterFavorite(service, dependencies.Logger))
@@ -190,10 +191,14 @@ func duplicateJobForm(service *customers.Service, page templates.PageData, csrfC
 
 func customerList(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Query().Has("q") {
+			http.Redirect(response, request, "/customers", http.StatusSeeOther)
+			return
+		}
 		renderCustomerList(response, request, service, page, csrfCookie, logger, customers.CustomerListFilter{
-			Search: request.URL.Query().Get("q"), Sort: request.URL.Query().Get("sort"),
-			Direction: request.URL.Query().Get("direction"), IncludeArchived: request.URL.Query().Get("archived") == "1",
-			Page: queryPage(request), PageSize: 25,
+			Sort: request.URL.Query().Get("sort"), Direction: request.URL.Query().Get("direction"),
+			IncludeArchived: request.URL.Query().Get("archived") == "1",
+			Page:            queryPage(request), PageSize: 25,
 		})
 	}
 }
@@ -204,10 +209,19 @@ func customerSearch(service *customers.Service, page templates.PageData, csrfCoo
 		if err != nil || pageNumber < 1 {
 			pageNumber = 1
 		}
-		renderCustomerList(response, request, service, page, csrfCookie, logger, customers.CustomerListFilter{
+		filter := customers.CustomerListFilter{
 			Search: request.Form.Get("q"), Sort: request.Form.Get("sort"), Direction: request.Form.Get("direction"),
-			IncludeArchived: request.Form.Get("archived") == "1", Page: pageNumber, PageSize: 25,
-		})
+			Locality: request.Form.Get("locality"), Region: request.Form.Get("region"),
+			NotificationPreference: customers.NotificationPreference(request.Form.Get("notification")),
+			JobActivity:            customers.CustomerJobActivity(request.Form.Get("job_activity")),
+			MissingContact:         request.Form.Get("missing_contact") == "1",
+			IncompleteAddress:      request.Form.Get("incomplete_address") == "1",
+			IncludeArchived:        request.Form.Get("archived") == "1", Page: pageNumber, PageSize: 25,
+		}
+		if sortKey, direction, found := strings.Cut(request.Form.Get("order"), ":"); found {
+			filter.Sort, filter.Direction = sortKey, direction
+		}
+		renderCustomerList(response, request, service, page, csrfCookie, logger, filter)
 	}
 }
 
@@ -461,22 +475,53 @@ func archiveJob(service *customers.Service, logger *slog.Logger) http.HandlerFun
 func waitlistPage(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		filter := waitlistFilterFromRequest(request)
-		filter.Normalize()
-		session, _ := sessionFromContext(request.Context())
-		result, err := service.ListWaitlist(request.Context(), session.Actor, filter)
-		if err != nil {
-			renderCustomerError(response, request, page, logger, err, "Warteliste nicht verfügbar")
+		if request.URL.Query().Has("q") {
+			filter.Query = ""
+			http.Redirect(response, request, waitlistFilterLocation(filter), http.StatusSeeOther)
 			return
 		}
-		result.Favorites, err = service.ListWaitlistFilterFavorites(request.Context(), session.Actor)
-		if err != nil {
-			renderCustomerError(response, request, page, logger, err, "Filterfavoriten nicht verfügbar")
-			return
-		}
-		render(response, request, templates.Waitlist(templates.WaitlistData{
-			Shell: shell(request, page, csrfCookie), Page: result, Filter: filter,
-		}), http.StatusOK, logger)
+		renderWaitlist(response, request, service, page, csrfCookie, logger, filter)
 	}
+}
+
+func waitlistSearch(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		filter := waitlistFilterFromRequest(request)
+		if sortKey := request.Form.Get("sort_choice"); sortKey != "" {
+			filter.Sort = sortKey
+		}
+		if direction := request.Form.Get("direction_choice"); direction != "" {
+			filter.Direction = direction
+		}
+		if region := strings.TrimSpace(request.Form.Get("region_choice")); region != "" {
+			filter.Region = region
+		}
+		clearWaitlistFilter(&filter, request.Form.Get("clear"))
+		if sortKey, direction, found := strings.Cut(request.Form.Get("order"), ":"); found {
+			filter.Sort, filter.Direction = sortKey, direction
+		}
+		filter.Normalize()
+		renderWaitlist(response, request, service, page, csrfCookie, logger, filter)
+	}
+}
+
+func renderWaitlist(response http.ResponseWriter, request *http.Request, service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger, filter customers.WaitlistFilter) {
+	response.Header().Set("Cache-Control", "no-store")
+	filter.Normalize()
+	session, _ := sessionFromContext(request.Context())
+	result, err := service.ListWaitlist(request.Context(), session.Actor, filter)
+	if err != nil {
+		renderCustomerError(response, request, page, logger, err, "Warteliste nicht verfügbar")
+		return
+	}
+	result.Favorites, err = service.ListWaitlistFilterFavorites(request.Context(), session.Actor)
+	if err != nil {
+		renderCustomerError(response, request, page, logger, err, "Filterfavoriten nicht verfügbar")
+		return
+	}
+	render(response, request, templates.Waitlist(templates.WaitlistData{
+		Shell: shell(request, page, csrfCookie), Page: result, Filter: filter,
+	}), http.StatusOK, logger)
 }
 
 func recordRecentCustomer(service *customers.Service, logger *slog.Logger) http.HandlerFunc {
@@ -603,6 +648,10 @@ func jobDraftValues(job customers.JobInput) templates.IntakeValues {
 }
 
 func waitlistFilterFromRequest(request *http.Request) customers.WaitlistFilter {
+	page := 1
+	if parsed, err := strconv.Atoi(request.FormValue("page")); err == nil && parsed > 0 {
+		page = parsed
+	}
 	filter := customers.WaitlistFilter{
 		Query: request.FormValue("q"), JobType: request.FormValue("type"), Region: request.FormValue("region"),
 		Urgency: request.FormValue("urgency"), PreferredMonth: request.FormValue("month"),
@@ -611,17 +660,46 @@ func waitlistFilterFromRequest(request *http.Request) customers.WaitlistFilter {
 		DurationIssue:   request.FormValue("duration_issue") == "1", Overdue: request.FormValue("overdue") == "1",
 		Unassigned: request.FormValue("unassigned") == "1", TransportPending: request.FormValue("transport_pending") == "1",
 		Incomplete:    request.FormValue("incomplete") == "1",
-		DurationGroup: request.FormValue("duration_group"), Page: queryPage(request), PageSize: 25,
+		DurationGroup: request.FormValue("duration_group"), Page: page, PageSize: 25,
 	}
 	filter.Normalize()
 	return filter
+}
+
+func clearWaitlistFilter(filter *customers.WaitlistFilter, key string) {
+	switch key {
+	case "type":
+		filter.JobType = ""
+	case "region":
+		filter.Region = ""
+	case "urgency":
+		filter.Urgency = ""
+	case "month":
+		filter.PreferredMonth = ""
+	case "workflow":
+		filter.Workflow = ""
+	case "duration_group":
+		filter.DurationGroup = ""
+	case "missing_location":
+		filter.MissingLocation = false
+	case "duration_issue":
+		filter.DurationIssue = false
+	case "overdue":
+		filter.Overdue = false
+	case "unassigned":
+		filter.Unassigned = false
+	case "transport_pending":
+		filter.TransportPending = false
+	case "incomplete":
+		filter.Incomplete = false
+	}
 }
 
 func waitlistFilterLocation(filter customers.WaitlistFilter) string {
 	values := url.Values{}
 	for key, value := range map[string]string{
 		"type": filter.JobType, "region": filter.Region, "urgency": filter.Urgency, "month": filter.PreferredMonth,
-		"workflow": filter.Workflow, "duration_group": filter.DurationGroup, "sort": filter.Sort, "direction": filter.Direction,
+		"workflow": filter.Workflow, "duration_group": filter.DurationGroup,
 	} {
 		if value != "" {
 			values.Set(key, value)
@@ -644,6 +722,12 @@ func waitlistFilterLocation(filter customers.WaitlistFilter) string {
 	}
 	if filter.Incomplete {
 		values.Set("incomplete", "1")
+	}
+	if filter.Sort != "" && filter.Sort != "entered" {
+		values.Set("sort", filter.Sort)
+	}
+	if filter.Direction == "desc" {
+		values.Set("direction", "desc")
 	}
 	if encoded := values.Encode(); encoded != "" {
 		return "/waitlist?" + encoded

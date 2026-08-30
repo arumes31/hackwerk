@@ -25,14 +25,32 @@ type CustomerSummary struct {
 	AddressComplete, HasContact                                             bool
 }
 
+type CustomerJobActivity string
+
+const (
+	CustomerJobsActive CustomerJobActivity = "active"
+	CustomerJobsNone   CustomerJobActivity = "none"
+)
+
 type CustomerListFilter struct {
-	Search, Sort, Direction string
-	IncludeArchived         bool
-	Page, PageSize          int
+	Search, Sort, Direction, Locality, Region string
+	NotificationPreference                    NotificationPreference
+	JobActivity                               CustomerJobActivity
+	IncludeArchived, MissingContact           bool
+	IncompleteAddress                         bool
+	Page, PageSize                            int
 }
 
 func (filter *CustomerListFilter) Normalize() {
 	filter.Search = strings.TrimSpace(filter.Search)
+	filter.Locality = strings.TrimSpace(filter.Locality)
+	filter.Region = strings.TrimSpace(filter.Region)
+	if filter.JobActivity != "" && !filter.JobActivity.Valid() {
+		filter.JobActivity = ""
+	}
+	if filter.NotificationPreference != "" && !filter.NotificationPreference.Valid() {
+		filter.NotificationPreference = ""
+	}
 	if filter.Sort != "name" && filter.Sort != "locality" && filter.Sort != "jobs" && filter.Sort != "recent" {
 		filter.Sort = "recent"
 	}
@@ -49,6 +67,10 @@ func (filter *CustomerListFilter) Normalize() {
 	if filter.PageSize < 1 || filter.PageSize > 100 {
 		filter.PageSize = 25
 	}
+}
+
+func (value CustomerJobActivity) Valid() bool {
+	return value == CustomerJobsActive || value == CustomerJobsNone
 }
 
 type Customer struct {

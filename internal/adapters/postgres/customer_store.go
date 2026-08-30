@@ -277,7 +277,10 @@ func (store *CustomerStore) ListCustomers(ctx context.Context, filter customers.
 	}
 	params := dbgen.ListCustomersParams{
 		IncludeArchived: filter.IncludeArchived, Search: filter.Search,
-		SearchPhone: customers.NormalizePhone(filter.Search), Sort: filter.Sort, Direction: filter.Direction,
+		SearchPhone: customers.NormalizePhone(filter.Search), MissingContact: filter.MissingContact,
+		IncompleteAddress: filter.IncompleteAddress, JobActivity: string(filter.JobActivity),
+		NotificationFilter: string(filter.NotificationPreference), LocalityFilter: filter.Locality,
+		RegionFilter: filter.Region, Sort: filter.Sort, Direction: filter.Direction,
 		PageOffset: pageOffset, PageSize: pageSize,
 	}
 	rows, err := store.queries.ListCustomers(ctx, params)
@@ -304,7 +307,11 @@ func (store *CustomerStore) ListCustomers(ctx context.Context, filter customers.
 		items = append(items, item)
 	}
 	total, err := store.queries.CountCustomers(ctx, dbgen.CountCustomersParams{
-		IncludeArchived: filter.IncludeArchived, Search: filter.Search, SearchPhone: customers.NormalizePhone(filter.Search),
+		IncludeArchived: filter.IncludeArchived, Search: filter.Search,
+		SearchPhone: customers.NormalizePhone(filter.Search), MissingContact: filter.MissingContact,
+		IncompleteAddress: filter.IncompleteAddress, JobActivity: string(filter.JobActivity),
+		NotificationFilter: string(filter.NotificationPreference), LocalityFilter: filter.Locality,
+		RegionFilter: filter.Region,
 	})
 	if err != nil {
 		return customers.Page[customers.CustomerSummary]{}, err
