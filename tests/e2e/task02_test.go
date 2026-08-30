@@ -303,6 +303,7 @@ func TestTask02BrowserJourney(t *testing.T) {
 	}
 	var mapsURL string
 	var transportVisible, externalConfirmationVisible, compactJobFormMobile bool
+	var customerAddressDrafted, customerAddressControlMobile bool
 	var pickerHorizontalOverflow, pickerTouchTargetTooSmall bool
 	if err := chromedp.Run(browserContext,
 		chromedp.AttributeValue("a[href^='https://www.google.com/maps/search/']", "href", &mapsURL, nil, chromedp.ByQuery),
@@ -313,6 +314,25 @@ func TestTask02BrowserJourney(t *testing.T) {
 		chromedp.Evaluate(`(() => { const target=document.querySelector('[data-existing-customer-job]'); const box=target.getBoundingClientRect(); return box.width < 44 || box.height < 44; })()`, &pickerTouchTargetTooSmall),
 		chromedp.Click("a[href='/customers/"+customerID+"/jobs/new']", chromedp.ByQuery),
 		chromedp.WaitVisible("[data-job-type]", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('.job-location-disclosure').open=true`, nil),
+		chromedp.Click("[data-location-customer]", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-location-search-results] .location-search__result", chromedp.ByQuery),
+		chromedp.Click("[data-location-search-results] .location-search__result", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const editor=document.querySelector('[data-job-location-editor]');
+			return editor.querySelector('[data-location-latitude]').value==='46.710000'
+				&& editor.querySelector('[data-location-longitude]').value==='15.570000'
+				&& editor.querySelector('[data-location-committed-latitude]').value===''
+				&& editor.querySelector('[data-location-committed-source]').value==='';
+		})()`, &customerAddressDrafted),
+		chromedp.Evaluate(`(() => {
+			const button=document.querySelector('[data-location-customer]');
+			const box=button.getBoundingClientRect();
+			return box.width>=44 && box.height>=44
+				&& document.documentElement.scrollWidth<=document.documentElement.clientWidth+1;
+		})()`, &customerAddressControlMobile),
+		chromedp.Click("[data-location-clear]", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('.job-location-disclosure').open=false`, nil),
 		chromedp.Evaluate(`(() => {
 			const form=document.querySelector('.customer-job-workbench');
 			const targets=Array.from(form.querySelectorAll('input,select,button,summary')).filter((element)=>element.getClientRects().length);
@@ -338,8 +358,8 @@ func TestTask02BrowserJourney(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(mapsURL, "https://www.google.com/maps/search/") || !transportVisible || !externalConfirmationVisible || !compactJobFormMobile || pickerHorizontalOverflow || pickerTouchTargetTooSmall {
-		t.Fatalf("maps=%q transport=%v external=%v compact form=%v picker overflow=%v touch too small=%v", mapsURL, transportVisible, externalConfirmationVisible, compactJobFormMobile, pickerHorizontalOverflow, pickerTouchTargetTooSmall)
+	if !strings.HasPrefix(mapsURL, "https://www.google.com/maps/search/") || !transportVisible || !externalConfirmationVisible || !compactJobFormMobile || !customerAddressDrafted || !customerAddressControlMobile || pickerHorizontalOverflow || pickerTouchTargetTooSmall {
+		t.Fatalf("maps=%q transport=%v external=%v compact form=%v customer address draft=%v customer address mobile=%v picker overflow=%v touch too small=%v", mapsURL, transportVisible, externalConfirmationVisible, compactJobFormMobile, customerAddressDrafted, customerAddressControlMobile, pickerHorizontalOverflow, pickerTouchTargetTooSmall)
 	}
 
 	var jobCount int
@@ -577,6 +597,107 @@ func TestTask02LocationSearchWithoutMap(t *testing.T) {
 	}
 	if !draftPrepared || !committed {
 		t.Fatalf("fallback draft prepared=%v, committed=%v", draftPrepared, committed)
+	}
+}
+
+func TestTask02CustomerAddressLocationSelectionWithoutStoredCoordinates(t *testing.T) {
+	appJavaScript, err := assets.Files.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/":
+			response.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = io.WriteString(response, `<!doctype html><html><body>
+<span hidden data-map-assets data-map-script="/missing-map.js" data-map-worker="/missing-worker.js" data-map-css="/missing-map.css" data-map-attribution="Kartendaten"></span>
+<form><input type="hidden" name="csrf_token" value="test-csrf">
+<div data-customer-fields>
+  <input name="street" value="Bräuerau 5a"><input name="postal_code" value="4162">
+  <input name="locality" value="Julbach"><input name="region" value="Rohrbach">
+</div>
+<section data-job-location-editor>
+  <div data-map-canvas tabindex="0"><p data-map-fallback hidden></p></div>
+  <span data-location-badge>Fehlt</span>
+  <input data-location-latitude><input data-location-longitude>
+  <input type="hidden" data-location-committed-latitude><input type="hidden" data-location-committed-longitude><input type="hidden" data-location-committed-source>
+  <input type="search" data-location-search-input><button type="button" data-location-search-submit>Suchen</button>
+  <p data-location-search-status></p><ul data-location-search-results hidden></ul>
+  <button type="button" data-location-customer>Kundenadresse wählen</button>
+  <p data-location-message></p><button type="button" data-location-commit>Standort übernehmen</button>
+</section></form><script src="/assets/app.js"></script></body></html>`)
+		case "/assets/app.js":
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = response.Write(appJavaScript)
+		case "/api/v1/geocoding/search":
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(response, `{"results":[{"label":"Bräuerau 5a, 4162 Julbach","latitude":48.658,"longitude":13.866,"bounds":[48.657,48.659,13.865,13.867]}]}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	options := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(browserExecutable(t)), chromedp.Headless, chromedp.DisableGPU,
+		chromedp.NoSandbox, chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck,
+		chromedp.UserDataDir(browserProfileDir(t)), chromedp.WindowSize(1280, 900),
+	)
+	allocatorContext, cancelAllocator := chromedp.NewExecAllocator(context.Background(), options...)
+	t.Cleanup(cancelAllocator)
+	browserContext, cancelBrowser := chromedp.NewContext(allocatorContext)
+	t.Cleanup(cancelBrowser)
+	browserContext, cancelTimeout := context.WithTimeout(browserContext, 60*time.Second)
+	t.Cleanup(cancelTimeout)
+	t.Cleanup(func() { _ = chromedp.Cancel(browserContext) })
+
+	var draftPrepared, committed, unavailableHandled, missingAddressHandled bool
+	if err := chromedp.Run(browserContext,
+		chromedp.Navigate(server.URL),
+		chromedp.WaitVisible("[data-map-fallback]:not([hidden])", chromedp.ByQuery),
+		chromedp.Click("[data-location-customer]", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-location-search-results] .location-search__result", chromedp.ByQuery),
+		chromedp.Click("[data-location-search-results] .location-search__result", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const editor = document.querySelector('[data-job-location-editor]');
+			return editor.querySelector('[data-location-latitude]').value === '48.658000'
+				&& editor.querySelector('[data-location-longitude]').value === '13.866000'
+				&& editor.querySelector('[data-location-committed-latitude]').value === ''
+				&& editor.querySelector('[data-location-committed-longitude]').value === ''
+				&& editor.querySelector('[data-location-committed-source]').value === '';
+		})()`, &draftPrepared),
+		chromedp.Click("[data-location-commit]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const editor = document.querySelector('[data-job-location-editor]');
+			return editor.querySelector('[data-location-committed-latitude]').value === '48.658000'
+				&& editor.querySelector('[data-location-committed-longitude]').value === '13.866000'
+				&& editor.querySelector('[data-location-committed-source]').value === 'customer_address';
+		})()`, &committed),
+		chromedp.Evaluate(`document.querySelector('[data-location-search-input]').disabled=true`, nil),
+		chromedp.Click("[data-location-customer]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const editor = document.querySelector('[data-job-location-editor]');
+			return editor.querySelector('[data-location-message]').textContent.includes('Adresssuche ist nicht konfiguriert')
+				&& editor.querySelector('[data-location-committed-source]').value === 'customer_address';
+		})()`, &unavailableHandled),
+		chromedp.Evaluate(`(() => {
+			document.querySelector('[data-location-search-input]').disabled=false;
+			document.querySelectorAll('[data-customer-fields] input').forEach((input) => {
+				input.value='';
+				input.dispatchEvent(new Event('input', {bubbles:true}));
+			});
+		})()`, nil),
+		chromedp.Click("[data-location-customer]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const editor = document.querySelector('[data-job-location-editor]');
+			return editor.querySelector('[data-location-message]').textContent.includes('Bitte zuerst eine Kundenadresse erfassen')
+				&& editor.querySelector('[data-location-committed-source]').value === 'customer_address';
+		})()`, &missingAddressHandled),
+	); err != nil {
+		t.Fatalf("customer address location journey: %s", browserDiagnostics(browserContext, err))
+	}
+	if !draftPrepared || !committed || !unavailableHandled || !missingAddressHandled {
+		t.Fatalf("customer address draft prepared=%v, committed=%v, unavailable=%v, missing address=%v", draftPrepared, committed, unavailableHandled, missingAddressHandled)
 	}
 }
 

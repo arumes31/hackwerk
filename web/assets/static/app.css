@@ -1762,6 +1762,13 @@ button.nav-menu__icon-trigger:hover, button.nav-menu__icon-trigger:focus-visible
 }
 .location-actions .button,
 .location-preview-meta .button { margin: 0; }
+.location-customer-choice {
+  display: grid;
+  flex: 1 1 18rem;
+  gap: .25rem;
+  min-width: min(18rem, 100%);
+}
+.location-customer-choice small { color: var(--muted); overflow-wrap: anywhere; }
 .location-preview-meta {
   display: flex;
   align-items: center;
@@ -1784,6 +1791,8 @@ button.nav-menu__icon-trigger:hover, button.nav-menu__icon-trigger:focus-visible
   .location-search__bar .button { width: 100%; }
   .coordinate-grid { grid-template-columns: 1fr; }
   .location-actions { display: grid; grid-template-columns: 1fr; }
+  .location-customer-choice { min-width: 0; width: 100%; }
+  .location-customer-choice .button { width: 100%; }
   .location-actions .button,
   .location-preview-meta .button { width: 100%; }
   .location-preview-meta { align-items: stretch; flex-direction: column; }

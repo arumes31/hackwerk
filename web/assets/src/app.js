@@ -2828,6 +2828,27 @@ function initializeJobLocationEditor(editor, maplibregl) {
   const searchSubmit = editor.querySelector("[data-location-search-submit]");
   const searchStatus = editor.querySelector("[data-location-search-status]");
   const searchResults = editor.querySelector("[data-location-search-results]");
+  const customerAddressLabel = editor.querySelector("[data-location-customer-address]");
+  const customerFields = editor.closest("form")?.querySelector("[data-customer-fields]");
+  const customerFieldValue = (name) => String(customerFields?.querySelector(`[name="${name}"]`)?.value || "").trim();
+  const currentCustomerAddress = () => {
+    if (!customerFields) return String(editor.dataset.customerAddress || "").trim();
+    const street = customerFieldValue("street");
+    const postalCode = customerFieldValue("postal_code");
+    const locality = customerFieldValue("locality");
+    const region = customerFieldValue("region");
+    const localityLine = [postalCode, locality].filter(Boolean).join(" ");
+    const structured = [street, localityLine, region].filter(Boolean);
+    if (structured.length > 0) return [...structured, "AT"].join(", ");
+    return customerFieldValue("address_freeform") || String(editor.dataset.customerAddress || "").trim();
+  };
+  const updateCustomerAddressLabel = () => {
+    if (!customerAddressLabel) return;
+    customerAddressLabel.textContent = currentCustomerAddress() || "Adresse aus den aktuellen Kundendaten verwenden";
+  };
+  customerFields?.querySelectorAll("[name='street'], [name='postal_code'], [name='locality'], [name='region'], [name='address_freeform']")
+    .forEach((input) => input.addEventListener("input", updateCustomerAddressLabel));
+  updateCustomerAddressLabel();
   const clearSearchResults = () => {
     searchResults?.replaceChildren();
     if (searchResults) searchResults.hidden = true;
@@ -2842,7 +2863,7 @@ function initializeJobLocationEditor(editor, maplibregl) {
     searchSubmit.disabled = false;
     searchSubmit.removeAttribute("aria-busy");
   };
-  const searchAddress = async () => {
+  const searchAddress = async (selectionMode = "map") => {
     const sequence = ++searchSequence;
     searchController?.abort();
     searchController = new AbortController();
@@ -2890,6 +2911,12 @@ function initializeJobLocationEditor(editor, maplibregl) {
         button.className = "location-search__result";
         button.textContent = label;
         button.addEventListener("click", () => {
+          if (selectionMode === "customer") {
+            setDraft(point, "customer_address", `Kundenadresse „${label}“ gewählt. Bitte prüfen und anschließend „Standort übernehmen“ wählen.`);
+            showSearchStatus(`Kundenadresse „${label}“ als Standortentwurf gewählt.`);
+            latitudeInput.focus({ preventScroll: true });
+            return;
+          }
           if (!map) {
             setDraft(point, "coordinates", `Koordinaten aus „${label}“ vorbereitet. Mit „Standort übernehmen“ in das Formular übernehmen.`);
             showSearchStatus(`Koordinaten aus „${label}“ vorbereitet.`);
@@ -2921,7 +2948,7 @@ function initializeJobLocationEditor(editor, maplibregl) {
     }
   };
 
-  searchSubmit?.addEventListener("click", searchAddress);
+  searchSubmit?.addEventListener("click", () => searchAddress());
   searchInput?.addEventListener("keydown", (event) => {
     if (event.key !== "Enter") return;
     event.preventDefault();
@@ -2952,11 +2979,23 @@ function initializeJobLocationEditor(editor, maplibregl) {
 
   editor.querySelector("[data-location-customer]")?.addEventListener("click", () => {
     const point = mapPoint(editor.dataset.customerLatitude, editor.dataset.customerLongitude);
-    if (!point) {
-      announce("Für die Kundenadresse sind keine nutzbaren Koordinaten vorhanden.", badge?.textContent || "Fehlt");
+    if (point) {
+      setDraft(point, "customer_address", "Kundenadresse geladen. Bitte prüfen und anschließend übernehmen.");
       return;
     }
-    setDraft(point, "customer_address", "Kundenadresse geladen. Bitte prüfen und anschließend übernehmen.");
+    const address = currentCustomerAddress();
+    if (!address) {
+      announce("Bitte zuerst eine Kundenadresse erfassen oder den Haufenstandort auf der Karte wählen.", badge?.textContent || "Fehlt");
+      return;
+    }
+    if (!searchInput || searchInput.disabled) {
+      announce("Die Kundenadresse hat noch keine Koordinaten und die Adresssuche ist nicht konfiguriert. Setzen Sie den Marker oder geben Sie Koordinaten ein.", badge?.textContent || "Fehlt");
+      return;
+    }
+    searchInput.value = address;
+    showSearchStatus("Kundenadresse wird gesucht …");
+    announce("Kundenadresse wird zur Auswahl vorbereitet …", badge?.textContent || "Fehlt");
+    searchAddress("customer");
   });
 
   editor.querySelector("[data-location-device]")?.addEventListener("click", () => {

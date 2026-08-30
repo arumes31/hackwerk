@@ -478,6 +478,61 @@ func TestCustomerHTTPDetailProvidesSafeContactActions(t *testing.T) {
 	}
 }
 
+func TestCustomerHTTPJobFormOffersCustomerAddressWithoutStoredCoordinates(t *testing.T) {
+	store := &customerHTTPStore{detail: customers.CustomerDetail{Customer: customers.Customer{
+		ID: testCustomerID, FirstName: "Stefan", LastName: "Fischer",
+		Street: "Bräuerau 5a", PostalCode: "4162", Locality: "Julbach", Region: "Rohrbach",
+		CountryCode: "AT", NotificationPreference: customers.NotifyNone, GeocodingStatus: "not_requested", Version: 1,
+	}}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodGet, "/customers/"+testCustomerID+"/jobs/new", nil, sessionToken, csrfToken))
+	body := response.Body.String()
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", response.Code, body)
+	}
+	for _, expected := range []string{
+		`data-customer-address="Bräuerau 5a, 4162 Julbach, Rohrbach, AT"`,
+		`data-location-customer>Kundenadresse wählen</button>`,
+		`Bräuerau 5a, 4162 Julbach`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("job form is missing customer address choice %q: %s", expected, body)
+		}
+	}
+	if strings.Contains(body, `data-location-customer disabled`) {
+		t.Fatalf("customer address choice is disabled without stored coordinates: %s", body)
+	}
+}
+
+func TestCustomerHTTPInvalidJobKeepsCustomerAddressChoice(t *testing.T) {
+	store := &customerHTTPStore{detail: customers.CustomerDetail{Customer: customers.Customer{
+		ID: testCustomerID, FirstName: "Stefan", LastName: "Fischer",
+		Street: "Bräuerau 5a", PostalCode: "4162", Locality: "Julbach", Region: "Rohrbach",
+		CountryCode: "AT", NotificationPreference: customers.NotifyNone, GeocodingStatus: "not_requested", Version: 1,
+	}}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	form := validCustomerHTTPForm(csrfToken)
+	form.Set("volume_m3", "ungültig")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/customers/"+testCustomerID+"/jobs", form, sessionToken, csrfToken))
+	body := response.Body.String()
+
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, body = %q", response.Code, body)
+	}
+	for _, expected := range []string{
+		`data-customer-address="Bräuerau 5a, 4162 Julbach, Rohrbach, AT"`,
+		`data-location-customer>Kundenadresse wählen</button>`,
+		`Bräuerau 5a, 4162 Julbach`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("invalid job form lost customer address choice %q: %s", expected, body)
+		}
+	}
+}
+
 func TestCustomerHTTPDetailOpensRelevantOptionalFormSections(t *testing.T) {
 	latitude, longitude := 48.216667, 13.9
 	store := &customerHTTPStore{detail: customers.CustomerDetail{
@@ -838,5 +893,8 @@ func TestCustomerPresentationHelpers(t *testing.T) {
 	}
 	if name := displayCustomerName(customers.Customer{FirstName: "Franz", LastName: "Huber", CompanyName: "Forst GmbH"}); name != "Forst GmbH · Franz Huber" {
 		t.Fatalf("company customer name = %q", name)
+	}
+	if address := customerAddressText(customers.Customer{AddressFreeform: "Beim Stadel hinterm Hof", CountryCode: "AT"}); address != "Beim Stadel hinterm Hof" {
+		t.Fatalf("freeform customer address = %q", address)
 	}
 }

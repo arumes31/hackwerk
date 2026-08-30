@@ -61,12 +61,12 @@ type WaitlistData struct {
 }
 
 type JobFormData struct {
-	Shell                                    ShellData
-	CustomerID, CustomerName, CustomerRegion string
-	Values                                   IntakeValues
-	Error                                    string
-	FieldErrors                              []FormFieldError
-	CustomerLatitude, CustomerLongitude      string
+	Shell                                                     ShellData
+	CustomerID, CustomerName, CustomerRegion, CustomerAddress string
+	Values                                                    IntakeValues
+	Error                                                     string
+	FieldErrors                                               []FormFieldError
+	CustomerLatitude, CustomerLongitude                       string
 }
 
 type WorkspaceSearchData struct {
@@ -156,8 +156,8 @@ templ mapAssetData(page PageData) {
 	<span hidden data-map-assets data-map-script={ page.MapLibreJSPath } data-map-worker={ page.MapLibreWorkerPath } data-map-css={ page.MapLibreCSSPath } data-map-attribution={ page.MapAttribution }></span>
 }
 
-templ jobLocationEditor(page PageData, prefix string, values IntakeValues, customerLatitude string, customerLongitude string, fieldErrors []FormFieldError) {
-	<section class="job-location-editor span-2" data-job-location-editor data-initial-latitude={ values.PileLatitude } data-initial-longitude={ values.PileLongitude } data-initial-source={ values.PileLocationSource } data-customer-latitude={ customerLatitude } data-customer-longitude={ customerLongitude }>
+templ jobLocationEditor(page PageData, prefix string, values IntakeValues, customerLatitude string, customerLongitude string, customerAddress string, fieldErrors []FormFieldError) {
+	<section class="job-location-editor span-2" data-job-location-editor data-initial-latitude={ values.PileLatitude } data-initial-longitude={ values.PileLongitude } data-initial-source={ values.PileLocationSource } data-customer-latitude={ customerLatitude } data-customer-longitude={ customerLongitude } data-customer-address={ customerAddress }>
 		@mapAssetData(page)
 		<div class="section-heading"><div><p class="eyebrow">Einsatzort</p><h3 id={ prefix + "-pile-map-heading" }>Hackschnitzelhaufen markieren</h3></div><span class="status-badge" data-location-badge>{ locationBadge(values) }</span></div>
 		<p>Der Haufenstandort ist vom Kundenstandort getrennt. Erst „Standort übernehmen“ schreibt die gewählte Position in das Formular.</p>
@@ -186,7 +186,7 @@ templ jobLocationEditor(page PageData, prefix string, values IntakeValues, custo
 		<input type="hidden" name="pile_longitude" value={ values.PileLongitude } data-location-committed-longitude/>
 		<input type="hidden" name="pile_location_source" value={ values.PileLocationSource } data-location-committed-source/>
 		<div class="location-actions">
-			<button class="button button--quiet" type="button" data-location-customer disabled?={ customerLatitude == "" || customerLongitude == "" }>Kundenadresse übernehmen</button>
+			<div class="location-customer-choice"><button class="button button--quiet" type="button" aria-describedby={ prefix + "-customer-address-hint" } data-location-customer>Kundenadresse wählen</button><small id={ prefix + "-customer-address-hint" } data-location-customer-address>{ customerAddressHint(customerAddress) }</small></div>
 			<button class="button button--quiet" type="button" data-location-device>Meinen Standort verwenden</button>
 			<button class="button" type="button" data-location-commit>Standort übernehmen</button>
 			<button class="button button--quiet" type="button" data-location-clear>Standort entfernen</button>
@@ -320,7 +320,7 @@ func jobLocationOpen(values IntakeValues, fieldErrors []FormFieldError) bool {
 }
 
 templ customerFormFields(values IntakeValues, fieldErrors []FormFieldError) {
-	<div class="customer-form-sections">
+	<div class="customer-form-sections" data-customer-fields>
 		<fieldset class="compact-form-section customer-form-section customer-form-section--identity">
 			<legend>Identität</legend>
 			<div class="customer-field-grid customer-identity-grid">
@@ -363,7 +363,7 @@ templ customerFormFields(values IntakeValues, fieldErrors []FormFieldError) {
 	</div>
 }
 
-templ jobIntakeFields(page PageData, prefix string, values IntakeValues, fieldErrors []FormFieldError, customerLatitude string, customerLongitude string, customerRegion string) {
+templ jobIntakeFields(page PageData, prefix string, values IntakeValues, fieldErrors []FormFieldError, customerLatitude string, customerLongitude string, customerAddress string, customerRegion string) {
 	<fieldset class="compact-form-section job-form-section job-core-section">
 		<legend>Hackauftrag</legend>
 		<div class="job-core-grid">
@@ -441,7 +441,7 @@ templ jobIntakeFields(page PageData, prefix string, values IntakeValues, fieldEr
 	<details class="form-disclosure job-location-disclosure" open?={ jobLocationOpen(values, fieldErrors) }>
 		<summary><span>Haufenstandort</span><span class="status-badge">{ locationBadge(values) }</span></summary>
 		<div class="form-disclosure__body">
-			@jobLocationEditor(page, prefix, values, customerLatitude, customerLongitude, fieldErrors)
+			@jobLocationEditor(page, prefix, values, customerLatitude, customerLongitude, customerAddress, fieldErrors)
 		</div>
 	</details>
 }
@@ -579,7 +579,7 @@ templ Intake(data IntakeData) {
 						<form method="post" action="/customers" class="intake-form customer-job-workbench" data-transport-form data-sticky-actions>
 							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="transport_mode" value="none" data-transport-default disabled/>
 							@customerFormFields(data.Values, data.FieldErrors)
-							@jobIntakeFields(data.Shell.Page, "new-intake-job", data.Values, data.FieldErrors, "", "", data.Values.Region)
+							@jobIntakeFields(data.Shell.Page, "new-intake-job", data.Values, data.FieldErrors, "", "", intakeCustomerAddress(data.Values), data.Values.Region)
 							<div class="form-actions workbench-form-actions"><p>Es wird noch kein Termin erzeugt.</p><button class="button" type="submit">Kunde &amp; Auftrag auf Warteliste setzen</button></div>
 						</form>
 					</details>
@@ -788,7 +788,7 @@ templ CustomerDetail(data CustomerDetailData) {
 											<details class="form-disclosure job-location-disclosure" open?={ jobLocationOpen(jobEditValuesFor(data, job), jobEditErrorsFor(data, job)) }>
 												<summary><span>Haufenstandort</span><span class="status-badge">{ locationBadge(jobEditValuesFor(data, job)) }</span></summary>
 												<div class="form-disclosure__body">
-													@jobLocationEditor(data.Shell.Page, "edit-"+job.ID, jobEditValuesFor(data, job), coordinateValue(data.Detail.Customer.Latitude), coordinateValue(data.Detail.Customer.Longitude), jobEditErrorsFor(data, job))
+													@jobLocationEditor(data.Shell.Page, "edit-"+job.ID, jobEditValuesFor(data, job), coordinateValue(data.Detail.Customer.Latitude), coordinateValue(data.Detail.Customer.Longitude), customerAddress(data.Detail.Customer), jobEditErrorsFor(data, job))
 												</div>
 											</details>
 											<div class="form-actions workbench-form-actions"><a class="button button--quiet" href={ "/customers/" + data.Detail.Customer.ID + "#job-" + job.ID }>Abbrechen</a><button class="button" type="submit">Auftrag speichern</button></div>
@@ -962,7 +962,7 @@ templ JobForm(data JobFormData) {
 				@formErrorSummary(data.Error, data.FieldErrors)
 				<form method="post" action={ "/customers/" + data.CustomerID + "/jobs" } class="intake-form customer-job-workbench" data-transport-form data-sticky-actions>
 					<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="transport_mode" value="none" data-transport-default disabled/>
-					@jobIntakeFields(data.Shell.Page, "new-customer-job", data.Values, data.FieldErrors, data.CustomerLatitude, data.CustomerLongitude, data.CustomerRegion)
+					@jobIntakeFields(data.Shell.Page, "new-customer-job", data.Values, data.FieldErrors, data.CustomerLatitude, data.CustomerLongitude, data.CustomerAddress, data.CustomerRegion)
 					<div class="form-actions workbench-form-actions"><a class="button button--quiet" href={ "/customers/" + data.CustomerID }>Abbrechen</a><button class="button" type="submit">Auf Warteliste setzen</button></div>
 				</form>
 			</main>@appFooter(data.Shell.Page)
@@ -1558,4 +1558,37 @@ func waitlistRegions(items []customers.WaitlistItem) []string {
 		}
 	}
 	return regions
+}
+
+func formattedCustomerAddress(street, postalCode, locality, region, countryCode, freeform string) string {
+	localityLine := strings.TrimSpace(strings.Join([]string{strings.TrimSpace(postalCode), strings.TrimSpace(locality)}, " "))
+	parts := []string{strings.TrimSpace(street), localityLine, strings.TrimSpace(region)}
+	clean := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			clean = append(clean, part)
+		}
+	}
+	if len(clean) == 0 {
+		return strings.TrimSpace(freeform)
+	}
+	if countryCode = strings.TrimSpace(countryCode); countryCode != "" {
+		clean = append(clean, countryCode)
+	}
+	return strings.Join(clean, ", ")
+}
+
+func intakeCustomerAddress(values IntakeValues) string {
+	return formattedCustomerAddress(values.Street, values.PostalCode, values.Locality, values.Region, "AT", values.AddressFreeform)
+}
+
+func customerAddress(customer customers.Customer) string {
+	return formattedCustomerAddress(customer.Street, customer.PostalCode, customer.Locality, customer.Region, customer.CountryCode, customer.AddressFreeform)
+}
+
+func customerAddressHint(address string) string {
+	if address == "" {
+		return "Adresse aus den aktuellen Kundendaten verwenden"
+	}
+	return address
 }

@@ -124,6 +124,7 @@ func jobForm(service *customers.Service, page templates.PageData, csrfCookie str
 			Shell: shell(request, page, csrfCookie), CustomerID: detail.Customer.ID,
 			CustomerName: displayCustomerName(detail.Customer), Values: defaultIntakeValues(),
 			CustomerRegion:   detail.Customer.Region,
+			CustomerAddress:  customerAddressText(detail.Customer),
 			CustomerLatitude: floatFormValue(detail.Customer.Latitude), CustomerLongitude: floatFormValue(detail.Customer.Longitude),
 		}), http.StatusOK, logger)
 	}
@@ -134,14 +135,10 @@ func createJob(service *customers.Service, page templates.PageData, csrfCookie s
 		values := intakeValues(request)
 		fieldErrors := intakeFormErrors(values, false)
 		if len(fieldErrors) > 0 {
-			render(response, request, templates.JobForm(templates.JobFormData{
-				Shell:        shell(request, page, csrfCookie),
-				CustomerID:   chi.URLParam(request, "customerID"),
-				CustomerName: "bestehenden Kunden",
-				Values:       values,
-				Error:        "Bitte korrigieren Sie die markierten Felder.",
-				FieldErrors:  fieldErrors,
-			}), http.StatusUnprocessableEntity, logger)
+			render(response, request, templates.JobForm(jobFormData(
+				request, service, page, csrfCookie, chi.URLParam(request, "customerID"), values,
+				"Bitte korrigieren Sie die markierten Felder.", fieldErrors,
+			)), http.StatusUnprocessableEntity, logger)
 			return
 		}
 		job, err := jobInput(values)
@@ -157,15 +154,32 @@ func createJob(service *customers.Service, page templates.PageData, csrfCookie s
 			if errors.Is(err, auth.ErrForbidden) {
 				status = http.StatusForbidden
 			}
-			render(response, request, templates.JobForm(templates.JobFormData{
-				Shell: shell(request, page, csrfCookie), CustomerID: chi.URLParam(request, "customerID"),
-				CustomerName: "bestehenden Kunden", Values: values,
-				Error: "Der Auftrag konnte nicht gespeichert werden. Prüfen Sie Menge, Dauer und Transportangaben.",
-			}), status, logger)
+			render(response, request, templates.JobForm(jobFormData(
+				request, service, page, csrfCookie, chi.URLParam(request, "customerID"), values,
+				"Der Auftrag konnte nicht gespeichert werden. Prüfen Sie Menge, Dauer und Transportangaben.", nil,
+			)), status, logger)
 			return
 		}
 		http.Redirect(response, request, "/customers/"+url.PathEscape(chi.URLParam(request, "customerID")), http.StatusSeeOther)
 	}
+}
+
+func jobFormData(request *http.Request, service *customers.Service, page templates.PageData, csrfCookie, customerID string, values templates.IntakeValues, message string, fieldErrors []templates.FormFieldError) templates.JobFormData {
+	data := templates.JobFormData{
+		Shell: shell(request, page, csrfCookie), CustomerID: customerID,
+		CustomerName: "bestehenden Kunden", Values: values, Error: message, FieldErrors: fieldErrors,
+	}
+	session, _ := sessionFromContext(request.Context())
+	detail, err := service.CustomerDetail(request.Context(), session.Actor, customerID)
+	if err != nil || detail.Customer.ArchivedAt != nil {
+		return data
+	}
+	data.CustomerName = displayCustomerName(detail.Customer)
+	data.CustomerRegion = detail.Customer.Region
+	data.CustomerAddress = customerAddressText(detail.Customer)
+	data.CustomerLatitude = floatFormValue(detail.Customer.Latitude)
+	data.CustomerLongitude = floatFormValue(detail.Customer.Longitude)
+	return data
 }
 
 func duplicateJobForm(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
@@ -185,6 +199,7 @@ func duplicateJobForm(service *customers.Service, page templates.PageData, csrfC
 			Shell: shell(request, page, csrfCookie), CustomerID: draft.CustomerID, CustomerName: draft.CustomerName,
 			Values: jobDraftValues(draft.Job), CustomerLatitude: floatFormValue(detail.Customer.Latitude),
 			CustomerLongitude: floatFormValue(detail.Customer.Longitude), CustomerRegion: detail.Customer.Region,
+			CustomerAddress: customerAddressText(detail.Customer),
 		}), http.StatusOK, logger)
 	}
 }
@@ -916,6 +931,24 @@ func displayCustomerName(customer customers.Customer) string {
 		return customer.CompanyName + " · " + name
 	}
 	return name
+}
+
+func customerAddressText(customer customers.Customer) string {
+	localityLine := strings.TrimSpace(strings.Join([]string{strings.TrimSpace(customer.PostalCode), strings.TrimSpace(customer.Locality)}, " "))
+	parts := []string{strings.TrimSpace(customer.Street), localityLine, strings.TrimSpace(customer.Region)}
+	clean := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			clean = append(clean, part)
+		}
+	}
+	if len(clean) == 0 {
+		return strings.TrimSpace(customer.AddressFreeform)
+	}
+	if countryCode := strings.TrimSpace(customer.CountryCode); countryCode != "" {
+		clean = append(clean, countryCode)
+	}
+	return strings.Join(clean, ", ")
 }
 
 func queryPage(request *http.Request) int {
