@@ -207,6 +207,7 @@ SELECT n.id::text, n.appointment_id::text, n.channel, n.status, n.recipient_snap
        COALESCE(n.provider_id, '')::text AS provider_id,
        n.available_at, n.sent_at, n.created_at, n.updated_at,
        cr.status AS confirmation_request_status, COALESCE(cr.response, '')::text AS response,
+       COALESCE(cr.response_note, '')::text AS response_note,
        cr.responded_at, cr.expires_at, n.reviewed_at
 FROM notifications n
 JOIN confirmation_requests cr ON cr.id=n.confirmation_request_id AND cr.status='active'

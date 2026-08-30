@@ -723,6 +723,13 @@ function calendarErrorMessage(error) {
   return error?.error?.message || "Die Planung konnte nicht gespeichert werden. Bitte prüfen Sie den aktuellen Kalenderstand.";
 }
 
+function calendarFailure(payload, status) {
+  const failure = new Error(calendarErrorMessage(payload));
+  failure.status = status;
+  failure.code = payload?.error?.code;
+  return failure;
+}
+
 async function calendarRequest(url, form, csrf) {
   const body = form instanceof FormData ? new URLSearchParams(form) : form;
   const response = await fetch(url, {
@@ -733,10 +740,7 @@ async function calendarRequest(url, form, csrf) {
   });
   const payload = await response.json().catch(() => ({ error: { code: "invalid_response" } }));
   if (!response.ok) {
-    const failure = new Error(calendarErrorMessage(payload));
-    failure.status = response.status;
-    failure.code = payload?.error?.code;
-    throw failure;
+    throw calendarFailure(payload, response.status);
   }
   return payload;
 }
@@ -1287,7 +1291,7 @@ document.querySelector("[data-appointment-swap-search]")?.addEventListener("clic
   if (!date?.value || !target) { showAppointmentError("Bitte wählen Sie ein Datum.", date); return; }
   const response = await fetch(`/api/v1/appointments/${encodeURIComponent(dialog.dataset.appointmentId)}/swap-candidates?date=${encodeURIComponent(date.value)}`, { headers: { Accept: "application/json" } });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) { showAppointmentFailure(payload); return; }
+  if (!response.ok) { showAppointmentFailure(calendarFailure(payload, response.status)); return; }
   target.replaceChildren(new Option("Bitte wählen", ""));
   (payload.candidates || []).forEach((candidate) => {
     const label = new Intl.DateTimeFormat("de-AT", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Vienna" }).format(new Date(candidate.start));

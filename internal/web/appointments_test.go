@@ -212,6 +212,11 @@ func TestAppointmentSwapCandidatesCanBeLoadedForAnotherDate(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"candidate-proposal"`) || strings.Contains(response.Body.String(), `"id":"fixed"`) {
 		t.Fatalf("swap candidates response = %d %s", response.Code, response.Body.String())
 	}
+	invalidDate := httptest.NewRecorder()
+	router.ServeHTTP(invalidDate, authenticatedCustomerRequest(t, http.MethodGet, "/api/v1/appointments/"+testAppointmentID+"/swap-candidates?date=ungueltig", nil, session, csrf))
+	if invalidDate.Code != http.StatusUnprocessableEntity || !strings.Contains(invalidDate.Body.String(), `"code":"validation_failed"`) {
+		t.Fatalf("invalid swap candidates date response = %d %s", invalidDate.Code, invalidDate.Body.String())
+	}
 
 	driverRouter, driverSession, driverCSRF := appointmentTestRouter(t, auth.RoleDriver, store)
 	forbidden := httptest.NewRecorder()

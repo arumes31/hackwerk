@@ -231,7 +231,7 @@ func (store *NotificationStore) ListFailed(ctx context.Context, filter notificat
 		values = append(values, notification.Status{
 			ID: row.NID, AppointmentID: row.NAppointmentID, Channel: row.Channel, State: row.Status,
 			Recipient: row.RecipientSnapshot, ErrorCode: row.LastErrorCode,
-			ProviderReference: row.ProviderID, ConfirmationStatus: row.ConfirmationRequestStatus, Response: row.Response,
+			ProviderReference: row.ProviderID, ConfirmationStatus: row.ConfirmationRequestStatus, Response: row.Response, ResponseNote: row.ResponseNote,
 			AttemptCount: row.AttemptCount, MaxAttempts: row.MaxAttempts,
 			AvailableAt: timestampValue(row.AvailableAt), SentAt: timestampValue(row.SentAt),
 			CreatedAt: timestampValue(row.CreatedAt), UpdatedAt: timestampValue(row.UpdatedAt),

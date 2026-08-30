@@ -347,9 +347,13 @@ func TestParallelWorkerClaimsAndAdminRetry(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	const responseNote = "Bitte vormittags zurückrufen"
+	if _, err := fixture.pool.Exec(fixture.ctx, `UPDATE confirmation_requests SET response='declined', response_note=$1, responded_at=now() WHERE id IN (SELECT confirmation_request_id FROM notifications WHERE status='failed')`, responseNote); err != nil {
+		t.Fatal(err)
+	}
 	adminService, _ := notification.NewAdminService(postgres.NewNotificationStore(fixture.pool), time.Now)
 	failed, err := adminService.Failed(fixture.ctx, fixture.admin, notification.FailureAll, 100)
-	if err != nil || len(failed) != 2 || strings.Contains(failed[0].Recipient, "@") && !strings.Contains(failed[0].Recipient, "***@") {
+	if err != nil || len(failed) != 2 || strings.Contains(failed[0].Recipient, "@") && !strings.Contains(failed[0].Recipient, "***@") || failed[0].ResponseNote != responseNote || failed[1].ResponseNote != responseNote {
 		t.Fatalf("failed list = %+v, err=%v", failed, err)
 	}
 	if err := adminService.Review(fixture.ctx, fixture.admin, failed[0].ID, "admin-review"); err != nil {

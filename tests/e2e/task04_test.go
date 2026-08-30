@@ -518,7 +518,8 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		chromedp.Text("[data-appointment-error]", &staleError, chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector('[data-appointment-dialog]').open`, &staleDialogOpen),
 		chromedp.Evaluate(`document.activeElement === document.querySelector('[data-appointment-error]')`, &errorFocused),
-		chromedp.Evaluate(`document.querySelector('[data-appointment-dialog]').close()`, nil),
+		chromedp.Evaluate(`window.confirm=()=>true`, nil),
+		chromedp.Click("[data-appointment-close]", chromedp.ByQuery),
 		chromedp.WaitNotVisible("[data-appointment-dialog]", chromedp.ByQuery),
 		chromedp.Evaluate(`window.hackWerkCalendar.refetchEvents()`, nil),
 	); err != nil {

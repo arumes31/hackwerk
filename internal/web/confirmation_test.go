@@ -89,13 +89,17 @@ func TestConfirmationHTTPHeadersNativeFormOriginAndRedactedLogs(t *testing.T) {
 		t.Fatalf("cross-site response = %d calls=%d body=%q", crossResponse.Code, store.respondCalls, crossResponse.Body.String())
 	}
 
+	store.value.Response = notification.ResponseCallback
+	store.value.ConfirmationStatus = string(notification.ResponseCallback)
 	noteRequest := nativeConfirmationRequestWithNote(t, material.Raw, material.FormNonce, "confirmed", "Bitte vormittags")
 	noteRequest.Header.Set("Origin", "null")
 	noteResponse := httptest.NewRecorder()
 	router.ServeHTTP(noteResponse, noteRequest)
-	if noteResponse.Code != http.StatusUnprocessableEntity || store.respondCalls != 0 || !strings.Contains(noteResponse.Body.String(), "nur mit einer Ablehnung") || !strings.Contains(noteResponse.Body.String(), "Bitte vormittags") || !strings.Contains(noteResponse.Body.String(), `aria-invalid="true"`) {
+	if noteResponse.Code != http.StatusUnprocessableEntity || store.respondCalls != 0 || !strings.Contains(noteResponse.Body.String(), "nur mit einer Ablehnung") || !strings.Contains(noteResponse.Body.String(), "Bitte vormittags") || !strings.Contains(noteResponse.Body.String(), `aria-invalid="true"`) || !strings.Contains(noteResponse.Body.String(), "Ihr Rückrufwunsch ist gespeichert") || strings.Contains(noteResponse.Body.String(), `value="callback_requested"`) {
 		t.Fatalf("confirmation note validation = %d calls=%d body=%q", noteResponse.Code, store.respondCalls, noteResponse.Body.String())
 	}
+	store.value.Response = ""
+	store.value.ConfirmationStatus = "pending"
 
 	post := nativeConfirmationRequest(t, material.Raw, material.FormNonce, "confirmed")
 	post.Header.Set("Origin", "null")

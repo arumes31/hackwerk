@@ -166,7 +166,7 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 		})()`, nil),
 		chromedp.Evaluate(`(()=>{const prompt=document.querySelector('[data-install-prompt]');return !prompt.hidden&&getComputedStyle(prompt).display!=='none'})()`, &installPromptFlow.ShownAfterEvent),
 		chromedp.Click("[data-install-accept]", chromedp.ByQuery),
-		chromedp.Sleep(20*time.Millisecond),
+		chromedp.Poll(`(()=>{const prompt=document.querySelector('[data-install-prompt]');return prompt.hidden&&window.__hackwerkInstallPromptCalls===1})()`, nil),
 		chromedp.Evaluate(`(()=>{const prompt=document.querySelector('[data-install-prompt]');return prompt.hidden&&getComputedStyle(prompt).display==='none'})()`, &installPromptFlow.HiddenAfterUse),
 		chromedp.Evaluate(`window.__hackwerkInstallPromptCalls`, &installPromptFlow.PromptCalls),
 		chromedp.Click("[data-admin-menu] summary", chromedp.ByQuery),

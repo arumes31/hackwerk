@@ -59,8 +59,12 @@ func appointmentSwapCandidates(service *appointment.Service, logger *slog.Logger
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
 		location, err := time.LoadLocation("Europe/Vienna")
-		date, dateErr := time.ParseInLocation(time.DateOnly, request.URL.Query().Get("date"), location)
-		if err != nil || dateErr != nil {
+		if err != nil {
+			appointmentAPIError(response, request, logger, appointment.ErrValidation, "appointment_swap_candidates_rejected")
+			return
+		}
+		date, err := time.ParseInLocation(time.DateOnly, request.URL.Query().Get("date"), location)
+		if err != nil {
 			appointmentAPIError(response, request, logger, appointment.ErrValidation, "appointment_swap_candidates_rejected")
 			return
 		}
