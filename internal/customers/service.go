@@ -69,6 +69,7 @@ type Job struct {
 	TransportMode                                                                      TransportMode
 	Urgency                                                                            Urgency
 	Source                                                                             Source
+	PreferenceMode                                                                     PreferenceMode
 	EstimatedHackMinutes, EstimatedTransportMinutes, TransportTripCount                int32
 	ExternalTransportConfirmed                                                         bool
 	ReceivedAt                                                                         time.Time
@@ -105,14 +106,19 @@ type WaitlistItem struct {
 	WaitlistID, JobID, JobNumber, VolumeM3, PreferredStartDate, PreferredEndDate                                                    string
 	PreferenceText, Region, CustomerID, FirstName, LastName, CompanyName, Locality                                                  string
 	NoteExcerpt                                                                                                                     string
+	PriorityReason                                                                                                                  string
 	JobType                                                                                                                         JobType
 	TransportMode                                                                                                                   TransportMode
 	Urgency                                                                                                                         Urgency
+	PreferenceMode                                                                                                                  PreferenceMode
 	EnteredAt                                                                                                                       time.Time
 	ManualPriority, WaitlistVersion, EstimatedHackMinutes, EstimatedTransportMinutes, TotalMinutes, AgeDays                         int32
 	WorkflowStatus, NextStep                                                                                                        string
+	MissingFields                                                                                                                   []string
+	Completeness                                                                                                                    int
 	UpdatedAt                                                                                                                       time.Time
 	HasPileLocation, HasPileSource, HasActiveAppointment, HasInternalAssignment, ExternalTransportConfirmed, DurationIssue, Overdue bool
+	HasContact, PlanReady                                                                                                           bool
 }
 
 type JobDraft struct {
@@ -131,14 +137,24 @@ type WaitlistFilterFavorite struct {
 }
 
 type Page[T any] struct {
-	Items          []T
-	Page           int
-	PageSize       int
-	Total          int64
-	TotalPages     int
-	Recent         []RecentRecord
-	Favorites      []WaitlistFilterFavorite
-	CustomerFilter CustomerListFilter
+	Items           []T
+	Page            int
+	PageSize        int
+	Total           int64
+	UnfilteredTotal int64
+	TotalPages      int
+	Recent          []RecentRecord
+	Favorites       []WaitlistFilterFavorite
+	CustomerFilter  CustomerListFilter
+}
+
+type SearchResult struct {
+	Kind     string `json:"kind"`
+	ID       string `json:"id"`
+	ParentID string `json:"parent_id,omitempty"`
+	Title    string `json:"title"`
+	Subtitle string `json:"subtitle,omitempty"`
+	Href     string `json:"href"`
 }
 
 type CreatedIntake struct {
@@ -178,10 +194,11 @@ type Store interface {
 	UpdateCustomer(context.Context, auth.Actor, UpdateCustomerInput) error
 	ArchiveCustomer(context.Context, auth.Actor, string, int32, string) error
 	ListWaitlist(context.Context, WaitlistFilter) (Page[WaitlistItem], error)
+	SearchWorkspace(context.Context, string) ([]SearchResult, error)
 	ListWaitlistFilterFavorites(context.Context, string) ([]WaitlistFilterFavorite, error)
 	SaveWaitlistFilterFavorite(context.Context, string, string, WaitlistFilter) error
 	DeleteWaitlistFilterFavorite(context.Context, string, string) error
-	UpdateWaitlistPriority(context.Context, auth.Actor, string, int32, int32, string) error
+	UpdateWaitlistPriority(context.Context, auth.Actor, string, int32, string, int32, string) error
 	RemoveWaitlist(context.Context, auth.Actor, string, int32, string, string) error
 	AddNote(context.Context, auth.Actor, string, string, string, string, string) (string, error)
 }
@@ -196,6 +213,9 @@ func (service *Service) CreateJob(ctx context.Context, actor auth.Actor, input C
 	input.InitialNote = strings.TrimSpace(input.InitialNote)
 	input.Job.VolumeM3, _ = CanonicalVolume(input.Job.VolumeM3)
 	input.Job.PreferenceText = strings.TrimSpace(input.Job.PreferenceText)
+	if input.Job.PreferenceMode == "" {
+		input.Job.PreferenceMode = PreferenceWindow
+	}
 	input.Job.Region = strings.TrimSpace(input.Job.Region)
 	if input.CustomerID == "" || len([]rune(input.InitialNote)) > 4000 {
 		return CreatedIntake{}, ErrValidation
@@ -217,6 +237,9 @@ func (service *Service) UpdateJob(ctx context.Context, actor auth.Actor, input U
 	input.ID = strings.TrimSpace(input.ID)
 	input.Job.VolumeM3, _ = CanonicalVolume(input.Job.VolumeM3)
 	input.Job.PreferenceText = strings.TrimSpace(input.Job.PreferenceText)
+	if input.Job.PreferenceMode == "" {
+		input.Job.PreferenceMode = PreferenceWindow
+	}
 	input.Job.Region = strings.TrimSpace(input.Job.Region)
 	if input.ID == "" || input.ExpectedVersion < 1 {
 		return ErrValidation
@@ -447,17 +470,36 @@ func (service *Service) ListWaitlist(ctx context.Context, actor auth.Actor, filt
 	filter.Normalize()
 	filter.DurationReviewMinMinutes = service.durationReviewMinMinutes
 	filter.DurationReviewMaxMinutes = service.durationReviewMaxMinutes
-	return service.store.ListWaitlist(ctx, filter)
+	page, err := service.store.ListWaitlist(ctx, filter)
+	if err != nil {
+		return Page[WaitlistItem]{}, err
+	}
+	for index := range page.Items {
+		assessWaitlistItem(&page.Items[index])
+	}
+	return page, nil
 }
 
-func (service *Service) UpdateWaitlistPriority(ctx context.Context, actor auth.Actor, id string, priority int32, version int32, requestID string) error {
+func (service *Service) SearchWorkspace(ctx context.Context, actor auth.Actor, query string) ([]SearchResult, error) {
+	if err := actor.Require(auth.PermissionDashboardView); err != nil {
+		return nil, err
+	}
+	query = strings.TrimSpace(query)
+	if len([]rune(query)) < 2 || len([]rune(query)) > 120 {
+		return nil, ErrValidation
+	}
+	return service.store.SearchWorkspace(ctx, query)
+}
+
+func (service *Service) UpdateWaitlistPriority(ctx context.Context, actor auth.Actor, id string, priority int32, reason string, version int32, requestID string) error {
 	if err := actor.Require(auth.PermissionWaitlistPrioritize); err != nil {
 		return err
 	}
-	if id == "" || version < 1 || priority < -100 || priority > 100 {
+	reason = strings.TrimSpace(reason)
+	if id == "" || version < 1 || priority < -100 || priority > 100 || len([]rune(reason)) > 240 || (priority != 0 && reason == "") {
 		return ErrValidation
 	}
-	return service.store.UpdateWaitlistPriority(ctx, actor, id, priority, version, requestID)
+	return service.store.UpdateWaitlistPriority(ctx, actor, id, priority, reason, version, requestID)
 }
 
 func (service *Service) RemoveWaitlist(ctx context.Context, actor auth.Actor, id string, version int32, reason string, requestID string) error {
@@ -486,6 +528,9 @@ func normalizeIntake(input *IntakeInput) {
 	normalizeCustomer(&input.Customer)
 	input.Job.VolumeM3, _ = CanonicalVolume(input.Job.VolumeM3)
 	input.Job.PreferenceText = strings.TrimSpace(input.Job.PreferenceText)
+	if input.Job.PreferenceMode == "" {
+		input.Job.PreferenceMode = PreferenceWindow
+	}
 	input.Job.Region = strings.TrimSpace(input.Job.Region)
 	input.InitialNote = strings.TrimSpace(input.InitialNote)
 }
@@ -505,6 +550,38 @@ func normalizeCustomer(input *CustomerInput) {
 	input.AddressFreeform = strings.TrimSpace(input.AddressFreeform)
 	input.PhoneRaw = strings.TrimSpace(input.PhoneRaw)
 	input.Email = strings.TrimSpace(input.Email)
+}
+
+func assessWaitlistItem(item *WaitlistItem) {
+	missing := make([]string, 0, 6)
+	if !item.HasPileSource || !item.HasPileLocation {
+		missing = append(missing, "Einsatzort vollständig erfassen")
+	}
+	if item.DurationIssue {
+		missing = append(missing, "Dauer plausibilisieren")
+	}
+	if strings.TrimSpace(item.Region) == "" {
+		missing = append(missing, "Region ergänzen")
+	}
+	if item.PreferenceMode == PreferenceWindow && (item.PreferredStartDate == "" || item.PreferredEndDate == "") {
+		missing = append(missing, "Wunschzeitraum vervollständigen")
+	}
+	transportPending := item.JobType == JobTypeChippingWithTransport &&
+		(item.TransportMode == TransportUndecided || (item.TransportMode == TransportExternal && !item.ExternalTransportConfirmed))
+	if transportPending {
+		missing = append(missing, "Transport klären")
+	}
+	if !item.HasContact {
+		missing = append(missing, "passenden Benachrichtigungskontakt ergänzen")
+	}
+	item.MissingFields = missing
+	item.Completeness = (6 - len(missing)) * 100 / 6
+	item.PlanReady = len(missing) == 0
+	if item.PlanReady {
+		item.NextStep = "Planungsbereit"
+		return
+	}
+	item.NextStep = missing[0]
 }
 
 func allowedRemovalReason(value string) bool {

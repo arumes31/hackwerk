@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -41,6 +42,8 @@ type customerHTTPStore struct {
 	removeCalls          int
 	listCalls            int
 	listSearch           string
+	searchResults        []customers.SearchResult
+	searchErr            error
 
 	updateCustomerErr error
 	updateJobErr      error
@@ -121,7 +124,11 @@ func (store *customerHTTPStore) DeleteWaitlistFilterFavorite(context.Context, st
 	return nil
 }
 
-func (store *customerHTTPStore) UpdateWaitlistPriority(context.Context, auth.Actor, string, int32, int32, string) error {
+func (store *customerHTTPStore) SearchWorkspace(context.Context, string) ([]customers.SearchResult, error) {
+	return store.searchResults, store.searchErr
+}
+
+func (store *customerHTTPStore) UpdateWaitlistPriority(context.Context, auth.Actor, string, int32, string, int32, string) error {
 	store.priorityCalls++
 	return nil
 }
@@ -162,6 +169,39 @@ func TestCustomerHTTPDriverIntakeUsesCSRFAndPRG(t *testing.T) {
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden || store.createCalls != 1 {
 		t.Fatalf("missing CSRF status = %d, create calls = %d", response.Code, store.createCalls)
+	}
+}
+
+func TestWorkspaceSearchUsesAuthenticatedPostNoStoreAndBoundedResults(t *testing.T) {
+	store := &customerHTTPStore{searchResults: []customers.SearchResult{{Kind: "job", ID: testJobID, ParentID: testCustomerID, Title: "HA-2026-0001", Subtitle: "Franz Huber", Href: "/customers/" + testCustomerID + "#job-" + testJobID}}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	form := url.Values{"csrf_token": {csrfToken}, "q": {"HA-2026"}}
+	request := authenticatedCustomerRequest(t, http.MethodPost, "/search", form, sessionToken, csrfToken)
+	request.Header.Set("Accept", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" || !strings.Contains(response.Body.String(), "HA-2026-0001") {
+		t.Fatalf("search response = %d cache=%q body=%q", response.Code, response.Header().Get("Cache-Control"), response.Body.String())
+	}
+	if strings.Contains(response.Header().Get("Location"), "HA-2026") {
+		t.Fatalf("search query leaked into redirect: %q", response.Header().Get("Location"))
+	}
+
+	invalid := authenticatedCustomerRequest(t, http.MethodPost, "/search", url.Values{"csrf_token": {csrfToken}, "q": {"x"}}, sessionToken, csrfToken)
+	invalid.Header.Set("Accept", "application/json")
+	invalidResponse := httptest.NewRecorder()
+	router.ServeHTTP(invalidResponse, invalid)
+	if invalidResponse.Code != http.StatusUnprocessableEntity || invalidResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("invalid search = %d cache=%q", invalidResponse.Code, invalidResponse.Header().Get("Cache-Control"))
+	}
+
+	store.searchErr = errors.New("database unavailable")
+	unavailable := authenticatedCustomerRequest(t, http.MethodPost, "/search", form, sessionToken, csrfToken)
+	unavailable.Header.Set("Accept", "application/json")
+	unavailableResponse := httptest.NewRecorder()
+	router.ServeHTTP(unavailableResponse, unavailable)
+	if unavailableResponse.Code != http.StatusServiceUnavailable || !strings.Contains(unavailableResponse.Body.String(), `"code":"search_unavailable"`) || strings.Contains(unavailableResponse.Body.String(), "database unavailable") {
+		t.Fatalf("unavailable search = %d body=%q", unavailableResponse.Code, unavailableResponse.Body.String())
 	}
 }
 
@@ -615,7 +655,7 @@ func validCustomerHTTPForm(csrfToken string) url.Values {
 		"street": {"Unterneukirchen 15"}, "locality": {"Unterneukirchen"}, "region": {"Unterneukirchen"},
 		"phone": {"0664 1234567"}, "email": {"franz.huber@example.test"}, "notification": {"none"},
 		"job_type": {"chipping_only"}, "volume_m3": {"80"}, "hack_duration": {"3:30"},
-		"transport_mode": {"none"}, "urgency": {"normal"}, "source": {"phone"}, "note": {"Interne Bemerkung"},
+		"transport_mode": {"none"}, "preference_mode": {"window"}, "urgency": {"normal"}, "source": {"phone"}, "note": {"Interne Bemerkung"},
 	}
 }
 

@@ -38,7 +38,7 @@ func (store *DashboardStore) Load(ctx context.Context, window dashboard.Window) 
 		return dashboard.Snapshot{}, err
 	}
 	bookingRows, err := store.queries.ListDashboardChipperBookings(ctx, dbgen.ListDashboardChipperBookingsParams{
-		BusinessStart: timestamp(window.BusinessStart), BusinessEnd: timestamp(window.BusinessEnd),
+		CapacityStart: timestamp(window.BusinessStart), CapacityEnd: timestamp(window.CapacityEnd),
 	})
 	if err != nil {
 		return dashboard.Snapshot{}, err
@@ -49,10 +49,16 @@ func (store *DashboardStore) Load(ctx context.Context, window dashboard.Window) 
 	if err != nil {
 		return dashboard.Snapshot{}, err
 	}
+	unplannedRows, err := store.queries.ListDashboardUnplannedJobs(ctx, 8)
+	if err != nil {
+		return dashboard.Snapshot{}, err
+	}
 
 	result := dashboard.Snapshot{Counts: dashboard.Counts{
 		Waitlist: counts.WaitlistCount, Appointments: counts.AppointmentCount, Attention: counts.AttentionCount,
 		NotificationIssues: counts.NotificationIssueCount, Overrides: counts.OverrideCount, ActiveDrivers: counts.ActiveDriverCount, VoiceDrafts: counts.VoiceDraftCount,
+		OverdueConfirmations: counts.OverdueConfirmationCount, DeclinedConfirmations: counts.DeclinedConfirmationCount,
+		CallbackRequests: counts.CallbackRequestCount, Unplanned: counts.UnplannedCount,
 	}}
 	result.Appointments = make([]dashboard.Appointment, 0, len(appointmentRows))
 	for _, row := range appointmentRows {
@@ -78,7 +84,10 @@ func (store *DashboardStore) Load(ctx context.Context, window dashboard.Window) 
 		case row.HasRule:
 			state = "verfügbar"
 		}
-		result.Drivers = append(result.Drivers, dashboard.DriverAvailability{ID: row.DID, UserID: row.UserID, Name: row.DisplayName, State: state})
+		result.Drivers = append(result.Drivers, dashboard.DriverAvailability{
+			ID: row.DID, UserID: row.UserID, Name: row.DisplayName, State: state,
+			Windows: row.AvailabilityWindows, ExceptionReasons: row.ExceptionReasons, BookedMinutes: row.BookedMinutes,
+		})
 	}
 	result.Bookings = make([]dashboard.Booking, 0, len(bookingRows))
 	for _, row := range bookingRows {
@@ -97,6 +106,17 @@ func (store *DashboardStore) Load(ctx context.Context, window dashboard.Window) 
 			item.PreferredEnd = row.PreferredEndDate.Time
 		}
 		result.UrgentJobs = append(result.UrgentJobs, item)
+	}
+	result.UnplannedJobs = make([]dashboard.UrgentJob, 0, len(unplannedRows))
+	for _, row := range unplannedRows {
+		item := dashboard.UrgentJob{
+			ID: row.JID, CustomerID: row.CustomerID, Number: row.JobNumber, Urgency: row.Urgency,
+			VolumeM3: row.JVolumeM3, ReceivedAt: row.ReceivedAt.Time.UTC(), CustomerName: row.CustomerName, Locality: row.Locality,
+		}
+		if row.PreferredEndDate.Valid {
+			item.PreferredEnd = row.PreferredEndDate.Time
+		}
+		result.UnplannedJobs = append(result.UnplannedJobs, item)
 	}
 	return result, nil
 }

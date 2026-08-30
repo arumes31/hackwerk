@@ -104,6 +104,26 @@ func testService(t *testing.T, store *fakeStore, now time.Time) (*Service, Passw
 	return service, hasher
 }
 
+func TestLoginFailsClosedWhenSecondFactorStoreIsUnavailable(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	store := &fakeStore{}
+	service, hasher := testService(t, store, now)
+	// #nosec G101 -- deterministic test-only password fixture.
+	password := "Ein sicheres Fahrerpasswort 2026"
+	hash, err := hasher.Hash(password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.user = User{ID: "user", Username: "driver", DisplayName: "Driver", Role: RoleDriver, PasswordHash: hash, Active: true, Version: 1, TOTPEnabled: true}
+	if _, err := service.LoginWithDevice(t.Context(), "driver", password, "client", "Chrome auf Windows", "request"); !errors.Is(err, ErrInvalidMFA) {
+		t.Fatalf("login error = %v", err)
+	}
+	if store.rotated.UserID != "" {
+		t.Fatal("login created a session while MFA dependencies were unavailable")
+	}
+}
+
 func TestLoginStoresOnlyTokenHashes(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)

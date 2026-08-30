@@ -11,6 +11,100 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const applyVerifiedEmail = `-- name: ApplyVerifiedEmail :exec
+UPDATE users
+SET email=$1::citext, email_verified_at=now(), version=version+1, updated_at=now()
+WHERE id=$2::uuid
+`
+
+type ApplyVerifiedEmailParams struct {
+	Email  string
+	UserID pgtype.UUID
+}
+
+func (q *Queries) ApplyVerifiedEmail(ctx context.Context, arg ApplyVerifiedEmailParams) error {
+	_, err := q.db.Exec(ctx, applyVerifiedEmail, arg.Email, arg.UserID)
+	return err
+}
+
+const cancelPendingEmailVerification = `-- name: CancelPendingEmailVerification :execrows
+UPDATE user_email_verifications
+SET status='cancelled', cancelled_at=now(), updated_at=now()
+WHERE user_id=$1::uuid AND status='pending'
+`
+
+func (q *Queries) CancelPendingEmailVerification(ctx context.Context, userID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, cancelPendingEmailVerification, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const claimIdentityEmailOutbox = `-- name: ClaimIdentityEmailOutbox :many
+WITH candidates AS (
+    SELECT id FROM outbox_events
+    WHERE event_type='identity.email_verification_requested'
+      AND ((status IN ('queued','retry_wait') AND available_at <= $3::timestamptz)
+           OR (status='claimed' AND lease_until <= $3::timestamptz))
+    ORDER BY available_at, created_at, id
+    FOR UPDATE SKIP LOCKED
+    LIMIT $4
+)
+UPDATE outbox_events o
+SET status='claimed', claimed_by=$1, lease_until=$2::timestamptz,
+    locked_at=$3::timestamptz, attempt_count=o.attempt_count+1, updated_at=$3::timestamptz
+FROM candidates c
+WHERE o.id=c.id
+RETURNING o.id::text, o.aggregate_id::text AS verification_id, o.idempotency_key, o.attempt_count, o.max_attempts
+`
+
+type ClaimIdentityEmailOutboxParams struct {
+	WorkerID   *string
+	LeaseUntil pgtype.Timestamptz
+	NowUtc     pgtype.Timestamptz
+	BatchSize  int32
+}
+
+type ClaimIdentityEmailOutboxRow struct {
+	OID            string
+	VerificationID string
+	IdempotencyKey string
+	AttemptCount   int32
+	MaxAttempts    int32
+}
+
+func (q *Queries) ClaimIdentityEmailOutbox(ctx context.Context, arg ClaimIdentityEmailOutboxParams) ([]ClaimIdentityEmailOutboxRow, error) {
+	rows, err := q.db.Query(ctx, claimIdentityEmailOutbox,
+		arg.WorkerID,
+		arg.LeaseUntil,
+		arg.NowUtc,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ClaimIdentityEmailOutboxRow{}
+	for rows.Next() {
+		var i ClaimIdentityEmailOutboxRow
+		if err := rows.Scan(
+			&i.OID,
+			&i.VerificationID,
+			&i.IdempotencyKey,
+			&i.AttemptCount,
+			&i.MaxAttempts,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const clearLoginFailures = `-- name: ClearLoginFailures :exec
 DELETE FROM auth_rate_limits WHERE key_hash = $1
 `
@@ -18,6 +112,43 @@ DELETE FROM auth_rate_limits WHERE key_hash = $1
 func (q *Queries) ClearLoginFailures(ctx context.Context, keyHash []byte) error {
 	_, err := q.db.Exec(ctx, clearLoginFailures, keyHash)
 	return err
+}
+
+const consumeLoginChallenge = `-- name: ConsumeLoginChallenge :execrows
+UPDATE auth_login_challenges SET consumed_at=now()
+WHERE token_hash=$1 AND consumed_at IS NULL
+  AND expires_at > $2::timestamptz AND attempt_count < 10
+`
+
+type ConsumeLoginChallengeParams struct {
+	TokenHash []byte
+	NowUtc    pgtype.Timestamptz
+}
+
+func (q *Queries) ConsumeLoginChallenge(ctx context.Context, arg ConsumeLoginChallengeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, consumeLoginChallenge, arg.TokenHash, arg.NowUtc)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const consumeRecoveryCode = `-- name: ConsumeRecoveryCode :execrows
+UPDATE user_recovery_codes SET used_at=now()
+WHERE user_id=$1::uuid AND code_hash=$2 AND used_at IS NULL
+`
+
+type ConsumeRecoveryCodeParams struct {
+	UserID   pgtype.UUID
+	CodeHash []byte
+}
+
+func (q *Queries) ConsumeRecoveryCode(ctx context.Context, arg ConsumeRecoveryCodeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, consumeRecoveryCode, arg.UserID, arg.CodeHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const countActiveAdmins = `-- name: CountActiveAdmins :one
@@ -31,12 +162,138 @@ func (q *Queries) CountActiveAdmins(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countEnabledSecurityFactors = `-- name: CountEnabledSecurityFactors :one
+SELECT ((EXISTS (
+    SELECT 1 FROM user_totp_credentials t
+    WHERE t.user_id=$1::uuid AND t.enabled_at IS NOT NULL
+))::integer + (
+    SELECT count(*)::integer FROM user_webauthn_credentials w
+    WHERE w.user_id=$1::uuid
+))::integer
+`
+
+func (q *Queries) CountEnabledSecurityFactors(ctx context.Context, userID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countEnabledSecurityFactors, userID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countRecoveryCodes = `-- name: CountRecoveryCodes :one
+SELECT count(*)::integer FROM user_recovery_codes
+WHERE user_id=$1::uuid AND used_at IS NULL
+`
+
+func (q *Queries) CountRecoveryCodes(ctx context.Context, userID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countRecoveryCodes, userID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const deleteExpiredSessions = `-- name: DeleteExpiredSessions :execrows
 DELETE FROM sessions WHERE revoked_at IS NOT NULL OR idle_expires_at <= now() OR absolute_expires_at <= now()
 `
 
 func (q *Queries) DeleteExpiredSessions(ctx context.Context) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpiredSessions)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteLoginChallengesForUser = `-- name: DeleteLoginChallengesForUser :exec
+DELETE FROM auth_login_challenges WHERE user_id=$1::uuid
+`
+
+func (q *Queries) DeleteLoginChallengesForUser(ctx context.Context, userID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteLoginChallengesForUser, userID)
+	return err
+}
+
+const deleteRecoveryCodes = `-- name: DeleteRecoveryCodes :exec
+DELETE FROM user_recovery_codes WHERE user_id=$1::uuid
+`
+
+func (q *Queries) DeleteRecoveryCodes(ctx context.Context, userID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteRecoveryCodes, userID)
+	return err
+}
+
+const deleteTOTPCredential = `-- name: DeleteTOTPCredential :execrows
+DELETE FROM user_totp_credentials WHERE user_id=$1::uuid
+`
+
+func (q *Queries) DeleteTOTPCredential(ctx context.Context, userID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteTOTPCredential, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteWebAuthnCredential = `-- name: DeleteWebAuthnCredential :execrows
+DELETE FROM user_webauthn_credentials
+WHERE credential_id=$1 AND user_id=$2::uuid
+`
+
+type DeleteWebAuthnCredentialParams struct {
+	CredentialID []byte
+	UserID       pgtype.UUID
+}
+
+func (q *Queries) DeleteWebAuthnCredential(ctx context.Context, arg DeleteWebAuthnCredentialParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteWebAuthnCredential, arg.CredentialID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteWebAuthnCredentialsForUser = `-- name: DeleteWebAuthnCredentialsForUser :exec
+DELETE FROM user_webauthn_credentials WHERE user_id=$1::uuid
+`
+
+func (q *Queries) DeleteWebAuthnCredentialsForUser(ctx context.Context, userID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWebAuthnCredentialsForUser, userID)
+	return err
+}
+
+const deleteWebAuthnRegistrationChallenge = `-- name: DeleteWebAuthnRegistrationChallenge :execrows
+DELETE FROM user_webauthn_registration_challenges
+WHERE session_id=$1::uuid AND user_id=$2::uuid
+`
+
+type DeleteWebAuthnRegistrationChallengeParams struct {
+	SessionID pgtype.UUID
+	UserID    pgtype.UUID
+}
+
+func (q *Queries) DeleteWebAuthnRegistrationChallenge(ctx context.Context, arg DeleteWebAuthnRegistrationChallengeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteWebAuthnRegistrationChallenge, arg.SessionID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteWebAuthnRegistrationChallengesForUser = `-- name: DeleteWebAuthnRegistrationChallengesForUser :exec
+DELETE FROM user_webauthn_registration_challenges WHERE user_id=$1::uuid
+`
+
+func (q *Queries) DeleteWebAuthnRegistrationChallengesForUser(ctx context.Context, userID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWebAuthnRegistrationChallengesForUser, userID)
+	return err
+}
+
+const enableTOTPCredential = `-- name: EnableTOTPCredential :execrows
+UPDATE user_totp_credentials SET enabled_at=now(), updated_at=now()
+WHERE user_id=$1::uuid AND enabled_at IS NULL
+`
+
+func (q *Queries) EnableTOTPCredential(ctx context.Context, userID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, enableTOTPCredential, userID)
 	if err != nil {
 		return 0, err
 	}
@@ -61,7 +318,8 @@ func (q *Queries) FindRateLimit(ctx context.Context, keyHash []byte) (FindRateLi
 
 const findSession = `-- name: FindSession :one
 SELECT s.id::text, s.user_id::text, s.csrf_token_hash, s.idle_expires_at,
-       s.absolute_expires_at, s.revoked_at, u.username::text, u.display_name,
+       s.absolute_expires_at, s.revoked_at, s.created_at, s.last_used_at, s.device_label,
+       u.username::text, u.display_name,
        u.role, u.must_change_password, u.active, COALESCE(d.id::text, '')::text AS driver_id, u.version
 FROM sessions s
 JOIN users u ON u.id = s.user_id
@@ -76,6 +334,9 @@ type FindSessionRow struct {
 	IdleExpiresAt      pgtype.Timestamptz
 	AbsoluteExpiresAt  pgtype.Timestamptz
 	RevokedAt          pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	LastUsedAt         pgtype.Timestamptz
+	DeviceLabel        string
 	UUsername          string
 	DisplayName        string
 	Role               string
@@ -95,6 +356,9 @@ func (q *Queries) FindSession(ctx context.Context, tokenHash []byte) (FindSessio
 		&i.IdleExpiresAt,
 		&i.AbsoluteExpiresAt,
 		&i.RevokedAt,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.DeviceLabel,
 		&i.UUsername,
 		&i.DisplayName,
 		&i.Role,
@@ -109,23 +373,34 @@ func (q *Queries) FindSession(ctx context.Context, tokenHash []byte) (FindSessio
 const findUserByID = `-- name: FindUserByID :one
 SELECT u.id::text, u.username::text, u.display_name, COALESCE(u.email::text, '')::text AS email,
        u.role, u.password_hash, u.must_change_password, u.active, u.version,
-       COALESCE(d.id::text, '')::text AS driver_id
+       COALESCE(d.id::text, '')::text AS driver_id,
+       u.salutation, u.work_phone_raw, u.work_phone_normalized,
+       u.email_verified_at, u.webauthn_user_handle,
+       EXISTS (SELECT 1 FROM user_totp_credentials t WHERE t.user_id=u.id AND t.enabled_at IS NOT NULL) AS totp_enabled,
+       EXISTS (SELECT 1 FROM user_webauthn_credentials w WHERE w.user_id=u.id) AS passkey_enabled
 FROM users u
 LEFT JOIN drivers d ON d.user_id = u.id
 WHERE u.id = $1::uuid
 `
 
 type FindUserByIDRow struct {
-	UID                string
-	UUsername          string
-	DisplayName        string
-	Email              string
-	Role               string
-	PasswordHash       string
-	MustChangePassword bool
-	Active             bool
-	Version            int32
-	DriverID           string
+	UID                 string
+	UUsername           string
+	DisplayName         string
+	Email               string
+	Role                string
+	PasswordHash        string
+	MustChangePassword  bool
+	Active              bool
+	Version             int32
+	DriverID            string
+	Salutation          string
+	WorkPhoneRaw        string
+	WorkPhoneNormalized string
+	EmailVerifiedAt     pgtype.Timestamptz
+	WebauthnUserHandle  []byte
+	TotpEnabled         bool
+	PasskeyEnabled      bool
 }
 
 func (q *Queries) FindUserByID(ctx context.Context, id pgtype.UUID) (FindUserByIDRow, error) {
@@ -142,6 +417,13 @@ func (q *Queries) FindUserByID(ctx context.Context, id pgtype.UUID) (FindUserByI
 		&i.Active,
 		&i.Version,
 		&i.DriverID,
+		&i.Salutation,
+		&i.WorkPhoneRaw,
+		&i.WorkPhoneNormalized,
+		&i.EmailVerifiedAt,
+		&i.WebauthnUserHandle,
+		&i.TotpEnabled,
+		&i.PasskeyEnabled,
 	)
 	return i, err
 }
@@ -150,23 +432,34 @@ const findUserByUsername = `-- name: FindUserByUsername :one
 SELECT u.id::text AS id, u.username::text AS username, u.display_name,
        COALESCE(u.email::text, '')::text AS email, u.role, u.password_hash,
        u.must_change_password, u.active, u.version,
-       COALESCE(d.id::text, '')::text AS driver_id
+       COALESCE(d.id::text, '')::text AS driver_id,
+       u.salutation, u.work_phone_raw, u.work_phone_normalized,
+       u.email_verified_at, u.webauthn_user_handle,
+       EXISTS (SELECT 1 FROM user_totp_credentials t WHERE t.user_id=u.id AND t.enabled_at IS NOT NULL) AS totp_enabled,
+       EXISTS (SELECT 1 FROM user_webauthn_credentials w WHERE w.user_id=u.id) AS passkey_enabled
 FROM users u
 LEFT JOIN drivers d ON d.user_id = u.id
 WHERE u.username = $1
 `
 
 type FindUserByUsernameRow struct {
-	ID                 string
-	Username           string
-	DisplayName        string
-	Email              string
-	Role               string
-	PasswordHash       string
-	MustChangePassword bool
-	Active             bool
-	Version            int32
-	DriverID           string
+	ID                  string
+	Username            string
+	DisplayName         string
+	Email               string
+	Role                string
+	PasswordHash        string
+	MustChangePassword  bool
+	Active              bool
+	Version             int32
+	DriverID            string
+	Salutation          string
+	WorkPhoneRaw        string
+	WorkPhoneNormalized string
+	EmailVerifiedAt     pgtype.Timestamptz
+	WebauthnUserHandle  []byte
+	TotpEnabled         bool
+	PasskeyEnabled      bool
 }
 
 func (q *Queries) FindUserByUsername(ctx context.Context, username string) (FindUserByUsernameRow, error) {
@@ -183,7 +476,307 @@ func (q *Queries) FindUserByUsername(ctx context.Context, username string) (Find
 		&i.Active,
 		&i.Version,
 		&i.DriverID,
+		&i.Salutation,
+		&i.WorkPhoneRaw,
+		&i.WorkPhoneNormalized,
+		&i.EmailVerifiedAt,
+		&i.WebauthnUserHandle,
+		&i.TotpEnabled,
+		&i.PasskeyEnabled,
 	)
+	return i, err
+}
+
+const forceOwnSecurityRecovery = `-- name: ForceOwnSecurityRecovery :execrows
+UPDATE users SET must_change_password=true, version=version+1, updated_at=now()
+WHERE id=$1::uuid AND version=$2
+`
+
+type ForceOwnSecurityRecoveryParams struct {
+	ID              pgtype.UUID
+	ExpectedVersion int32
+}
+
+func (q *Queries) ForceOwnSecurityRecovery(ctx context.Context, arg ForceOwnSecurityRecoveryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, forceOwnSecurityRecovery, arg.ID, arg.ExpectedVersion)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getEmailVerificationForUpdate = `-- name: GetEmailVerificationForUpdate :one
+SELECT id::text, user_id::text, email::text, status, expires_at
+FROM user_email_verifications
+WHERE token_hash=$1
+FOR UPDATE
+`
+
+type GetEmailVerificationForUpdateRow struct {
+	ID        string
+	UserID    string
+	Email     string
+	Status    string
+	ExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) GetEmailVerificationForUpdate(ctx context.Context, tokenHash []byte) (GetEmailVerificationForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getEmailVerificationForUpdate, tokenHash)
+	var i GetEmailVerificationForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Email,
+		&i.Status,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
+const getIdentityEmailDelivery = `-- name: GetIdentityEmailDelivery :one
+SELECT ev.id::text, ev.user_id::text, ev.email::text, ev.token_key_id, ev.token_version,
+       ev.status, ev.expires_at, u.display_name
+FROM user_email_verifications ev
+JOIN users u ON u.id=ev.user_id AND u.active
+WHERE ev.id=$1::uuid
+`
+
+type GetIdentityEmailDeliveryRow struct {
+	EvID         string
+	EvUserID     string
+	EvEmail      string
+	TokenKeyID   string
+	TokenVersion int32
+	Status       string
+	ExpiresAt    pgtype.Timestamptz
+	DisplayName  string
+}
+
+func (q *Queries) GetIdentityEmailDelivery(ctx context.Context, id pgtype.UUID) (GetIdentityEmailDeliveryRow, error) {
+	row := q.db.QueryRow(ctx, getIdentityEmailDelivery, id)
+	var i GetIdentityEmailDeliveryRow
+	err := row.Scan(
+		&i.EvID,
+		&i.EvUserID,
+		&i.EvEmail,
+		&i.TokenKeyID,
+		&i.TokenVersion,
+		&i.Status,
+		&i.ExpiresAt,
+		&i.DisplayName,
+	)
+	return i, err
+}
+
+const getLoginChallenge = `-- name: GetLoginChallenge :one
+SELECT c.id::text, c.user_id::text, c.expires_at, c.attempt_count, c.webauthn_session,
+       u.username::text, u.display_name, COALESCE(u.email::text, '')::text AS email,
+       u.role, u.password_hash, u.must_change_password, u.active, u.version,
+       COALESCE(d.id::text, '')::text AS driver_id, u.webauthn_user_handle,
+       EXISTS (SELECT 1 FROM user_totp_credentials t WHERE t.user_id=u.id AND t.enabled_at IS NOT NULL) AS totp_enabled,
+       EXISTS (SELECT 1 FROM user_webauthn_credentials w WHERE w.user_id=u.id) AS passkey_enabled
+FROM auth_login_challenges c
+JOIN users u ON u.id=c.user_id
+LEFT JOIN drivers d ON d.user_id=u.id
+WHERE c.token_hash=$1 AND c.consumed_at IS NULL
+`
+
+type GetLoginChallengeRow struct {
+	CID                string
+	CUserID            string
+	ExpiresAt          pgtype.Timestamptz
+	AttemptCount       int32
+	WebauthnSession    []byte
+	UUsername          string
+	DisplayName        string
+	Email              string
+	Role               string
+	PasswordHash       string
+	MustChangePassword bool
+	Active             bool
+	Version            int32
+	DriverID           string
+	WebauthnUserHandle []byte
+	TotpEnabled        bool
+	PasskeyEnabled     bool
+}
+
+func (q *Queries) GetLoginChallenge(ctx context.Context, tokenHash []byte) (GetLoginChallengeRow, error) {
+	row := q.db.QueryRow(ctx, getLoginChallenge, tokenHash)
+	var i GetLoginChallengeRow
+	err := row.Scan(
+		&i.CID,
+		&i.CUserID,
+		&i.ExpiresAt,
+		&i.AttemptCount,
+		&i.WebauthnSession,
+		&i.UUsername,
+		&i.DisplayName,
+		&i.Email,
+		&i.Role,
+		&i.PasswordHash,
+		&i.MustChangePassword,
+		&i.Active,
+		&i.Version,
+		&i.DriverID,
+		&i.WebauthnUserHandle,
+		&i.TotpEnabled,
+		&i.PasskeyEnabled,
+	)
+	return i, err
+}
+
+const getOwnSecurityProfile = `-- name: GetOwnSecurityProfile :one
+SELECT u.id::text, u.username::text, u.display_name, COALESCE(u.email::text, '')::text AS email,
+       u.role, u.active, u.version, COALESCE(d.id::text, '')::text AS driver_id,
+       u.salutation, u.work_phone_raw, u.work_phone_normalized, u.email_verified_at,
+       COALESCE(ev.id::text, '')::text AS pending_email_id,
+       COALESCE(ev.email::text, '')::text AS pending_email,
+       ev.last_sent_at AS pending_email_last_sent_at, ev.expires_at AS pending_email_expires_at,
+       COALESCE((SELECT o.status FROM outbox_events o
+                 WHERE o.aggregate_type='user_email_verification' AND o.aggregate_id=ev.id
+                 ORDER BY o.created_at DESC LIMIT 1), '')::text AS pending_email_delivery_status,
+       COALESCE(t.name, '')::text AS totp_name, t.enabled_at AS totp_enabled_at,
+       (SELECT count(*)::integer FROM user_webauthn_credentials w WHERE w.user_id=u.id) AS passkey_count,
+       (SELECT count(*)::integer FROM user_recovery_codes r WHERE r.user_id=u.id AND r.used_at IS NULL) AS recovery_code_count
+FROM users u
+LEFT JOIN drivers d ON d.user_id=u.id
+LEFT JOIN user_email_verifications ev ON ev.user_id=u.id AND ev.status='pending'
+LEFT JOIN user_totp_credentials t ON t.user_id=u.id
+WHERE u.id=$1::uuid
+`
+
+type GetOwnSecurityProfileRow struct {
+	UID                        string
+	UUsername                  string
+	DisplayName                string
+	Email                      string
+	Role                       string
+	Active                     bool
+	Version                    int32
+	DriverID                   string
+	Salutation                 string
+	WorkPhoneRaw               string
+	WorkPhoneNormalized        string
+	EmailVerifiedAt            pgtype.Timestamptz
+	PendingEmailID             string
+	PendingEmail               string
+	PendingEmailLastSentAt     pgtype.Timestamptz
+	PendingEmailExpiresAt      pgtype.Timestamptz
+	PendingEmailDeliveryStatus string
+	TotpName                   string
+	TotpEnabledAt              pgtype.Timestamptz
+	PasskeyCount               int32
+	RecoveryCodeCount          int32
+}
+
+func (q *Queries) GetOwnSecurityProfile(ctx context.Context, id pgtype.UUID) (GetOwnSecurityProfileRow, error) {
+	row := q.db.QueryRow(ctx, getOwnSecurityProfile, id)
+	var i GetOwnSecurityProfileRow
+	err := row.Scan(
+		&i.UID,
+		&i.UUsername,
+		&i.DisplayName,
+		&i.Email,
+		&i.Role,
+		&i.Active,
+		&i.Version,
+		&i.DriverID,
+		&i.Salutation,
+		&i.WorkPhoneRaw,
+		&i.WorkPhoneNormalized,
+		&i.EmailVerifiedAt,
+		&i.PendingEmailID,
+		&i.PendingEmail,
+		&i.PendingEmailLastSentAt,
+		&i.PendingEmailExpiresAt,
+		&i.PendingEmailDeliveryStatus,
+		&i.TotpName,
+		&i.TotpEnabledAt,
+		&i.PasskeyCount,
+		&i.RecoveryCodeCount,
+	)
+	return i, err
+}
+
+const getPendingEmailVerification = `-- name: GetPendingEmailVerification :one
+SELECT id::text, user_id::text, email::text, token_key_id, token_version, send_count, last_sent_at, expires_at
+FROM user_email_verifications
+WHERE user_id=$1::uuid AND status='pending'
+`
+
+type GetPendingEmailVerificationRow struct {
+	ID           string
+	UserID       string
+	Email        string
+	TokenKeyID   string
+	TokenVersion int32
+	SendCount    int32
+	LastSentAt   pgtype.Timestamptz
+	ExpiresAt    pgtype.Timestamptz
+}
+
+func (q *Queries) GetPendingEmailVerification(ctx context.Context, userID pgtype.UUID) (GetPendingEmailVerificationRow, error) {
+	row := q.db.QueryRow(ctx, getPendingEmailVerification, userID)
+	var i GetPendingEmailVerificationRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Email,
+		&i.TokenKeyID,
+		&i.TokenVersion,
+		&i.SendCount,
+		&i.LastSentAt,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
+const getTOTPCredential = `-- name: GetTOTPCredential :one
+SELECT name, secret_key_id, secret_ciphertext, enabled_at, last_used_step
+FROM user_totp_credentials WHERE user_id=$1::uuid
+`
+
+type GetTOTPCredentialRow struct {
+	Name             string
+	SecretKeyID      string
+	SecretCiphertext []byte
+	EnabledAt        pgtype.Timestamptz
+	LastUsedStep     *int64
+}
+
+func (q *Queries) GetTOTPCredential(ctx context.Context, userID pgtype.UUID) (GetTOTPCredentialRow, error) {
+	row := q.db.QueryRow(ctx, getTOTPCredential, userID)
+	var i GetTOTPCredentialRow
+	err := row.Scan(
+		&i.Name,
+		&i.SecretKeyID,
+		&i.SecretCiphertext,
+		&i.EnabledAt,
+		&i.LastUsedStep,
+	)
+	return i, err
+}
+
+const getWebAuthnRegistrationChallenge = `-- name: GetWebAuthnRegistrationChallenge :one
+SELECT session_data, expires_at FROM user_webauthn_registration_challenges
+WHERE session_id=$1::uuid AND user_id=$2::uuid
+`
+
+type GetWebAuthnRegistrationChallengeParams struct {
+	SessionID pgtype.UUID
+	UserID    pgtype.UUID
+}
+
+type GetWebAuthnRegistrationChallengeRow struct {
+	SessionData []byte
+	ExpiresAt   pgtype.Timestamptz
+}
+
+func (q *Queries) GetWebAuthnRegistrationChallenge(ctx context.Context, arg GetWebAuthnRegistrationChallengeParams) (GetWebAuthnRegistrationChallengeRow, error) {
+	row := q.db.QueryRow(ctx, getWebAuthnRegistrationChallenge, arg.SessionID, arg.UserID)
+	var i GetWebAuthnRegistrationChallengeRow
+	err := row.Scan(&i.SessionData, &i.ExpiresAt)
 	return i, err
 }
 
@@ -234,9 +827,95 @@ func (q *Queries) InsertDriver(ctx context.Context, arg InsertDriverParams) (str
 	return id, err
 }
 
+const insertEmailVerification = `-- name: InsertEmailVerification :exec
+INSERT INTO user_email_verifications (
+    id, user_id, email, token_hash, token_key_id, token_version, expires_at
+) VALUES (
+    $1::uuid, $2::uuid, $3::citext,
+    $4, $5, $6, $7::timestamptz
+)
+`
+
+type InsertEmailVerificationParams struct {
+	ID           pgtype.UUID
+	UserID       pgtype.UUID
+	Email        string
+	TokenHash    []byte
+	TokenKeyID   string
+	TokenVersion int32
+	ExpiresAt    pgtype.Timestamptz
+}
+
+func (q *Queries) InsertEmailVerification(ctx context.Context, arg InsertEmailVerificationParams) error {
+	_, err := q.db.Exec(ctx, insertEmailVerification,
+		arg.ID,
+		arg.UserID,
+		arg.Email,
+		arg.TokenHash,
+		arg.TokenKeyID,
+		arg.TokenVersion,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
+const insertEmailVerificationOutbox = `-- name: InsertEmailVerificationOutbox :exec
+INSERT INTO outbox_events (
+    event_type, aggregate_type, aggregate_id, payload, payload_version, idempotency_key, max_attempts
+) VALUES (
+    'identity.email_verification_requested', 'user_email_verification', $1::uuid,
+    jsonb_build_object('verification_id', $1::text), 1,
+    'identity.email_verification_requested:' || $1::text || ':' || $2::text,
+    $3
+)
+ON CONFLICT (idempotency_key) DO NOTHING
+`
+
+type InsertEmailVerificationOutboxParams struct {
+	VerificationID pgtype.UUID
+	TokenVersion   string
+	MaxAttempts    int32
+}
+
+func (q *Queries) InsertEmailVerificationOutbox(ctx context.Context, arg InsertEmailVerificationOutboxParams) error {
+	_, err := q.db.Exec(ctx, insertEmailVerificationOutbox, arg.VerificationID, arg.TokenVersion, arg.MaxAttempts)
+	return err
+}
+
+const insertLoginChallenge = `-- name: InsertLoginChallenge :exec
+INSERT INTO auth_login_challenges (user_id, token_hash, expires_at)
+VALUES ($1::uuid, $2, $3::timestamptz)
+`
+
+type InsertLoginChallengeParams struct {
+	UserID    pgtype.UUID
+	TokenHash []byte
+	ExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) InsertLoginChallenge(ctx context.Context, arg InsertLoginChallengeParams) error {
+	_, err := q.db.Exec(ctx, insertLoginChallenge, arg.UserID, arg.TokenHash, arg.ExpiresAt)
+	return err
+}
+
+const insertRecoveryCode = `-- name: InsertRecoveryCode :exec
+INSERT INTO user_recovery_codes (user_id, code_hash)
+VALUES ($1::uuid, $2)
+`
+
+type InsertRecoveryCodeParams struct {
+	UserID   pgtype.UUID
+	CodeHash []byte
+}
+
+func (q *Queries) InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error {
+	_, err := q.db.Exec(ctx, insertRecoveryCode, arg.UserID, arg.CodeHash)
+	return err
+}
+
 const insertSession = `-- name: InsertSession :one
-INSERT INTO sessions (user_id, token_hash, csrf_token_hash, idle_expires_at, absolute_expires_at)
-VALUES ($1::uuid, $2, $3, $4, $5)
+INSERT INTO sessions (user_id, token_hash, csrf_token_hash, idle_expires_at, absolute_expires_at, device_label)
+VALUES ($1::uuid, $2, $3, $4, $5, $6)
 RETURNING id::text
 `
 
@@ -246,6 +925,7 @@ type InsertSessionParams struct {
 	CsrfTokenHash     []byte
 	IdleExpiresAt     pgtype.Timestamptz
 	AbsoluteExpiresAt pgtype.Timestamptz
+	DeviceLabel       string
 }
 
 func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) (string, error) {
@@ -255,6 +935,7 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) (s
 		arg.CsrfTokenHash,
 		arg.IdleExpiresAt,
 		arg.AbsoluteExpiresAt,
+		arg.DeviceLabel,
 	)
 	var id string
 	err := row.Scan(&id)
@@ -262,8 +943,10 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) (s
 }
 
 const insertUser = `-- name: InsertUser :one
-INSERT INTO users (username, display_name, email, role, password_hash, must_change_password)
-VALUES ($1, $2, NULLIF($3::text, '')::citext, $4, $5, $6)
+INSERT INTO users (username, display_name, email, email_verified_at, role, password_hash, must_change_password)
+VALUES ($1, $2, NULLIF($3::text, '')::citext,
+        CASE WHEN $3::text = '' THEN NULL ELSE now() END,
+        $4, $5, $6)
 RETURNING id::text
 `
 
@@ -288,6 +971,80 @@ func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) (string,
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const insertWebAuthnCredential = `-- name: InsertWebAuthnCredential :exec
+INSERT INTO user_webauthn_credentials (credential_id, user_id, name, credential_key_id, credential_ciphertext)
+VALUES ($1, $2::uuid, $3, $4, $5)
+`
+
+type InsertWebAuthnCredentialParams struct {
+	CredentialID         []byte
+	UserID               pgtype.UUID
+	Name                 string
+	CredentialKeyID      string
+	CredentialCiphertext []byte
+}
+
+func (q *Queries) InsertWebAuthnCredential(ctx context.Context, arg InsertWebAuthnCredentialParams) error {
+	_, err := q.db.Exec(ctx, insertWebAuthnCredential,
+		arg.CredentialID,
+		arg.UserID,
+		arg.Name,
+		arg.CredentialKeyID,
+		arg.CredentialCiphertext,
+	)
+	return err
+}
+
+const listUserSessions = `-- name: ListUserSessions :many
+SELECT id::text, device_label, created_at, last_used_at, idle_expires_at, absolute_expires_at
+FROM sessions
+WHERE user_id=$1::uuid AND revoked_at IS NULL
+  AND idle_expires_at > $2::timestamptz
+  AND absolute_expires_at > $2::timestamptz
+ORDER BY last_used_at DESC, id
+`
+
+type ListUserSessionsParams struct {
+	UserID pgtype.UUID
+	NowUtc pgtype.Timestamptz
+}
+
+type ListUserSessionsRow struct {
+	ID                string
+	DeviceLabel       string
+	CreatedAt         pgtype.Timestamptz
+	LastUsedAt        pgtype.Timestamptz
+	IdleExpiresAt     pgtype.Timestamptz
+	AbsoluteExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListUserSessions(ctx context.Context, arg ListUserSessionsParams) ([]ListUserSessionsRow, error) {
+	rows, err := q.db.Query(ctx, listUserSessions, arg.UserID, arg.NowUtc)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserSessionsRow{}
+	for rows.Next() {
+		var i ListUserSessionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeviceLabel,
+			&i.CreatedAt,
+			&i.LastUsedAt,
+			&i.IdleExpiresAt,
+			&i.AbsoluteExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listUsers = `-- name: ListUsers :many
@@ -343,6 +1100,73 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 	return items, nil
 }
 
+const listWebAuthnCredentials = `-- name: ListWebAuthnCredentials :many
+SELECT credential_id, name, credential_key_id, credential_ciphertext, created_at, last_used_at
+FROM user_webauthn_credentials
+WHERE user_id=$1::uuid
+ORDER BY created_at, credential_id
+`
+
+type ListWebAuthnCredentialsRow struct {
+	CredentialID         []byte
+	Name                 string
+	CredentialKeyID      string
+	CredentialCiphertext []byte
+	CreatedAt            pgtype.Timestamptz
+	LastUsedAt           pgtype.Timestamptz
+}
+
+func (q *Queries) ListWebAuthnCredentials(ctx context.Context, userID pgtype.UUID) ([]ListWebAuthnCredentialsRow, error) {
+	rows, err := q.db.Query(ctx, listWebAuthnCredentials, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWebAuthnCredentialsRow{}
+	for rows.Next() {
+		var i ListWebAuthnCredentialsRow
+		if err := rows.Scan(
+			&i.CredentialID,
+			&i.Name,
+			&i.CredentialKeyID,
+			&i.CredentialCiphertext,
+			&i.CreatedAt,
+			&i.LastUsedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markEmailVerificationExpired = `-- name: MarkEmailVerificationExpired :exec
+UPDATE user_email_verifications SET status='expired', updated_at=now()
+WHERE id=$1::uuid AND status='pending'
+`
+
+func (q *Queries) MarkEmailVerificationExpired(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markEmailVerificationExpired, id)
+	return err
+}
+
+const markEmailVerificationVerified = `-- name: MarkEmailVerificationVerified :execrows
+UPDATE user_email_verifications
+SET status='verified', verified_at=now(), updated_at=now()
+WHERE id=$1::uuid AND status='pending'
+`
+
+func (q *Queries) MarkEmailVerificationVerified(ctx context.Context, id pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, markEmailVerificationVerified, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markLogin = `-- name: MarkLogin :exec
 UPDATE users SET last_login_at = now(), updated_at = now() WHERE id = $1::uuid
 `
@@ -350,6 +1174,30 @@ UPDATE users SET last_login_at = now(), updated_at = now() WHERE id = $1::uuid
 func (q *Queries) MarkLogin(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, markLogin, id)
 	return err
+}
+
+const newIdentityObjectID = `-- name: NewIdentityObjectID :one
+SELECT gen_random_uuid()::text
+`
+
+func (q *Queries) NewIdentityObjectID(ctx context.Context) (string, error) {
+	row := q.db.QueryRow(ctx, newIdentityObjectID)
+	var column_1 string
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const recordLoginChallengeFailure = `-- name: RecordLoginChallengeFailure :execrows
+UPDATE auth_login_challenges SET attempt_count=attempt_count+1
+WHERE token_hash=$1 AND consumed_at IS NULL AND attempt_count < 10
+`
+
+func (q *Queries) RecordLoginChallengeFailure(ctx context.Context, tokenHash []byte) (int64, error) {
+	result, err := q.db.Exec(ctx, recordLoginChallengeFailure, tokenHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const recordLoginFailure = `-- name: RecordLoginFailure :exec
@@ -364,6 +1212,80 @@ SET failure_count = CASE WHEN auth_rate_limits.window_started_at < now() - inter
 func (q *Queries) RecordLoginFailure(ctx context.Context, keyHash []byte) error {
 	_, err := q.db.Exec(ctx, recordLoginFailure, keyHash)
 	return err
+}
+
+const recordTOTPStep = `-- name: RecordTOTPStep :execrows
+UPDATE user_totp_credentials SET last_used_step=$1, updated_at=now()
+WHERE user_id=$2::uuid AND enabled_at IS NOT NULL
+  AND (last_used_step IS NULL OR last_used_step < $1)
+`
+
+type RecordTOTPStepParams struct {
+	Step   *int64
+	UserID pgtype.UUID
+}
+
+func (q *Queries) RecordTOTPStep(ctx context.Context, arg RecordTOTPStepParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordTOTPStep, arg.Step, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const renameTOTPCredential = `-- name: RenameTOTPCredential :execrows
+UPDATE user_totp_credentials SET name=$1, updated_at=now()
+WHERE user_id=$2::uuid AND enabled_at IS NOT NULL
+`
+
+type RenameTOTPCredentialParams struct {
+	Name   string
+	UserID pgtype.UUID
+}
+
+func (q *Queries) RenameTOTPCredential(ctx context.Context, arg RenameTOTPCredentialParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameTOTPCredential, arg.Name, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const renameWebAuthnCredential = `-- name: RenameWebAuthnCredential :execrows
+UPDATE user_webauthn_credentials SET name=$1, updated_at=now()
+WHERE credential_id=$2 AND user_id=$3::uuid
+`
+
+type RenameWebAuthnCredentialParams struct {
+	Name         string
+	CredentialID []byte
+	UserID       pgtype.UUID
+}
+
+func (q *Queries) RenameWebAuthnCredential(ctx context.Context, arg RenameWebAuthnCredentialParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameWebAuthnCredential, arg.Name, arg.CredentialID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const revokeOwnedSessionByID = `-- name: RevokeOwnedSessionByID :execrows
+UPDATE sessions SET revoked_at=COALESCE(revoked_at, now())
+WHERE id=$1::uuid AND user_id=$2::uuid AND revoked_at IS NULL
+`
+
+type RevokeOwnedSessionByIDParams struct {
+	ID     pgtype.UUID
+	UserID pgtype.UUID
+}
+
+func (q *Queries) RevokeOwnedSessionByID(ctx context.Context, arg RevokeOwnedSessionByIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeOwnedSessionByID, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const revokeSession = `-- name: RevokeSession :exec
@@ -385,6 +1307,24 @@ func (q *Queries) RevokeUserSessions(ctx context.Context, userID pgtype.UUID) er
 	return err
 }
 
+const setLoginWebAuthnSession = `-- name: SetLoginWebAuthnSession :execrows
+UPDATE auth_login_challenges SET webauthn_session=$1::jsonb
+WHERE token_hash=$2 AND consumed_at IS NULL
+`
+
+type SetLoginWebAuthnSessionParams struct {
+	SessionData []byte
+	TokenHash   []byte
+}
+
+func (q *Queries) SetLoginWebAuthnSession(ctx context.Context, arg SetLoginWebAuthnSessionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setLoginWebAuthnSession, arg.SessionData, arg.TokenHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const touchSession = `-- name: TouchSession :exec
 UPDATE sessions
 SET last_used_at = now(), idle_expires_at = LEAST($1, absolute_expires_at)
@@ -399,6 +1339,73 @@ type TouchSessionParams struct {
 func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) error {
 	_, err := q.db.Exec(ctx, touchSession, arg.IdleExpiresAt, arg.ID)
 	return err
+}
+
+const updateEmailVerificationForResend = `-- name: UpdateEmailVerificationForResend :execrows
+UPDATE user_email_verifications
+SET token_hash=$1, token_key_id=$2,
+    token_version=$3, send_count=send_count+1,
+    last_sent_at=now(), expires_at=$4::timestamptz, updated_at=now()
+WHERE id=$5::uuid AND user_id=$6::uuid AND status='pending'
+  AND send_count < 20 AND last_sent_at <= $7::timestamptz
+`
+
+type UpdateEmailVerificationForResendParams struct {
+	TokenHash    []byte
+	TokenKeyID   string
+	TokenVersion int32
+	ExpiresAt    pgtype.Timestamptz
+	ID           pgtype.UUID
+	UserID       pgtype.UUID
+	ResendBefore pgtype.Timestamptz
+}
+
+func (q *Queries) UpdateEmailVerificationForResend(ctx context.Context, arg UpdateEmailVerificationForResendParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateEmailVerificationForResend,
+		arg.TokenHash,
+		arg.TokenKeyID,
+		arg.TokenVersion,
+		arg.ExpiresAt,
+		arg.ID,
+		arg.UserID,
+		arg.ResendBefore,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateOwnProfile = `-- name: UpdateOwnProfile :execrows
+UPDATE users
+SET display_name=$1, salutation=$2,
+    work_phone_raw=$3, work_phone_normalized=$4,
+    version=version+1, updated_at=now()
+WHERE id=$5::uuid AND version=$6 AND active
+`
+
+type UpdateOwnProfileParams struct {
+	DisplayName         string
+	Salutation          string
+	WorkPhoneRaw        string
+	WorkPhoneNormalized string
+	ID                  pgtype.UUID
+	ExpectedVersion     int32
+}
+
+func (q *Queries) UpdateOwnProfile(ctx context.Context, arg UpdateOwnProfileParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateOwnProfile,
+		arg.DisplayName,
+		arg.Salutation,
+		arg.WorkPhoneRaw,
+		arg.WorkPhoneNormalized,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updatePassword = `-- name: UpdatePassword :execrows
@@ -458,6 +1465,7 @@ const updateUserDetails = `-- name: UpdateUserDetails :execrows
 UPDATE users
 SET username = $1, display_name = $2,
     email = NULLIF($3::text, '')::citext,
+    email_verified_at = CASE WHEN $3::text = '' THEN NULL ELSE now() END,
     version = version + 1, updated_at = now()
 WHERE id = $4::uuid AND version = $5
 `
@@ -482,4 +1490,84 @@ func (q *Queries) UpdateUserDetails(ctx context.Context, arg UpdateUserDetailsPa
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const updateWebAuthnCredential = `-- name: UpdateWebAuthnCredential :execrows
+UPDATE user_webauthn_credentials
+SET credential_key_id=$1, credential_ciphertext=$2,
+    last_used_at=now(), updated_at=now()
+WHERE credential_id=$3 AND user_id=$4::uuid
+`
+
+type UpdateWebAuthnCredentialParams struct {
+	CredentialKeyID      string
+	CredentialCiphertext []byte
+	CredentialID         []byte
+	UserID               pgtype.UUID
+}
+
+func (q *Queries) UpdateWebAuthnCredential(ctx context.Context, arg UpdateWebAuthnCredentialParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateWebAuthnCredential,
+		arg.CredentialKeyID,
+		arg.CredentialCiphertext,
+		arg.CredentialID,
+		arg.UserID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const upsertTOTPEnrollment = `-- name: UpsertTOTPEnrollment :execrows
+INSERT INTO user_totp_credentials (user_id, name, secret_key_id, secret_ciphertext)
+VALUES ($1::uuid, $2, $3, $4)
+ON CONFLICT (user_id) DO UPDATE
+SET name=EXCLUDED.name, secret_key_id=EXCLUDED.secret_key_id,
+    secret_ciphertext=EXCLUDED.secret_ciphertext, enabled_at=NULL, last_used_step=NULL, updated_at=now()
+WHERE user_totp_credentials.enabled_at IS NULL
+`
+
+type UpsertTOTPEnrollmentParams struct {
+	UserID           pgtype.UUID
+	Name             string
+	SecretKeyID      string
+	SecretCiphertext []byte
+}
+
+func (q *Queries) UpsertTOTPEnrollment(ctx context.Context, arg UpsertTOTPEnrollmentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upsertTOTPEnrollment,
+		arg.UserID,
+		arg.Name,
+		arg.SecretKeyID,
+		arg.SecretCiphertext,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const upsertWebAuthnRegistrationChallenge = `-- name: UpsertWebAuthnRegistrationChallenge :exec
+INSERT INTO user_webauthn_registration_challenges (session_id, user_id, session_data, expires_at)
+VALUES ($1::uuid, $2::uuid, $3::jsonb, $4::timestamptz)
+ON CONFLICT (session_id) DO UPDATE
+SET user_id=EXCLUDED.user_id, session_data=EXCLUDED.session_data, expires_at=EXCLUDED.expires_at, created_at=now()
+`
+
+type UpsertWebAuthnRegistrationChallengeParams struct {
+	SessionID   pgtype.UUID
+	UserID      pgtype.UUID
+	SessionData []byte
+	ExpiresAt   pgtype.Timestamptz
+}
+
+func (q *Queries) UpsertWebAuthnRegistrationChallenge(ctx context.Context, arg UpsertWebAuthnRegistrationChallengeParams) error {
+	_, err := q.db.Exec(ctx, upsertWebAuthnRegistrationChallenge,
+		arg.SessionID,
+		arg.UserID,
+		arg.SessionData,
+		arg.ExpiresAt,
+	)
+	return err
 }

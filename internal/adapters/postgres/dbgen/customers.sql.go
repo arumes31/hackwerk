@@ -48,6 +48,20 @@ func (q *Queries) ArchiveJob(ctx context.Context, arg ArchiveJobParams) (int64, 
 	return result.RowsAffected(), nil
 }
 
+const countActiveWaitlist = `-- name: CountActiveWaitlist :one
+SELECT count(*) FROM waitlist_entries w
+JOIN jobs j ON j.id=w.job_id
+JOIN customers c ON c.id=j.customer_id
+WHERE w.removed_at IS NULL AND j.archived_at IS NULL AND c.archived_at IS NULL
+`
+
+func (q *Queries) CountActiveWaitlist(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveWaitlist)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countCustomers = `-- name: CountCustomers :one
 SELECT count(*) FROM customers c
 WHERE ($1::boolean OR c.archived_at IS NULL)
@@ -90,7 +104,20 @@ WHERE w.removed_at IS NULL AND j.archived_at IS NULL AND c.archived_at IS NULL
   AND (NOT $11::boolean OR (j.preferred_end_date IS NOT NULL AND j.preferred_end_date < (now() AT TIME ZONE 'Europe/Vienna')::date))
   AND (NOT $12::boolean OR NOT EXISTS (SELECT 1 FROM appointments a JOIN appointment_drivers ad ON ad.appointment_id=a.id WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed')))
   AND (NOT $13::boolean OR (j.job_type='chipping_with_transport' AND (j.transport_mode='undecided' OR (j.transport_mode='external' AND NOT j.external_transport_confirmed))))
-  AND ($14::text='' OR $14::text=CASE WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=120 THEN 'short' WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=360 THEN 'medium' ELSE 'long' END)
+  AND (NOT $14::boolean OR
+       j.pile_latitude IS NULL OR j.pile_longitude IS NULL OR COALESCE(j.pile_location_source, '') = '' OR
+       COALESCE(w.region_snapshot, '') = '' OR
+       j.estimated_hack_minutes+j.estimated_transport_minutes<$9::integer OR
+       j.estimated_hack_minutes+j.estimated_transport_minutes>$10::integer OR
+       (j.preference_mode='window' AND (j.preferred_start_date IS NULL OR j.preferred_end_date IS NULL)) OR
+       (j.job_type='chipping_with_transport' AND (j.transport_mode='undecided' OR (j.transport_mode='external' AND NOT j.external_transport_confirmed))) OR
+       NOT CASE c.notification_preference
+         WHEN 'email' THEN c.email IS NOT NULL
+         WHEN 'sms' THEN c.phone_normalized IS NOT NULL
+         WHEN 'both' THEN c.email IS NOT NULL OR c.phone_normalized IS NOT NULL
+         ELSE false
+       END)
+  AND ($15::text='' OR $15::text=CASE WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=120 THEN 'short' WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=360 THEN 'medium' ELSE 'long' END)
 `
 
 type CountWaitlistParams struct {
@@ -107,6 +134,7 @@ type CountWaitlistParams struct {
 	Overdue           bool
 	Unassigned        bool
 	TransportPending  bool
+	Incomplete        bool
 	DurationGroup     string
 }
 
@@ -125,6 +153,7 @@ func (q *Queries) CountWaitlist(ctx context.Context, arg CountWaitlistParams) (i
 		arg.Overdue,
 		arg.Unassigned,
 		arg.TransportPending,
+		arg.Incomplete,
 		arg.DurationGroup,
 	)
 	var count int64
@@ -328,7 +357,7 @@ SELECT id::text, customer_id::text, job_number, job_type, volume_m3::text,
        transport_mode, external_transport_confirmed,
        COALESCE(to_char(preferred_start_date, 'YYYY-MM-DD'), '')::text AS preferred_start_date,
        COALESCE(to_char(preferred_end_date, 'YYYY-MM-DD'), '')::text AS preferred_end_date,
-       COALESCE(preference_text, '')::text AS preference_text, urgency,
+       preference_mode, COALESCE(preference_text, '')::text AS preference_text, urgency,
        COALESCE(region, '')::text AS region, source, workflow_status, received_at,
        archived_at, version,
        COALESCE(pile_latitude::text, '')::text AS pile_latitude,
@@ -350,6 +379,7 @@ type GetJobRow struct {
 	ExternalTransportConfirmed bool
 	PreferredStartDate         string
 	PreferredEndDate           string
+	PreferenceMode             string
 	PreferenceText             string
 	Urgency                    string
 	Region                     string
@@ -379,6 +409,7 @@ func (q *Queries) GetJob(ctx context.Context, id pgtype.UUID) (GetJobRow, error)
 		&i.ExternalTransportConfirmed,
 		&i.PreferredStartDate,
 		&i.PreferredEndDate,
+		&i.PreferenceMode,
 		&i.PreferenceText,
 		&i.Urgency,
 		&i.Region,
@@ -456,17 +487,17 @@ const insertJob = `-- name: InsertJob :one
 INSERT INTO jobs (
     job_number, customer_id, job_type, volume_m3, estimated_hack_minutes,
     estimated_transport_minutes, transport_trip_count, transport_mode, external_transport_confirmed,
-    preferred_start_date, preferred_end_date, preference_text, urgency, region, source,
+    preferred_start_date, preferred_end_date, preference_mode, preference_text, urgency, region, source,
     pile_latitude, pile_longitude, pile_location_source, pile_location_updated_at
 ) VALUES (
     $1, $2::uuid, $3, $4::numeric,
     $5, $6, $7,
     $8, $9,
     NULLIF($10::text, '')::date, NULLIF($11::text, '')::date,
-    NULLIF($12::text, ''), $13, NULLIF($14::text, ''), $15,
-    NULLIF($16::text, '')::numeric, NULLIF($17::text, '')::numeric,
-    NULLIF($18::text, ''),
-    CASE WHEN NULLIF($16::text, '') IS NULL THEN NULL ELSE now() END
+    $12, NULLIF($13::text, ''), $14, NULLIF($15::text, ''), $16,
+    NULLIF($17::text, '')::numeric, NULLIF($18::text, '')::numeric,
+    NULLIF($19::text, ''),
+    CASE WHEN NULLIF($17::text, '') IS NULL THEN NULL ELSE now() END
 ) RETURNING id::text
 `
 
@@ -482,6 +513,7 @@ type InsertJobParams struct {
 	ExternalTransportConfirmed bool
 	PreferredStartDate         string
 	PreferredEndDate           string
+	PreferenceMode             string
 	PreferenceText             string
 	Urgency                    string
 	Region                     string
@@ -504,6 +536,7 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) (string, e
 		arg.ExternalTransportConfirmed,
 		arg.PreferredStartDate,
 		arg.PreferredEndDate,
+		arg.PreferenceMode,
 		arg.PreferenceText,
 		arg.Urgency,
 		arg.Region,
@@ -658,7 +691,7 @@ SELECT id::text, job_number, job_type, volume_m3::text, estimated_hack_minutes,
        estimated_transport_minutes, transport_trip_count, transport_mode,
        external_transport_confirmed, COALESCE(to_char(preferred_start_date, 'YYYY-MM-DD'), '')::text AS preferred_start_date,
        COALESCE(to_char(preferred_end_date, 'YYYY-MM-DD'), '')::text AS preferred_end_date,
-       COALESCE(preference_text, '')::text AS preference_text, urgency, COALESCE(region, '')::text AS region,
+       preference_mode, COALESCE(preference_text, '')::text AS preference_text, urgency, COALESCE(region, '')::text AS region,
        source, workflow_status, received_at, archived_at, version,
        COALESCE(pile_latitude::text, '')::text AS pile_latitude,
        COALESCE(pile_longitude::text, '')::text AS pile_longitude,
@@ -680,6 +713,7 @@ type ListCustomerJobsRow struct {
 	ExternalTransportConfirmed bool
 	PreferredStartDate         string
 	PreferredEndDate           string
+	PreferenceMode             string
 	PreferenceText             string
 	Urgency                    string
 	Region                     string
@@ -715,6 +749,7 @@ func (q *Queries) ListCustomerJobs(ctx context.Context, customerID pgtype.UUID) 
 			&i.ExternalTransportConfirmed,
 			&i.PreferredStartDate,
 			&i.PreferredEndDate,
+			&i.PreferenceMode,
 			&i.PreferenceText,
 			&i.Urgency,
 			&i.Region,
@@ -960,13 +995,14 @@ func (q *Queries) ListRecentRecords(ctx context.Context, arg ListRecentRecordsPa
 }
 
 const listWaitlist = `-- name: ListWaitlist :many
-SELECT w.id::text AS waitlist_id, w.job_id::text, w.entered_at, w.manual_priority, w.version AS waitlist_version,
+SELECT w.id::text AS waitlist_id, w.job_id::text, w.entered_at, w.manual_priority,
+       w.priority_reason, w.version AS waitlist_version,
        j.job_number, j.job_type, j.volume_m3::text, j.estimated_hack_minutes, j.estimated_transport_minutes,
        (j.estimated_hack_minutes+j.estimated_transport_minutes)::integer AS total_minutes,
        j.transport_mode, j.external_transport_confirmed,
        COALESCE(to_char(j.preferred_start_date, 'YYYY-MM-DD'), '')::text AS preferred_start_date,
        COALESCE(to_char(j.preferred_end_date, 'YYYY-MM-DD'), '')::text AS preferred_end_date,
-       COALESCE(j.preference_text, '')::text AS preference_text, j.urgency,
+       j.preference_mode, COALESCE(j.preference_text, '')::text AS preference_text, j.urgency,
        COALESCE(w.region_snapshot, '')::text AS region,
        c.id::text AS customer_id, c.first_name, c.last_name, COALESCE(c.company_name, '')::text AS company_name, c.locality,
        COALESCE((SELECT n.body FROM job_notes n WHERE n.job_id = j.id ORDER BY n.created_at DESC, n.id DESC LIMIT 1), '')::text AS note_excerpt,
@@ -978,7 +1014,13 @@ SELECT w.id::text AS waitlist_id, w.job_id::text, w.entered_at, w.manual_priorit
        (COALESCE(j.pile_location_source::text, '') <> '')::boolean AS has_pile_source,
        (j.preferred_end_date IS NOT NULL AND j.preferred_end_date < (now() AT TIME ZONE 'Europe/Vienna')::date)::boolean AS overdue,
        EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed'))::boolean AS has_active_appointment,
-       EXISTS (SELECT 1 FROM appointments a JOIN appointment_drivers ad ON ad.appointment_id=a.id WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed'))::boolean AS has_internal_assignment
+       EXISTS (SELECT 1 FROM appointments a JOIN appointment_drivers ad ON ad.appointment_id=a.id WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed'))::boolean AS has_internal_assignment,
+       CASE c.notification_preference
+         WHEN 'email' THEN c.email IS NOT NULL
+         WHEN 'sms' THEN c.phone_normalized IS NOT NULL
+         WHEN 'both' THEN c.email IS NOT NULL OR c.phone_normalized IS NOT NULL
+         ELSE false
+       END::boolean AS has_contact
 FROM waitlist_entries w
 JOIN jobs j ON j.id = w.job_id
 JOIN customers c ON c.id = j.customer_id
@@ -997,34 +1039,47 @@ WHERE w.removed_at IS NULL AND j.archived_at IS NULL AND c.archived_at IS NULL
   AND (NOT $11::boolean OR (j.preferred_end_date IS NOT NULL AND j.preferred_end_date < (now() AT TIME ZONE 'Europe/Vienna')::date))
   AND (NOT $12::boolean OR NOT EXISTS (SELECT 1 FROM appointments a JOIN appointment_drivers ad ON ad.appointment_id=a.id WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed')))
   AND (NOT $13::boolean OR (j.job_type='chipping_with_transport' AND (j.transport_mode='undecided' OR (j.transport_mode='external' AND NOT j.external_transport_confirmed))))
-  AND ($14::text='' OR $14::text=CASE WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=120 THEN 'short' WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=360 THEN 'medium' ELSE 'long' END)
+  AND (NOT $14::boolean OR
+       j.pile_latitude IS NULL OR j.pile_longitude IS NULL OR COALESCE(j.pile_location_source, '') = '' OR
+       COALESCE(w.region_snapshot, '') = '' OR
+       j.estimated_hack_minutes+j.estimated_transport_minutes<$9::integer OR
+       j.estimated_hack_minutes+j.estimated_transport_minutes>$10::integer OR
+       (j.preference_mode='window' AND (j.preferred_start_date IS NULL OR j.preferred_end_date IS NULL)) OR
+       (j.job_type='chipping_with_transport' AND (j.transport_mode='undecided' OR (j.transport_mode='external' AND NOT j.external_transport_confirmed))) OR
+       NOT CASE c.notification_preference
+         WHEN 'email' THEN c.email IS NOT NULL
+         WHEN 'sms' THEN c.phone_normalized IS NOT NULL
+         WHEN 'both' THEN c.email IS NOT NULL OR c.phone_normalized IS NOT NULL
+         ELSE false
+       END)
+  AND ($15::text='' OR $15::text=CASE WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=120 THEN 'short' WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=360 THEN 'medium' ELSE 'long' END)
 ORDER BY
-  CASE WHEN $15::text = 'entered' AND $16::text = 'asc' THEN w.entered_at END ASC,
-  CASE WHEN $15::text = 'entered' AND $16::text = 'desc' THEN w.entered_at END DESC,
-  CASE WHEN $15::text = 'preferred' AND $16::text = 'asc' THEN j.preferred_start_date END ASC NULLS LAST,
-  CASE WHEN $15::text = 'preferred' AND $16::text = 'desc' THEN j.preferred_start_date END DESC NULLS LAST,
-  CASE WHEN $15::text = 'urgency' AND $16::text = 'asc' THEN array_position(ARRAY['low','normal','high','urgent'], j.urgency) END ASC,
-  CASE WHEN $15::text = 'urgency' AND $16::text = 'desc' THEN array_position(ARRAY['low','normal','high','urgent'], j.urgency) END DESC,
-  CASE WHEN $15::text = 'volume' AND $16::text = 'asc' THEN j.volume_m3 END ASC,
-  CASE WHEN $15::text = 'volume' AND $16::text = 'desc' THEN j.volume_m3 END DESC,
-  CASE WHEN $15::text = 'region' AND $16::text = 'asc' THEN lower(w.region_snapshot) END ASC,
-  CASE WHEN $15::text = 'region' AND $16::text = 'desc' THEN lower(w.region_snapshot) END DESC,
-  CASE WHEN $15::text = 'customer' AND $16::text = 'asc' THEN lower(concat_ws(' ', c.company_name, c.last_name, c.first_name)) END ASC,
-  CASE WHEN $15::text = 'customer' AND $16::text = 'desc' THEN lower(concat_ws(' ', c.company_name, c.last_name, c.first_name)) END DESC,
-  CASE WHEN $15::text = 'workflow' AND $16::text = 'asc' THEN CASE
+  CASE WHEN $16::text = 'entered' AND $17::text = 'asc' THEN w.entered_at END ASC,
+  CASE WHEN $16::text = 'entered' AND $17::text = 'desc' THEN w.entered_at END DESC,
+  CASE WHEN $16::text = 'preferred' AND $17::text = 'asc' THEN j.preferred_start_date END ASC NULLS LAST,
+  CASE WHEN $16::text = 'preferred' AND $17::text = 'desc' THEN j.preferred_start_date END DESC NULLS LAST,
+  CASE WHEN $16::text = 'urgency' AND $17::text = 'asc' THEN array_position(ARRAY['low','normal','high','urgent'], j.urgency) END ASC,
+  CASE WHEN $16::text = 'urgency' AND $17::text = 'desc' THEN array_position(ARRAY['low','normal','high','urgent'], j.urgency) END DESC,
+  CASE WHEN $16::text = 'volume' AND $17::text = 'asc' THEN j.volume_m3 END ASC,
+  CASE WHEN $16::text = 'volume' AND $17::text = 'desc' THEN j.volume_m3 END DESC,
+  CASE WHEN $16::text = 'region' AND $17::text = 'asc' THEN lower(w.region_snapshot) END ASC,
+  CASE WHEN $16::text = 'region' AND $17::text = 'desc' THEN lower(w.region_snapshot) END DESC,
+  CASE WHEN $16::text = 'customer' AND $17::text = 'asc' THEN lower(concat_ws(' ', c.company_name, c.last_name, c.first_name)) END ASC,
+  CASE WHEN $16::text = 'customer' AND $17::text = 'desc' THEN lower(concat_ws(' ', c.company_name, c.last_name, c.first_name)) END DESC,
+  CASE WHEN $16::text = 'workflow' AND $17::text = 'asc' THEN CASE
        WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='fixed') THEN 'scheduled'
        WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
        ELSE 'unplanned' END END ASC,
-  CASE WHEN $15::text = 'workflow' AND $16::text = 'desc' THEN CASE
+  CASE WHEN $16::text = 'workflow' AND $17::text = 'desc' THEN CASE
        WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='fixed') THEN 'scheduled'
        WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
        ELSE 'unplanned' END END DESC,
-  CASE WHEN $15::text = 'updated' AND $16::text = 'asc' THEN j.updated_at END ASC,
-  CASE WHEN $15::text = 'updated' AND $16::text = 'desc' THEN j.updated_at END DESC,
-  CASE WHEN $15::text = 'duration' AND $16::text = 'asc' THEN j.estimated_hack_minutes+j.estimated_transport_minutes END ASC,
-  CASE WHEN $15::text = 'duration' AND $16::text = 'desc' THEN j.estimated_hack_minutes+j.estimated_transport_minutes END DESC,
+  CASE WHEN $16::text = 'updated' AND $17::text = 'asc' THEN j.updated_at END ASC,
+  CASE WHEN $16::text = 'updated' AND $17::text = 'desc' THEN j.updated_at END DESC,
+  CASE WHEN $16::text = 'duration' AND $17::text = 'asc' THEN j.estimated_hack_minutes+j.estimated_transport_minutes END ASC,
+  CASE WHEN $16::text = 'duration' AND $17::text = 'desc' THEN j.estimated_hack_minutes+j.estimated_transport_minutes END DESC,
   w.manual_priority DESC, w.entered_at, w.id
-LIMIT $18 OFFSET $17
+LIMIT $19 OFFSET $18
 `
 
 type ListWaitlistParams struct {
@@ -1041,6 +1096,7 @@ type ListWaitlistParams struct {
 	Overdue           bool
 	Unassigned        bool
 	TransportPending  bool
+	Incomplete        bool
 	DurationGroup     string
 	Sort              string
 	Direction         string
@@ -1053,6 +1109,7 @@ type ListWaitlistRow struct {
 	WJobID                     string
 	EnteredAt                  pgtype.Timestamptz
 	ManualPriority             int32
+	PriorityReason             string
 	WaitlistVersion            int32
 	JobNumber                  string
 	JobType                    string
@@ -1064,6 +1121,7 @@ type ListWaitlistRow struct {
 	ExternalTransportConfirmed bool
 	PreferredStartDate         string
 	PreferredEndDate           string
+	PreferenceMode             string
 	PreferenceText             string
 	Urgency                    string
 	Region                     string
@@ -1081,6 +1139,7 @@ type ListWaitlistRow struct {
 	Overdue                    bool
 	HasActiveAppointment       bool
 	HasInternalAssignment      bool
+	HasContact                 bool
 }
 
 func (q *Queries) ListWaitlist(ctx context.Context, arg ListWaitlistParams) ([]ListWaitlistRow, error) {
@@ -1098,6 +1157,7 @@ func (q *Queries) ListWaitlist(ctx context.Context, arg ListWaitlistParams) ([]L
 		arg.Overdue,
 		arg.Unassigned,
 		arg.TransportPending,
+		arg.Incomplete,
 		arg.DurationGroup,
 		arg.Sort,
 		arg.Direction,
@@ -1116,6 +1176,7 @@ func (q *Queries) ListWaitlist(ctx context.Context, arg ListWaitlistParams) ([]L
 			&i.WJobID,
 			&i.EnteredAt,
 			&i.ManualPriority,
+			&i.PriorityReason,
 			&i.WaitlistVersion,
 			&i.JobNumber,
 			&i.JobType,
@@ -1127,6 +1188,7 @@ func (q *Queries) ListWaitlist(ctx context.Context, arg ListWaitlistParams) ([]L
 			&i.ExternalTransportConfirmed,
 			&i.PreferredStartDate,
 			&i.PreferredEndDate,
+			&i.PreferenceMode,
 			&i.PreferenceText,
 			&i.Urgency,
 			&i.Region,
@@ -1144,6 +1206,7 @@ func (q *Queries) ListWaitlist(ctx context.Context, arg ListWaitlistParams) ([]L
 			&i.Overdue,
 			&i.HasActiveAppointment,
 			&i.HasInternalAssignment,
+			&i.HasContact,
 		); err != nil {
 			return nil, err
 		}
@@ -1158,7 +1221,7 @@ func (q *Queries) ListWaitlist(ctx context.Context, arg ListWaitlistParams) ([]L
 const listWaitlistFilterFavorites = `-- name: ListWaitlistFilterFavorites :many
 SELECT id::text, name, job_type, region, urgency, preferred_month, workflow,
        missing_location, duration_issue, duration_group, overdue, unassigned,
-       transport_pending, sort_key, sort_direction
+       transport_pending, incomplete, sort_key, sort_direction
 FROM waitlist_filter_favorites
 WHERE user_id=$1::uuid
 ORDER BY updated_at DESC, id
@@ -1178,6 +1241,7 @@ type ListWaitlistFilterFavoritesRow struct {
 	Overdue          bool
 	Unassigned       bool
 	TransportPending bool
+	Incomplete       bool
 	SortKey          string
 	SortDirection    string
 }
@@ -1205,6 +1269,7 @@ func (q *Queries) ListWaitlistFilterFavorites(ctx context.Context, userID pgtype
 			&i.Overdue,
 			&i.Unassigned,
 			&i.TransportPending,
+			&i.Incomplete,
 			&i.SortKey,
 			&i.SortDirection,
 		); err != nil {
@@ -1362,6 +1427,78 @@ func (q *Queries) RemoveWaitlistEntry(ctx context.Context, arg RemoveWaitlistEnt
 	return result.RowsAffected(), nil
 }
 
+const searchWorkspace = `-- name: SearchWorkspace :many
+WITH matches AS (
+    SELECT 'customer'::text AS kind, c.id::text AS id, ''::text AS parent_id,
+           concat_ws(' ', NULLIF(c.first_name,''), NULLIF(c.last_name,''), NULLIF(c.company_name,''))::text AS title,
+           concat_ws(' · ', NULLIF(c.locality,''), NULLIF(c.region,''))::text AS subtitle,
+           c.updated_at AS ranked_at
+    FROM customers c
+    WHERE c.archived_at IS NULL
+      AND concat_ws(' ', c.first_name, c.last_name, c.company_name, c.locality, c.region) ILIKE '%' || $1::text || '%'
+    ORDER BY c.updated_at DESC, c.id
+    LIMIT 8
+), job_matches AS (
+    SELECT 'job'::text AS kind, j.id::text AS id, c.id::text AS parent_id,
+           j.job_number::text AS title,
+           concat_ws(' · ', concat_ws(' ', NULLIF(c.first_name,''), NULLIF(c.last_name,''), NULLIF(c.company_name,'')), NULLIF(c.locality,''))::text AS subtitle,
+           j.updated_at AS ranked_at
+    FROM jobs j JOIN customers c ON c.id=j.customer_id
+    WHERE j.archived_at IS NULL AND c.archived_at IS NULL
+      AND concat_ws(' ', j.job_number, c.first_name, c.last_name, c.company_name, c.locality) ILIKE '%' || $1::text || '%'
+    ORDER BY j.updated_at DESC, j.id
+    LIMIT 8
+), appointment_matches AS (
+    SELECT 'appointment'::text AS kind, a.id::text AS id, c.id::text AS parent_id,
+           concat_ws(' · ', j.job_number, concat_ws(' ', NULLIF(c.first_name,''), NULLIF(c.last_name,''), NULLIF(c.company_name,'')))::text AS title,
+           to_char(a.starts_at AT TIME ZONE 'Europe/Vienna', 'DD.MM.YYYY HH24:MI')::text AS subtitle,
+           a.updated_at AS ranked_at
+    FROM appointments a JOIN jobs j ON j.id=a.job_id JOIN customers c ON c.id=j.customer_id
+    WHERE a.lifecycle_status IN ('draft','proposal','fixed') AND j.archived_at IS NULL AND c.archived_at IS NULL
+      AND concat_ws(' ', j.job_number, c.first_name, c.last_name, c.company_name, c.locality) ILIKE '%' || $1::text || '%'
+    ORDER BY a.updated_at DESC, a.id
+    LIMIT 8
+)
+SELECT kind, id, parent_id, title, subtitle
+FROM (SELECT kind, id, parent_id, title, subtitle, ranked_at FROM matches UNION ALL SELECT kind, id, parent_id, title, subtitle, ranked_at FROM job_matches UNION ALL SELECT kind, id, parent_id, title, subtitle, ranked_at FROM appointment_matches) all_matches
+ORDER BY ranked_at DESC, kind, id
+LIMIT 24
+`
+
+type SearchWorkspaceRow struct {
+	Kind     string
+	ID       string
+	ParentID string
+	Title    string
+	Subtitle string
+}
+
+func (q *Queries) SearchWorkspace(ctx context.Context, search string) ([]SearchWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, searchWorkspace, search)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SearchWorkspaceRow{}
+	for rows.Next() {
+		var i SearchWorkspaceRow
+		if err := rows.Scan(
+			&i.Kind,
+			&i.ID,
+			&i.ParentID,
+			&i.Title,
+			&i.Subtitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const trimRecentRecords = `-- name: TrimRecentRecords :exec
 DELETE FROM recent_records WHERE ctid IN (
     SELECT ctid FROM recent_records
@@ -1436,14 +1573,15 @@ UPDATE jobs SET
     external_transport_confirmed = $7,
     preferred_start_date = NULLIF($8::text, '')::date,
     preferred_end_date = NULLIF($9::text, '')::date,
-    preference_text = NULLIF($10::text, ''), urgency = $11,
-    region = NULLIF($12::text, ''), source = $13,
-    pile_latitude = NULLIF($14::text, '')::numeric,
-    pile_longitude = NULLIF($15::text, '')::numeric,
-    pile_location_source = NULLIF($16::text, ''),
-    pile_location_updated_at = CASE WHEN NULLIF($14::text, '') IS NULL THEN NULL ELSE now() END,
+    preference_mode = $10,
+    preference_text = NULLIF($11::text, ''), urgency = $12,
+    region = NULLIF($13::text, ''), source = $14,
+    pile_latitude = NULLIF($15::text, '')::numeric,
+    pile_longitude = NULLIF($16::text, '')::numeric,
+    pile_location_source = NULLIF($17::text, ''),
+    pile_location_updated_at = CASE WHEN NULLIF($15::text, '') IS NULL THEN NULL ELSE now() END,
     version = version + 1, updated_at = now()
-WHERE id = $17::uuid AND version = $18
+WHERE id = $18::uuid AND version = $19
   AND archived_at IS NULL AND workflow_status IN ('waitlist', 'planning', 'scheduled')
 `
 
@@ -1457,6 +1595,7 @@ type UpdateJobParams struct {
 	ExternalTransportConfirmed bool
 	PreferredStartDate         string
 	PreferredEndDate           string
+	PreferenceMode             string
 	PreferenceText             string
 	Urgency                    string
 	Region                     string
@@ -1479,6 +1618,7 @@ func (q *Queries) UpdateJob(ctx context.Context, arg UpdateJobParams) (int64, er
 		arg.ExternalTransportConfirmed,
 		arg.PreferredStartDate,
 		arg.PreferredEndDate,
+		arg.PreferenceMode,
 		arg.PreferenceText,
 		arg.Urgency,
 		arg.Region,
@@ -1496,18 +1636,24 @@ func (q *Queries) UpdateJob(ctx context.Context, arg UpdateJobParams) (int64, er
 }
 
 const updateWaitlistPriority = `-- name: UpdateWaitlistPriority :execrows
-UPDATE waitlist_entries SET manual_priority = $1, version = version + 1
-WHERE id = $2::uuid AND version = $3 AND removed_at IS NULL
+UPDATE waitlist_entries SET manual_priority = $1, priority_reason = $2, version = version + 1
+WHERE id = $3::uuid AND version = $4 AND removed_at IS NULL
 `
 
 type UpdateWaitlistPriorityParams struct {
 	Priority        int32
+	Reason          string
 	ID              pgtype.UUID
 	ExpectedVersion int32
 }
 
 func (q *Queries) UpdateWaitlistPriority(ctx context.Context, arg UpdateWaitlistPriorityParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updateWaitlistPriority, arg.Priority, arg.ID, arg.ExpectedVersion)
+	result, err := q.db.Exec(ctx, updateWaitlistPriority,
+		arg.Priority,
+		arg.Reason,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -1558,18 +1704,18 @@ const upsertWaitlistFilterFavorite = `-- name: UpsertWaitlistFilterFavorite :exe
 INSERT INTO waitlist_filter_favorites
     (id, user_id, name, job_type, region, urgency, preferred_month, workflow,
      missing_location, duration_issue, duration_group, overdue, unassigned,
-     transport_pending, sort_key, sort_direction)
+     transport_pending, incomplete, sort_key, sort_direction)
 VALUES (gen_random_uuid(), $1::uuid, $2, $3,
         $4, $5, $6, $7,
         $8, $9, $10,
-        $11, $12, $13,
-        $14, $15)
+        $11, $12, $13, $14,
+        $15, $16)
 ON CONFLICT (user_id, lower(name)) DO UPDATE SET
     job_type=excluded.job_type, region=excluded.region, urgency=excluded.urgency,
     preferred_month=excluded.preferred_month, workflow=excluded.workflow,
     missing_location=excluded.missing_location, duration_issue=excluded.duration_issue,
     duration_group=excluded.duration_group, overdue=excluded.overdue,
-    unassigned=excluded.unassigned, transport_pending=excluded.transport_pending,
+    unassigned=excluded.unassigned, transport_pending=excluded.transport_pending, incomplete=excluded.incomplete,
     sort_key=excluded.sort_key, sort_direction=excluded.sort_direction, updated_at=now()
 `
 
@@ -1587,6 +1733,7 @@ type UpsertWaitlistFilterFavoriteParams struct {
 	Overdue          bool
 	Unassigned       bool
 	TransportPending bool
+	Incomplete       bool
 	SortKey          string
 	SortDirection    string
 }
@@ -1606,6 +1753,7 @@ func (q *Queries) UpsertWaitlistFilterFavorite(ctx context.Context, arg UpsertWa
 		arg.Overdue,
 		arg.Unassigned,
 		arg.TransportPending,
+		arg.Incomplete,
 		arg.SortKey,
 		arg.SortDirection,
 	)

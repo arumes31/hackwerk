@@ -69,6 +69,9 @@ func TestFreeCapacityMergesReservationsForEveryResource(t *testing.T) {
 	if len(values[1].Free) != 1 || values[1].Free[0].StartsAt != start || values[1].Free[0].EndsAt != end {
 		t.Fatalf("second resource free capacity = %#v", values[1])
 	}
+	if values[0].FreeMinutes != 420 || values[0].TotalMinutes != 600 || values[0].Largest.StartsAt != start.Add(4*time.Hour) {
+		t.Fatalf("capacity totals/largest = %#v", values[0])
+	}
 }
 
 func TestViewRejectsInvalidOrUnboundedDateAndStoreFailure(t *testing.T) {
@@ -141,6 +144,32 @@ func TestViewProjectsAdminAppointmentsGroupsAndCapacity(t *testing.T) {
 	}
 	if view.Counts.NotificationIssues != 2 || len(view.Capacities) != 2 || len(view.Capacities[0].Free) != 1 {
 		t.Fatalf("admin data missing = %#v", view)
+	}
+}
+
+func TestViewExceptionModeShowsOnlyActionableAppointmentsAndSevenDays(t *testing.T) {
+	t.Parallel()
+	location := time.UTC
+	now := time.Date(2026, 9, 1, 9, 0, 0, 0, location)
+	store := &fakeStore{snapshot: Snapshot{
+		Appointments: []Appointment{
+			{ID: "normal", Drivers: "Franz", Chippers: "Maschine", Confirmation: "confirmed", StartsAt: now, EndsAt: now.Add(time.Hour)},
+			{ID: "missing", Chippers: "Maschine", Confirmation: "confirmed", StartsAt: now.Add(time.Hour), EndsAt: now.Add(2 * time.Hour)},
+			{ID: "declined", Drivers: "Franz", Chippers: "Maschine", Confirmation: "declined", StartsAt: now.Add(2 * time.Hour), EndsAt: now.Add(3 * time.Hour)},
+		},
+		Drivers:  []DriverAvailability{{ID: "driver", BookedMinutes: 601}},
+		Bookings: []Booking{{ResourceID: "machine", ResourceName: "Maschine"}},
+	}}
+	service, _ := New(store, Config{Location: location, HorizonDays: 7, PendingAfter: 15 * time.Minute, BusinessOpen: "07:00", BusinessClose: "17:00"}, func() time.Time { return now })
+	view, err := service.View(t.Context(), auth.Actor{UserID: "admin", Role: auth.RoleAdmin}, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Today) != 2 || view.Today[0].ID != "missing" || view.Today[1].ID != "declined" || len(view.MissingAssignments) != 1 {
+		t.Fatalf("exception projection = %#v", view)
+	}
+	if len(view.DailyCapacities) != 7 || !view.Drivers[0].OvertimeRisk {
+		t.Fatalf("forecast/overtime = %#v / %#v", view.DailyCapacities, view.Drivers)
 	}
 }
 

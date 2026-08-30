@@ -78,11 +78,11 @@ templ ConfirmationPage(data ConfirmationData) {
 						<p>Bitte wählen Sie genau eine Rückmeldung. Sie können den Termin hier nicht verschieben oder stornieren.</p>
 						<form method="post" action={ "/termin/" + data.Token + "/antwort" } class="confirmation-actions" data-confirmation-form>
 							<input type="hidden" name="form_nonce" value={ data.Value.FormNonce }/>
-							<label for="confirmation-response-note">Optionale Rückrufnotiz bei Ablehnung</label><textarea id="confirmation-response-note" name="response_note" maxlength="500" rows="3" placeholder="z. B. Bitte vormittags zurückrufen" aria-invalid={ confirmationNoteInvalid(data.ResponseNoteError) } aria-describedby={ confirmationNoteDescription(data.ResponseNoteError) }>{ data.ResponseNote }</textarea><small id="confirmation-note-help">Maximal 500 Zeichen; nur zusammen mit „Termin ablehnen“.</small>
+							<label for="confirmation-response-note">Optionale Rückrufnotiz</label><textarea id="confirmation-response-note" name="response_note" maxlength="500" rows="3" placeholder="z. B. Bitte vormittags zurückrufen" aria-invalid={ confirmationNoteInvalid(data.ResponseNoteError) } aria-describedby={ confirmationNoteDescription(data.ResponseNoteError) }>{ data.ResponseNote }</textarea><small id="confirmation-note-help">Maximal 500 Zeichen; zusammen mit „Termin ablehnen“ oder „Rückruf wünschen“.</small>
 							if data.ResponseNoteError != "" {
 								<small id="confirmation-note-error" class="field-error" role="alert">{ data.ResponseNoteError }</small>
 							}
-							<small id="confirmation-note-feedback" data-confirmation-note-feedback role="status" aria-live="polite">Die Notiz wird nur bei einer Ablehnung übermittelt.</small>
+							<small id="confirmation-note-feedback" data-confirmation-note-feedback role="status" aria-live="polite">Die Notiz wird nur bei einer Ablehnung oder einem Rückrufwunsch übermittelt.</small>
 							<p class="form-hint" data-confirmation-summary>Die gewählte Antwort wird unmittelbar und einmalig gespeichert.</p>
 							<button class="button" type="submit" name="action" value="confirmed" data-response-label="Sie bestätigen den angezeigten Termin.">Termin bestätigen</button>
 							<button class="button button--quiet" type="submit" name="action" value="declined" data-response-label="Sie lehnen den angezeigten Termin ab.">Termin ablehnen</button>

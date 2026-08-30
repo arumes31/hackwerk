@@ -33,6 +33,15 @@ func TestDashboardStoreRemainsBoundedWithOperationalData(t *testing.T) {
 		INSERT INTO waitlist_entries (job_id)
 		SELECT id FROM jobs WHERE job_number LIKE 'HW-DASH-%' ORDER BY job_number LIMIT 500;
 
+		WITH archived_customer AS (
+			INSERT INTO customers (first_name,last_name,locality,email,archived_at)
+			VALUES ('Archiviert','Dashboard','Linz','dashboard-archived@example.test',now()) RETURNING id
+		), archived_job AS (
+			INSERT INTO jobs (job_number,customer_id,job_type,volume_m3,estimated_hack_minutes,urgency)
+			SELECT 'HW-DASH-ARCHIVED',id,'chipping_only',25,120,'normal' FROM archived_customer RETURNING id
+		)
+		INSERT INTO waitlist_entries (job_id) SELECT id FROM archived_job;
+
 		INSERT INTO appointments (job_id, lifecycle_status, starts_at, ends_at)
 		SELECT j.id, 'proposal',
 		       timestamptz '2026-08-25 05:00:00+00' + ((row_number() OVER (ORDER BY j.job_number) % 120) - 30) * interval '1 day',
@@ -63,7 +72,8 @@ func TestDashboardStoreRemainsBoundedWithOperationalData(t *testing.T) {
 		LocalDate: localDate, DayStart: localDate.UTC(), DayEnd: localDate.AddDate(0, 0, 1).UTC(),
 		HorizonEnd: localDate.AddDate(0, 0, 14).UTC(), BusinessStart: time.Date(2026, 8, 25, 7, 0, 0, 0, location).UTC(),
 		BusinessEnd: time.Date(2026, 8, 25, 17, 0, 0, 0, location).UTC(), PendingBefore: time.Now().Add(-15 * time.Minute),
-		OldBefore: time.Date(2026, 7, 26, 0, 0, 0, 0, location).UTC(), PreferredBefore: localDate.AddDate(0, 0, 14), ISOWeekday: 2,
+		CapacityEnd: time.Date(2026, 9, 1, 17, 0, 0, 0, location).UTC(),
+		OldBefore:   time.Date(2026, 7, 26, 0, 0, 0, 0, location).UTC(), PreferredBefore: localDate.AddDate(0, 0, 14), ISOWeekday: 2,
 	}
 	started := time.Now()
 	snapshot, err := postgres.NewDashboardStore(fixture.pool).Load(fixture.ctx, window)
@@ -75,6 +85,16 @@ func TestDashboardStoreRemainsBoundedWithOperationalData(t *testing.T) {
 	}
 	if snapshot.Counts.Waitlist != 500 || len(snapshot.Appointments) == 0 || len(snapshot.Appointments) > 500 {
 		t.Fatalf("bounded snapshot counts = waitlist %d, appointments %d", snapshot.Counts.Waitlist, len(snapshot.Appointments))
+	}
+	var expectedUnplanned int64
+	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT count(*) FROM waitlist_entries w
+		JOIN jobs j ON j.id=w.job_id JOIN customers c ON c.id=j.customer_id
+		WHERE w.removed_at IS NULL AND j.archived_at IS NULL AND c.archived_at IS NULL
+		AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed'))`).Scan(&expectedUnplanned); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Counts.Unplanned != expectedUnplanned {
+		t.Fatalf("unplanned dashboard count = %d, want %d active visible jobs", snapshot.Counts.Unplanned, expectedUnplanned)
 	}
 	if len(snapshot.UrgentJobs) != 20 {
 		t.Fatalf("urgent result limit = %d", len(snapshot.UrgentJobs))
@@ -96,6 +116,14 @@ func TestDashboardStoreRemainsBoundedWithOperationalData(t *testing.T) {
 	waitlistPage, err := customerService.ListWaitlist(fixture.ctx, fixture.admin, customers.WaitlistFilter{})
 	if err != nil || len(waitlistPage.Items) == 0 || len(waitlistPage.Items) > 50 || waitlistPage.Total != 500 {
 		t.Fatalf("waitlist page items/total/error=%d/%d/%v", len(waitlistPage.Items), waitlistPage.Total, err)
+	}
+	incompletePage, err := customerService.ListWaitlist(fixture.ctx, fixture.admin, customers.WaitlistFilter{Incomplete: true})
+	if err != nil || len(incompletePage.Items) == 0 || incompletePage.Total != 500 || incompletePage.UnfilteredTotal != 500 {
+		t.Fatalf("incomplete waitlist items/total/unfiltered/error=%d/%d/%d/%v", len(incompletePage.Items), incompletePage.Total, incompletePage.UnfilteredTotal, err)
+	}
+	searchResults, err := customerService.SearchWorkspace(fixture.ctx, fixture.admin, "HW-DASH-000")
+	if err != nil || len(searchResults) == 0 || len(searchResults) > 24 {
+		t.Fatalf("workspace search results/error=%d/%v", len(searchResults), err)
 	}
 	if elapsed := time.Since(listStarted); elapsed > 2*time.Second {
 		t.Fatalf("bounded customer/waitlist pages took %s", elapsed)
@@ -130,5 +158,25 @@ func TestDashboardStoreRemainsBoundedWithOperationalData(t *testing.T) {
 	}
 	if !strings.Contains(plan, "appointments_calendar_range_idx") {
 		t.Fatalf("calendar range query did not use its index: %s", plan)
+	}
+	for name, query := range map[string]string{
+		"incomplete waitlist": `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+			SELECT w.id FROM waitlist_entries w JOIN jobs j ON j.id=w.job_id JOIN customers c ON c.id=j.customer_id
+			WHERE w.removed_at IS NULL AND j.archived_at IS NULL AND c.archived_at IS NULL
+			  AND (j.pile_latitude IS NULL OR j.pile_longitude IS NULL OR COALESCE(j.pile_location_source, '')='')
+			ORDER BY w.entered_at,w.id LIMIT 25`,
+		"workspace search": `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+			SELECT j.id FROM jobs j JOIN customers c ON c.id=j.customer_id
+			WHERE j.archived_at IS NULL AND c.archived_at IS NULL
+			  AND concat_ws(' ',j.job_number,c.first_name,c.last_name,c.company_name,c.locality) ILIKE '%HW-DASH-000%'
+			ORDER BY j.updated_at DESC,j.id LIMIT 8`,
+	} {
+		var explain string
+		if err := tx.QueryRow(fixture.ctx, query).Scan(&explain); err != nil {
+			t.Fatalf("%s EXPLAIN: %v", name, err)
+		}
+		if !strings.Contains(explain, `"Plan"`) || !strings.Contains(explain, `"Actual Total Time"`) {
+			t.Fatalf("%s EXPLAIN lacks analyzed bounded plan: %s", name, explain)
+		}
 	}
 }

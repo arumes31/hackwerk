@@ -59,7 +59,7 @@ func TestAdminServiceMasksOperationalViewsAndKeepsProviderReferenceAdminOnly(t *
 			ResponseNote: "Bitte nur vormittags zurückrufen",
 			CreatedAt:    now.Add(-time.Hour), ReviewedAt: now,
 		}},
-		callbacks: []CallbackRequest{{AppointmentID: "appointment", Phone: "+43 664 1234567", RespondedAt: now}},
+		callbacks: []CallbackRequest{{AppointmentID: "appointment", Phone: "+43 664 1234567", ResponseNote: "Bitte nur vormittags", RespondedAt: now}},
 	}
 	service, err := NewAdminService(store, func() time.Time { return now })
 	if err != nil {
@@ -86,7 +86,7 @@ func TestAdminServiceMasksOperationalViewsAndKeepsProviderReferenceAdminOnly(t *
 		t.Fatalf("admin history = %+v, %v", adminHistory, err)
 	}
 	callbacks, err := service.Callbacks(t.Context(), admin, 20)
-	if err != nil || callbacks[0].Phone != "***567" {
+	if err != nil || callbacks[0].Phone != "***567" || callbacks[0].ResponseNote != "Bitte nur vormittags" {
 		t.Fatalf("callbacks = %+v, %v", callbacks, err)
 	}
 }

@@ -64,6 +64,7 @@ func TestTask05NotificationConfirmationBrowserJourney(t *testing.T) {
 		AppName: "HackWerk", BaseURL: "http://" + server.Listener.Addr().String(), Database: config.Database{ReadinessTimeout: 2 * time.Second},
 		Auth:         config.Auth{SessionCookieName: "hackplan_session", CSRFCookieName: "hackplan_csrf", SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour},
 		Confirmation: config.Confirmation{RateLimit: 30}, Mail: config.Mail{Enabled: true},
+		Planning: config.Planning{BusinessOpen: "07:00", BusinessClose: "17:00"},
 	}
 	router, err := web.NewRouter(web.Dependencies{
 		Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pool, Build: buildinfo.Info{Version: "e2e"},

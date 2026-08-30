@@ -158,6 +158,127 @@ type ConflictResolution struct {
 	Alternatives                       []Alternative
 }
 
+type PreflightCheck struct {
+	Key    string `json:"key"`
+	Label  string `json:"label"`
+	Detail string `json:"detail"`
+	Passed bool   `json:"passed"`
+}
+
+type PreflightInput struct {
+	AppointmentID, Action string
+	ExpectedVersion       int32
+	StartsAt, EndsAt      time.Time
+	Assignments           *AssignmentInput
+}
+
+type Preflight struct {
+	CurrentStartsAt     time.Time        `json:"current_starts_at"`
+	CurrentEndsAt       time.Time        `json:"current_ends_at"`
+	ProposedStartsAt    time.Time        `json:"proposed_starts_at"`
+	ProposedEndsAt      time.Time        `json:"proposed_ends_at"`
+	WorkingMinutes      int32            `json:"working_minutes"`
+	TransportMinutes    int32            `json:"transport_minutes"`
+	BufferBeforeMinutes int32            `json:"buffer_before_minutes"`
+	BufferAfterMinutes  int32            `json:"buffer_after_minutes"`
+	Checks              []PreflightCheck `json:"checks"`
+	Conflicts           []Conflict       `json:"conflicts"`
+}
+
+func (s *Service) PreviewMutation(ctx context.Context, actor auth.Actor, input PreflightInput) (Preflight, error) {
+	if err := actor.Require(auth.PermissionAppointmentPlan); err != nil {
+		return Preflight{}, err
+	}
+	input.AppointmentID = strings.TrimSpace(input.AppointmentID)
+	if input.AppointmentID == "" || input.ExpectedVersion < 1 {
+		return Preflight{}, ErrValidation
+	}
+	current, err := s.store.Get(ctx, input.AppointmentID)
+	if err != nil {
+		return Preflight{}, err
+	}
+	startsAt, endsAt := input.StartsAt, input.EndsAt
+	if startsAt.IsZero() && endsAt.IsZero() {
+		startsAt, endsAt = current.StartsAt, current.EndsAt
+	}
+	if validateTime(TimeInput{StartsAt: startsAt, EndsAt: endsAt}) != nil {
+		return Preflight{}, ErrValidation
+	}
+	candidate := current
+	candidate.StartsAt, candidate.EndsAt = startsAt, endsAt
+	if input.Assignments != nil {
+		assignments := *input.Assignments
+		normalizeAssignments(&assignments)
+		if err := assignments.Validate(); err != nil {
+			return Preflight{}, err
+		}
+		candidate, err = s.assignmentSnapshot(ctx, candidate, assignments)
+		if err != nil {
+			return Preflight{}, err
+		}
+	}
+	result := Preflight{
+		CurrentStartsAt: current.StartsAt, CurrentEndsAt: current.EndsAt,
+		ProposedStartsAt: startsAt, ProposedEndsAt: endsAt,
+		WorkingMinutes: current.EstimatedHackMinutes, TransportMinutes: current.EstimatedTransportMinutes,
+		BufferBeforeMinutes: current.BufferBeforeMinutes, BufferAfterMinutes: current.BufferAfterMinutes,
+		Checks: make([]PreflightCheck, 0, 8),
+	}
+	result.Checks = append(result.Checks,
+		PreflightCheck{Key: "version", Label: "Terminversion", Passed: current.Version == input.ExpectedVersion, Detail: "Aktueller Stand wird beim Speichern erneut geprüft."},
+		PreflightCheck{Key: "job", Label: "Auftrag", Passed: strings.TrimSpace(current.JobID) != "", Detail: current.JobNumber},
+		PreflightCheck{Key: "time", Label: "Zeit und Dauer", Passed: endsAt.After(startsAt) && endsAt.Sub(startsAt) >= time.Duration(current.EstimatedHackMinutes+current.EstimatedTransportMinutes)*time.Minute, Detail: "Arbeits-, Transport- und Pufferzeit sind getrennt ausgewiesen."},
+	)
+	primaryDriver := false
+	for _, assigned := range candidate.Drivers {
+		primaryDriver = primaryDriver || assigned.Primary
+	}
+	chipper := false
+	transport := candidate.TransportMode != "internal"
+	driverIDs := make([]string, 0, len(candidate.Drivers))
+	for _, assigned := range candidate.Drivers {
+		driverIDs = append(driverIDs, assigned.ID)
+	}
+	resourceIDs := make([]string, 0, len(candidate.Resources))
+	for _, assigned := range candidate.Resources {
+		chipper = chipper || assigned.Purpose == PurposeChipping
+		transport = transport || assigned.Purpose == PurposeTransport
+		if assigned.Exclusive {
+			resourceIDs = append(resourceIDs, assigned.ID)
+		}
+	}
+	result.Checks = append(result.Checks,
+		PreflightCheck{Key: "driver", Label: "Primärfahrer", Passed: primaryDriver, Detail: "Mindestens ein Fahrer und genau ein Primärfahrer."},
+		PreflightCheck{Key: "chipper", Label: "Hackressource", Passed: chipper, Detail: "Eine aktive Hackmaschine ist erforderlich."},
+		PreflightCheck{Key: "transport", Label: "Transport", Passed: transport, Detail: "Interner Transport benötigt ein Transportmittel."},
+	)
+	from, to := reservationRange(candidate, startsAt, endsAt)
+	availabilityPassed := true
+	for _, assigned := range candidate.Drivers {
+		status, _, availabilityErr := s.availability.IsAvailable(ctx, actor, assigned.ID, from, to)
+		if availabilityErr != nil {
+			if errors.Is(availabilityErr, driver.ErrNotFound) {
+				availabilityPassed = false
+				continue
+			}
+			return Preflight{}, availabilityErr
+		}
+		if status != driver.StatusAvailable {
+			availabilityPassed = false
+		}
+	}
+	conflicts, err := s.store.ListConflicts(ctx, from, to, driverIDs, resourceIDs, current.ID)
+	if err != nil {
+		return Preflight{}, err
+	}
+	result.Conflicts = conflicts
+	result.Checks = append(result.Checks,
+		PreflightCheck{Key: "availability", Label: "Fahrerverfügbarkeit", Passed: availabilityPassed, Detail: "Abweichungen benötigen eine Admin-Begründung."},
+		PreflightCheck{Key: "conflicts", Label: "Konflikte", Passed: len(conflicts) == 0, Detail: fmt.Sprintf("%d betroffene Belegung(en)", len(conflicts))},
+	)
+	return result, nil
+}
+
 type SwapInput struct {
 	FirstID, SecondID           string
 	FirstVersion, SecondVersion int32

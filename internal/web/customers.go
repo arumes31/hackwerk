@@ -22,6 +22,7 @@ func registerCustomerRoutes(router chi.Router, dependencies Dependencies, page t
 	csrfCookie := dependencies.Config.Auth.CSRFCookieName
 	router.Get("/customers", customerList(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers/search", customerSearch(service, page, csrfCookie, dependencies.Logger))
+	router.Post("/search", workspaceSearch(service, page, csrfCookie, dependencies.Logger))
 	router.Get("/customers/new", intakePage(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers/new/search", intakeCustomerSearch(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers", createIntake(service, page, csrfCookie, dependencies.Logger))
@@ -41,6 +42,44 @@ func registerCustomerRoutes(router chi.Router, dependencies Dependencies, page t
 	router.Post("/waitlist/{waitlistID}/remove", removeWaitlist(service, dependencies.Logger))
 	router.Post("/waitlist/filter-favorites", saveWaitlistFilterFavorite(service, dependencies.Logger))
 	router.Post("/waitlist/filter-favorites/{favoriteID}/delete", deleteWaitlistFilterFavorite(service, dependencies.Logger))
+}
+
+func workspaceSearch(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Cache-Control", "no-store")
+		session, _ := sessionFromContext(request.Context())
+		query := request.Form.Get("q")
+		results, err := service.SearchWorkspace(request.Context(), session.Actor, query)
+		if strings.Contains(request.Header.Get("Accept"), "application/json") {
+			if err != nil {
+				status, code, message := workspaceSearchError(err)
+				logger.WarnContext(request.Context(), "workspace search rejected", slog.String("error_code", code))
+				writeJSON(response, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
+				return
+			}
+			writeJSON(response, http.StatusOK, map[string]any{"results": results})
+			return
+		}
+		data := templates.WorkspaceSearchData{Shell: shell(request, page, csrfCookie), Query: query, Results: results}
+		status := http.StatusOK
+		if err != nil {
+			var code string
+			status, code, data.Error = workspaceSearchError(err)
+			logger.WarnContext(request.Context(), "workspace search rejected", slog.String("error_code", code))
+		}
+		render(response, request, templates.WorkspaceSearch(data), status, logger)
+	}
+}
+
+func workspaceSearchError(err error) (int, string, string) {
+	switch {
+	case errors.Is(err, auth.ErrForbidden):
+		return http.StatusForbidden, "search_forbidden", "Für die globale Suche fehlt die Berechtigung."
+	case errors.Is(err, customers.ErrValidation):
+		return http.StatusUnprocessableEntity, "search_invalid", "Bitte mindestens zwei und höchstens 120 Zeichen eingeben."
+	default:
+		return http.StatusServiceUnavailable, "search_unavailable", "Die Suche ist derzeit nicht verfügbar. Bitte versuchen Sie es erneut."
+	}
 }
 
 func updateCustomer(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
@@ -495,7 +534,7 @@ func updateWaitlistPriority(service *customers.Service, logger *slog.Logger) htt
 		priority, priorityErr := strconv.ParseInt(request.Form.Get("priority"), 10, 32)
 		err := errors.Join(versionErr, priorityErr)
 		if err == nil {
-			err = service.UpdateWaitlistPriority(request.Context(), session.Actor, chi.URLParam(request, "waitlistID"), int32(priority), version, middleware.GetReqID(request.Context()))
+			err = service.UpdateWaitlistPriority(request.Context(), session.Actor, chi.URLParam(request, "waitlistID"), int32(priority), request.Form.Get("reason"), version, middleware.GetReqID(request.Context()))
 		}
 		if err != nil {
 			mutationError(response, err, logger, request, "waitlist_priority_rejected")
@@ -531,6 +570,7 @@ func intakeValues(request *http.Request) templates.IntakeValues {
 		HackDuration: request.Form.Get("hack_duration"), TransportDuration: request.Form.Get("transport_duration"),
 		Trips: request.Form.Get("transport_trips"), TransportMode: request.Form.Get("transport_mode"),
 		PreferredStart: request.Form.Get("preferred_start"), PreferredEnd: request.Form.Get("preferred_end"),
+		PreferenceMode: request.Form.Get("preference_mode"),
 		PreferenceText: request.Form.Get("preference_text"), Urgency: request.Form.Get("urgency"),
 		Source: request.Form.Get("source"), Note: request.Form.Get("note"),
 		PileLatitude: request.Form.Get("pile_latitude"), PileLongitude: request.Form.Get("pile_longitude"),
@@ -540,14 +580,14 @@ func intakeValues(request *http.Request) templates.IntakeValues {
 }
 
 func defaultIntakeValues() templates.IntakeValues {
-	return templates.IntakeValues{Notification: "none", JobType: "chipping_only", TransportMode: "none", Urgency: "normal", Source: "phone"}
+	return templates.IntakeValues{Notification: "none", JobType: "chipping_only", TransportMode: "none", PreferenceMode: "window", Urgency: "normal", Source: "phone"}
 }
 
 func jobDraftValues(job customers.JobInput) templates.IntakeValues {
 	values := templates.IntakeValues{
 		JobType: string(job.JobType), Volume: job.VolumeM3, HackDuration: strconv.Itoa(job.EstimatedHackMinutes),
 		TransportMode: string(job.TransportMode), PreferredStart: job.PreferredStartDate,
-		PreferredEnd: job.PreferredEndDate, PreferenceText: job.PreferenceText, Urgency: string(job.Urgency),
+		PreferredEnd: job.PreferredEndDate, PreferenceMode: string(job.PreferenceMode), PreferenceText: job.PreferenceText, Urgency: string(job.Urgency),
 		Region: job.Region, Source: string(job.Source), ExternalConfirmed: job.ExternalTransportConfirmed,
 		PileLocationSource: string(job.PileLocationSource),
 	}
@@ -570,6 +610,7 @@ func waitlistFilterFromRequest(request *http.Request) customers.WaitlistFilter {
 		MissingLocation: request.FormValue("missing_location") == "1",
 		DurationIssue:   request.FormValue("duration_issue") == "1", Overdue: request.FormValue("overdue") == "1",
 		Unassigned: request.FormValue("unassigned") == "1", TransportPending: request.FormValue("transport_pending") == "1",
+		Incomplete:    request.FormValue("incomplete") == "1",
 		DurationGroup: request.FormValue("duration_group"), Page: queryPage(request), PageSize: 25,
 	}
 	filter.Normalize()
@@ -600,6 +641,9 @@ func waitlistFilterLocation(filter customers.WaitlistFilter) string {
 	}
 	if filter.TransportPending {
 		values.Set("transport_pending", "1")
+	}
+	if filter.Incomplete {
+		values.Set("incomplete", "1")
 	}
 	if encoded := values.Encode(); encoded != "" {
 		return "/waitlist?" + encoded
@@ -691,6 +735,12 @@ func validatePreferredDates(values templates.IntakeValues, add func(string, stri
 	if endErr != nil || (startErr == nil && !start.IsZero() && !end.IsZero() && end.Before(start)) {
 		add("preferred_end", "Spätestes Datum", "Ein gültiges Datum wählen, das nicht vor dem frühesten Datum liegt.")
 	}
+	mode := customers.PreferenceMode(values.PreferenceMode)
+	if !mode.Valid() {
+		add("preference_mode", "Terminpräferenz", "Fixes Datum, Zeitraum oder flexibel auswählen.")
+	} else if mode == customers.PreferenceFixed && (start.IsZero() || end.IsZero() || !start.Equal(end)) {
+		add("preferred_start", "Fixes Datum", "Für ein fixes Datum müssen frühestes und spätestes Datum identisch sein.")
+	}
 }
 
 func parseFormDate(value string) (time.Time, error) {
@@ -735,7 +785,7 @@ func jobInput(values templates.IntakeValues) (customers.JobInput, error) {
 		JobType: customers.JobType(values.JobType), VolumeM3: values.Volume, EstimatedHackMinutes: hackMinutes,
 		EstimatedTransportMinutes: transportMinutes, TransportTripCount: trips,
 		TransportMode: customers.TransportMode(values.TransportMode), PreferredStartDate: values.PreferredStart,
-		PreferredEndDate: values.PreferredEnd, PreferenceText: values.PreferenceText,
+		PreferredEndDate: values.PreferredEnd, PreferenceMode: customers.PreferenceMode(values.PreferenceMode), PreferenceText: values.PreferenceText,
 		Urgency: customers.Urgency(values.Urgency), Region: values.Region, Source: customers.Source(values.Source),
 		ExternalTransportConfirmed: values.ExternalConfirmed,
 		PileLatitude:               pileLatitude, PileLongitude: pileLongitude, PileLocationSource: pileSource,

@@ -479,7 +479,7 @@ func NotificationFailures(data NotificationFailuresData) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if len(data.Callbacks) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<div class=\"table-scroll\"><table><caption class=\"visually-hidden\">Offene Rückrufwünsche</caption><thead><tr><th>Auftrag</th><th>Kunde/Ort</th><th>Telefon</th><th>Antwort</th><th>Link gültig bis</th><th>Aktion</th></tr></thead> <tbody>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<div class=\"table-scroll\"><table><caption class=\"visually-hidden\">Offene Rückrufwünsche</caption><thead><tr><th>Auftrag</th><th>Kunde/Ort</th><th>Telefon</th><th>Rückrufnotiz</th><th>Antwort</th><th>Link gültig bis</th><th>Aktion</th></tr></thead> <tbody>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -536,12 +536,12 @@ func NotificationFailures(data NotificationFailuresData) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "</td><td>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "</td><td class=\"callback-note\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var34 string
-				templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(notificationLocalTime(value.RespondedAt))
+				templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(value.ResponseNote)
 				if templ_7745c5c3_Err != nil {
 					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/notifications.templ`, Line: 89, Col: 183}
 				}
@@ -554,95 +554,108 @@ func NotificationFailures(data NotificationFailuresData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var35 string
-				templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(notificationLocalTime(value.ExpiresAt))
+				templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(notificationLocalTime(value.RespondedAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/notifications.templ`, Line: 89, Col: 234}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/notifications.templ`, Line: 89, Col: 236}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "</td><td><a class=\"button button--quiet\" href=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "</td><td>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var36 templ.SafeURL
-				templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinURLErrs("/calendar?appointment=" + url.QueryEscape(value.AppointmentID))
+				var templ_7745c5c3_Var36 string
+				templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(notificationLocalTime(value.ExpiresAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/notifications.templ`, Line: 89, Col: 347}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/notifications.templ`, Line: 89, Col: 287}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "\">Termin öffnen</a></td></tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "</td><td><a class=\"button button--quiet\" href=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var37 templ.SafeURL
+				templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinURLErrs("/calendar?appointment=" + url.QueryEscape(value.AppointmentID))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/notifications.templ`, Line: 89, Col: 400}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "\">Termin öffnen</a></td></tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "</tbody></table></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "</tbody></table></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<p>Derzeit ist kein Rückruf offen.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<p>Derzeit ist kein Rückruf offen.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "</section><section class=\"table-card\" aria-labelledby=\"template-preview-title\"><div class=\"section-heading\"><div><p class=\"eyebrow\">Synthetische Beispieldaten</p><h2 id=\"template-preview-title\">Nachrichtenvorschau</h2><p>Diese Vorschau verwendet keine Kunden-, Termin- oder Providerdaten und löst keinen Versand aus.</p></div></div><div class=\"form-grid\"><div><h3>E-Mail</h3><p><strong>Betreff:</strong> ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var37 string
-		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(data.Preview.Subject)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/notifications.templ`, Line: 100, Col: 99}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</p><pre>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</section><section class=\"table-card\" aria-labelledby=\"template-preview-title\"><div class=\"section-heading\"><div><p class=\"eyebrow\">Synthetische Beispieldaten</p><h2 id=\"template-preview-title\">Nachrichtenvorschau</h2><p>Diese Vorschau verwendet keine Kunden-, Termin- oder Providerdaten und löst keinen Versand aus.</p></div></div><div class=\"form-grid\"><div><h3>E-Mail</h3><p><strong>Betreff:</strong> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var38 string
-		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(data.Preview.Text)
+		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(data.Preview.Subject)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/notifications.templ`, Line: 100, Col: 129}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/notifications.templ`, Line: 100, Col: 99}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "</pre></div><div><h3>SMS</h3><p><span class=\"status-badge\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "</p><pre>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var39 string
-		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d Segment(e) · %s", data.Preview.SMSSegments, data.Preview.SMSEncoding))
+		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(data.Preview.Text)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/notifications.templ`, Line: 100, Col: 278}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/notifications.templ`, Line: 100, Col: 129}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "</span></p><pre>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "</pre></div><div><h3>SMS</h3><p><span class=\"status-badge\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var40 string
-		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(data.Preview.SMS)
+		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d Segment(e) · %s", data.Preview.SMSSegments, data.Preview.SMSEncoding))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/notifications.templ`, Line: 100, Col: 314}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/notifications.templ`, Line: 100, Col: 278}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</pre></div></div><div class=\"form-alert form-alert--info\"><strong>Kanalprüfung vor Fixierung</strong><p>HackWerk zeigt den konfigurierten Kanal und das maskierte Ziel. Fehlen Wunschkanal oder Kontaktdaten, wird der konkrete Grund genannt. Ein anderer vorhandener Kanal wird nur vorgeschlagen und niemals automatisch entgegen der Kundenpräferenz verwendet. Bei Präferenz „Keine“ bleibt eine begründete Adminausnahme erforderlich.</p></div></section></main>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</span></p><pre>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var41 string
+		templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(data.Preview.SMS)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/notifications.templ`, Line: 100, Col: 314}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</pre></div></div><div class=\"form-alert form-alert--info\"><strong>Kanalprüfung vor Fixierung</strong><p>HackWerk zeigt den konfigurierten Kanal und das maskierte Ziel. Fehlen Wunschkanal oder Kontaktdaten, wird der konkrete Grund genannt. Ein anderer vorhandener Kanal wird nur vorgeschlagen und niemals automatisch entgegen der Kundenpräferenz verwendet. Bei Präferenz „Keine“ bleibt eine begründete Adminausnahme erforderlich.</p></div></section></main>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -650,7 +663,7 @@ func NotificationFailures(data NotificationFailuresData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "</body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

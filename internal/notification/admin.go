@@ -66,8 +66,8 @@ func ParseFailureFilter(value string) FailureFilter {
 }
 
 type CallbackRequest struct {
-	AppointmentID, JobNumber, CustomerName, Locality, Phone string
-	RespondedAt, ExpiresAt                                  time.Time
+	AppointmentID, JobNumber, CustomerName, Locality, Phone, ResponseNote string
+	RespondedAt, ExpiresAt                                                time.Time
 }
 
 type AdminStore interface {

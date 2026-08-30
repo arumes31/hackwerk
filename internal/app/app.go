@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"example.invalid/hackplan/internal/adapters/postgres"
+	"example.invalid/hackplan/internal/auth"
 	"example.invalid/hackplan/internal/buildinfo"
 	"example.invalid/hackplan/internal/calendarfeed"
 	"example.invalid/hackplan/internal/config"
@@ -259,6 +260,13 @@ func Worker(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		}, time.Now, logger,
 	)
 	if err != nil {
+		return err
+	}
+	securityKeys, err := auth.NewSecurityKeyRing(cfg.Auth.SecurityKeys, cfg.Auth.SecurityCurrentKeyID)
+	if err != nil {
+		return err
+	}
+	if err := processor.ConfigureIdentityEmail(postgres.NewNotificationWorkerStore(pool), securityKeys); err != nil {
 		return err
 	}
 	voiceService, err := VoiceService(cfg, pool)

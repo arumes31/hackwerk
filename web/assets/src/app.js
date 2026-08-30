@@ -117,6 +117,12 @@ function updateConnectivityBanner() {
       ? "Verbindung wiederhergestellt. Nicht gespeicherte Änderungen können jetzt gesendet werden."
       : `Offline: Lesen bleibt teilweise möglich. Letzte Verbindung${lastSuccessfulConnection ? ` um ${lastSuccessfulConnection.toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" })} Uhr` : " unbekannt"}. Änderungen werden nicht zwischengespeichert.`;
   });
+  document.querySelectorAll("[data-profile-connectivity]").forEach((status) => {
+    status.textContent = navigator.onLine
+      ? "Online – Änderungen werden direkt an HackWerk gesendet"
+      : "Offline – Änderungen sind gesperrt und werden nicht vorgemerkt";
+    status.dataset.state = navigator.onLine ? "online" : "offline";
+  });
   const recovered = navigator.onLine && wasOffline;
   if (navigator.onLine) {
     lastSuccessfulConnection = new Date();
@@ -242,38 +248,71 @@ document.querySelectorAll('input[type="password"]').forEach((input) => {
   input.addEventListener("keydown", updateCaps); input.addEventListener("keyup", updateCaps); input.addEventListener("blur", () => { caps.textContent = ""; });
 });
 
+document.querySelectorAll("[data-password-strength]").forEach((input) => {
+  const output = document.querySelector("[data-password-strength-output]");
+  if (!output) return;
+  const bar = output.querySelector("span");
+  const label = output.querySelector("small");
+  const update = () => {
+    const value = input.value;
+    const score = [value.length >= 14, value.length >= 20, /[a-z]/.test(value) && /[A-Z]/.test(value), /\d/.test(value), /[^\p{L}\p{N}]/u.test(value)].filter(Boolean).length;
+    output.dataset.score = String(score);
+    if (bar) bar.style.setProperty("--password-score", `${score * 20}%`);
+    if (label) label.textContent = value.length < 14
+      ? `Noch ${14 - value.length} Zeichen bis zur Mindestlänge.`
+      : score >= 4 ? "Starkes Passwort. Die endgültige Prüfung erfolgt beim Speichern." : "Gültige Länge. Mehr Länge und unterschiedliche Zeichenarten erhöhen die Stärke.";
+  };
+  input.addEventListener("input", update);
+  update();
+});
+
 let installEvent;
 const installPrompt = document.querySelector("[data-install-prompt]");
+const profileInstallButton = document.querySelector("[data-profile-install]");
+const profileInstallStatus = document.querySelector("[data-profile-install-status]");
 const hideInstallPrompt = () => {
   if (installPrompt) installPrompt.hidden = true;
 };
 const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
-
-hideInstallPrompt();
-window.addEventListener("beforeinstallprompt", (event) => {
-  event.preventDefault();
-  if (typeof event.prompt !== "function") return;
-  installEvent = event;
-  if (safePreferenceGet("hackwerk:install-dismissed") !== "true" && !isStandalone() && installPrompt) {
-    installPrompt.hidden = false;
-    announce("HackWerk kann auf diesem Gerät installiert werden.");
-  }
-});
-installPrompt?.querySelector("[data-install-accept]")?.addEventListener("click", async () => {
+const updateInstallState = () => {
+  const installed = isStandalone();
+  if (profileInstallStatus) profileInstallStatus.textContent = installed ? "Installiert" : installEvent ? "Installation unterstützt" : "In diesem Browser nicht verfügbar";
+  if (profileInstallButton) profileInstallButton.hidden = installed || !installEvent;
+};
+const promptForInstall = async () => {
   if (!installEvent) {
     hideInstallPrompt();
+    updateInstallState();
     return;
   }
   const promptEvent = installEvent;
   installEvent = undefined;
   hideInstallPrompt();
+  updateInstallState();
   try {
     await promptEvent.prompt();
     await promptEvent.userChoice;
   } catch {
     announce("Die Installation konnte nicht geöffnet werden. Verwenden Sie bei Bedarf die Installationsfunktion des Browsers.");
   }
+};
+
+hideInstallPrompt();
+updateInstallState();
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  if (typeof event.prompt !== "function") return;
+  installEvent = event;
+  updateInstallState();
+  if (safePreferenceGet("hackwerk:install-dismissed") !== "true" && !isStandalone() && installPrompt) {
+    installPrompt.hidden = false;
+    announce("HackWerk kann auf diesem Gerät installiert werden.");
+  }
 });
+installPrompt?.querySelector("[data-install-accept]")?.addEventListener("click", async () => {
+  await promptForInstall();
+});
+profileInstallButton?.addEventListener("click", promptForInstall);
 installPrompt?.querySelector("[data-install-dismiss]")?.addEventListener("click", () => {
   safePreferenceSet("hackwerk:install-dismissed", "true");
   installEvent = undefined;
@@ -282,6 +321,126 @@ installPrompt?.querySelector("[data-install-dismiss]")?.addEventListener("click"
 window.addEventListener("appinstalled", () => {
   installEvent = undefined;
   hideInstallPrompt();
+  updateInstallState();
+});
+
+const bytesFromBase64URL = (value) => {
+  const base64 = String(value).replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(String(value).length / 4) * 4, "=");
+  return Uint8Array.from(window.atob(base64), (character) => character.charCodeAt(0));
+};
+const base64URLFromBytes = (value) => {
+  if (value === null || value === undefined) return null;
+  const bytes = new Uint8Array(value);
+  let binary = "";
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+};
+const credentialCreationOptions = (options) => {
+  const publicKey = options.publicKey || options;
+  if (PublicKeyCredential.parseCreationOptionsFromJSON) return { publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(publicKey) };
+  publicKey.challenge = bytesFromBase64URL(publicKey.challenge);
+  publicKey.user.id = bytesFromBase64URL(publicKey.user.id);
+  (publicKey.excludeCredentials || []).forEach((item) => { item.id = bytesFromBase64URL(item.id); });
+  return options.publicKey ? { ...options, publicKey } : { publicKey };
+};
+const credentialRequestOptions = (options) => {
+  const publicKey = options.publicKey || options;
+  if (PublicKeyCredential.parseRequestOptionsFromJSON) return { publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(publicKey) };
+  publicKey.challenge = bytesFromBase64URL(publicKey.challenge);
+  (publicKey.allowCredentials || []).forEach((item) => { item.id = bytesFromBase64URL(item.id); });
+  return options.publicKey ? { ...options, publicKey } : { publicKey };
+};
+const publicKeyCredentialJSON = (credential) => {
+  if (typeof credential.toJSON === "function") return credential.toJSON();
+  const response = {
+    clientDataJSON: base64URLFromBytes(credential.response.clientDataJSON),
+  };
+  if (credential.response.attestationObject) response.attestationObject = base64URLFromBytes(credential.response.attestationObject);
+  if (credential.response.authenticatorData) response.authenticatorData = base64URLFromBytes(credential.response.authenticatorData);
+  if (credential.response.signature) response.signature = base64URLFromBytes(credential.response.signature);
+  if (credential.response.userHandle) response.userHandle = base64URLFromBytes(credential.response.userHandle);
+  if (credential.response.getTransports) response.transports = credential.response.getTransports();
+  return { id: credential.id, rawId: base64URLFromBytes(credential.rawId), type: credential.type, response, clientExtensionResults: credential.getClientExtensionResults(), authenticatorAttachment: credential.authenticatorAttachment };
+};
+const passkeysSupported = () => window.isSecureContext && "PublicKeyCredential" in window && navigator.credentials;
+
+document.querySelectorAll("[data-passkey-register]").forEach((form) => {
+  const button = form.querySelector("[data-passkey-register-button]");
+  const status = form.querySelector("[data-passkey-support]");
+  if (!passkeysSupported()) {
+    if (button) button.hidden = true;
+    if (status) status.textContent = "Passkeys werden auf diesem Gerät oder in dieser Verbindung nicht unterstützt.";
+    return;
+  }
+  if (status) status.textContent = "Unterstützt. HackWerk speichert keinen Fingerabdruck und keine Geräte-PIN.";
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (button) button.disabled = true;
+    if (status) status.textContent = "Passkey wird vorbereitet …";
+    try {
+      const csrf = form.elements.namedItem("csrf_token")?.value || "";
+      const optionsResponse = await fetch("/profile/security/passkeys/options", { method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": csrf } });
+      if (!optionsResponse.ok) throw new Error("options");
+      const credential = await navigator.credentials.create(credentialCreationOptions(await optionsResponse.json()));
+      const passkeyName = encodeURIComponent(form.elements.namedItem("name")?.value || "Dieses Gerät");
+      const finishResponse = await fetch(`/profile/security/passkeys/finish?name=${passkeyName}`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf }, body: JSON.stringify(publicKeyCredentialJSON(credential)) });
+      if (!finishResponse.ok) throw new Error("finish");
+      const result = await finishResponse.json();
+      if (Array.isArray(result.recovery_codes) && result.recovery_codes.length) {
+        const panel = document.querySelector(".recovery-panel");
+        const oneTime = document.createElement("div");
+        oneTime.className = "recovery-codes";
+        oneTime.setAttribute("role", "status");
+        oneTime.tabIndex = -1;
+        const heading = document.createElement("strong"); heading.textContent = "Jetzt einmalig speichern";
+        const list = document.createElement("ul");
+        result.recovery_codes.forEach((value) => { const item = document.createElement("li"); const code = document.createElement("code"); code.textContent = String(value); item.append(code); list.append(item); });
+        const help = document.createElement("p"); help.textContent = "Der Passkey ist aktiv. Laden Sie die Seite erst neu, nachdem Sie diese Codes gesichert haben.";
+        oneTime.append(heading, list, help);
+        panel?.prepend(oneTime);
+        oneTime.focus();
+        if (status) status.textContent = "Passkey aktiviert. Recovery-Codes jetzt sicher speichern.";
+      } else {
+        window.location.assign("/profile?status=passkey_added#security");
+      }
+    } catch (error) {
+      if (status) status.textContent = error?.name === "NotAllowedError" ? "Passkey-Einrichtung abgebrochen oder nicht erlaubt." : "Passkey konnte nicht eingerichtet werden. Bitte erneut versuchen.";
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
+});
+
+document.querySelectorAll("[data-passkey-login]").forEach((button) => {
+  const status = document.querySelector("[data-passkey-login-status]");
+  if (!passkeysSupported()) {
+    button.hidden = true;
+    if (status) status.textContent = "Passkeys werden auf diesem Gerät oder in dieser Verbindung nicht unterstützt.";
+    return;
+  }
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    if (status) status.textContent = "Passkey wird angefordert …";
+    try {
+      const optionsResponse = await fetch("/login/mfa/passkey/options", { method: "POST", credentials: "same-origin" });
+      if (!optionsResponse.ok) throw new Error("options");
+      const credential = await navigator.credentials.get(credentialRequestOptions(await optionsResponse.json()));
+      const finishResponse = await fetch("/login/mfa/passkey/finish", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(publicKeyCredentialJSON(credential)) });
+      if (!finishResponse.ok) throw new Error("finish");
+      const result = await finishResponse.json();
+      window.location.assign(result.redirect || "/dashboard");
+    } catch (error) {
+      if (status) status.textContent = error?.name === "NotAllowedError" ? "Passkey-Anmeldung abgebrochen oder nicht erlaubt." : "Passkey konnte nicht geprüft werden. Verwenden Sie eine andere Methode oder versuchen Sie es erneut.";
+      button.disabled = false;
+    }
+  });
+});
+
+document.querySelectorAll("[data-logout-form]").forEach((form) => {
+  form.addEventListener("submit", () => {
+    if (!form.querySelector("[data-clear-local-preferences]")?.checked) return;
+    ["hackwerk:density", "hackwerk:outdoor", "hackwerk:install-dismissed", "hackwerk:privacy-notice:v1"].forEach(safePreferenceRemove);
+  });
 });
 
 document.querySelectorAll("[data-mobile-menu] a").forEach((link) => link.addEventListener("click", () => { link.closest("details")?.removeAttribute("open"); }));
@@ -797,6 +956,56 @@ function showAppointmentFailure(failure) {
   showAppointmentError(failure.message, null, appointmentConflictCause(failure));
 }
 
+function renderAppointmentPreflight(preview) {
+  const target = document.querySelector("[data-appointment-preflight]");
+  if (!target) return;
+  target.replaceChildren();
+  const heading = document.createElement("h3");
+  heading.textContent = "Prüfung vor der Änderung";
+  const timing = document.createElement("p");
+  timing.textContent = `Arbeit ${preview.WorkingMinutes ?? preview.working_minutes ?? 0} Min. · Transport ${preview.TransportMinutes ?? preview.transport_minutes ?? 0} Min. · Puffer ${preview.BufferBeforeMinutes ?? preview.buffer_before_minutes ?? 0}/${preview.BufferAfterMinutes ?? preview.buffer_after_minutes ?? 0} Min.`;
+  const list = document.createElement("ul");
+  list.className = "preflight-check-list";
+  (preview.Checks || preview.checks || []).forEach((check) => {
+    const item = document.createElement("li");
+    const passed = check.Passed ?? check.passed;
+    item.className = passed ? "preflight-check preflight-check--passed" : "preflight-check preflight-check--failed";
+    const label = document.createElement("strong");
+    label.textContent = `${passed ? "Bestanden" : "Prüfen"}: ${check.Label || check.label}`;
+    const detail = document.createElement("span");
+    detail.textContent = check.Detail || check.detail || "";
+    item.append(label, detail); list.append(item);
+  });
+  const conflicts = preview.Conflicts || preview.conflicts || [];
+  target.append(heading, timing, list);
+  if (conflicts.length) {
+    const conflictHeading = document.createElement("strong");
+    conflictHeading.textContent = "Betroffene Zuweisungen";
+    const conflictList = document.createElement("ul");
+    conflicts.forEach((conflict) => {
+      const item = document.createElement("li");
+      item.textContent = `${conflict.SubjectName || conflict.subject_name || "Ressource"} · ${conflict.JobNumber || conflict.job_number || "Termin"} · ${conflict.CustomerName || conflict.customer_name || ""}`;
+      conflictList.append(item);
+    });
+    target.append(conflictHeading, conflictList);
+  }
+  target.hidden = false;
+  target.tabIndex = -1;
+  target.focus();
+}
+
+async function previewAppointmentMutation(appointmentID, version, action, extra, csrf) {
+  const form = new FormData();
+  form.set("csrf_token", csrf); form.set("version", version); form.set("action", action);
+  Object.entries(extra || {}).forEach(([key, value]) => {
+    if (Array.isArray(value)) value.forEach((item) => form.append(key, item));
+    else form.set(key, value);
+  });
+  const preview = await calendarRequest(`/api/v1/appointments/${encodeURIComponent(appointmentID)}/preview`, form, csrf);
+  renderAppointmentPreflight(preview);
+  return preview;
+}
+
 async function showConflictAlternatives(appointmentID, startsAt, endsAt) {
   if (!appointmentID || !startsAt || !endsAt) return;
   const query = new URLSearchParams({ starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString() });
@@ -930,6 +1139,105 @@ document.querySelectorAll("[data-dialog-close]").forEach((button) => {
   button.addEventListener("click", () => closeDialogWithDirtyCheck(button.closest("dialog")));
 });
 
+const commandPalette = document.querySelector("[data-command-palette]");
+const shortcutDialog = document.querySelector("[data-shortcuts-dialog]");
+let commandTrigger = null;
+let shortcutTrigger = null;
+
+function openCommandPalette(trigger) {
+  if (!commandPalette) return;
+  commandTrigger = trigger || document.activeElement;
+  if (!commandPalette.open) commandPalette.showModal();
+  window.requestAnimationFrame(() => commandPalette.querySelector("[data-global-search-input]")?.focus());
+}
+
+function closeCommandPalette() {
+  if (!commandPalette?.open) return;
+  commandPalette.close();
+  commandTrigger?.focus?.();
+}
+
+document.querySelectorAll("[data-command-open]").forEach((button) => button.addEventListener("click", () => openCommandPalette(button)));
+document.querySelectorAll("[data-command-close]").forEach((button) => button.addEventListener("click", closeCommandPalette));
+document.querySelectorAll("[data-shortcuts-open]").forEach((button) => button.addEventListener("click", () => {
+	shortcutTrigger = commandTrigger || button;
+  if (commandPalette?.open) commandPalette.close();
+  if (shortcutDialog && !shortcutDialog.open) shortcutDialog.showModal();
+  window.requestAnimationFrame(() => shortcutDialog?.querySelector("[data-shortcuts-close]")?.focus());
+}));
+document.querySelectorAll("[data-shortcuts-close]").forEach((button) => button.addEventListener("click", () => shortcutDialog?.close()));
+commandPalette?.addEventListener("close", () => commandTrigger?.focus?.());
+shortcutDialog?.addEventListener("close", () => shortcutTrigger?.focus?.());
+
+document.addEventListener("keydown", (event) => {
+  const active = document.activeElement;
+  const isInput = active && active.matches("input, textarea, select, [contenteditable='true']");
+  if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase("de-AT") === "k") {
+    event.preventDefault(); openCommandPalette(active); return;
+  }
+  if (!isInput && event.key === "?") {
+    event.preventDefault();
+	shortcutTrigger = active;
+    if (commandPalette?.open) commandPalette.close();
+    if (shortcutDialog && !shortcutDialog.open) shortcutDialog.showModal();
+	window.requestAnimationFrame(() => shortcutDialog?.querySelector("[data-shortcuts-close]")?.focus());
+  }
+});
+
+function renderGlobalSearchResults(target, results) {
+  target.replaceChildren();
+  if (!results.length) {
+    const empty = document.createElement("p"); empty.textContent = "Keine Treffer."; target.append(empty); return;
+  }
+  results.forEach((result) => {
+    const link = document.createElement("a"); link.className = "search-result"; link.href = result.Href || result.href;
+    const label = document.createElement("span"); label.className = "status-badge";
+    label.textContent = ({ customer: "Kunde", job: "Auftrag", appointment: "Termin" })[result.Kind || result.kind] || "Treffer";
+    const title = document.createElement("strong"); title.textContent = result.Title || result.title;
+    const subtitle = document.createElement("small"); subtitle.textContent = result.Subtitle || result.subtitle || "";
+    link.append(label, title, subtitle); target.append(link);
+  });
+  target.querySelector("a")?.focus();
+}
+
+document.querySelector("[data-global-search-form]")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const target = commandPalette?.querySelector("[data-global-search-results]");
+  if (!target || !form.reportValidity()) return;
+  target.textContent = "Suche läuft …";
+  try {
+    const response = await fetch(form.action, { method: "POST", body: new URLSearchParams(new FormData(form)), credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error?.message || "Suche derzeit nicht verfügbar.");
+    renderGlobalSearchResults(target, payload.results || []);
+  } catch (failure) {
+    target.replaceChildren();
+    const message = document.createElement("p"); message.className = "form-alert"; message.textContent = failure.message;
+    const retry = document.createElement("button"); retry.type = "button"; retry.className = "button button--quiet"; retry.textContent = "Suche erneut versuchen"; retry.addEventListener("click", () => form.requestSubmit());
+    target.append(message, retry); retry.focus();
+  }
+});
+
+const waitlistSelections = Array.from(document.querySelectorAll("[data-waitlist-select]"));
+const selectionCount = document.querySelector("[data-selection-count]");
+const selectionOpen = document.querySelector("[data-selection-open]");
+function updateWaitlistSelection() {
+  const selected = waitlistSelections.filter((input) => input.checked);
+  if (selected.length > 20) {
+    const changed = selected[selected.length - 1]; changed.checked = false;
+    announce("Maximal 20 Aufträge auswählen.", "Auswahl begrenzt");
+    return updateWaitlistSelection();
+  }
+  if (selectionCount) selectionCount.textContent = `${selected.length} ausgewählt`;
+  if (selectionOpen) selectionOpen.disabled = selected.length === 0;
+}
+waitlistSelections.forEach((input) => input.addEventListener("change", updateWaitlistSelection));
+selectionOpen?.addEventListener("click", () => {
+  waitlistSelections.filter((input) => input.checked).forEach((input) => window.open(input.dataset.openHref, "_blank", "noopener"));
+  announce("Ausgewählte Aufträge wurden nur lesend geöffnet. Es wurde keine Mehrfachmutation ausgeführt.");
+});
+
 const planningForm = document.querySelector("[data-planning-form]");
 if (planningForm) {
   planningForm.addEventListener("submit", async (event) => {
@@ -1042,6 +1350,8 @@ async function appointmentDetail(event, loadedProps) {
   dialog.dataset.notificationTargets = planningSummary.targets.join(" und ");
   dialog.dataset.appointmentSummary = `${props.title}; ${props.status_label}`;
   clearAppointmentError();
+  const previousPreflight = dialog.querySelector("[data-appointment-preflight]");
+  if (previousPreflight) { previousPreflight.hidden = true; previousPreflight.replaceChildren(); }
   dialog.querySelectorAll([
     "[data-appointment-move-override]",
     "[data-without-notification-reason]",
@@ -1072,6 +1382,9 @@ async function appointmentDetail(event, loadedProps) {
     ["Status", props.status_label],
     ["Zeit", `${dateTime.format(start)} – ${time.format(end)}`],
     ["Dauer", `${Math.round((end - start) / 60000)} Minuten${dateOnly.format(start) !== dateOnly.format(end) ? " · endet am Folgetag" : ""}`],
+    ["Arbeitszeit", `${props.working_minutes || 0} Minuten`],
+    ["Transportzeit", `${props.transport_minutes || 0} Minuten`],
+    ["Puffer", `${props.buffer_before_minutes || 0} Minuten davor · ${props.buffer_after_minutes || 0} Minuten danach`],
     ["Ort", props.locality], ["Menge", `${props.volume_m3} m³`],
     ["Fahrer", (props.drivers || []).map((item) => item.Name).join(", ") || "Nicht zugewiesen"],
     ["Ressourcen", (props.resources || []).map((item) => item.Name).join(", ") || "Nicht zugewiesen"],
@@ -1110,6 +1423,16 @@ async function appointmentDetail(event, loadedProps) {
     wrapper.append(term, description); list.append(wrapper);
   });
   detail.append(list);
+  if (props.message_preview) {
+    const preview = document.createElement("section");
+    preview.className = "message-preview";
+    const heading = document.createElement("h3"); heading.textContent = "Nachrichtenvorschau vor Fixierung / neuem Link";
+    const explanation = document.createElement("p"); explanation.textContent = "Nebenwirkungsfrei; [BESTÄTIGUNGSLINK] wird erst im Worker sicher ersetzt.";
+    const subject = document.createElement("p"); subject.textContent = `Betreff: ${props.message_preview.Subject || props.message_preview.subject || ""}`;
+    const email = document.createElement("pre"); email.textContent = props.message_preview.Text || props.message_preview.text || "";
+    const sms = document.createElement("pre"); sms.textContent = props.message_preview.SMS || props.message_preview.sms || "";
+    preview.append(heading, explanation, subject, email, sms); detail.append(preview);
+  }
   const copyTime = document.createElement("button");
   copyTime.type = "button"; copyTime.className = "button button--quiet"; copyTime.textContent = "Beginn und Ende kopieren";
   copyTime.addEventListener("click", async () => { if (await copyText(`${dateTime.format(start)} – ${dateTime.format(end)} · Europe/Vienna`)) announce("Terminzeit kopiert."); });
@@ -1257,14 +1580,23 @@ document.querySelector("[data-appointment-reschedule-submit]")?.addEventListener
     return;
   }
   clearAppointmentError();
+  const preflight = dialog.querySelector("[data-appointment-preflight]");
+  if (preflight) { preflight.hidden = true; preflight.replaceChildren(); }
   try {
     const action = start.value === dialog.dataset.originalStart ? "resize" : "move";
-    await appointmentAction(action, {
+	const proposedStart = viennaLocalDate(start.value);
+	const proposedEnd = proposedStart ? new Date(proposedStart.getTime() + Number(duration.value) * 60000) : null;
+	const fields = {
       starts_at_local: start.value,
       duration_minutes: duration.value,
       override_reason: dialog.querySelector("[data-appointment-move-override]")?.value.trim() || "",
       without_notification_reason: reason,
-    });
+	  starts_at: proposedStart?.toISOString() || "",
+	  ends_at: proposedEnd?.toISOString() || "",
+	};
+	await previewAppointmentMutation(dialog.dataset.appointmentId, dialog.dataset.version, action, fields, dialog.querySelector("[data-appointment-csrf]").value);
+	if (!window.confirm("Geprüfte Zeitänderung mit Alt/Neu-Vergleich speichern? Der Server prüft Version und Belegungen erneut.")) return;
+	await appointmentAction(action, fields);
   } catch (failure) {
 	showAppointmentFailure(failure);
 	if (failure.code === "reservation_conflict") {
@@ -1324,9 +1656,12 @@ document.querySelector("[data-appointment-fix]")?.addEventListener("click", asyn
     showAppointmentError("Bitte begründen Sie die Fixierung ohne Benachrichtigung.", reasonInput);
     return;
   }
-  if (!window.confirm(`Termin mit den angezeigten Fahrern und Ressourcen fixieren? Versandvormerkung: ${channels}; ${targets}.`)) return;
   clearAppointmentError();
-  try { await appointmentAction("fix", { without_notification_reason: reason }); } catch (failure) { showAppointmentFailure(failure); }
+  try {
+    await previewAppointmentMutation(dialog.dataset.appointmentId, dialog.dataset.version, "fix", { without_notification_reason: reason }, dialog.querySelector("[data-appointment-csrf]").value);
+    if (!window.confirm(`Prüfliste gelesen: Termin mit den angezeigten Fahrern und Ressourcen fixieren? Versandvormerkung: ${channels}; ${targets}.`)) return;
+    await appointmentAction("fix", { without_notification_reason: reason });
+  } catch (failure) { showAppointmentFailure(failure); }
 });
 
 document.querySelector("[data-appointment-complete]")?.addEventListener("click", async () => {
@@ -1388,7 +1723,7 @@ async function confirmationAdminAction(action, question) {
 document.querySelector("[data-confirmation-reissue]")?.addEventListener("click", () => confirmationAdminAction("reissue", "Aktiven Link widerrufen und eine neue Benachrichtigung einreihen?"));
 document.querySelector("[data-confirmation-reset]")?.addEventListener("click", () => confirmationAdminAction("reset", "Gespeicherte Kundenantwort wirklich zurücksetzen?"));
 
-function calendarMutation(info, action, csrf) {
+async function calendarMutation(info, action, csrf) {
 	const proposedStart = new Date(info.event.start);
 	const proposedEnd = new Date(info.event.end);
   const previousStart = new Date(info.oldEvent?.start || info.event.start);
@@ -1397,12 +1732,19 @@ function calendarMutation(info, action, csrf) {
   const comparison = action === "resize"
     ? `Dauer ändern: ${Math.round((previousEnd - previousStart) / 60000)} → ${Math.round((proposedEnd - proposedStart) / 60000)} Minuten?`
     : `Termin verschieben:\nAlt: ${compareFormat.format(previousStart)}–${compareFormat.format(previousEnd)}\nNeu: ${compareFormat.format(proposedStart)}–${compareFormat.format(proposedEnd)}?`;
-  if (!window.confirm(comparison)) { info.revert(); announceCalendar("Änderung abgebrochen."); return; }
   const form = new FormData();
   form.set("csrf_token", csrf);
   form.set("version", info.event.extendedProps.version);
   form.set("starts_at", info.event.start.toISOString());
   form.set("ends_at", info.event.end.toISOString());
+  try {
+    await previewAppointmentMutation(info.event.id, info.event.extendedProps.version, action, {
+      starts_at: info.event.start.toISOString(), ends_at: info.event.end.toISOString(),
+    }, csrf);
+  } catch (failure) {
+    info.revert(); showAppointmentFailure(failure); return;
+  }
+  if (!window.confirm(comparison)) { info.revert(); announceCalendar("Änderung abgebrochen."); return; }
   const send = () => calendarRequest(`/api/v1/appointments/${encodeURIComponent(info.event.id)}/${action}`, form, csrf);
   const accept = (payload, message) => {
     if (Number.isInteger(payload?.version)) info.event.setExtendedProp("version", payload.version);
@@ -2651,16 +2993,19 @@ document.querySelector("[data-appointment-assign]")?.addEventListener("click", a
     return;
   }
   clearAppointmentError();
+  const fields = {
+    driver_id: drivers,
+    primary_driver_id: primary.value,
+    chipper_resource_id: chipper.value,
+    transport_resource_id: assignment.querySelector("[data-appointment-transport]")?.value || "",
+    trailer_resource_id: assignment.querySelector("[data-appointment-trailer]")?.value || "",
+    other_resource_id: otherResources,
+    override_reason: assignment.querySelector("[data-appointment-assignment-override]")?.value.trim() || "",
+  };
   try {
-    await appointmentAction("assign", {
-      driver_id: drivers,
-      primary_driver_id: primary.value,
-      chipper_resource_id: chipper.value,
-      transport_resource_id: assignment.querySelector("[data-appointment-transport]")?.value || "",
-      trailer_resource_id: assignment.querySelector("[data-appointment-trailer]")?.value || "",
-      other_resource_id: otherResources,
-      override_reason: assignment.querySelector("[data-appointment-assignment-override]")?.value.trim() || "",
-    });
+    await previewAppointmentMutation(dialog.dataset.appointmentId, dialog.dataset.version, "assign", fields, dialog.querySelector("[data-appointment-csrf]").value);
+    if (!window.confirm("Geprüfte Fahrer- und Ressourcenzuweisung speichern? Der Server prüft Belegungen erneut.")) return;
+    await appointmentAction("assign", fields);
   } catch (failure) {
     showAppointmentFailure(failure);
   }

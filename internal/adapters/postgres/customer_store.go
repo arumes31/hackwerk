@@ -335,7 +335,8 @@ func (store *CustomerStore) DuplicateJobDraft(ctx context.Context, id string) (c
 			EstimatedHackMinutes: int(row.EstimatedHackMinutes), EstimatedTransportMinutes: int(row.EstimatedTransportMinutes),
 			TransportTripCount: int(row.TransportTripCount), TransportMode: customers.TransportMode(row.TransportMode),
 			ExternalTransportConfirmed: row.ExternalTransportConfirmed, PreferredStartDate: row.PreferredStartDate,
-			PreferredEndDate: row.PreferredEndDate, PreferenceText: row.PreferenceText, Urgency: customers.Urgency(row.Urgency),
+			PreferredEndDate: row.PreferredEndDate, PreferenceMode: customers.PreferenceMode(row.PreferenceMode),
+			PreferenceText: row.PreferenceText, Urgency: customers.Urgency(row.Urgency),
 			Region: row.Region, Source: customers.Source(row.Source), PileLatitude: parseFloat(row.PileLatitude),
 			PileLongitude: parseFloat(row.PileLongitude), PileLocationSource: customers.PileLocationSource(row.PileLocationSource),
 		},
@@ -530,8 +531,8 @@ func (store *CustomerStore) ListWaitlistFilterFavorites(ctx context.Context, use
 			JobType: row.JobType, Region: row.Region, Urgency: row.Urgency, PreferredMonth: row.PreferredMonth,
 			Workflow: row.Workflow, MissingLocation: row.MissingLocation, DurationIssue: row.DurationIssue,
 			DurationGroup: row.DurationGroup, Overdue: row.Overdue, Unassigned: row.Unassigned,
-			TransportPending: row.TransportPending,
-			Sort:             row.SortKey, Direction: row.SortDirection,
+			TransportPending: row.TransportPending, Incomplete: row.Incomplete,
+			Sort: row.SortKey, Direction: row.SortDirection,
 		}}
 		favorite.Filter.Normalize()
 		result = append(result, favorite)
@@ -561,8 +562,8 @@ func (store *CustomerStore) SaveWaitlistFilterFavorite(ctx context.Context, user
 			Urgency: filter.Urgency, PreferredMonth: filter.PreferredMonth, Workflow: filter.Workflow,
 			MissingLocation: filter.MissingLocation, DurationIssue: filter.DurationIssue,
 			DurationGroup: filter.DurationGroup, Overdue: filter.Overdue, Unassigned: filter.Unassigned,
-			TransportPending: filter.TransportPending,
-			SortKey:          filter.Sort, SortDirection: filter.Direction,
+			TransportPending: filter.TransportPending, Incomplete: filter.Incomplete,
+			SortKey: filter.Sort, SortDirection: filter.Direction,
 		})
 	})
 }
@@ -596,6 +597,7 @@ func (store *CustomerStore) ListWaitlist(ctx context.Context, filter customers.W
 		UrgencyFilter: filter.Urgency, MonthFilter: filter.PreferredMonth, WorkflowFilter: filter.Workflow,
 		MissingLocation: filter.MissingLocation, DurationIssue: filter.DurationIssue,
 		Overdue: filter.Overdue, Unassigned: filter.Unassigned, TransportPending: filter.TransportPending,
+		Incomplete:        filter.Incomplete,
 		DurationGroup:     filter.DurationGroup,
 		DurationReviewMin: filter.DurationReviewMinMinutes, DurationReviewMax: filter.DurationReviewMaxMinutes,
 		Sort: filter.Sort, Direction: filter.Direction,
@@ -610,7 +612,8 @@ func (store *CustomerStore) ListWaitlist(ctx context.Context, filter customers.W
 		item := customers.WaitlistItem{
 			WaitlistID: row.WaitlistID, JobID: row.WJobID, JobNumber: row.JobNumber, VolumeM3: row.JVolumeM3,
 			PreferredStartDate: row.PreferredStartDate, PreferredEndDate: row.PreferredEndDate,
-			PreferenceText: row.PreferenceText, Region: row.Region, CustomerID: row.CustomerID,
+			PreferenceText: row.PreferenceText, PreferenceMode: customers.PreferenceMode(row.PreferenceMode),
+			PriorityReason: row.PriorityReason, Region: row.Region, CustomerID: row.CustomerID,
 			FirstName: row.FirstName, LastName: row.LastName, CompanyName: row.CompanyName, Locality: row.Locality,
 			NoteExcerpt: row.NoteExcerpt, JobType: customers.JobType(row.JobType), TransportMode: customers.TransportMode(row.TransportMode),
 			Urgency: customers.Urgency(row.Urgency), EnteredAt: row.EnteredAt.Time, ManualPriority: row.ManualPriority,
@@ -619,7 +622,7 @@ func (store *CustomerStore) ListWaitlist(ctx context.Context, filter customers.W
 			WorkflowStatus: row.WorkflowStatus, UpdatedAt: row.UpdatedAt.Time,
 			HasPileLocation: boolPointerValue(row.HasPileLocation), HasPileSource: row.HasPileSource,
 			HasActiveAppointment: row.HasActiveAppointment, HasInternalAssignment: row.HasInternalAssignment,
-			ExternalTransportConfirmed: row.ExternalTransportConfirmed, Overdue: row.Overdue,
+			ExternalTransportConfirmed: row.ExternalTransportConfirmed, Overdue: row.Overdue, HasContact: row.HasContact,
 		}
 		item.DurationIssue = customers.DurationNeedsReviewWithin(item.TotalMinutes, filter.DurationReviewMinMinutes, filter.DurationReviewMaxMinutes)
 		item.NextStep = waitlistNextStep(item)
@@ -630,23 +633,51 @@ func (store *CustomerStore) ListWaitlist(ctx context.Context, filter customers.W
 		UrgencyFilter: filter.Urgency, MonthFilter: filter.PreferredMonth, WorkflowFilter: filter.Workflow,
 		MissingLocation: filter.MissingLocation, DurationIssue: filter.DurationIssue,
 		Overdue: filter.Overdue, Unassigned: filter.Unassigned, TransportPending: filter.TransportPending,
+		Incomplete:        filter.Incomplete,
 		DurationGroup:     filter.DurationGroup,
 		DurationReviewMin: filter.DurationReviewMinMinutes, DurationReviewMax: filter.DurationReviewMaxMinutes,
 	})
 	if err != nil {
 		return customers.Page[customers.WaitlistItem]{}, err
 	}
-	return pageOf(items, filter.Page, filter.PageSize, total), nil
+	unfilteredTotal, err := store.queries.CountActiveWaitlist(ctx)
+	if err != nil {
+		return customers.Page[customers.WaitlistItem]{}, err
+	}
+	page := pageOf(items, filter.Page, filter.PageSize, total)
+	page.UnfilteredTotal = unfilteredTotal
+	return page, nil
 }
 
-func (store *CustomerStore) UpdateWaitlistPriority(ctx context.Context, actor auth.Actor, id string, priority int32, version int32, requestID string) error {
+func (store *CustomerStore) UpdateWaitlistPriority(ctx context.Context, actor auth.Actor, id string, priority int32, reason string, version int32, requestID string) error {
 	waitlistID, err := uuid(id)
 	if err != nil {
 		return customers.ErrNotFound
 	}
-	return store.waitlistMutation(ctx, actor, id, requestID, "waitlist.priority_changed", []string{"manual_priority"}, func(queries *dbgen.Queries) (int64, error) {
-		return queries.UpdateWaitlistPriority(ctx, dbgen.UpdateWaitlistPriorityParams{Priority: priority, ID: waitlistID, ExpectedVersion: version})
+	return store.waitlistMutation(ctx, actor, id, requestID, "waitlist.priority_changed", []string{"manual_priority", "priority_reason"}, func(queries *dbgen.Queries) (int64, error) {
+		return queries.UpdateWaitlistPriority(ctx, dbgen.UpdateWaitlistPriorityParams{Priority: priority, Reason: reason, ID: waitlistID, ExpectedVersion: version})
 	})
+}
+
+func (store *CustomerStore) SearchWorkspace(ctx context.Context, query string) ([]customers.SearchResult, error) {
+	rows, err := store.queries.SearchWorkspace(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]customers.SearchResult, 0, len(rows))
+	for _, row := range rows {
+		item := customers.SearchResult{Kind: row.Kind, ID: row.ID, ParentID: row.ParentID, Title: row.Title, Subtitle: row.Subtitle}
+		switch row.Kind {
+		case "customer":
+			item.Href = "/customers/" + row.ID
+		case "job":
+			item.Href = "/customers/" + row.ParentID + "#job-" + row.ID
+		case "appointment":
+			item.Href = "/calendar?appointment=" + row.ID
+		}
+		results = append(results, item)
+	}
+	return results, nil
 }
 
 func (store *CustomerStore) RemoveWaitlist(ctx context.Context, actor auth.Actor, id string, version int32, reason string, requestID string) error {
@@ -741,13 +772,18 @@ func insertJobParams(customerID string, jobNumber string, input customers.JobInp
 	if err != nil {
 		return dbgen.InsertJobParams{}, err
 	}
+	preferenceMode := input.PreferenceMode
+	if preferenceMode == "" {
+		preferenceMode = customers.PreferenceWindow
+	}
 	return dbgen.InsertJobParams{
 		JobNumber: jobNumber, CustomerID: mustUUID(customerID), JobType: string(input.JobType), VolumeM3: volume,
 		EstimatedHackMinutes: hackMinutes, EstimatedTransportMinutes: transportMinutes,
 		TransportTripCount: transportTrips, TransportMode: string(input.TransportMode),
 		ExternalTransportConfirmed: input.ExternalTransportConfirmed, PreferredStartDate: input.PreferredStartDate,
 		PreferredEndDate: input.PreferredEndDate, PreferenceText: input.PreferenceText, Urgency: string(input.Urgency),
-		Region: input.Region, Source: string(input.Source), PileLatitude: floatString(input.PileLatitude),
+		PreferenceMode: string(preferenceMode),
+		Region:         input.Region, Source: string(input.Source), PileLatitude: floatString(input.PileLatitude),
 		PileLongitude: floatString(input.PileLongitude), PileLocationSource: string(input.PileLocationSource),
 	}, nil
 }
@@ -761,6 +797,10 @@ func updateJobParams(id pgtype.UUID, input customers.UpdateJobInput) (dbgen.Upda
 	if err != nil {
 		return dbgen.UpdateJobParams{}, err
 	}
+	preferenceMode := input.Job.PreferenceMode
+	if preferenceMode == "" {
+		preferenceMode = customers.PreferenceWindow
+	}
 	return dbgen.UpdateJobParams{
 		JobType: string(input.Job.JobType), VolumeM3: volume,
 		EstimatedHackMinutes:      hackMinutes,
@@ -768,6 +808,7 @@ func updateJobParams(id pgtype.UUID, input customers.UpdateJobInput) (dbgen.Upda
 		TransportTripCount:        transportTrips, TransportMode: string(input.Job.TransportMode),
 		ExternalTransportConfirmed: input.Job.ExternalTransportConfirmed,
 		PreferredStartDate:         input.Job.PreferredStartDate, PreferredEndDate: input.Job.PreferredEndDate,
+		PreferenceMode: string(preferenceMode),
 		PreferenceText: input.Job.PreferenceText, Urgency: string(input.Job.Urgency),
 		Region: input.Job.Region, Source: string(input.Job.Source),
 		PileLatitude: floatString(input.Job.PileLatitude), PileLongitude: floatString(input.Job.PileLongitude),
@@ -851,7 +892,8 @@ func jobFromRow(row dbgen.ListCustomerJobsRow) customers.Job {
 		TransportTripCount: row.TransportTripCount, TransportMode: customers.TransportMode(row.TransportMode),
 		ExternalTransportConfirmed: row.ExternalTransportConfirmed, PreferredStartDate: row.PreferredStartDate,
 		PreferredEndDate: row.PreferredEndDate, PreferenceText: row.PreferenceText, Urgency: customers.Urgency(row.Urgency),
-		Region: row.Region, Source: customers.Source(row.Source), WorkflowStatus: row.WorkflowStatus,
+		PreferenceMode: customers.PreferenceMode(row.PreferenceMode),
+		Region:         row.Region, Source: customers.Source(row.Source), WorkflowStatus: row.WorkflowStatus,
 		ReceivedAt: row.ReceivedAt.Time, ArchivedAt: optionalTime(row.ArchivedAt), Version: row.Version,
 		PileLatitude: parseFloat(row.PileLatitude), PileLongitude: parseFloat(row.PileLongitude),
 		PileLocationSource:  customers.PileLocationSource(row.PileLocationSource),

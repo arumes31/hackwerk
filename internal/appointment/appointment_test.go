@@ -836,6 +836,39 @@ func TestConflictAlternativesIncludeAffectedAndThreeSlots(t *testing.T) {
 	}
 }
 
+func TestPreviewMutationIsAdminOnlyAndReportsAuthoritativeChecks(t *testing.T) {
+	t.Parallel()
+	current := assignedAppointment(LifecycleProposal, 3)
+	current.JobNumber = "HA-2026-0001"
+	current.EstimatedHackMinutes = 120
+	current.EstimatedTransportMinutes = 30
+	current.BufferBeforeMinutes = 15
+	current.BufferAfterMinutes = 20
+	store := &fakeStore{current: current, conflictUntil: current.StartsAt.Add(time.Hour)}
+	service, err := New(store, fakeAvailability{status: driver.StatusAvailable}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := PreflightInput{AppointmentID: current.ID, Action: "fix", ExpectedVersion: 2}
+	if _, err := service.PreviewMutation(t.Context(), auth.Actor{UserID: "driver", Role: auth.RoleDriver}, input); !errors.Is(err, auth.ErrForbidden) {
+		t.Fatalf("driver PreviewMutation() error = %v", err)
+	}
+	preview, err := service.PreviewMutation(t.Context(), testAdmin(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := make(map[string]bool, len(preview.Checks))
+	for _, check := range preview.Checks {
+		checks[check.Key] = check.Passed
+	}
+	if checks["version"] || !checks["job"] || !checks["time"] || !checks["driver"] || !checks["chipper"] || !checks["transport"] || !checks["availability"] || checks["conflicts"] {
+		t.Fatalf("preflight checks = %#v", preview.Checks)
+	}
+	if preview.WorkingMinutes != 120 || preview.TransportMinutes != 30 || preview.BufferBeforeMinutes != 15 || preview.BufferAfterMinutes != 20 || len(preview.Conflicts) != 1 {
+		t.Fatalf("preflight timing/conflicts = %#v", preview)
+	}
+}
+
 func TestSwapAppointmentsIsAdminOnlyAndVersioned(t *testing.T) {
 	t.Parallel()
 	first := assignedAppointment(LifecycleProposal, 2)

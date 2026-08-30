@@ -19,6 +19,15 @@ type PasswordData struct {
 	Shell ShellData
 	Error string
 }
+type ProfileData struct {
+	Shell            ShellData
+	Profile          auth.Profile
+	CurrentSessionID string
+	Error            string
+	Notice           string
+	TOTPEnrollment   *auth.TOTPEnrollment
+	RecoveryCodes    []string
+}
 type UsersData struct {
 	Shell        ShellData
 	Users        []auth.UserSummary
@@ -50,6 +59,7 @@ templ appHeader(shell ShellData) {
 				}
 			</nav>
 			<div class="shell-tools">
+				<button class="nav-menu__icon-trigger" type="button" data-command-open aria-label="Globale Suche und Kommandos öffnen" title="Kommandos (Strg/⌘ K)">⌘</button>
 				<details class="nav-menu quick-menu" data-popover-menu data-quick-menu>
 					<summary class="nav-menu__icon-trigger" aria-label="Schnellzugriff" title="Schnellzugriff">
 						@quickActionsIcon()
@@ -105,6 +115,23 @@ templ appHeader(shell ShellData) {
 			</div>
 		</div>
 	</header>
+	<dialog class="command-palette" data-command-palette aria-labelledby="command-palette-title">
+		<div class="dialog-heading"><div><p class="eyebrow">Navigation &amp; Suche</p><h2 id="command-palette-title">Kommandos</h2></div><button class="icon-button" type="button" data-command-close aria-label="Kommandos schließen">×</button></div>
+		<form method="post" action="/search" class="form-stack" data-global-search-form><input type="hidden" name="csrf_token" value={ shell.CSRFToken }/><label>Global suchen<input name="q" type="search" minlength="2" maxlength="120" autocomplete="off" placeholder="Kunde, Auftragsnummer oder Termin" data-global-search-input required/></label><button class="button" type="submit">Suchen</button></form>
+		<div class="command-results" data-global-search-results aria-live="polite"></div>
+		<nav class="command-links" aria-label="Sichere Schnellnavigation">
+			<a href="/dashboard">Heute öffnen</a>
+			<a href="/calendar">Kalender öffnen</a>
+			<a href="/waitlist?incomplete=1">Prüfwarteschlange öffnen</a>
+			<a href="/customers/new">Auftrag erfassen</a>
+			if shell.Actor.Role == auth.RoleAdmin {
+				<a href="/planning">Planung öffnen</a>
+				<a href="/admin/notifications">Versand prüfen</a>
+			}
+		</nav>
+		<button class="button button--quiet" type="button" data-shortcuts-open>Tastaturkürzel anzeigen</button>
+	</dialog>
+	<dialog class="shortcut-help" data-shortcuts-dialog aria-labelledby="shortcut-help-title"><div class="dialog-heading"><div><p class="eyebrow">Tastatur</p><h2 id="shortcut-help-title">Kürzel</h2></div><button class="icon-button" type="button" data-shortcuts-close aria-label="Kürzel schließen">×</button></div><dl class="shortcut-list"><div><dt><kbd>Strg</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd></dt><dd>Kommandos und globale Suche</dd></div><div><dt><kbd>/</kbd></dt><dd>Seitensuche fokussieren</dd></div><div><dt><kbd>?</kbd></dt><dd>Diese Übersicht öffnen</dd></div><div><dt><kbd>Esc</kbd></dt><dd>Dialog schließen</dd></div></dl><p>Kürzel werden in Eingabefeldern nicht ausgelöst.</p></dialog>
 	<div class="connectivity-banner" role="status" aria-live="polite" data-connectivity-banner hidden></div>
 	<aside class="install-prompt" data-install-prompt hidden aria-label="HackWerk installieren">
 		<span>HackWerk auf diesem Gerät installieren – schneller erreichbar, ohne Kundendaten lokal zu speichern.</span>
@@ -204,6 +231,9 @@ templ Dashboard(data DashboardData) {
 						<a class="button button--quiet" href="/dashboard">Heute</a>
 						<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + data.View.NextDate) } aria-label="Nächster Tag">→</a>
 					</nav>
+					if data.View.Admin {
+						<div class="action-row dashboard-mode" aria-label="Dashboardansicht"><a class={ dashboardModeClass(!data.View.ExceptionsOnly) } href={ templ.SafeURL("/dashboard?date=" + data.View.Date) }>Alle Einsätze</a><a class={ dashboardModeClass(data.View.ExceptionsOnly) } href={ templ.SafeURL("/dashboard?date=" + data.View.Date + "&mode=exceptions") }>Nur Ausnahmen</a></div>
+					}
 					<section class="dashboard-metrics" aria-label="Kennzahlen">
 						if data.View.Admin {
 							@metricCard("Warteliste", data.View.Counts.Waitlist, "/waitlist", "⌛")
@@ -228,6 +258,15 @@ templ Dashboard(data DashboardData) {
 								if data.View.Counts.Attention > 0 {
 									<a href="/calendar"><strong>{ fmt.Sprint(data.View.Counts.Attention) }</strong> offene Kundenantworten</a>
 								}
+								if data.View.Counts.OverdueConfirmations > 0 {
+									<a href="/calendar"><strong>{ fmt.Sprint(data.View.Counts.OverdueConfirmations) }</strong> Bestätigungen überfällig</a>
+								}
+								if data.View.Counts.DeclinedConfirmations > 0 {
+									<a href="/calendar"><strong>{ fmt.Sprint(data.View.Counts.DeclinedConfirmations) }</strong> abgelehnte Termine</a>
+								}
+								if data.View.Counts.CallbackRequests > 0 {
+									<a href="/admin/notifications"><strong>{ fmt.Sprint(data.View.Counts.CallbackRequests) }</strong> Rückrufwünsche</a>
+								}
 								if data.View.Admin && data.View.Counts.NotificationIssues > 0 {
 									<a href="/admin/notifications?status=failed"><strong>{ fmt.Sprint(data.View.Counts.NotificationIssues) }</strong> Versandprobleme prüfen/erneut senden</a>
 								}
@@ -249,6 +288,16 @@ templ Dashboard(data DashboardData) {
 									}
 								</div>
 							}
+						</section>
+					}
+					if data.View.Admin && len(data.View.MissingAssignments) > 0 {
+						<section class="dashboard-attention" aria-labelledby="missing-assignments-heading">
+							<div><p class="eyebrow">Zuweisung</p><h2 id="missing-assignments-heading">Fahrer oder Hackmaschine fehlt</h2></div>
+							<div class="dashboard-attention__items">
+								for _, item := range data.View.MissingAssignments {
+									<a href={ "/calendar/appointments/" + item.ID }><strong>{ item.JobNumber }</strong> · { item.CustomerName } · { dashboardTime(item.StartsAt) } Uhr</a>
+								}
+							</div>
 						</section>
 					}
 					<div class="dashboard-columns">
@@ -282,10 +331,14 @@ templ Dashboard(data DashboardData) {
 							</section>
 							if data.View.Admin {
 								@capacityPanel(data.View.Capacities)
+								@unplannedPanel(data.View.UnplannedJobs)
 								@urgentPanel(data.View.UrgentJobs)
 							}
 						</aside>
 					</div>
+					if data.View.Admin {
+						@capacityForecast(data.View.DailyCapacities)
+					}
 					if len(data.View.Upcoming) > 0 {
 						<section class="dashboard-upcoming" aria-labelledby="upcoming-heading">
 							<div class="section-heading"><h2 id="upcoming-heading">Demnächst</h2><a href="/calendar">Alle Termine</a></div>
@@ -328,7 +381,21 @@ templ dashboardAppointment(item dashboard.Appointment) {
 }
 
 templ availabilityRow(item dashboard.DriverAvailability) {
-	<div class="availability-row"><span class={ "availability-dot availability-dot--" + availabilityClass(item.State) } aria-hidden="true"></span><span><strong>{ item.Name }</strong><small>{ item.State }</small></span></div>
+	<div class="availability-row">
+		<span class={ "availability-dot availability-dot--" + availabilityClass(item.State) } aria-hidden="true"></span>
+		<span>
+			<strong>{ item.Name }</strong><small>{ item.State } · { fmt.Sprint(item.BookedMinutes) } Min. belegt</small>
+			if item.Windows != "" {
+				<small>Verfügbar: { item.Windows }</small>
+			}
+			if item.ExceptionReasons != "" {
+				<small>Abweichung: { item.ExceptionReasons }</small>
+			}
+			if item.OvertimeRisk {
+				<span class="status-badge status-badge--failed">Überstundenrisiko: Belegung über Betriebszeit</span>
+			}
+		</span>
+	</div>
 }
 
 templ capacityPanel(values []dashboard.Capacity) {
@@ -340,14 +407,49 @@ templ capacityPanel(values []dashboard.Capacity) {
 		for _, capacity := range values {
 			<div class="capacity-item">
 				<strong>{ capacity.ResourceName }</strong>
+				<progress max={ fmt.Sprint(capacity.TotalMinutes) } value={ fmt.Sprint(capacity.FreeMinutes) } aria-label={ fmt.Sprintf("%s: %d von %d Minuten frei", capacity.ResourceName, capacity.FreeMinutes, capacity.TotalMinutes) }></progress><small>{ fmt.Sprint(capacity.FreeMinutes) } von { fmt.Sprint(capacity.TotalMinutes) } Minuten frei</small>
 				if len(capacity.Free) == 0 {
 					<small>Kein freies Fenster in der Betriebszeit</small>
 				}
 				for _, slot := range capacity.Free {
-					<small>{ dashboardTime(slot.StartsAt) }–{ dashboardTime(slot.EndsAt) } Uhr <span class="muted">(vor Planung erneut prüfen)</span></small>
+					<small>
+						{ dashboardTime(slot.StartsAt) }–{ dashboardTime(slot.EndsAt) } Uhr
+						if slot.StartsAt.Equal(capacity.Largest.StartsAt) && slot.EndsAt.Equal(capacity.Largest.EndsAt) {
+							<strong>größtes Fenster</strong>
+						}
+						<span class="muted">(vor Planung erneut prüfen)</span>
+					</small>
 				}
 			</div>
 		}
+	</section>
+}
+
+templ unplannedPanel(values []dashboard.UrgentJob) {
+	<section class="dashboard-panel">
+		<div class="section-heading"><h2>Heute noch ungeplant</h2><a href="/waitlist?workflow=unplanned">Alle ungeplanten</a></div>
+		if len(values) == 0 {
+			<p class="empty-copy">Keine aktiven ungeplanten Aufträge.</p>
+		}
+		for _, item := range values {
+			<a class="urgent-job" href={ "/calendar/plan?job_id=" + item.ID }><strong>{ item.CustomerName } · { item.VolumeM3 } m³</strong><small>{ item.Number } · { dashboardUrgencyLabel(item.Urgency) } · Planung prüft den aktuellen Stand erneut</small></a>
+		}
+	</section>
+}
+
+templ capacityForecast(days []dashboard.DailyCapacity) {
+	<section class="dashboard-upcoming" aria-labelledby="capacity-forecast-heading">
+		<div class="section-heading"><div><p class="eyebrow">7 Tage</p><h2 id="capacity-forecast-heading">Ungenutzte Hackkapazität</h2></div><span>Hinweis, keine Planungsgarantie</span></div>
+		<div class="capacity-forecast">
+			for _, day := range days {
+				<a class="capacity-day" href={ "/calendar?date=" + day.Date }>
+					<strong>{ day.DateLabel }</strong>
+					for _, capacity := range day.Capacities {
+						<span>{ capacity.ResourceName }: { fmt.Sprint(capacity.FreeMinutes) } Min. frei</span>
+					}
+				</a>
+			}
+		</div>
 	</section>
 }
 
@@ -363,15 +465,133 @@ templ urgentPanel(values []dashboard.UrgentJob) {
 	</section>
 }
 
-templ Profile(shell ShellData) {
+templ Profile(data ProfileData) {
 	<!DOCTYPE html>
 	<html lang="de-AT">
-		@documentHead(shell.Page, "Profil – "+shell.Page.AppName)
+		@documentHead(data.Shell.Page, "Profil – "+data.Shell.Page.AppName)
 		<body>
-			@appHeader(shell)
-			<main id="hauptinhalt" class="page narrow-page"><p class="eyebrow">Mein Zugang</p><h1>{ shell.Actor.DisplayName }</h1><dl class="profile-list"><div><dt>Benutzername</dt><dd>{ shell.Actor.Username }</dd></div><div><dt>Rolle</dt><dd>{ roleLabel(shell.Actor.Role) }</dd></div></dl><a class="button" href="/password">Passwort ändern</a></main>@appFooter(shell.Page)
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page profile-page">
+				<header class="profile-hero">
+					<div><p class="eyebrow">Mein Zugang</p><h1>{ data.Profile.DisplayName }</h1><p>Persönliche Daten, Kontosicherheit und angemeldete Geräte an einem Ort.</p></div>
+					<div class="profile-hero__badges"><span class={ userStatusClass(data.Profile.Active) }>{ activeLabel(data.Profile.Active) }</span><span class="user-badge">{ roleLabel(data.Profile.Role) }</span></div>
+				</header>
+				if data.Error != "" {
+					<div class="form-alert" role="alert" tabindex="-1" data-error-summary>{ data.Error }</div>
+				}
+				if data.Notice != "" {
+					<div class="form-alert form-alert--info" role="status" tabindex="-1" data-profile-notice>{ data.Notice }</div>
+				}
+				<div class="profile-grid">
+					<section class="profile-card profile-card--identity" aria-labelledby="profile-identity-heading">
+						<header><div><p class="eyebrow">Identität</p><h2 id="profile-identity-heading">Persönliche Daten</h2></div><span class="profile-card__number" aria-hidden="true">01</span></header>
+						<dl class="profile-list"><div><dt>Benutzername</dt><dd>{ data.Profile.Username }</dd></div><div><dt>Fahrerprofil</dt><dd>{ driverLabel(data.Profile.DriverID) }</dd></div></dl>
+						<form method="post" action="/profile/details" class="form-stack">
+							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(data.Profile.Version) }/>
+							<label for="profile-salutation">Anrede<select id="profile-salutation" name="salutation"><option value="" selected?={ data.Profile.Salutation == "" }>Keine Angabe</option><option value="frau" selected?={ data.Profile.Salutation == "frau" }>Frau</option><option value="herr" selected?={ data.Profile.Salutation == "herr" }>Herr</option><option value="divers" selected?={ data.Profile.Salutation == "divers" }>Divers</option></select></label>
+							<label for="profile-display-name">Anzeigename<input id="profile-display-name" name="display_name" value={ data.Profile.DisplayName } maxlength="200" autocomplete="name" required/></label>
+							<label for="profile-phone">Dienstliche Telefonnummer<input id="profile-phone" name="work_phone" type="tel" value={ data.Profile.WorkPhoneRaw } maxlength="80" autocomplete="tel"/></label>
+							<div class="action-row"><button class="button" type="submit">Änderungen speichern</button><a class="button button--quiet" href="/profile">Abbrechen</a></div>
+						</form>
+					</section>
+					<section class="profile-card" aria-labelledby="profile-email-heading">
+						<header><div><p class="eyebrow">Kontakt</p><h2 id="profile-email-heading">E-Mail-Adresse</h2></div><span class="profile-card__number" aria-hidden="true">02</span></header>
+						<dl class="profile-list"><div><dt>Aktuell</dt><dd>{ fallback(data.Profile.Email) }</dd></div><div><dt>Status</dt><dd>{ emailVerificationLabel(data.Profile) }</dd></div></dl>
+						if data.Profile.PendingEmail != "" {
+							<div class="profile-pending" role="status"><strong>Bestätigung ausstehend</strong><span>{ data.Profile.PendingEmail }</span><small>{ pendingEmailStatus(data.Profile) }</small></div>
+							<div class="action-row"><form method="post" action="/profile/email/resend"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Bestätigung erneut senden</button></form><form method="post" action="/profile/email/cancel"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Änderung abbrechen</button></form></div>
+						}
+						<form method="post" action="/profile/email" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label for="profile-email">Neue E-Mail-Adresse<input id="profile-email" name="email" type="email" maxlength="320" autocomplete="email" required/></label><p class="field-help">Die neue Adresse wird erst nach Klick auf den zeitlich begrenzten Bestätigungslink aktiv.</p><button class="button" type="submit">Bestätigung senden</button></form>
+					</section>
+					<section id="security" class="profile-card profile-card--wide" aria-labelledby="profile-security-heading">
+						<header><div><p class="eyebrow">Kontosicherheit</p><h2 id="profile-security-heading">Anmeldung schützen</h2></div><span class="profile-card__number" aria-hidden="true">03</span></header>
+						<div class="security-checklist" aria-label="Sicherheitsstatus">
+							@securityCheck("Langes persönliches Passwort", true, "Mindestens 14 Zeichen")
+							@securityCheck("Authenticator-App", data.Profile.TOTPEnabledAt != nil, securityMethodState(data.Profile.TOTPEnabledAt != nil))
+							@securityCheck("Passkey oder Sicherheitsschlüssel", len(data.Profile.Passkeys) > 0, securityMethodState(len(data.Profile.Passkeys) > 0))
+							@securityCheck("Recovery-Codes verfügbar", data.Profile.RecoveryCodeCount > 0, fmt.Sprintf("%d unverbrauchte Codes", data.Profile.RecoveryCodeCount))
+						</div>
+						<div class="security-columns">
+							<section aria-labelledby="password-method-heading"><h3 id="password-method-heading">Passwort</h3><p>Die Änderung meldet alle Geräte ab.</p><a class="button button--quiet" href="/password">Passwort ändern</a></section>
+							<section aria-labelledby="totp-method-heading">
+								<h3 id="totp-method-heading">Authenticator-App</h3>
+								if data.Profile.TOTPEnabledAt != nil {
+									<form method="post" action="/profile/security/totp/rename" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label>Name<input name="name" value={ data.Profile.TOTPName } maxlength="100" required/></label><button class="button button--quiet" type="submit">Namen speichern</button></form>
+									<form method="post" action="/profile/security/totp/delete"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--danger" type="submit" data-confirm-message="Authenticator-App wirklich entfernen? Prüfen Sie vorher, ob ein Passkey oder die Recovery-Codes verfügbar sind.">Authenticator-App entfernen</button></form>
+								} else {
+									<form method="post" action="/profile/security/totp/start" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label>Name<input name="name" value="Diensthandy" maxlength="100" required/></label><button class="button button--quiet" type="submit">Authenticator-App einrichten</button></form>
+								}
+							</section>
+							<section aria-labelledby="passkey-method-heading">
+								<h3 id="passkey-method-heading">Passkeys</h3>
+								<p>Mit Geräte-PIN, Fingerabdruck oder Sicherheitsschlüssel als zweitem Faktor.</p>
+								<form class="form-stack" data-passkey-register><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label>Name<input name="name" value="Dieses Gerät" maxlength="100" required/></label><button class="button button--quiet" type="submit" data-passkey-register-button>Passkey hinzufügen</button><p class="field-help" data-passkey-support>Benötigt einen kompatiblen Browser und eine sichere Verbindung.</p></form>
+								if len(data.Profile.Passkeys) > 0 {
+									<ul class="security-method-list">
+										for _, passkey := range data.Profile.Passkeys {
+											<li><div><strong>{ passkey.Name }</strong><small>Hinzugefügt { profileDateTime(passkey.CreatedAt) }{ lastUsedLabel(passkey.LastUsedAt) }</small></div><div class="action-row"><form method="post" action={ "/profile/security/passkeys/" + passkey.EncodedID + "/rename" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label class="visually-hidden">Neuer Name für { passkey.Name }</label><input name="name" value={ passkey.Name } maxlength="100" required/><button class="button button--quiet" type="submit">Umbenennen</button></form><form method="post" action={ "/profile/security/passkeys/" + passkey.EncodedID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--danger" type="submit" data-confirm-message="Diesen Passkey wirklich entfernen?">Entfernen</button></form></div></li>
+										}
+									</ul>
+								}
+							</section>
+						</div>
+						if data.TOTPEnrollment != nil {
+							<section class="enrollment-panel" aria-labelledby="totp-enrollment-heading"><h3 id="totp-enrollment-heading">Authenticator-App verbinden</h3><p>QR-Code scannen oder Schlüssel manuell eingeben. Danach einen aktuellen sechsstelligen Code bestätigen.</p><div class="totp-setup"><img src={ templ.SafeURL(data.TOTPEnrollment.QRCodeDataURI) } width="220" height="220" alt="QR-Code für die Authenticator-App"/><div><label>Einrichtungsschlüssel<input value={ data.TOTPEnrollment.Secret } readonly data-copy-source/></label><button class="button button--quiet" type="button" data-copy-value={ data.TOTPEnrollment.Secret }>Schlüssel kopieren</button></div></div><form method="post" action="/profile/security/totp/confirm" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label for="totp-confirm-code">Sechsstelliger Code<input id="totp-confirm-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus/></label><button class="button" type="submit">Einrichtung bestätigen</button></form></section>
+						}
+						<section class="recovery-panel" aria-labelledby="recovery-heading">
+							<h3 id="recovery-heading">Recovery-Codes</h3>
+							<p>Jeder Code funktioniert genau einmal. Sicher und getrennt vom Arbeitsgerät aufbewahren.</p>
+							if len(data.RecoveryCodes) > 0 {
+								<div class="recovery-codes" role="status">
+									<strong>Jetzt einmalig speichern</strong>
+									<ul>
+										for _, code := range data.RecoveryCodes {
+											<li><code>{ code }</code></li>
+										}
+									</ul>
+								</div>
+							}
+							<form method="post" action="/profile/security/recovery-codes"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit" data-confirm-message="Neue Recovery-Codes erzeugen? Alle bisherigen Codes werden sofort ungültig.">Recovery-Codes neu erzeugen</button></form>
+						</section>
+					</section>
+					<section class="profile-card profile-card--wide" aria-labelledby="sessions-heading">
+						<header><div><p class="eyebrow">Geräte</p><h2 id="sessions-heading">Aktive Sitzungen</h2></div><span class="profile-card__number" aria-hidden="true">04</span></header>
+						<div class="session-list">
+							for _, item := range data.Profile.Sessions {
+								<article class="session-row">
+									<div>
+										<strong>{ item.DeviceLabel }</strong>
+										<div class="badge-row">
+											if item.ID == data.CurrentSessionID {
+												<span class="status-badge status-badge--ready">Aktuelle Sitzung</span>
+											}
+										</div><small>Gestartet { profileDateTime(item.CreatedAt) } · zuletzt aktiv { profileDateTime(item.LastUsedAt) }</small><small>Automatisches Ende spätestens { profileDateTime(item.AbsoluteExpiresAt) }</small>
+									</div>
+									<form method="post" action={ "/profile/sessions/" + item.ID + "/revoke" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit" data-confirm-message="Diese Sitzung wirklich abmelden?">Sitzung abmelden</button></form>
+								</article>
+							}
+						</div>
+						<form method="post" action="/profile/sessions/revoke-all"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--danger" type="submit" data-confirm-message="Alle Sitzungen einschließlich dieses Geräts wirklich abmelden?">Alle Geräte abmelden</button></form>
+					</section>
+					<section class="profile-card" aria-labelledby="system-heading">
+						<header><div><p class="eyebrow">System</p><h2 id="system-heading">App &amp; Verbindung</h2></div><span class="profile-card__number" aria-hidden="true">05</span></header>
+						<dl class="profile-list"><div><dt>Zeitzone</dt><dd>Europe/Vienna</dd></div><div><dt>Build</dt><dd>{ data.Shell.Page.BuildVersion }</dd></div><div><dt>Verbindung</dt><dd data-profile-connectivity role="status" aria-live="polite">Status wird geprüft</dd></div><div><dt>Installation</dt><dd data-profile-install-status>Im Browser geöffnet</dd></div></dl>
+						<button class="button button--quiet" type="button" data-profile-install hidden>Auf diesem Gerät installieren</button>
+						<p class="field-help">HackWerk speichert keine Kundendaten für Offline-Arbeit. Ohne Verbindung werden Änderungen nicht vorgemerkt.</p>
+					</section>
+					<section class="profile-card" aria-labelledby="logout-heading">
+						<header><div><p class="eyebrow">Abschluss</p><h2 id="logout-heading">Abmelden</h2></div><span class="profile-card__number" aria-hidden="true">06</span></header>
+						<form method="post" action="/logout" class="form-stack" data-logout-form><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label class="check-label"><input type="checkbox" name="clear_preferences" value="true" data-clear-local-preferences/> Lokale Darstellungs- und Installationspräferenzen auf diesem Gerät löschen</label><button class="button button--quiet" type="submit">Abmelden</button></form>
+						<p class="field-help">Bei verlorenem Zugriff setzt ein Administrator nach Identitätsprüfung Sicherheitsmethoden und ein temporäres Passwort zurück.</p>
+					</section>
+				</div>
+			</main>@appFooter(data.Shell.Page)
 		</body>
 	</html>
+}
+
+templ securityCheck(label string, ready bool, detail string) {
+	<div class="security-check"><span class={ securityCheckClass(ready) } aria-hidden="true">{ securityCheckIcon(ready) }</span><span><strong>{ label }</strong><small>{ detail }</small></span></div>
 }
 
 templ Password(data PasswordData) {
@@ -388,7 +608,7 @@ templ Password(data PasswordData) {
 					if data.Error != "" {
 						<div class="form-alert" role="alert">{ data.Error }</div>
 					}
-					<form method="post" action="/password" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label for="new-password">Neues Passwort</label><input id="new-password" name="password" type="password" autocomplete="new-password" minlength="14" required/><label for="confirm-password">Passwort wiederholen</label><input id="confirm-password" name="confirmation" type="password" autocomplete="new-password" minlength="14" required/><button class="button" type="submit">Passwort speichern</button></form>
+					<form method="post" action="/password" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label for="new-password">Neues Passwort</label><input id="new-password" name="password" type="password" autocomplete="new-password" minlength="14" required data-password-strength/><div class="password-strength" data-password-strength-output role="status" aria-live="polite"><span></span><small>Mindestens 14 Zeichen verwenden.</small></div><label for="confirm-password">Passwort wiederholen</label><input id="confirm-password" name="confirmation" type="password" autocomplete="new-password" minlength="14" required/><button class="button" type="submit">Passwort speichern</button></form>
 				</section>
 			</main>@appFooter(data.Shell.Page)
 		</body>
@@ -452,6 +672,11 @@ templ Users(data UsersData) {
 											<label><span>Temporäres Passwort</span><input name="password" type="password" autocomplete="new-password" minlength="14" required/></label>
 											<button class="button button--quiet" type="submit" data-confirm-message="Passwort wirklich zurücksetzen? Das bisherige Passwort wird sofort ungültig.">Passwort zurücksetzen</button>
 										</form>
+										<form method="post" action={ "/admin/users/" + user.ID + "/reset-security" } class="form-stack user-manage__panel reset-form">
+											<div><h3>Sicherheitszugang wiederherstellen</h3><p>Nur nach persönlicher Identitätsprüfung: MFA, Passkeys und Recovery-Codes entfernen sowie alle Sitzungen widerrufen.</p></div>
+											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(user.Version) }/>
+											<button class="button button--danger" type="submit" data-confirm-message="Sicherheitszugang wirklich zurücksetzen? Alle Sicherheitsmethoden und aktiven Sitzungen werden sofort ungültig; beim nächsten Login ist eine Passwortänderung Pflicht.">Sicherheitszugang zurücksetzen</button>
+										</form>
 									</div>
 								</details>
 							</article>
@@ -489,6 +714,64 @@ func driverLabel(id string) string {
 	return "Zugeordnet"
 }
 
+func emailVerificationLabel(profile auth.Profile) string {
+	if profile.Email == "" {
+		return "Keine Adresse hinterlegt"
+	}
+	if profile.EmailVerifiedAt == nil {
+		return "Nicht bestätigt"
+	}
+	return "Bestätigt"
+}
+
+func pendingEmailStatus(profile auth.Profile) string {
+	status := "Versand vorgemerkt"
+	switch profile.PendingEmailDeliveryStatus {
+	case "processed":
+		status = "Bestätigung versendet"
+	case "retry_wait":
+		status = "Versand wird erneut versucht"
+	case "dead":
+		status = "Versand fehlgeschlagen – erneut senden"
+	}
+	if profile.PendingEmailExpiresAt != nil {
+		status += " · gültig bis " + profileDateTime(*profile.PendingEmailExpiresAt)
+	}
+	return status
+}
+
+func securityMethodState(enabled bool) string {
+	if enabled {
+		return "Eingerichtet"
+	}
+	return "Noch nicht eingerichtet"
+}
+
+func securityCheckClass(ready bool) string {
+	if ready {
+		return "security-check__icon security-check__icon--ready"
+	}
+	return "security-check__icon"
+}
+
+func securityCheckIcon(ready bool) string {
+	if ready {
+		return "✓"
+	}
+	return "○"
+}
+
+func profileDateTime(value time.Time) string {
+	return value.In(viennaLocation()).Format("02.01.2006, 15:04 Uhr")
+}
+
+func lastUsedLabel(value *time.Time) string {
+	if value == nil {
+		return " · noch nicht verwendet"
+	}
+	return " · zuletzt verwendet " + profileDateTime(*value)
+}
+
 func isActivePath(active string, path string) bool {
 	if path == "/planning" {
 		return active == path
@@ -508,6 +791,13 @@ func driverLink(role auth.Role) string {
 		return "/admin/drivers"
 	}
 	return "/availability"
+}
+
+func dashboardModeClass(active bool) string {
+	if active {
+		return "button"
+	}
+	return "button button--quiet"
 }
 
 func availabilityTitle(admin bool) string {

@@ -25,8 +25,11 @@ type Rendered struct {
 }
 
 type TemplatePreview struct {
-	Subject, Text, SMS, SMSEncoding string
-	SMSSegments                     int
+	Subject     string `json:"subject"`
+	Text        string `json:"text"`
+	SMS         string `json:"sms"`
+	SMSEncoding string `json:"sms_encoding"`
+	SMSSegments int    `json:"sms_segments"`
 }
 
 var confirmationHTML = template.Must(template.New("confirmation").Parse(`<!doctype html><html lang="de"><body><h1>Termin von {{.BusinessName}}</h1><p>Guten Tag {{.CustomerName}},</p><p>Ihr Termin ist am <strong>{{.When}}</strong>. Geplant sind {{.Duration}} für {{.VolumeM3}} m³ ({{.JobType}}).</p><p><a href="{{.ConfirmationURL}}">Termin bestätigen, ablehnen oder Rückruf wünschen</a></p><p>{{.BusinessAddress}} · {{.BusinessPhone}}</p></body></html>`))
@@ -79,6 +82,24 @@ func SyntheticPreview(location *time.Location) (TemplatePreview, error) {
 	}
 	segments, encoding := SMSSegmentCount(rendered.SMS)
 	return TemplatePreview{Subject: rendered.Subject, Text: rendered.Text, SMS: rendered.SMS, SMSSegments: segments, SMSEncoding: encoding}, nil
+}
+
+func AppointmentPreview(input TemplateInput, location *time.Location) (TemplatePreview, error) {
+	const placeholderURL = "https://preview.invalid/termin/VORSCHAU-OHNE-TOKEN"
+	input.ConfirmationURL = placeholderURL
+	rendered, err := Render(input, location)
+	if err != nil {
+		return TemplatePreview{}, err
+	}
+	replaceURL := func(value string) string {
+		return strings.ReplaceAll(value, placeholderURL, "[BESTÄTIGUNGSLINK]")
+	}
+	sms := replaceURL(rendered.SMS)
+	segments, encoding := SMSSegmentCount(sms)
+	return TemplatePreview{
+		Subject: rendered.Subject, Text: replaceURL(rendered.Text), SMS: sms,
+		SMSSegments: segments, SMSEncoding: encoding,
+	}, nil
 }
 
 func SMSSegmentCount(value string) (int, string) {

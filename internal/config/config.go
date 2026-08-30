@@ -22,7 +22,7 @@ const (
 	EnvironmentDevelopment = "development"
 	EnvironmentTest        = "test"
 	EnvironmentProduction  = "production"
-	CurrentSchemaVersion   = int64(17)
+	CurrentSchemaVersion   = int64(19)
 
 	businessNamePlaceholder                  = "HackWerk – Betreiber noch nicht hinterlegt"
 	businessAddressPlaceholder               = "Ladungsfähige Anschrift noch nicht hinterlegt"
@@ -91,16 +91,23 @@ type Database struct {
 
 // Auth contains password, session, cookie, and login protection settings.
 type Auth struct {
-	SessionCookieName   string
-	CSRFCookieName      string
-	SessionIdleTTL      time.Duration
-	SessionAbsoluteTTL  time.Duration
-	CookieSecure        bool
-	PasswordMinLength   int
-	Argon2MemoryKiB     uint32
-	Argon2Iterations    uint32
-	Argon2Parallelism   uint8
-	LoginLimitPerMinute int
+	SessionCookieName    string
+	CSRFCookieName       string
+	MFACookieName        string
+	SessionIdleTTL       time.Duration
+	SessionAbsoluteTTL   time.Duration
+	CookieSecure         bool
+	PasswordMinLength    int
+	Argon2MemoryKiB      uint32
+	Argon2Iterations     uint32
+	Argon2Parallelism    uint8
+	LoginLimitPerMinute  int
+	SecurityCurrentKeyID string
+	SecurityKeys         map[string]string
+	EmailVerificationTTL time.Duration
+	EmailResendInterval  time.Duration
+	MFAChallengeTTL      time.Duration
+	WebAuthnChallengeTTL time.Duration
 }
 
 type Confirmation struct {
@@ -317,6 +324,10 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 	if err != nil {
 		return Config{}, err
 	}
+	securityKeysValue, err := secretValue(getenv, readFile, "AUTH_SECURITY_KEYS")
+	if err != nil {
+		return Config{}, err
+	}
 	mailUsername, err := secretValue(getenv, readFile, "MAIL_SMTP_USERNAME")
 	if err != nil {
 		return Config{}, err
@@ -356,6 +367,13 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 			return Config{}, errors.New("config: invalid confirmation token keys JSON")
 		}
 	}
+	securityKeys := map[string]string{"development-v1": "ZGV2ZWxvcG1lbnQtb25seS1oYWNrd2Vyay1zZWN1cml0eS1rZXk="}
+	if securityKeysValue != "" {
+		securityKeys = make(map[string]string)
+		if err := json.Unmarshal([]byte(securityKeysValue), &securityKeys); err != nil {
+			return Config{}, errors.New("config: invalid auth security keys JSON")
+		}
+	}
 
 	cfg := Config{
 		Environment:     valueOrDefault(getenv("APP_ENV"), EnvironmentDevelopment),
@@ -387,16 +405,23 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 			ExpectedSchema:   CurrentSchemaVersion,
 		},
 		Auth: Auth{
-			SessionCookieName:   valueOrDefault(getenv("SESSION_COOKIE_NAME"), "hackwerk_session"),
-			CSRFCookieName:      valueOrDefault(getenv("CSRF_COOKIE_NAME"), "hackwerk_csrf"),
-			SessionIdleTTL:      8 * time.Hour,
-			SessionAbsoluteTTL:  24 * time.Hour,
-			CookieSecure:        false,
-			PasswordMinLength:   14,
-			Argon2MemoryKiB:     64 * 1024,
-			Argon2Iterations:    3,
-			Argon2Parallelism:   2,
-			LoginLimitPerMinute: 10,
+			SessionCookieName:    valueOrDefault(getenv("SESSION_COOKIE_NAME"), "hackwerk_session"),
+			CSRFCookieName:       valueOrDefault(getenv("CSRF_COOKIE_NAME"), "hackwerk_csrf"),
+			MFACookieName:        valueOrDefault(getenv("MFA_COOKIE_NAME"), "hackwerk_mfa"),
+			SessionIdleTTL:       8 * time.Hour,
+			SessionAbsoluteTTL:   24 * time.Hour,
+			CookieSecure:         false,
+			PasswordMinLength:    14,
+			Argon2MemoryKiB:      64 * 1024,
+			Argon2Iterations:     3,
+			Argon2Parallelism:    2,
+			LoginLimitPerMinute:  10,
+			SecurityCurrentKeyID: valueOrDefault(getenv("AUTH_SECURITY_KEY_ID"), "development-v1"),
+			SecurityKeys:         securityKeys,
+			EmailVerificationTTL: 24 * time.Hour,
+			EmailResendInterval:  time.Minute,
+			MFAChallengeTTL:      5 * time.Minute,
+			WebAuthnChallengeTTL: 5 * time.Minute,
 		},
 		Confirmation: Confirmation{TokenTTL: 14 * 24 * time.Hour, CurrentKeyID: valueOrDefault(getenv("CONFIRMATION_TOKEN_KEY_ID"), "development-v1"), TokenKeys: keys, RateLimit: 30},
 		Worker:       Worker{InstanceID: strings.TrimSpace(getenv("WORKER_INSTANCE_ID")), PollInterval: time.Second, Lease: 30 * time.Second, BatchSize: 20},
@@ -564,6 +589,16 @@ func applyOverrides(cfg *Config, getenv func(string) string) error {
 	}
 	if cfg.Auth.LoginLimitPerMinute, err = intValue(getenv, "LOGIN_RATE_LIMIT_PER_MINUTE", cfg.Auth.LoginLimitPerMinute); err != nil {
 		return err
+	}
+	for name, target := range map[string]*time.Duration{
+		"AUTH_EMAIL_VERIFICATION_TTL": &cfg.Auth.EmailVerificationTTL,
+		"AUTH_EMAIL_RESEND_INTERVAL":  &cfg.Auth.EmailResendInterval,
+		"AUTH_MFA_CHALLENGE_TTL":      &cfg.Auth.MFAChallengeTTL,
+		"AUTH_WEBAUTHN_CHALLENGE_TTL": &cfg.Auth.WebAuthnChallengeTTL,
+	} {
+		if *target, err = durationValue(getenv, name, *target); err != nil {
+			return err
+		}
 	}
 	if cfg.Confirmation.TokenTTL, err = durationValue(getenv, "CONFIRMATION_TOKEN_TTL", cfg.Confirmation.TokenTTL); err != nil {
 		return err
@@ -744,7 +779,8 @@ func (cfg Config) Validate() error {
 	if cfg.Auth.SessionIdleTTL > cfg.Auth.SessionAbsoluteTTL {
 		return errors.New("config: session idle ttl must not exceed absolute ttl")
 	}
-	if !validCookieName(cfg.Auth.SessionCookieName) || !validCookieName(cfg.Auth.CSRFCookieName) || cfg.Auth.SessionCookieName == cfg.Auth.CSRFCookieName {
+	if !validCookieName(cfg.Auth.SessionCookieName) || !validCookieName(cfg.Auth.CSRFCookieName) || !validCookieName(cfg.Auth.MFACookieName) ||
+		cfg.Auth.SessionCookieName == cfg.Auth.CSRFCookieName || cfg.Auth.SessionCookieName == cfg.Auth.MFACookieName || cfg.Auth.CSRFCookieName == cfg.Auth.MFACookieName {
 		return errors.New("config: invalid auth cookie names")
 	}
 	if cfg.Auth.PasswordMinLength < 12 || cfg.Auth.PasswordMinLength > 256 {
@@ -752,6 +788,17 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Auth.LoginLimitPerMinute < 1 || cfg.Auth.LoginLimitPerMinute > 1000 {
 		return errors.New("config: invalid login rate limit")
+	}
+	if cfg.Auth.EmailVerificationTTL < time.Hour || cfg.Auth.EmailVerificationTTL > 7*24*time.Hour ||
+		cfg.Auth.EmailResendInterval < 30*time.Second || cfg.Auth.EmailResendInterval > time.Hour ||
+		cfg.Auth.MFAChallengeTTL < time.Minute || cfg.Auth.MFAChallengeTTL > 15*time.Minute ||
+		cfg.Auth.WebAuthnChallengeTTL < time.Minute || cfg.Auth.WebAuthnChallengeTTL > 15*time.Minute {
+		return errors.New("config: invalid auth security time limits")
+	}
+	securityKey, ok := cfg.Auth.SecurityKeys[cfg.Auth.SecurityCurrentKeyID]
+	decodedSecurityKey, decodeSecurityErr := base64.StdEncoding.DecodeString(securityKey)
+	if !ok || decodeSecurityErr != nil || len(decodedSecurityKey) < 32 {
+		return errors.New("config: current auth security key is missing or too short")
 	}
 	if cfg.Confirmation.TokenTTL < time.Hour || cfg.Confirmation.TokenTTL > 90*24*time.Hour || cfg.Confirmation.RateLimit < 1 || cfg.Confirmation.RateLimit > 1000 {
 		return errors.New("config: invalid confirmation limits")
@@ -911,6 +958,9 @@ func (cfg Config) Validate() error {
 		}
 		if cfg.Confirmation.CurrentKeyID == "development-v1" {
 			return errors.New("config: production confirmation token key is required")
+		}
+		if cfg.Auth.SecurityCurrentKeyID == "development-v1" {
+			return errors.New("config: production auth security key is required")
 		}
 		if len(cfg.HTTP.TrustedProxyCIDRs) == 0 {
 			return errors.New("config: production trusted proxy CIDRs are required")
@@ -1205,6 +1255,6 @@ func (cfg Config) Diagnostic() map[string]any {
 		"voice_recording_retention": cfg.Voice.RecordingRetention.String(), "voice_provider_key": configured(cfg.Voice.OpenAIAPIKey), "calendar_enabled": cfg.CalendarFeed.Enabled,
 		"routing_provider": cfg.Planning.Router, "map_tile_url": configured(cfg.Map.TileURL), "map_tile_token": configured(cfg.Map.TileToken),
 		"geocoding_enabled": cfg.Geocoding.Enabled, "geocoding_search_url": configured(cfg.Geocoding.SearchURL),
-		"confirmation_key_count": len(cfg.Confirmation.TokenKeys), "maintenance_mode": cfg.MaintenanceMode,
+		"confirmation_key_count": len(cfg.Confirmation.TokenKeys), "auth_security_key_count": len(cfg.Auth.SecurityKeys), "maintenance_mode": cfg.MaintenanceMode,
 	}
 }

@@ -47,8 +47,9 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	}
 	cfg := config.Config{
 		AppName: "HackWerk", BaseURL: "http://127.0.0.1:18533", Database: config.Database{ReadinessTimeout: 2 * time.Second},
-		Auth: config.Auth{SessionCookieName: "hackplan_session", CSRFCookieName: "hackplan_csrf", SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour},
-		Mail: config.Mail{Enabled: true},
+		Auth:     config.Auth{SessionCookieName: "hackplan_session", CSRFCookieName: "hackplan_csrf", SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour},
+		Mail:     config.Mail{Enabled: true},
+		Planning: config.Planning{BusinessOpen: "07:00", BusinessClose: "17:00"},
 	}
 	router, err := web.NewRouter(web.Dependencies{
 		Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pool, Build: buildinfo.Info{Version: "e2e"},
@@ -357,12 +358,12 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		clickCurrent(appointmentEventSelector),
 		chromedp.WaitVisible("[data-appointment-reschedule]", chromedp.ByQuery),
 		chromedp.SetValue("[data-appointment-start]", "2026-08-25T08:30", chromedp.ByQuery),
-		chromedp.Evaluate(fmt.Sprintf(`window.__timeFetch=window.fetch;window.fetch=(input,...args)=>{const url=String(input);if(url.endsWith(%q))return Promise.resolve(new Response(JSON.stringify({error:{code:'reservation_conflict',message:'E2E conflict'}}),{status:409,headers:{'Content-Type':'application/json'}}));if(url.includes('/alternatives?')){window.__alternativeURL=url;return Promise.resolve(new Response(JSON.stringify({conflicts:[],alternatives:[]}),{status:200,headers:{'Content-Type':'application/json'}}));}return window.__timeFetch(input,...args)}`, "/api/v1/appointments/"+appointmentID+"/move"), nil),
+		chromedp.Evaluate(fmt.Sprintf(`window.__timeFetch=window.fetch;window.fetch=(input,...args)=>{const url=String(input);if(url.endsWith(%q))return Promise.resolve(new Response(JSON.stringify({checks:[],conflicts:[]}),{status:200,headers:{'Content-Type':'application/json'}}));if(url.endsWith(%q))return Promise.resolve(new Response(JSON.stringify({error:{code:'reservation_conflict',message:'E2E conflict'}}),{status:409,headers:{'Content-Type':'application/json'}}));if(url.includes('/alternatives?')){window.__alternativeURL=url;return Promise.resolve(new Response(JSON.stringify({conflicts:[],alternatives:[]}),{status:200,headers:{'Content-Type':'application/json'}}));}return window.__timeFetch(input,...args)}`, "/api/v1/appointments/"+appointmentID+"/preview", "/api/v1/appointments/"+appointmentID+"/move"), nil),
+		chromedp.Evaluate(`window.__conflictNativeConfirm=window.confirm;window.confirm=()=>true`, nil),
 		chromedp.Click("[data-appointment-reschedule-submit]", chromedp.ByQuery),
 		chromedp.Poll(`Boolean(window.__alternativeURL)`, nil),
 		chromedp.Evaluate(`new URL(window.__alternativeURL,location.origin).searchParams.get('starts_at')`, &alternativeStart),
 		chromedp.Evaluate(`window.fetch=window.__timeFetch;delete window.__timeFetch;delete window.__alternativeURL`, nil),
-		chromedp.Evaluate(`window.__conflictNativeConfirm=window.confirm;window.confirm=()=>true`, nil),
 		chromedp.Click("[data-appointment-close]", chromedp.ByQuery),
 		chromedp.Evaluate(`window.confirm=window.__conflictNativeConfirm;delete window.__conflictNativeConfirm`, nil),
 	); err != nil {
@@ -428,15 +429,20 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	if cleanAppointmentConfirmCalls != 0 {
 		t.Fatalf("clean reopened appointment dialog prompted %d times", cleanAppointmentConfirmCalls)
 	}
-
+	var preflightShown bool
 	if err := runBrowserStep(browserContext, "extend duration from appointment dialog",
 		clickCurrent(appointmentEventSelector),
 		chromedp.WaitVisible("[data-appointment-reschedule]", chromedp.ByQuery),
 		chromedp.Click("[data-appointment-duration-adjust='15']", chromedp.ByQuery),
+		chromedp.Evaluate(`window.confirm=()=>{const preview=document.querySelector('[data-appointment-preflight]');window.__preflightShown=Boolean(preview&&!preview.hidden&&preview.querySelectorAll('.preflight-check').length>=8);return true}`, nil),
 		chromedp.Click("[data-appointment-reschedule-submit]", chromedp.ByQuery),
 		chromedp.WaitNotVisible("[data-appointment-dialog]", chromedp.ByQuery),
+		chromedp.Evaluate(`window.__preflightShown===true`, &preflightShown),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if !preflightShown {
+		t.Fatal("appointment mutation did not render the server preflight before confirmation")
 	}
 	var extendedStart, extendedEnd time.Time
 	var extendedVersion int32
@@ -498,7 +504,7 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 			_, err := pool.Exec(ctx, "UPDATE appointments SET version=version+1 WHERE id=$1", appointmentID)
 			return err
 		}),
-		chromedp.Evaluate(`window.__appointmentFetch=window.fetch.bind(window);window.fetch=(input,...args)=>{if(!String(input).includes('/api/v1/appointments/'))return window.__appointmentFetch(input,...args);const dialog=document.querySelector('[data-appointment-dialog]');const event=new Event('cancel',{cancelable:true});window.__pendingAppointmentSnapshot={controlsLocked:dialog.inert&&Array.from(dialog.querySelectorAll('button,input,select,textarea')).every(control=>control.disabled),cancelBlocked:!dialog.dispatchEvent(event)&&dialog.open};return Promise.resolve(new Response(JSON.stringify({error:{code:'appointment_version_conflict',message:'Der Termin wurde zwischenzeitlich geändert.'}}),{status:409,headers:{'Content-Type':'application/json'}}))}`, nil),
+		chromedp.Evaluate(`window.__appointmentFetch=window.fetch.bind(window);window.fetch=(input,...args)=>{if(!String(input).endsWith('/resize'))return window.__appointmentFetch(input,...args);const dialog=document.querySelector('[data-appointment-dialog]');const event=new Event('cancel',{cancelable:true});window.__pendingAppointmentSnapshot={controlsLocked:dialog.inert&&Array.from(dialog.querySelectorAll('button,input,select,textarea')).every(control=>control.disabled),cancelBlocked:!dialog.dispatchEvent(event)&&dialog.open};return Promise.resolve(new Response(JSON.stringify({error:{code:'appointment_version_conflict',message:'Der Termin wurde zwischenzeitlich geändert.'}}),{status:409,headers:{'Content-Type':'application/json'}}))}`, nil),
 		chromedp.Click("[data-appointment-reschedule-submit]", chromedp.ByQuery),
 		chromedp.Poll(`window.__pendingAppointmentSnapshot`, nil),
 		chromedp.Poll(`document.querySelector('[data-appointment-dialog]')?.dataset.actionPending!=='true'`, nil),

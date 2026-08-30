@@ -253,12 +253,46 @@ func TestCustomersPersistence(t *testing.T) {
 		}
 	})
 
+	t.Run("preference mode and priority reason survive persistence constraints", func(t *testing.T) {
+		ctx, pool, service, admin, _ := customerFixture(t)
+		created, err := service.CreateIntake(ctx, admin, customerIntake("Petra", "Planbar", "60", customers.UrgencyNormal, "Nord"), "request-preference")
+		if err != nil {
+			t.Fatal(err)
+		}
+		detail, err := service.CustomerDetail(ctx, admin, created.CustomerID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		job := customerIntake("", "", "60", customers.UrgencyNormal, "Nord").Job
+		job.PreferenceMode = customers.PreferenceFixed
+		job.PreferredStartDate, job.PreferredEndDate = "2026-09-03", "2026-09-03"
+		if err := service.UpdateJob(ctx, admin, customers.UpdateJobInput{ID: created.JobID, ExpectedVersion: detail.Jobs[0].Version, Job: job, RequestID: "request-fixed"}); err != nil {
+			t.Fatal(err)
+		}
+		updated, err := service.CustomerDetail(ctx, admin, created.CustomerID)
+		if err != nil || updated.Jobs[0].PreferenceMode != customers.PreferenceFixed {
+			t.Fatalf("persisted preference=%q error=%v", updated.Jobs[0].PreferenceMode, err)
+		}
+		_, err = pool.Exec(ctx, "UPDATE jobs SET preferred_start_date='2026-09-03', preferred_end_date='2026-09-04' WHERE id=$1", created.JobID)
+		assertPostgresCode(t, err, "23514")
+		_, err = pool.Exec(ctx, "UPDATE waitlist_entries SET manual_priority=10, priority_reason='' WHERE id=$1", created.WaitlistID)
+		assertPostgresCode(t, err, "23514")
+		if err := service.UpdateWaitlistPriority(ctx, admin, created.WaitlistID, 10, "Fixtermin bevorzugt", 1, "request-priority"); err != nil {
+			t.Fatal(err)
+		}
+		var priority int32
+		var reason string
+		if err := pool.QueryRow(ctx, "SELECT manual_priority,priority_reason FROM waitlist_entries WHERE id=$1", created.WaitlistID).Scan(&priority, &reason); err != nil || priority != 10 || reason != "Fixtermin bevorzugt" {
+			t.Fatalf("persisted priority/reason=%d/%q error=%v", priority, reason, err)
+		}
+	})
+
 	t.Run("waitlist filter favorite round trips every visible filter", func(t *testing.T) {
 		ctx, _, service, admin, _ := customerFixture(t)
 		filter := customers.WaitlistFilter{
 			JobType: string(customers.JobTypeChippingWithTransport), Region: "Nord", Urgency: string(customers.UrgencyUrgent),
 			PreferredMonth: "2026-10", Workflow: "proposal", DurationGroup: "long",
-			MissingLocation: true, DurationIssue: true, Overdue: true, Unassigned: true, TransportPending: true,
+			MissingLocation: true, DurationIssue: true, Overdue: true, Unassigned: true, TransportPending: true, Incomplete: true,
 			Sort: "duration", Direction: "desc",
 		}
 		if err := service.SaveWaitlistFilterFavorite(ctx, admin, "Disposition", filter); err != nil {
@@ -270,7 +304,7 @@ func TestCustomersPersistence(t *testing.T) {
 		}
 		got := favorites[0].Filter
 		if got.DurationGroup != "long" || !got.MissingLocation || !got.DurationIssue || !got.Overdue ||
-			!got.Unassigned || !got.TransportPending || got.Sort != "duration" || got.Direction != "desc" {
+			!got.Unassigned || !got.TransportPending || !got.Incomplete || got.Sort != "duration" || got.Direction != "desc" {
 			t.Fatalf("favorite filter=%#v", got)
 		}
 	})
@@ -331,7 +365,7 @@ func customerIntake(firstName, lastName, volume string, urgency customers.Urgenc
 		},
 		Job: customers.JobInput{
 			JobType: customers.JobTypeChippingOnly, VolumeM3: volume, EstimatedHackMinutes: 120,
-			TransportMode: customers.TransportNone, Urgency: urgency, Region: region, Source: customers.SourcePhone,
+			TransportMode: customers.TransportNone, PreferenceMode: customers.PreferenceWindow, Urgency: urgency, Region: region, Source: customers.SourcePhone,
 		},
 	}
 }

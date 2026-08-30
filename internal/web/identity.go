@@ -36,6 +36,11 @@ func registerIdentityRoutes(router chi.Router, dependencies Dependencies, page t
 	})
 	router.Get("/login", loginPage(page, dependencies.Logger))
 	router.Post("/login", login(identity, dependencies, page))
+	router.Get("/login/mfa", mfaPage(identity, dependencies, page))
+	router.Post("/login/mfa", completeMFALogin(identity, dependencies, page))
+	router.Post("/login/mfa/passkey/options", beginPasskeyLogin(identity, dependencies))
+	router.Post("/login/mfa/passkey/finish", finishPasskeyLogin(identity, dependencies))
+	router.Get("/profil/email/bestaetigen", verifyProfileEmail(identity, dependencies, page))
 	if dependencies.Confirmations != nil {
 		registerConfirmationRoutes(router, dependencies, page)
 	}
@@ -48,7 +53,22 @@ func registerIdentityRoutes(router chi.Router, dependencies Dependencies, page t
 		protected.Use(requirePasswordChange(page, dependencies.Logger))
 		protected.Use(csrfProtection(identity, dependencies.Config.Auth.CSRFCookieName, page, dependencies.Logger))
 		protected.Get("/dashboard", dashboardPage(dependencies.Dashboard, dependencies.Notifications, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
-		protected.Get("/profile", profile(page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
+		protected.Get("/profile", profilePage(identity, dependencies, page))
+		protected.Post("/profile/details", updateOwnProfile(identity, dependencies, page))
+		protected.Post("/profile/email", requestProfileEmail(identity, dependencies, page))
+		protected.Post("/profile/email/resend", resendProfileEmail(identity, dependencies, page))
+		protected.Post("/profile/email/cancel", cancelProfileEmail(identity, dependencies, page))
+		protected.Post("/profile/security/totp/start", beginTOTPEnrollment(identity, dependencies, page))
+		protected.Post("/profile/security/totp/confirm", confirmTOTPEnrollment(identity, dependencies, page))
+		protected.Post("/profile/security/totp/rename", renameTOTP(identity, dependencies, page))
+		protected.Post("/profile/security/totp/delete", deleteTOTP(identity, dependencies, page))
+		protected.Post("/profile/security/recovery-codes", rotateRecoveryCodes(identity, dependencies, page))
+		protected.Post("/profile/security/passkeys/options", beginPasskeyRegistration(identity))
+		protected.Post("/profile/security/passkeys/finish", finishPasskeyRegistration(identity))
+		protected.Post("/profile/security/passkeys/{credentialID}/rename", renamePasskey(identity, dependencies, page))
+		protected.Post("/profile/security/passkeys/{credentialID}/delete", deletePasskey(identity, dependencies, page))
+		protected.Post("/profile/sessions/revoke-all", revokeAllProfileSessions(identity, dependencies, page))
+		protected.Post("/profile/sessions/{sessionID}/revoke", revokeProfileSession(identity, dependencies, page))
 		protected.Get("/hilfe/erste-schritte", onboardingPage(page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 		protected.Get("/password", passwordPage(page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 		protected.Post("/password", changePassword(identity, dependencies, page))
@@ -94,6 +114,7 @@ func registerIdentityRoutes(router chi.Router, dependencies Dependencies, page t
 			adminRouter.Post("/{userID}/details", updateUserDetails(identity, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 			adminRouter.Post("/{userID}/access", updateAccess(identity, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 			adminRouter.Post("/{userID}/reset-password", resetPassword(identity, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
+			adminRouter.Post("/{userID}/reset-security", resetUserSecurity(identity, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 		})
 	})
 	if dependencies.Voice != nil {
@@ -221,6 +242,9 @@ func loginPage(page templates.PageData, logger *slog.Logger) http.HandlerFunc {
 		if request.URL.Query().Get("password_changed") == "1" {
 			notice = "Passwort geändert. Alle bisherigen Sitzungen wurden widerrufen; bitte melden Sie sich mit dem neuen Passwort an."
 		}
+		if request.URL.Query().Get("email_verified") == "1" {
+			notice = "E-Mail-Adresse bestätigt. Sie können sich jetzt anmelden."
+		}
 		render(response, request, templates.Login(templates.LoginData{Page: page, Notice: notice}), http.StatusOK, logger)
 	}
 }
@@ -237,13 +261,18 @@ func login(identity *auth.Service, dependencies Dependencies, page templates.Pag
 			return
 		}
 		username := strings.TrimSpace(request.Form.Get("username"))
-		tokens, err := identity.Login(request.Context(), username, request.Form.Get("password"), request.RemoteAddr, middleware.GetReqID(request.Context()))
+		tokens, err := identity.LoginWithDevice(request.Context(), username, request.Form.Get("password"), request.RemoteAddr, auth.DeviceLabel(request.UserAgent()), middleware.GetReqID(request.Context()))
 		if err != nil {
 			status := http.StatusUnauthorized
 			if errors.Is(err, auth.ErrRateLimited) {
 				status = http.StatusTooManyRequests
 			}
 			render(response, request, templates.Login(templates.LoginData{Page: page, Username: username, Error: genericLoginError}), status, dependencies.Logger)
+			return
+		}
+		if tokens.MFARequired {
+			setMFACookie(response, dependencies, tokens.MFAChallengeToken)
+			http.Redirect(response, request, "/login/mfa", http.StatusSeeOther)
 			return
 		}
 		setAuthCookies(response, dependencies, tokens)
@@ -264,7 +293,7 @@ func dashboardPage(service *dashboarddomain.Service, notifications *notification
 			return
 		}
 		session, _ := sessionFromContext(request.Context())
-		value, err := service.View(request.Context(), session.Actor, request.URL.Query().Get("date"))
+		value, err := service.View(request.Context(), session.Actor, request.URL.Query().Get("date"), request.URL.Query().Get("mode") == "exceptions")
 		if err != nil {
 			status := http.StatusInternalServerError
 			message := "Der Tagesüberblick kann derzeit nicht geladen werden."
@@ -284,12 +313,6 @@ func dashboardPage(service *dashboarddomain.Service, notifications *notification
 			}
 		}
 		render(response, request, templates.Dashboard(data), http.StatusOK, logger)
-	}
-}
-
-func profile(page templates.PageData, csrfCookieName string, logger *slog.Logger) http.HandlerFunc {
-	return func(response http.ResponseWriter, request *http.Request) {
-		render(response, request, templates.Profile(shell(request, page, csrfCookieName)), http.StatusOK, logger)
 	}
 }
 
@@ -487,6 +510,17 @@ func clearAuthCookies(response http.ResponseWriter, dependencies Dependencies) {
 		// #nosec G124 -- production validation requires Secure=true; this expires both cookies.
 		http.SetCookie(response, &http.Cookie{Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: dependencies.Config.Auth.CookieSecure, SameSite: http.SameSiteStrictMode})
 	}
+}
+
+func setMFACookie(response http.ResponseWriter, dependencies Dependencies, token string) {
+	maxAge := int(dependencies.Config.Auth.MFAChallengeTTL.Seconds())
+	// #nosec G124 -- production validation requires Secure=true; the value is opaque and server-side hashed.
+	http.SetCookie(response, &http.Cookie{Name: dependencies.Config.Auth.MFACookieName, Value: token, Path: "/login/mfa", MaxAge: maxAge, HttpOnly: true, Secure: dependencies.Config.Auth.CookieSecure, SameSite: http.SameSiteStrictMode})
+}
+
+func clearMFACookie(response http.ResponseWriter, dependencies Dependencies) {
+	// #nosec G124 -- production validation requires Secure=true; this expires the pre-authentication cookie.
+	http.SetCookie(response, &http.Cookie{Name: dependencies.Config.Auth.MFACookieName, Value: "", Path: "/login/mfa", MaxAge: -1, HttpOnly: true, Secure: dependencies.Config.Auth.CookieSecure, SameSite: http.SameSiteStrictMode})
 }
 
 func sameOrigin(request *http.Request) bool {

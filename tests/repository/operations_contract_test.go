@@ -35,7 +35,7 @@ func TestProductionComposeHealthAndProviderSecretContracts(t *testing.T) {
 		t.Fatal("app container does not use the local binary healthcheck")
 	}
 	if !strings.Contains(app, "VOICE_OPENAI_API_KEY_FILE: /run/secrets/voice_openai_api_key") ||
-		!strings.Contains(app, "secrets: [database_url, confirmation_token_keys, voice_openai_api_key, map_tile_token]") ||
+		!strings.Contains(app, "secrets: [database_url, confirmation_token_keys, auth_security_keys, voice_openai_api_key, map_tile_token]") ||
 		!strings.Contains(compose, "voice_openai_api_key: {file: ./secrets/voice_openai_api_key}") {
 		t.Fatal("app container does not inject the optional voice provider key through a mounted secret")
 	}
@@ -43,12 +43,17 @@ func TestProductionComposeHealthAndProviderSecretContracts(t *testing.T) {
 		t.Fatal("app container forwards the voice provider key directly through the environment")
 	}
 	if !strings.Contains(app, "MAP_TILE_TOKEN_FILE: /run/secrets/map_tile_token") ||
-		!strings.Contains(app, "secrets: [database_url, confirmation_token_keys, voice_openai_api_key, map_tile_token]") ||
+		!strings.Contains(app, "secrets: [database_url, confirmation_token_keys, auth_security_keys, voice_openai_api_key, map_tile_token]") ||
 		!strings.Contains(compose, "map_tile_token: {file: ./secrets/map_tile_token}") || strings.Contains(compose, "MAP_TILE_TOKEN:") {
 		t.Fatal("map tile token is not isolated to the web container secret")
 	}
 	if !strings.Contains(worker, `test: ["CMD", "/hackwerk", "healthcheck", "worker"]`) {
 		t.Fatal("worker container has no heartbeat-aware healthcheck")
+	}
+	if !strings.Contains(compose, "AUTH_SECURITY_KEYS_FILE: /run/secrets/auth_security_keys") ||
+		!strings.Contains(app, "auth_security_keys") || !strings.Contains(worker, "      - auth_security_keys\n") ||
+		!strings.Contains(compose, "auth_security_keys: {file: ./secrets/auth_security_keys}") {
+		t.Fatal("auth credential keyring is not mounted into web and worker as a secret")
 	}
 	for _, secret := range []string{
 		"MAIL_SMTP_USERNAME_FILE: /run/secrets/mail_smtp_username",

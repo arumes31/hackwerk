@@ -11,10 +11,13 @@ import (
 )
 
 type Querier interface {
+	ApplyVerifiedEmail(ctx context.Context, arg ApplyVerifiedEmailParams) error
 	AppointmentAssignmentsReady(ctx context.Context, arg AppointmentAssignmentsReadyParams) (bool, error)
 	ArchiveCustomer(ctx context.Context, arg ArchiveCustomerParams) (int64, error)
 	ArchiveJob(ctx context.Context, arg ArchiveJobParams) (int64, error)
 	BumpAppointmentVersion(ctx context.Context, arg BumpAppointmentVersionParams) (int64, error)
+	CancelPendingEmailVerification(ctx context.Context, userID pgtype.UUID) (int64, error)
+	ClaimIdentityEmailOutbox(ctx context.Context, arg ClaimIdentityEmailOutboxParams) ([]ClaimIdentityEmailOutboxRow, error)
 	ClaimNotificationOutbox(ctx context.Context, arg ClaimNotificationOutboxParams) ([]ClaimNotificationOutboxRow, error)
 	ClaimVoiceRecording(ctx context.Context, arg ClaimVoiceRecordingParams) (ClaimVoiceRecordingRow, error)
 	CleanupExpiredVoiceDrafts(ctx context.Context) (int64, error)
@@ -28,8 +31,13 @@ type Querier interface {
 	CommitVoiceDraft(ctx context.Context, arg CommitVoiceDraftParams) (int64, error)
 	CompleteClaimedVoiceRecording(ctx context.Context, arg CompleteClaimedVoiceRecordingParams) (int64, error)
 	CompleteVoiceDraft(ctx context.Context, arg CompleteVoiceDraftParams) (int64, error)
+	ConsumeLoginChallenge(ctx context.Context, arg ConsumeLoginChallengeParams) (int64, error)
+	ConsumeRecoveryCode(ctx context.Context, arg ConsumeRecoveryCodeParams) (int64, error)
 	CountActiveAdmins(ctx context.Context) (int64, error)
+	CountActiveWaitlist(ctx context.Context) (int64, error)
 	CountCustomers(ctx context.Context, arg CountCustomersParams) (int64, error)
+	CountEnabledSecurityFactors(ctx context.Context, userID pgtype.UUID) (int32, error)
+	CountRecoveryCodes(ctx context.Context, userID pgtype.UUID) (int32, error)
 	CountWaitlist(ctx context.Context, arg CountWaitlistParams) (int64, error)
 	CountWaitlistFilterFavorites(ctx context.Context, userID pgtype.UUID) (int32, error)
 	CreateCalendarFeed(ctx context.Context, arg CreateCalendarFeedParams) (CreateCalendarFeedRow, error)
@@ -44,10 +52,18 @@ type Querier interface {
 	DeleteAvailabilityException(ctx context.Context, arg DeleteAvailabilityExceptionParams) (int64, error)
 	DeleteAvailabilityRule(ctx context.Context, arg DeleteAvailabilityRuleParams) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
+	DeleteLoginChallengesForUser(ctx context.Context, userID pgtype.UUID) error
+	DeleteRecoveryCodes(ctx context.Context, userID pgtype.UUID) error
 	DeleteRouteStops(ctx context.Context, routeDraftID pgtype.UUID) error
+	DeleteTOTPCredential(ctx context.Context, userID pgtype.UUID) (int64, error)
 	DeleteWaitlistFilterFavorite(ctx context.Context, arg DeleteWaitlistFilterFavoriteParams) (int64, error)
+	DeleteWebAuthnCredential(ctx context.Context, arg DeleteWebAuthnCredentialParams) (int64, error)
+	DeleteWebAuthnCredentialsForUser(ctx context.Context, userID pgtype.UUID) error
+	DeleteWebAuthnRegistrationChallenge(ctx context.Context, arg DeleteWebAuthnRegistrationChallengeParams) (int64, error)
+	DeleteWebAuthnRegistrationChallengesForUser(ctx context.Context, userID pgtype.UUID) error
 	DiscardOtherPlanningSuggestions(ctx context.Context, arg DiscardOtherPlanningSuggestionsParams) error
 	DriverCanCompleteAppointment(ctx context.Context, arg DriverCanCompleteAppointmentParams) (bool, error)
+	EnableTOTPCredential(ctx context.Context, userID pgtype.UUID) (int64, error)
 	ExpireVoiceDraft(ctx context.Context, arg ExpireVoiceDraftParams) (int64, error)
 	FailClaimedVoiceRecording(ctx context.Context, arg FailClaimedVoiceRecordingParams) (string, error)
 	FailVoiceDraft(ctx context.Context, arg FailVoiceDraftParams) (int64, error)
@@ -57,6 +73,7 @@ type Querier interface {
 	FindSession(ctx context.Context, tokenHash []byte) (FindSessionRow, error)
 	FindUserByID(ctx context.Context, id pgtype.UUID) (FindUserByIDRow, error)
 	FindUserByUsername(ctx context.Context, username string) (FindUserByUsernameRow, error)
+	ForceOwnSecurityRecovery(ctx context.Context, arg ForceOwnSecurityRecoveryParams) (int64, error)
 	GetActiveConfirmationForUpdate(ctx context.Context, appointmentID pgtype.UUID) (GetActiveConfirmationForUpdateRow, error)
 	GetActiveCustomer(ctx context.Context, id pgtype.UUID) (string, error)
 	GetActiveRouteLocation(ctx context.Context, id pgtype.UUID) (GetActiveRouteLocationRow, error)
@@ -71,18 +88,25 @@ type Querier interface {
 	GetDashboardCounts(ctx context.Context, arg GetDashboardCountsParams) (GetDashboardCountsRow, error)
 	GetDefaultRouteStartLocation(ctx context.Context) (GetDefaultRouteStartLocationRow, error)
 	GetDriverProfile(ctx context.Context, id pgtype.UUID) (GetDriverProfileRow, error)
+	GetEmailVerificationForUpdate(ctx context.Context, tokenHash []byte) (GetEmailVerificationForUpdateRow, error)
+	GetIdentityEmailDelivery(ctx context.Context, id pgtype.UUID) (GetIdentityEmailDeliveryRow, error)
 	GetJob(ctx context.Context, id pgtype.UUID) (GetJobRow, error)
+	GetLoginChallenge(ctx context.Context, tokenHash []byte) (GetLoginChallengeRow, error)
 	GetNotificationDelivery(ctx context.Context, id pgtype.UUID) (GetNotificationDeliveryRow, error)
 	GetNotificationPlanningData(ctx context.Context, appointmentID pgtype.UUID) (GetNotificationPlanningDataRow, error)
+	GetOwnSecurityProfile(ctx context.Context, id pgtype.UUID) (GetOwnSecurityProfileRow, error)
+	GetPendingEmailVerification(ctx context.Context, userID pgtype.UUID) (GetPendingEmailVerificationRow, error)
 	GetPlanningInput(ctx context.Context, jobID pgtype.UUID) (GetPlanningInputRow, error)
 	GetPlanningJob(ctx context.Context, id pgtype.UUID) (GetPlanningJobRow, error)
 	GetPlanningSuggestionForUpdate(ctx context.Context, id pgtype.UUID) (GetPlanningSuggestionForUpdateRow, error)
 	GetResourceForUpdate(ctx context.Context, id pgtype.UUID) (GetResourceForUpdateRow, error)
 	GetRouteDraft(ctx context.Context, id pgtype.UUID) (GetRouteDraftRow, error)
 	GetRouteLocationForUpdate(ctx context.Context, id pgtype.UUID) (GetRouteLocationForUpdateRow, error)
+	GetTOTPCredential(ctx context.Context, userID pgtype.UUID) (GetTOTPCredentialRow, error)
 	GetVoiceDraftByUploadKey(ctx context.Context, arg GetVoiceDraftByUploadKeyParams) (GetVoiceDraftByUploadKeyRow, error)
 	GetVoiceDraftForOwner(ctx context.Context, arg GetVoiceDraftForOwnerParams) (GetVoiceDraftForOwnerRow, error)
 	GetVoiceRecordingAudio(ctx context.Context, id pgtype.UUID) (GetVoiceRecordingAudioRow, error)
+	GetWebAuthnRegistrationChallenge(ctx context.Context, arg GetWebAuthnRegistrationChallengeParams) (GetWebAuthnRegistrationChallengeRow, error)
 	HasActiveDriverReservations(ctx context.Context, driverID pgtype.UUID) (bool, error)
 	HasActiveResourceReservations(ctx context.Context, resourceID pgtype.UUID) (bool, error)
 	InsertAdoptedProposal(ctx context.Context, arg InsertAdoptedProposalParams) (string, error)
@@ -97,14 +121,18 @@ type Querier interface {
 	InsertCustomer(ctx context.Context, arg InsertCustomerParams) (string, error)
 	InsertDriver(ctx context.Context, arg InsertDriverParams) (string, error)
 	InsertDriverProfile(ctx context.Context, arg InsertDriverProfileParams) (string, error)
+	InsertEmailVerification(ctx context.Context, arg InsertEmailVerificationParams) error
+	InsertEmailVerificationOutbox(ctx context.Context, arg InsertEmailVerificationOutboxParams) error
 	InsertJob(ctx context.Context, arg InsertJobParams) (string, error)
 	InsertJobNote(ctx context.Context, arg InsertJobNoteParams) (string, error)
 	InsertJobNoteIdempotent(ctx context.Context, arg InsertJobNoteIdempotentParams) (InsertJobNoteIdempotentRow, error)
+	InsertLoginChallenge(ctx context.Context, arg InsertLoginChallengeParams) error
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (string, error)
 	InsertNotificationOutboxEvent(ctx context.Context, arg InsertNotificationOutboxEventParams) error
 	InsertOutboxEvent(ctx context.Context, arg InsertOutboxEventParams) error
 	InsertPlanningRun(ctx context.Context, arg InsertPlanningRunParams) (string, error)
 	InsertPlanningSuggestion(ctx context.Context, arg InsertPlanningSuggestionParams) (string, error)
+	InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error
 	InsertResource(ctx context.Context, arg InsertResourceParams) (string, error)
 	InsertRouteDraft(ctx context.Context, arg InsertRouteDraftParams) (InsertRouteDraftRow, error)
 	InsertRouteLocation(ctx context.Context, arg InsertRouteLocationParams) (InsertRouteLocationRow, error)
@@ -114,6 +142,7 @@ type Querier interface {
 	InsertVoiceDraft(ctx context.Context, arg InsertVoiceDraftParams) (InsertVoiceDraftRow, error)
 	InsertVoiceRecording(ctx context.Context, arg InsertVoiceRecordingParams) (string, error)
 	InsertWaitlistEntry(ctx context.Context, arg InsertWaitlistEntryParams) (string, error)
+	InsertWebAuthnCredential(ctx context.Context, arg InsertWebAuthnCredentialParams) error
 	JobHasActiveAppointment(ctx context.Context, jobID pgtype.UUID) (bool, error)
 	LatestAppliedMigration(ctx context.Context) (int64, error)
 	LatestAssignedRouteForDriver(ctx context.Context, arg LatestAssignedRouteForDriverParams) (string, error)
@@ -139,6 +168,7 @@ type Querier interface {
 	ListDashboardAppointments(ctx context.Context, arg ListDashboardAppointmentsParams) ([]ListDashboardAppointmentsRow, error)
 	ListDashboardChipperBookings(ctx context.Context, arg ListDashboardChipperBookingsParams) ([]ListDashboardChipperBookingsRow, error)
 	ListDashboardDriverAvailability(ctx context.Context, arg ListDashboardDriverAvailabilityParams) ([]ListDashboardDriverAvailabilityRow, error)
+	ListDashboardUnplannedJobs(ctx context.Context, resultLimit int32) ([]ListDashboardUnplannedJobsRow, error)
 	ListDashboardUrgentJobs(ctx context.Context, arg ListDashboardUrgentJobsParams) ([]ListDashboardUrgentJobsRow, error)
 	ListDraftRouteIDsForDate(ctx context.Context, localDate pgtype.Date) ([]string, error)
 	ListDriverProfiles(ctx context.Context) ([]ListDriverProfilesRow, error)
@@ -156,11 +186,13 @@ type Querier interface {
 	ListRouteResources(ctx context.Context) ([]ListRouteResourcesRow, error)
 	ListRouteStopPhones(ctx context.Context, jobIds []pgtype.UUID) ([]ListRouteStopPhonesRow, error)
 	ListRouteStops(ctx context.Context, routeDraftID pgtype.UUID) ([]ListRouteStopsRow, error)
+	ListUserSessions(ctx context.Context, arg ListUserSessionsParams) ([]ListUserSessionsRow, error)
 	ListUsers(ctx context.Context) ([]ListUsersRow, error)
 	ListVoiceRecordingsForAdmin(ctx context.Context, arg ListVoiceRecordingsForAdminParams) ([]ListVoiceRecordingsForAdminRow, error)
 	ListWaitlist(ctx context.Context, arg ListWaitlistParams) ([]ListWaitlistRow, error)
 	ListWaitlistFilterFavorites(ctx context.Context, userID pgtype.UUID) ([]ListWaitlistFilterFavoritesRow, error)
 	ListWaitlistForPlanning(ctx context.Context) ([]ListWaitlistForPlanningRow, error)
+	ListWebAuthnCredentials(ctx context.Context, userID pgtype.UUID) ([]ListWebAuthnCredentialsRow, error)
 	LockActiveCustomer(ctx context.Context, id pgtype.UUID) (string, error)
 	LockAppointmentDrivers(ctx context.Context, appointmentID pgtype.UUID) ([]string, error)
 	LockAppointmentForConfirmation(ctx context.Context, id pgtype.UUID) (string, error)
@@ -182,6 +214,8 @@ type Querier interface {
 	LockSchedulingMutation(ctx context.Context) error
 	LockVoiceDraftForOwner(ctx context.Context, arg LockVoiceDraftForOwnerParams) (LockVoiceDraftForOwnerRow, error)
 	LockVoiceUploadKey(ctx context.Context, arg LockVoiceUploadKeyParams) error
+	MarkEmailVerificationExpired(ctx context.Context, id pgtype.UUID) error
+	MarkEmailVerificationVerified(ctx context.Context, id pgtype.UUID) (int64, error)
 	MarkLogin(ctx context.Context, id pgtype.UUID) error
 	MarkNotificationFailed(ctx context.Context, arg MarkNotificationFailedParams) error
 	MarkNotificationRetry(ctx context.Context, arg MarkNotificationRetryParams) error
@@ -193,18 +227,23 @@ type Querier interface {
 	MarkOutboxRetry(ctx context.Context, arg MarkOutboxRetryParams) (int64, error)
 	MarkPlanningSuggestionAdopted(ctx context.Context, arg MarkPlanningSuggestionAdoptedParams) (int64, error)
 	NewConfirmationRequestID(ctx context.Context) (string, error)
+	NewIdentityObjectID(ctx context.Context) (string, error)
 	NextConfirmationTokenVersion(ctx context.Context, appointmentID pgtype.UUID) (int32, error)
 	NextJobNumber(ctx context.Context) (NextJobNumberRow, error)
 	NotificationMetricCounts(ctx context.Context) ([]NotificationMetricCountsRow, error)
 	OperationalSnapshot(ctx context.Context) (OperationalSnapshotRow, error)
 	PlanningDriverAvailable(ctx context.Context, arg PlanningDriverAvailableParams) (bool, error)
 	PrepareAppointmentSwap(ctx context.Context, arg PrepareAppointmentSwapParams) (int64, error)
+	RecordLoginChallengeFailure(ctx context.Context, tokenHash []byte) (int64, error)
 	RecordLoginFailure(ctx context.Context, keyHash []byte) error
+	RecordTOTPStep(ctx context.Context, arg RecordTOTPStepParams) (int64, error)
 	RefreshAppointmentReservations(ctx context.Context, appointmentID pgtype.UUID) error
 	RefreshAppointmentResourceReservations(ctx context.Context, appointmentID pgtype.UUID) error
 	RemoveActiveWaitlistForJob(ctx context.Context, jobID pgtype.UUID) (int64, error)
 	RemoveWaitlistEntry(ctx context.Context, arg RemoveWaitlistEntryParams) (int64, error)
 	RemoveWaitlistScheduled(ctx context.Context, jobID pgtype.UUID) error
+	RenameTOTPCredential(ctx context.Context, arg RenameTOTPCredentialParams) (int64, error)
+	RenameWebAuthnCredential(ctx context.Context, arg RenameWebAuthnCredentialParams) (int64, error)
 	RenewNotificationLease(ctx context.Context, arg RenewNotificationLeaseParams) (int64, error)
 	ReopenCancelledAppointment(ctx context.Context, arg ReopenCancelledAppointmentParams) (int64, error)
 	RequeueNotification(ctx context.Context, id pgtype.UUID) (int64, error)
@@ -215,10 +254,12 @@ type Querier interface {
 	RetryFailedVoiceRecording(ctx context.Context, arg RetryFailedVoiceRecordingParams) (RetryFailedVoiceRecordingRow, error)
 	RevokeActiveConfirmationRequests(ctx context.Context, arg RevokeActiveConfirmationRequestsParams) error
 	RevokeCalendarFeed(ctx context.Context, arg RevokeCalendarFeedParams) (RevokeCalendarFeedRow, error)
+	RevokeOwnedSessionByID(ctx context.Context, arg RevokeOwnedSessionByIDParams) (int64, error)
 	RevokeSession(ctx context.Context, tokenHash []byte) error
 	RevokeUserSessions(ctx context.Context, userID pgtype.UUID) error
 	RotateCalendarFeed(ctx context.Context, arg RotateCalendarFeedParams) (RotateCalendarFeedRow, error)
 	SchemaApplication(ctx context.Context) (string, error)
+	SearchWorkspace(ctx context.Context, search string) ([]SearchWorkspaceRow, error)
 	SetAppointmentCancelled(ctx context.Context, arg SetAppointmentCancelledParams) (int64, error)
 	SetAppointmentCompleted(ctx context.Context, arg SetAppointmentCompletedParams) (int64, error)
 	SetAppointmentConfirmation(ctx context.Context, arg SetAppointmentConfirmationParams) error
@@ -228,6 +269,7 @@ type Querier interface {
 	SetAppointmentProposal(ctx context.Context, arg SetAppointmentProposalParams) (int64, error)
 	SetConfirmationResponse(ctx context.Context, arg SetConfirmationResponseParams) (int64, error)
 	SetJobWorkflow(ctx context.Context, arg SetJobWorkflowParams) error
+	SetLoginWebAuthnSession(ctx context.Context, arg SetLoginWebAuthnSessionParams) (int64, error)
 	SetRouteDraftAssigned(ctx context.Context, arg SetRouteDraftAssignedParams) (int64, error)
 	TouchCalendarFeed(ctx context.Context, arg TouchCalendarFeedParams) error
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
@@ -237,7 +279,9 @@ type Querier interface {
 	UpdateAvailabilityRule(ctx context.Context, arg UpdateAvailabilityRuleParams) (int64, error)
 	UpdateCustomer(ctx context.Context, arg UpdateCustomerParams) (int64, error)
 	UpdateDriverProfile(ctx context.Context, arg UpdateDriverProfileParams) (int64, error)
+	UpdateEmailVerificationForResend(ctx context.Context, arg UpdateEmailVerificationForResendParams) (int64, error)
 	UpdateJob(ctx context.Context, arg UpdateJobParams) (int64, error)
+	UpdateOwnProfile(ctx context.Context, arg UpdateOwnProfileParams) (int64, error)
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) (int64, error)
 	UpdateResource(ctx context.Context, arg UpdateResourceParams) (int64, error)
 	UpdateRouteDraft(ctx context.Context, arg UpdateRouteDraftParams) (int64, error)
@@ -248,9 +292,12 @@ type Querier interface {
 	UpdateUserAccess(ctx context.Context, arg UpdateUserAccessParams) (int64, error)
 	UpdateUserDetails(ctx context.Context, arg UpdateUserDetailsParams) (int64, error)
 	UpdateWaitlistPriority(ctx context.Context, arg UpdateWaitlistPriorityParams) (int64, error)
+	UpdateWebAuthnCredential(ctx context.Context, arg UpdateWebAuthnCredentialParams) (int64, error)
 	UpsertRecentCustomer(ctx context.Context, arg UpsertRecentCustomerParams) (int64, error)
 	UpsertRecentJob(ctx context.Context, arg UpsertRecentJobParams) (string, error)
+	UpsertTOTPEnrollment(ctx context.Context, arg UpsertTOTPEnrollmentParams) (int64, error)
 	UpsertWaitlistFilterFavorite(ctx context.Context, arg UpsertWaitlistFilterFavoriteParams) error
+	UpsertWebAuthnRegistrationChallenge(ctx context.Context, arg UpsertWebAuthnRegistrationChallengeParams) error
 	UpsertWorkerHeartbeat(ctx context.Context, arg UpsertWorkerHeartbeatParams) error
 	VoiceMetricCounts(ctx context.Context) ([]VoiceMetricCountsRow, error)
 	WaitlistFilterFavoriteExists(ctx context.Context, arg WaitlistFilterFavoriteExistsParams) (bool, error)

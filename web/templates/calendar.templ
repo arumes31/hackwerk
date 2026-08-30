@@ -3,6 +3,7 @@ package templates
 import (
 	"example.invalid/hackplan/internal/appointment"
 	"example.invalid/hackplan/internal/auth"
+	"example.invalid/hackplan/internal/notification"
 	"example.invalid/hackplan/internal/resource"
 	"fmt"
 	"net/url"
@@ -63,6 +64,7 @@ type AppointmentDetailData struct {
 	ConfirmationActionError string
 	CanReissueConfirmation  bool
 	CanResetConfirmation    bool
+	MessagePreview          *notification.TemplatePreview
 }
 
 templ Calendar(data CalendarData) {
@@ -307,6 +309,7 @@ templ appointmentDialog(csrf string, admin bool, options appointment.PlanningOpt
 	<dialog class="planning-dialog" data-appointment-dialog aria-labelledby="appointment-dialog-title">
 		<div class="dialog-heading"><div><p class="eyebrow">Termindetail</p><h2 id="appointment-dialog-title" data-appointment-title>Termin</h2></div><button class="icon-button" type="button" data-appointment-close aria-label="Dialog schließen">×</button></div>
 		<div data-appointment-detail></div>
+		<section class="appointment-preflight" data-appointment-preflight hidden aria-live="polite"></section>
 		<div class="appointment-actions" data-appointment-actions>
 			<div class="form-alert" role="alert" tabindex="-1" hidden data-appointment-error></div>
 			if admin {
@@ -389,6 +392,7 @@ templ AppointmentDetailPage(data AppointmentDetailData) {
 				<section class="form-card" aria-labelledby="appointment-assignment-title">
 					<h2 id="appointment-assignment-title">Fahrer und Ressourcen</h2>
 					<p>Änderungen werden gegen Terminversion, Verfügbarkeit und Reservierungen geprüft.</p>
+					<dl class="appointment-detail-list"><div><dt>Arbeitszeit</dt><dd>{ fmt.Sprint(data.Detail.EstimatedHackMinutes) } Minuten</dd></div><div><dt>Transportzeit</dt><dd>{ fmt.Sprint(data.Detail.EstimatedTransportMinutes) } Minuten</dd></div><div><dt>Puffer</dt><dd>{ fmt.Sprint(data.Detail.BufferBeforeMinutes) } Minuten davor · { fmt.Sprint(data.Detail.BufferAfterMinutes) } Minuten danach</dd></div></dl>
 					<form method="post" action={ "/calendar/appointments/" + data.Detail.ID + "/assign" } class="form-stack">
 						if data.Error.Message != "" {
 							<div id="appointment-assignment-error" class="form-alert" role="alert" tabindex="-1" autofocus><strong>Zuweisung konnte nicht gespeichert werden.</strong><p>{ data.Error.Message }</p></div>
@@ -397,6 +401,9 @@ templ AppointmentDetailPage(data AppointmentDetailData) {
 						<div class="form-actions"><button class="button" type="submit">Zuweisung speichern</button><a class="button button--quiet" href="/calendar">Abbrechen</a></div>
 					</form>
 				</section>
+				if data.MessagePreview != nil {
+					<section class="form-card" aria-labelledby="appointment-message-preview-title"><p class="eyebrow">Nebenwirkungsfreie Vorschau</p><h2 id="appointment-message-preview-title">Nachricht vor Fixierung oder erneutem Link prüfen</h2><p>Es wird nichts versendet. Der echte Bestätigungslink wird erst im Worker rekonstruiert.</p><div class="form-grid"><div><h3>E-Mail</h3><p><strong>Betreff:</strong> { data.MessagePreview.Subject }</p><pre>{ data.MessagePreview.Text }</pre></div><div><h3>SMS</h3><p>{ fmt.Sprintf("%d Segment(e) · %s", data.MessagePreview.SMSSegments, data.MessagePreview.SMSEncoding) }</p><pre>{ data.MessagePreview.SMS }</pre></div></div></section>
+				}
 				if data.CanReissueConfirmation || data.CanResetConfirmation {
 					<section class="form-card" aria-labelledby="appointment-confirmation-admin-title">
 						<h2 id="appointment-confirmation-admin-title">Kundenbestätigung verwalten</h2>

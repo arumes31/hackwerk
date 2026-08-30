@@ -108,7 +108,6 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
-
 	var routeLocationMapReady, routeLocationWorkerReady, routeLocationConfirmed, routeLocationInvalidated, routeLocationLayout, routeLocationSaved bool
 	routeLocationContext, cancelRouteLocation := context.WithTimeout(browser, 45*time.Second)
 	if err := chromedp.Run(routeLocationContext,
@@ -177,6 +176,10 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	}
 
 	var compactDesktopOverflow, compactMobileOverflow bool
+	var waitlistLayout struct {
+		SelectionWidth, NextStepWidth, ActionsWidth, MaxRowHeight float64
+		BreaksInsideWords                                         bool
+	}
 	var driverCreateOpen bool
 	if err := runBrowserStep(browser, "compact driver list",
 		chromedp.Navigate(server.URL+"/admin/drivers"), chromedp.WaitVisible(".driver-compact-row", chromedp.ByQuery),
@@ -192,6 +195,20 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	if err := runBrowserStep(browser, "compact waitlist desktop",
 		chromedp.Navigate(server.URL+"/waitlist"), chromedp.WaitVisible(".waitlist-table", chromedp.ByQuery),
 		chromedp.Evaluate(`document.documentElement.scrollWidth > window.innerWidth`, &compactDesktopOverflow),
+		chromedp.Evaluate(`(() => {
+			const table = document.querySelector('.waitlist-table');
+			const cell = label => table.querySelector('tbody td[data-label="' + label + '"]');
+			const rows = Array.from(table.tBodies[0]?.rows || []);
+			const nextStep = cell('Nächster Schritt');
+			const style = getComputedStyle(nextStep);
+			return {
+				SelectionWidth: cell('Auswahl').getBoundingClientRect().width,
+				NextStepWidth: nextStep.getBoundingClientRect().width,
+				ActionsWidth: cell('Aktionen').getBoundingClientRect().width,
+				MaxRowHeight: Math.max(0, ...rows.map(row => row.getBoundingClientRect().height)),
+				BreaksInsideWords: style.overflowWrap === 'anywhere' || style.wordBreak === 'break-all'
+			};
+		})()`, &waitlistLayout),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
@@ -204,6 +221,9 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	}
 	if driverCreateOpen || compactDesktopOverflow || compactMobileOverflow {
 		t.Fatalf("compact default/create/desktop-overflow/mobile-overflow=%v/%v/%v", driverCreateOpen, compactDesktopOverflow, compactMobileOverflow)
+	}
+	if waitlistLayout.SelectionWidth > 90 || waitlistLayout.NextStepWidth < 180 || waitlistLayout.ActionsWidth < 100 || waitlistLayout.MaxRowHeight > 280 || waitlistLayout.BreaksInsideWords {
+		t.Fatalf("waitlist desktop layout selection/next/actions/row/breaks=%.0f/%.0f/%.0f/%.0f/%v", waitlistLayout.SelectionWidth, waitlistLayout.NextStepWidth, waitlistLayout.ActionsWidth, waitlistLayout.MaxRowHeight, waitlistLayout.BreaksInsideWords)
 	}
 
 	var desktopOverflow, smallDesktopTarget, selectedByMap, selectedByCard, selectedMarkerState, deselectedByKeyboard, candidateSemantics, mapReady bool
@@ -401,7 +421,6 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	if assignedStatus != "assigned" || proposalCount != 2 || outboxCount != 0 {
 		t.Fatalf("assignment status/proposals/outbox=%s/%d/%d", assignedStatus, proposalCount, outboxCount)
 	}
-
 	if err := runBrowserStep(browser, "driver mobile route",
 		chromedp.Evaluate(`document.querySelector("header form[action='/logout']").requestSubmit()`, nil),
 		chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery),
@@ -519,6 +538,49 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
 	assertRouteGeocodingJourney(t, browser, server.URL)
+	assertCommandPaletteJourney(t, browser)
+}
+
+func assertCommandPaletteJourney(t *testing.T, browser context.Context) {
+	t.Helper()
+	var commandResults int
+	var commandPrivate, commandFocusRestored bool
+	if err := runBrowserStep(browser, "command palette search",
+		chromedp.EmulateViewport(1440, 900),
+		chromedp.Focus("[data-command-open]", chromedp.ByQuery),
+		chromedp.Evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}))`, nil),
+		chromedp.WaitVisible("[data-command-palette]", chromedp.ByQuery),
+		chromedp.Poll(`document.activeElement===document.querySelector('[data-global-search-input]')`, nil),
+		chromedp.SetValue("[data-global-search-input]", "Franz", chromedp.ByQuery),
+		chromedp.Click("[data-global-search-form] button[type='submit']", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelectorAll('[data-global-search-results] .search-result').length>0`, nil),
+		chromedp.Evaluate(`document.querySelectorAll('[data-global-search-results] .search-result').length`, &commandResults),
+		chromedp.Evaluate(`!location.href.includes('Franz')&&![...Object.values(localStorage),...Object.values(sessionStorage)].some(value=>String(value).includes('Franz'))`, &commandPrivate),
+		chromedp.Click("[data-command-close]", chromedp.ByQuery),
+		chromedp.WaitNotVisible("[data-command-palette]", chromedp.ByQuery),
+		chromedp.Evaluate(`document.activeElement===document.querySelector('[data-command-open]')`, &commandFocusRestored),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if commandResults == 0 || !commandPrivate || !commandFocusRestored {
+		t.Fatalf("command results/private/focus=%d/%v/%v", commandResults, commandPrivate, commandFocusRestored)
+	}
+	var shortcutsVisible, shortcutsFocusRestored bool
+	if err := runBrowserStep(browser, "shortcut help",
+		chromedp.Click("[data-command-open]", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-command-palette]", chromedp.ByQuery),
+		chromedp.Click("[data-shortcuts-open]", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-shortcuts-dialog]", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('[data-shortcuts-dialog]').open`, &shortcutsVisible),
+		chromedp.Click("[data-shortcuts-close]", chromedp.ByQuery),
+		chromedp.WaitNotVisible("[data-shortcuts-dialog]", chromedp.ByQuery),
+		chromedp.Evaluate(`document.activeElement===document.querySelector('[data-command-open]')`, &shortcutsFocusRestored),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if !shortcutsVisible || !shortcutsFocusRestored {
+		t.Fatalf("shortcuts/focus=%v/%v", shortcutsVisible, shortcutsFocusRestored)
+	}
 }
 
 func assertRouteGeocodingJourney(t *testing.T, browser context.Context, serverURL string) {

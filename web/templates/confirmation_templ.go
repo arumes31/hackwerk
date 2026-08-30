@@ -373,14 +373,14 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\"> <label for=\"confirmation-response-note\">Optionale Rückrufnotiz bei Ablehnung</label><textarea id=\"confirmation-response-note\" name=\"response_note\" maxlength=\"500\" rows=\"3\" placeholder=\"z. B. Bitte vormittags zurückrufen\" aria-invalid=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\"> <label for=\"confirmation-response-note\">Optionale Rückrufnotiz</label><textarea id=\"confirmation-response-note\" name=\"response_note\" maxlength=\"500\" rows=\"3\" placeholder=\"z. B. Bitte vormittags zurückrufen\" aria-invalid=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var22 string
 			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(confirmationNoteInvalid(data.ResponseNoteError))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 81, Col: 292}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 81, Col: 278}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 			if templ_7745c5c3_Err != nil {
@@ -393,7 +393,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(confirmationNoteDescription(data.ResponseNoteError))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 81, Col: 365}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 81, Col: 351}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 			if templ_7745c5c3_Err != nil {
@@ -406,13 +406,13 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 			var templ_7745c5c3_Var24 string
 			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(data.ResponseNote)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 81, Col: 387}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 81, Col: 373}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</textarea><small id=\"confirmation-note-help\">Maximal 500 Zeichen; nur zusammen mit „Termin ablehnen“.</small> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</textarea><small id=\"confirmation-note-help\">Maximal 500 Zeichen; zusammen mit „Termin ablehnen“ oder „Rückruf wünschen“.</small> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -435,7 +435,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<small id=\"confirmation-note-feedback\" data-confirmation-note-feedback role=\"status\" aria-live=\"polite\">Die Notiz wird nur bei einer Ablehnung übermittelt.</small><p class=\"form-hint\" data-confirmation-summary>Die gewählte Antwort wird unmittelbar und einmalig gespeichert.</p><button class=\"button\" type=\"submit\" name=\"action\" value=\"confirmed\" data-response-label=\"Sie bestätigen den angezeigten Termin.\">Termin bestätigen</button> <button class=\"button button--quiet\" type=\"submit\" name=\"action\" value=\"declined\" data-response-label=\"Sie lehnen den angezeigten Termin ab.\">Termin ablehnen</button> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<small id=\"confirmation-note-feedback\" data-confirmation-note-feedback role=\"status\" aria-live=\"polite\">Die Notiz wird nur bei einer Ablehnung oder einem Rückrufwunsch übermittelt.</small><p class=\"form-hint\" data-confirmation-summary>Die gewählte Antwort wird unmittelbar und einmalig gespeichert.</p><button class=\"button\" type=\"submit\" name=\"action\" value=\"confirmed\" data-response-label=\"Sie bestätigen den angezeigten Termin.\">Termin bestätigen</button> <button class=\"button button--quiet\" type=\"submit\" name=\"action\" value=\"declined\" data-response-label=\"Sie lehnen den angezeigten Termin ab.\">Termin ablehnen</button> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

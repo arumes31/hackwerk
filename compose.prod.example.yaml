@@ -15,6 +15,8 @@ x-runtime-environment: &runtime-environment
   DATABASE_URL_FILE: /run/secrets/database_url
   CONFIRMATION_TOKEN_KEY_ID: ${CONFIRMATION_TOKEN_KEY_ID:?Token-Key-ID setzen}
   CONFIRMATION_TOKEN_KEYS_FILE: /run/secrets/confirmation_token_keys
+  AUTH_SECURITY_KEY_ID: ${AUTH_SECURITY_KEY_ID:?Auth-Security-Key-ID setzen}
+  AUTH_SECURITY_KEYS_FILE: /run/secrets/auth_security_keys
   MAIL_ENABLED: ${MAIL_ENABLED:-false}
   SMS_ENABLED: ${SMS_ENABLED:-false}
   BUSINESS_NAME: ${BUSINESS_NAME:-HackWerk – Betreiber noch nicht hinterlegt}
@@ -90,7 +92,7 @@ services:
       SMS_ENABLED: "false"
       VOICE_ENABLED: "false"
       METRICS_ENABLED: "false"
-    secrets: [migration_database_url, confirmation_token_keys]
+    secrets: [migration_database_url, confirmation_token_keys, auth_security_keys]
     networks: [backend]
     read_only: true
     security_opt: [no-new-privileges:true]
@@ -108,7 +110,7 @@ services:
       MAP_TILE_TOKEN_FILE: /run/secrets/map_tile_token
       METRICS_ENABLED: "true"
       METRICS_LISTEN_ADDR: 172.33.0.10:19090
-    secrets: [database_url, confirmation_token_keys, voice_openai_api_key, map_tile_token]
+    secrets: [database_url, confirmation_token_keys, auth_security_keys, voice_openai_api_key, map_tile_token]
     depends_on:
       postgres: {condition: service_healthy}
     ports: ["127.0.0.1:18533:18533"]
@@ -157,6 +159,7 @@ services:
     secrets:
       - database_url
       - confirmation_token_keys
+      - auth_security_keys
       - mail_smtp_username
       - mail_smtp_password
       - sendberry_api_key
@@ -217,6 +220,7 @@ secrets:
   migration_database_url: {file: ./secrets/migration_database_url}
   backup_database_url: {file: ./secrets/backup_database_url}
   confirmation_token_keys: {file: ./secrets/confirmation_token_keys}
+  auth_security_keys: {file: ./secrets/auth_security_keys}
   postgres_bootstrap_password: {file: ./secrets/postgres_bootstrap_password}
   postgres_migration_password: {file: ./secrets/postgres_migration_password}
   postgres_runtime_password: {file: ./secrets/postgres_runtime_password}

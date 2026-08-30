@@ -6,6 +6,41 @@ info:
 servers:
   - url: http://localhost:18533
 paths:
+  /search:
+    post:
+      operationId: searchWorkspace
+      description: Authentifizierte, rollenbasierte Navigation über Kunden, Aufträge und aktive Termine. Der Suchtext bleibt im POST-Body, wird nicht gespeichert und die Antwort ist immer `no-store`.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [csrf_token, q]
+              properties:
+                csrf_token: { type: string, writeOnly: true }
+                q: { type: string, minLength: 2, maxLength: 120 }
+      responses:
+        "200":
+          description: Höchstens 24 navigierende Treffer, jeweils maximal acht pro Objektart.
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    maxItems: 24
+                    items: { $ref: "#/components/schemas/WorkspaceSearchResult" }
+            text/html: { schema: { type: string } }
+        "403": { description: Session, Rolle oder CSRF ungültig. }
+        "422": { description: Suchtext ist zu kurz oder zu lang. }
   /api/v1/geocoding/search:
     post:
       operationId: searchGeocodingCandidates
@@ -418,9 +453,49 @@ paths:
                 username: { type: string }
                 password: { type: string, format: password, writeOnly: true }
       responses:
-        "303": { description: Anmeldung erfolgreich; opaque Session wurde rotiert. }
+        "303": { description: Anmeldung erfolgreich; neue opaque Session wurde angelegt oder der zweite Faktor wird angefordert. }
         "401": { description: Generische ungültige Zugangsdaten. }
         "429": { description: Loginlimit erreicht, mit derselben generischen sichtbaren Meldung. }
+  /login/mfa:
+    get:
+      operationId: getSecondFactor
+      security: [{ mfaCookie: [] }]
+      responses:
+        "200": { description: Zweiter Login-Schritt mit den eingerichteten TOTP-, Passkey- und Recovery-Optionen. }
+        "303": { description: Challenge fehlt oder ist abgelaufen; zurück zur Anmeldung. }
+    post:
+      operationId: completeSecondFactor
+      security: [{ mfaCookie: [] }]
+      description: Verbraucht einen gültigen TOTP- oder Recovery-Code atomar und erzeugt erst danach eine reguläre Sitzung.
+      responses:
+        "303": { description: Zweiter Faktor gültig; neue parallele Sitzung angelegt. }
+        "401": { description: Generischer Fehler ohne Preisgabe von Faktor- oder Kontostatus. }
+  /login/mfa/passkey/options:
+    post:
+      operationId: beginPasskeyLogin
+      security: [{ mfaCookie: [] }]
+      responses:
+        "200": { description: Kurzlebige, serverseitig gebundene WebAuthn-Assertion-Optionen. }
+        "401": { description: Challenge ungültig oder Passkey nicht verfügbar. }
+  /login/mfa/passkey/finish:
+    post:
+      operationId: finishPasskeyLogin
+      security: [{ mfaCookie: [] }]
+      responses:
+        "200": { description: Assertion einmalig akzeptiert und reguläre Sitzung angelegt. }
+        "401": { description: Assertion generisch abgelehnt. }
+  /profil/email/bestaetigen:
+    get:
+      operationId: verifyOwnEmailChange
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "303": { description: Einmaliger Link akzeptiert; neue normalisierte E-Mail-Adresse aktiv. }
+        "410": { description: Link abgelaufen. }
+        "422": { description: Link ungültig oder bereits verwendet. }
   /logout:
     post:
       operationId: postLogout
@@ -441,6 +516,92 @@ paths:
         "303": { description: Passwort geändert und bestehende Sessions widerrufen. }
         "403": { description: CSRF-Prüfung fehlgeschlagen. }
         "422": { description: Passwortpolicy oder Bestätigung ungültig. }
+  /profile:
+    get:
+      operationId: getOwnProfile
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Eigenes Profil mit Identität, E-Mail-Status, Sicherheitsmethoden, Recovery-Code-Anzahl, aktiven Sitzungen und Systemstatus. }
+        "401": { description: Anmeldung erforderlich. }
+  /profile/details:
+    post:
+      operationId: updateOwnProfile
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Anzeigename, Anrede und dienstliche Telefonnummer normalisiert, versioniert und auditiert gespeichert. }
+        "403": { description: CSRF-Prüfung fehlgeschlagen. }
+        "409": { description: Profilversion veraltet. }
+        "422": { description: Eingabe ungültig. }
+  /profile/email:
+    post:
+      operationId: requestOwnEmailChange
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Ausstehende Adresse und Transactional-Outbox-Ereignis atomar angelegt; aktive Adresse unverändert. }
+        "403": { description: CSRF-Prüfung fehlgeschlagen. }
+        "422": { description: Adresse ungültig oder mit der aktiven Adresse identisch. }
+  /profile/email/resend:
+    post:
+      operationId: resendOwnEmailVerification
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Neuer zeitlich begrenzter Link in der Outbox vorgemerkt. }
+        "429": { description: Begrenztes Resend-Intervall noch nicht erreicht. }
+  /profile/email/cancel:
+    post:
+      operationId: cancelOwnEmailChange
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Eigene ausstehende Änderung abgebrochen. }
+        "409": { description: Keine abbrechbare Änderung vorhanden. }
+  /profile/security/passkeys/options:
+    post:
+      operationId: beginOwnPasskeyRegistration
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Kurzlebige WebAuthn-Registrierungsoptionen, an Benutzer und aktuelle Sitzung gebunden. }
+        "403": { description: CSRF-Prüfung fehlgeschlagen. }
+  /profile/security/passkeys/finish:
+    post:
+      operationId: finishOwnPasskeyRegistration
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Passkey registriert; falls nötig einmalig sichtbare Recovery-Codes enthalten. }
+        "403": { description: CSRF-Prüfung fehlgeschlagen. }
+        "422": { description: Challenge abgelaufen oder WebAuthn-Antwort ungültig. }
+  /profile/sessions/{sessionID}/revoke:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: revokeOwnSession
+      description: Widerruft ausschließlich eine Sitzung des angemeldeten Benutzers; fremde IDs werden nicht aufgelöst.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Sitzung widerrufen. }
+        "404": { description: Sitzung nicht aktiv oder nicht dem Benutzer zugeordnet. }
+  /profile/sessions/revoke-all:
+    post:
+      operationId: revokeAllOwnSessions
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Alle Sitzungen einschließlich der aktuellen atomar widerrufen. }
+  /admin/users/{userID}/reset-security:
+    parameters:
+      - name: userID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: resetUserSecurity
+      description: Kontrollierter, auditierter Admin-Recovery nach Identitätsprüfung; entfernt Faktoren und Recovery-Codes, widerruft Sitzungen und erzwingt Passwortänderung.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Sicherheitszugang atomar zurückgesetzt. }
+        "403": { description: Benutzerverwaltung oder CSRF fehlt. }
+        "409": { description: Benutzer-Version veraltet. }
   /admin/users:
     get:
       operationId: listUsers
@@ -895,6 +1056,38 @@ paths:
               schema: { $ref: "#/components/schemas/AppointmentDetail" }
         "403": { description: Kalenderberechtigung fehlt. }
         "404": { description: Termin nicht gefunden. }
+  /api/v1/appointments/{appointmentID}/preview:
+    parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
+    post:
+      operationId: previewAppointmentMutation
+      description: Nebenwirkungsfreie Admin-Prüfung vor Move, Resize, Assignment oder Fixierung. Mutation und PostgreSQL-Reservierungsconstraints prüfen beim anschließenden Schreiben erneut.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: true
+              required: [csrf_token, version, action]
+              properties:
+                csrf_token: { type: string, writeOnly: true }
+                version: { type: integer, minimum: 1 }
+                action: { type: string, enum: [assign, move, resize, fix] }
+                starts_at: { type: string, format: date-time }
+                ends_at: { type: string, format: date-time }
+                without_notification_reason: { type: string, maxLength: 1000 }
+      responses:
+        "200":
+          description: Pass/Fail-Prüfliste, Alt/Neu-Zeit, Zeitanteile und datensparsame Konflikte; keine Speicherung oder Benachrichtigung.
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppointmentPreflight" }
+        "403": { description: Nur Administratoren dürfen Terminmutationen prüfen. }
+        "404": { description: Termin nicht gefunden. }
+        "422": { description: Aktion, Version, Zeit oder Zuweisung ungültig. }
   /api/v1/appointments/{appointmentID}/move:
     parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
     post:
@@ -1283,7 +1476,7 @@ components:
     AppointmentDetail:
       type: object
       additionalProperties: false
-      required: [id, job_id, customer_id, title, start, end, lifecycle, status_label, locality, volume_m3, drivers, resources, notes, maps_url, phone, email, notification_preference, notification_channels, notification_targets, notification_warning, notification_suggestion, notification_requires_override, notifications, version, can_complete, complete_requires_override, can_fix, can_cancel, can_reopen, can_reschedule, can_swap, can_reissue, can_reset_confirmation]
+      required: [id, job_id, customer_id, title, start, end, lifecycle, status_label, locality, volume_m3, drivers, resources, notes, maps_url, phone, email, notification_preference, notification_channels, notification_targets, notification_warning, notification_suggestion, notification_requires_override, notifications, version, working_minutes, transport_minutes, buffer_before_minutes, buffer_after_minutes, can_complete, complete_requires_override, can_fix, can_cancel, can_reopen, can_assign, can_reschedule, can_swap, can_reissue, can_reset_confirmation]
       properties:
         id: { type: string, format: uuid }
         job_id: { type: string, format: uuid }
@@ -1326,15 +1519,67 @@ components:
         notification_requires_override: { type: boolean }
         notifications: { type: array, items: { $ref: "#/components/schemas/NotificationStatus" } }
         version: { type: integer, minimum: 1 }
+        working_minutes: { type: integer, minimum: 0 }
+        transport_minutes: { type: integer, minimum: 0 }
+        buffer_before_minutes: { type: integer, minimum: 0 }
+        buffer_after_minutes: { type: integer, minimum: 0 }
+        message_preview: { $ref: "#/components/schemas/NotificationTemplatePreview", description: "Ausschließlich für Administratoren; ohne Roh-Token und ohne Nebenwirkung." }
         can_complete: { type: boolean, description: Der angemeldete Akteur darf diesen fixierten Termin unter den aktuellen Zeit-, Zuweisungs- und Fahrerprofilregeln abschließen. }
         complete_requires_override: { type: boolean, description: Ein Administrator muss den Abschluss vor Terminbeginn begründen. }
         can_fix: { type: boolean }
         can_cancel: { type: boolean }
         can_reopen: { type: boolean }
+        can_assign: { type: boolean }
         can_reschedule: { type: boolean, description: Admin darf den editierbaren Termin per Dialog ohne Drag-and-drop verschieben oder in der Dauer ändern. }
         can_swap: { type: boolean }
         can_reissue: { type: boolean }
         can_reset_confirmation: { type: boolean }
+    WorkspaceSearchResult:
+      type: object
+      additionalProperties: false
+      required: [kind, id, title, href]
+      properties:
+        kind: { type: string, enum: [customer, job, appointment] }
+        id: { type: string, format: uuid }
+        parent_id: { type: string, format: uuid }
+        title: { type: string }
+        subtitle: { type: string }
+        href: { type: string, description: Rollenberechtigtes internes Navigationsziel. }
+    NotificationTemplatePreview:
+      type: object
+      additionalProperties: false
+      required: [subject, text, sms, sms_encoding, sms_segments]
+      properties:
+        subject: { type: string }
+        text: { type: string, description: "Enthält ausschließlich den Marker `[BESTÄTIGUNGSLINK]`, niemals einen Roh-Token." }
+        sms: { type: string, description: "Enthält ausschließlich den Marker `[BESTÄTIGUNGSLINK]`, niemals einen Roh-Token." }
+        sms_encoding: { type: string, enum: [GSM-7, UCS-2] }
+        sms_segments: { type: integer, minimum: 0 }
+    AppointmentPreflight:
+      type: object
+      additionalProperties: false
+      required: [current_starts_at, current_ends_at, proposed_starts_at, proposed_ends_at, working_minutes, transport_minutes, buffer_before_minutes, buffer_after_minutes, checks, conflicts]
+      properties:
+        current_starts_at: { type: string, format: date-time }
+        current_ends_at: { type: string, format: date-time }
+        proposed_starts_at: { type: string, format: date-time }
+        proposed_ends_at: { type: string, format: date-time }
+        working_minutes: { type: integer, minimum: 0 }
+        transport_minutes: { type: integer, minimum: 0 }
+        buffer_before_minutes: { type: integer, minimum: 0 }
+        buffer_after_minutes: { type: integer, minimum: 0 }
+        checks:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, label, detail, passed]
+            properties:
+              key: { type: string }
+              label: { type: string }
+              detail: { type: string }
+              passed: { type: boolean }
+        conflicts: { type: array, items: { type: object, additionalProperties: true } }
     NotificationStatus:
       type: object
       additionalProperties: false
@@ -1475,3 +1720,7 @@ components:
       type: apiKey
       in: cookie
       name: hackwerk_session
+    mfaCookie:
+      type: apiKey
+      in: cookie
+      name: hackwerk_mfa

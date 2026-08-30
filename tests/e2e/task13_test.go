@@ -3,7 +3,9 @@
 package e2e_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -122,6 +124,19 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 			Enabled: true, Transcriber: "fake", MaxDuration: 90 * time.Second, MaxBytes: 15 << 20,
 			ProviderTimeout: 5 * time.Second, TempDir: t.TempDir(), ExternalProviderNote: "Synthetischer Testprovider",
 		},
+	}
+	securityKeys, err := auth.NewSecurityKeyRing(map[string]string{
+		"e2e-v1": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x73}, 32)),
+	}, "e2e-v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := identity.ConfigureSecurity(auth.SecurityConfig{
+		Keys: securityKeys, AppName: "HackWerk", BaseURL: "http://localhost",
+		EmailVerificationTTL: 24 * time.Hour, EmailResendInterval: time.Minute,
+		MFAChallengeTTL: 5 * time.Minute, WebAuthnChallengeTTL: 5 * time.Minute, MailMaxAttempts: 6,
+	}); err != nil {
+		t.Fatal(err)
 	}
 	handler, err := web.NewRouter(web.Dependencies{
 		Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pool, Build: buildinfo.Info{Version: "e2e"},

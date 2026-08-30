@@ -33,7 +33,7 @@ func TestLoad(t *testing.T) {
 		{name: "tailscale whisper rejects arbitrary endpoint", values: map[string]string{"VOICE_TRANSCRIBER": "whisper-tailscale", "VOICE_WHISPER_URL": "http://10.0.0.1:8080"}, expectError: "Tailscale whisper"},
 		{name: "local whisper rejects other model", values: map[string]string{"VOICE_TRANSCRIBER": "whisper-local", "VOICE_WHISPER_MODEL": "large"}, expectError: "small model"},
 		{name: "voice timeout remains bounded", values: map[string]string{"VOICE_PROVIDER_TIMEOUT": "16m"}, expectError: "voice limits"},
-		{name: "production rejects fake voice", values: map[string]string{"APP_ENV": "production", "APP_BASE_URL": "https://hackwerk.example", "SESSION_COOKIE_SECURE": "true", "DATABASE_URL": "postgres://secure@example/hackwerk", "CONFIRMATION_TOKEN_KEY_ID": "production", "CONFIRMATION_TOKEN_KEYS": `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`, "VOICE_TRANSCRIBER": "fake"}, expectError: "fake voice"},
+		{name: "production rejects fake voice", values: map[string]string{"APP_ENV": "production", "APP_BASE_URL": "https://hackwerk.example", "SESSION_COOKIE_SECURE": "true", "DATABASE_URL": "postgres://secure@example/hackwerk", "CONFIRMATION_TOKEN_KEY_ID": "production", "CONFIRMATION_TOKEN_KEYS": `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`, "AUTH_SECURITY_KEY_ID": "production", "AUTH_SECURITY_KEYS": `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`, "VOICE_TRANSCRIBER": "fake"}, expectError: "fake voice"},
 		{name: "OSRM rejects request-controlled query", values: map[string]string{"PLANNING_ROUTER": "osrm", "PLANNING_ROUTING_URL": "https://router.example/table?target=internal"}, expectError: "static non-loopback HTTPS"},
 		{name: "internal OSRM requires exact endpoint", values: map[string]string{"PLANNING_ROUTER": "osrm-internal", "PLANNING_ROUTING_URL": "http://router:5000"}, expectError: "exactly http://osrm:5000"},
 		{name: "internal OSRM rejects path", values: map[string]string{"PLANNING_ROUTER": "osrm-internal", "PLANNING_ROUTING_URL": "http://osrm:5000/base"}, expectError: "exactly http://osrm:5000"},
@@ -292,6 +292,7 @@ func TestProductionRequiresTrustedProxyAndRejectsWildcardHost(t *testing.T) {
 		"APP_ENV": "production", "APP_BASE_URL": "https://hackwerk.example", "APP_ALLOWED_HOSTS": "hackwerk.example",
 		"SESSION_COOKIE_SECURE": "true", "DATABASE_URL": "postgres://secure@example/hackwerk?sslmode=require",
 		"CONFIRMATION_TOKEN_KEY_ID": "production", "CONFIRMATION_TOKEN_KEYS": `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`,
+		"AUTH_SECURITY_KEY_ID": "production", "AUTH_SECURITY_KEYS": `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`,
 	}
 	for name, value := range validBusinessEnvironment() {
 		base[name] = value
@@ -336,6 +337,7 @@ func TestProductionRejectsBusinessPlaceholders(t *testing.T) {
 				"APP_TRUSTED_PROXY_CIDRS": "10.0.0.0/8", "SESSION_COOKIE_SECURE": "true",
 				"DATABASE_URL": "postgres://secure@example/hackwerk?sslmode=require", "CALENDAR_UID_DOMAIN": "calendar.hackwerk.example",
 				"CONFIRMATION_TOKEN_KEY_ID": "production", "CONFIRMATION_TOKEN_KEYS": `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`,
+				"AUTH_SECURITY_KEY_ID": "production", "AUTH_SECURITY_KEYS": `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`,
 			}
 			for businessName, value := range validBusinessEnvironment() {
 				values[businessName] = value

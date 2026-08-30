@@ -25,6 +25,7 @@ type Window struct {
 	LocalDate                                 time.Time
 	DayStart, DayEnd, HorizonEnd              time.Time
 	BusinessStart, BusinessEnd, PendingBefore time.Time
+	CapacityEnd                               time.Time
 	OldBefore                                 time.Time
 	PreferredBefore                           time.Time
 	ISOWeekday                                int16
@@ -32,6 +33,7 @@ type Window struct {
 
 type Counts struct {
 	Waitlist, Appointments, Attention, NotificationIssues, Overrides, ActiveDrivers, VoiceDrafts int64
+	OverdueConfirmations, DeclinedConfirmations, CallbackRequests, Unplanned                     int64
 }
 
 type Appointment struct {
@@ -44,8 +46,9 @@ type Appointment struct {
 }
 
 type DriverAvailability struct {
-	ID, UserID, Name, State string
-	Own                     bool
+	ID, UserID, Name, State, Windows, ExceptionReasons string
+	Own, OvertimeRisk                                  bool
+	BookedMinutes                                      int32
 }
 
 type Booking struct {
@@ -61,11 +64,12 @@ type UrgentJob struct {
 }
 
 type Snapshot struct {
-	Counts       Counts
-	Appointments []Appointment
-	Drivers      []DriverAvailability
-	Bookings     []Booking
-	UrgentJobs   []UrgentJob
+	Counts        Counts
+	Appointments  []Appointment
+	Drivers       []DriverAvailability
+	Bookings      []Booking
+	UrgentJobs    []UrgentJob
+	UnplannedJobs []UrgentJob
 }
 
 type Store interface {
@@ -75,8 +79,15 @@ type Store interface {
 type Slot struct{ StartsAt, EndsAt time.Time }
 
 type Capacity struct {
-	ResourceID, ResourceName string
-	Free                     []Slot
+	ResourceID, ResourceName  string
+	Free                      []Slot
+	FreeMinutes, TotalMinutes int
+	Largest                   Slot
+}
+
+type DailyCapacity struct {
+	Date, DateLabel string
+	Capacities      []Capacity
 }
 
 type AppointmentGroup struct {
@@ -95,6 +106,10 @@ type View struct {
 	OwnAvailability              *DriverAvailability
 	Capacities                   []Capacity
 	UrgentJobs                   []UrgentJob
+	UnplannedJobs                []UrgentJob
+	MissingAssignments           []Appointment
+	DailyCapacities              []DailyCapacity
+	ExceptionsOnly               bool
 	GeneratedAt                  time.Time
 }
 
@@ -126,7 +141,7 @@ func New(store Store, cfg Config, now func() time.Time) (*Service, error) {
 	}, nil
 }
 
-func (service *Service) View(ctx context.Context, actor auth.Actor, requestedDate string) (View, error) {
+func (service *Service) View(ctx context.Context, actor auth.Actor, requestedDate string, exceptionMode ...bool) (View, error) {
 	if err := actor.Require(auth.PermissionDashboardView); err != nil {
 		return View{}, err
 	}
@@ -143,7 +158,8 @@ func (service *Service) View(ctx context.Context, actor auth.Actor, requestedDat
 		OwnerUserID: actor.UserID,
 		LocalDate:   localDate, DayStart: dayStart.UTC(), DayEnd: dayEnd.UTC(), HorizonEnd: dayStart.AddDate(0, 0, service.horizonDays).UTC(),
 		BusinessStart: businessStart.UTC(), BusinessEnd: businessEnd.UTC(), PendingBefore: now.Add(-service.pendingAfter).UTC(),
-		OldBefore: now.AddDate(0, 0, -30).UTC(), PreferredBefore: localDate.AddDate(0, 0, service.horizonDays), ISOWeekday: isoWeekday(localDate.Weekday()),
+		CapacityEnd: time.Date(localDate.AddDate(0, 0, 7).Year(), localDate.AddDate(0, 0, 7).Month(), localDate.AddDate(0, 0, 7).Day(), service.closeHour, service.closeMinute, 0, 0, service.location).UTC(),
+		OldBefore:   now.AddDate(0, 0, -30).UTC(), PreferredBefore: localDate.AddDate(0, 0, service.horizonDays), ISOWeekday: isoWeekday(localDate.Weekday()),
 	}
 	if window.ISOWeekday == 0 {
 		window.ISOWeekday = 7
@@ -155,29 +171,59 @@ func (service *Service) View(ctx context.Context, actor auth.Actor, requestedDat
 	view := View{
 		Date: localDate.Format(time.DateOnly), PreviousDate: localDate.AddDate(0, 0, -1).Format(time.DateOnly), NextDate: localDate.AddDate(0, 0, 1).Format(time.DateOnly),
 		DateLabel: germanDateLabel(localDate), UpdatedLabel: now.Format("15:04"), Admin: actor.Role == auth.RoleAdmin,
-		Counts: snapshot.Counts, Drivers: snapshot.Drivers, UrgentJobs: snapshot.UrgentJobs, GeneratedAt: now.UTC(),
+		Counts: snapshot.Counts, Drivers: snapshot.Drivers, UrgentJobs: snapshot.UrgentJobs,
+		UnplannedJobs: snapshot.UnplannedJobs, GeneratedAt: now.UTC(),
 	}
+	view.ExceptionsOnly = len(exceptionMode) > 0 && exceptionMode[0]
+	dailyLimitMinutes := int64(businessEnd.Sub(businessStart) / time.Minute)
 	for index := range view.Drivers {
 		view.Drivers[index].Own = view.Drivers[index].ID == actor.DriverID
 		if view.Drivers[index].Own {
 			ownAvailability := view.Drivers[index]
 			view.OwnAvailability = &ownAvailability
 		}
+		view.Drivers[index].OvertimeRisk = int64(view.Drivers[index].BookedMinutes) > dailyLimitMinutes
 	}
 	for _, item := range snapshot.Appointments {
 		if item.StartsAt.Before(window.DayEnd) && item.EndsAt.After(window.DayStart) {
 			view.Today = append(view.Today, item)
+			if item.Drivers == "" || item.Chippers == "" {
+				view.MissingAssignments = append(view.MissingAssignments, item)
+			}
 		} else {
 			view.Upcoming = append(view.Upcoming, item)
 		}
 	}
 	view.Groups = groupAppointments(view.Today)
 	view.Capacities = freeCapacity(snapshot.Bookings, window.BusinessStart, window.BusinessEnd)
+	for dayOffset := range 7 {
+		day := localDate.AddDate(0, 0, dayOffset)
+		start := time.Date(day.Year(), day.Month(), day.Day(), service.openHour, service.openMinute, 0, 0, service.location).UTC()
+		end := time.Date(day.Year(), day.Month(), day.Day(), service.closeHour, service.closeMinute, 0, 0, service.location).UTC()
+		view.DailyCapacities = append(view.DailyCapacities, DailyCapacity{
+			Date: day.Format(time.DateOnly), DateLabel: germanDateLabel(day), Capacities: freeCapacity(snapshot.Bookings, start, end),
+		})
+	}
+	if view.ExceptionsOnly {
+		exceptions := make([]Appointment, 0, len(view.Today))
+		for _, item := range view.Today {
+			needsAttention := item.Drivers == "" || item.Chippers == "" || item.OverrideReason != "" ||
+				item.Confirmation == "declined" || item.Confirmation == "callback_requested" || item.Confirmation == "pending"
+			if needsAttention {
+				exceptions = append(exceptions, item)
+			}
+		}
+		view.Today = exceptions
+		view.Groups = groupAppointments(view.Today)
+	}
 	if !view.Admin {
 		view.Counts.NotificationIssues = 0
 		view.Counts.Overrides = 0
 		view.UrgentJobs = nil
+		view.UnplannedJobs = nil
+		view.MissingAssignments = nil
 		view.Capacities = nil
+		view.DailyCapacities = nil
 		for index := range view.Today {
 			view.Today[index].OverrideReason = ""
 		}
@@ -273,6 +319,15 @@ func freeCapacity(bookings []Booking, start, end time.Time) []Capacity {
 			free = append(free, Slot{StartsAt: cursor, EndsAt: end})
 		}
 		result = append(result, Capacity{ResourceID: id, ResourceName: names[id], Free: free})
+		capacity := &result[len(result)-1]
+		capacity.TotalMinutes = int(end.Sub(start) / time.Minute)
+		for _, slot := range free {
+			minutes := int(slot.EndsAt.Sub(slot.StartsAt) / time.Minute)
+			capacity.FreeMinutes += minutes
+			if capacity.Largest.EndsAt.Sub(capacity.Largest.StartsAt) < slot.EndsAt.Sub(slot.StartsAt) {
+				capacity.Largest = slot
+			}
+		}
 	}
 	return result
 }

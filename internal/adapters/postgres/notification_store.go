@@ -250,7 +250,8 @@ func (store *NotificationStore) ListCallbacks(ctx context.Context, limit int32) 
 	for _, row := range rows {
 		values = append(values, notification.CallbackRequest{
 			AppointmentID: row.AppointmentID, JobNumber: row.JobNumber, CustomerName: row.CustomerName,
-			Locality: row.Locality, Phone: row.Phone, RespondedAt: timestampValue(row.RespondedAt), ExpiresAt: timestampValue(row.ExpiresAt),
+			Locality: row.Locality, Phone: row.Phone, ResponseNote: row.ResponseNote,
+			RespondedAt: timestampValue(row.RespondedAt), ExpiresAt: timestampValue(row.ExpiresAt),
 		})
 	}
 	return values, nil

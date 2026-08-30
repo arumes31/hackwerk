@@ -83,10 +83,10 @@ templ NotificationFailures(data NotificationFailuresData) {
 					if len(data.Callbacks) > 0 {
 						<div class="table-scroll">
 							<table>
-								<caption class="visually-hidden">Offene Rückrufwünsche</caption><thead><tr><th>Auftrag</th><th>Kunde/Ort</th><th>Telefon</th><th>Antwort</th><th>Link gültig bis</th><th>Aktion</th></tr></thead>
+								<caption class="visually-hidden">Offene Rückrufwünsche</caption><thead><tr><th>Auftrag</th><th>Kunde/Ort</th><th>Telefon</th><th>Rückrufnotiz</th><th>Antwort</th><th>Link gültig bis</th><th>Aktion</th></tr></thead>
 								<tbody>
 									for _, value := range data.Callbacks {
-										<tr><td>{ value.JobNumber }</td><td><strong>{ value.CustomerName }</strong><br/>{ value.Locality }</td><td>{ value.Phone }</td><td>{ notificationLocalTime(value.RespondedAt) }</td><td>{ notificationLocalTime(value.ExpiresAt) }</td><td><a class="button button--quiet" href={ "/calendar?appointment=" + url.QueryEscape(value.AppointmentID) }>Termin öffnen</a></td></tr>
+										<tr><td>{ value.JobNumber }</td><td><strong>{ value.CustomerName }</strong><br/>{ value.Locality }</td><td>{ value.Phone }</td><td class="callback-note">{ value.ResponseNote }</td><td>{ notificationLocalTime(value.RespondedAt) }</td><td>{ notificationLocalTime(value.ExpiresAt) }</td><td><a class="button button--quiet" href={ "/calendar?appointment=" + url.QueryEscape(value.AppointmentID) }>Termin öffnen</a></td></tr>
 									}
 								</tbody>
 							</table>

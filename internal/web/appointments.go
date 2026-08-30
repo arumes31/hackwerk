@@ -26,7 +26,11 @@ func registerAppointmentRoutes(router chi.Router, dependencies Dependencies, pag
 	router.Get("/calendar", calendarPage(service, page, csrfCookie, logger))
 	router.Get("/calendar/plan", calendarPlanPage(service, page, csrfCookie, logger))
 	router.Post("/calendar/plan", planFromWaitlist(service, page, csrfCookie, logger, false))
-	router.Get("/calendar/appointments/{appointmentID}", appointmentDetailPage(service, page, csrfCookie, dependencies.Notifications != nil, logger))
+	router.Get("/calendar/appointments/{appointmentID}", appointmentDetailPage(service, page, csrfCookie, dependencies.Notifications != nil, appointmentDetailOptions{
+		MailEnabled: dependencies.Config.Mail.Enabled, SMSEnabled: dependencies.Config.SMS.Enabled,
+		BusinessName: dependencies.Config.Business.Name, BusinessAddress: dependencies.Config.Business.Address,
+		BusinessPhone: dependencies.Config.Business.Phone,
+	}, logger))
 	router.Post("/calendar/appointments/{appointmentID}/assign", assignAppointmentPage(service, page, csrfCookie, logger))
 	if dependencies.Notifications != nil {
 		router.Post("/calendar/appointments/{appointmentID}/confirmation/reissue", confirmationAdminPageAction(dependencies.Notifications, false, logger))
@@ -36,7 +40,13 @@ func registerAppointmentRoutes(router chi.Router, dependencies Dependencies, pag
 	router.Get("/api/v1/calendar/conflicts", appointmentConflicts(service, logger))
 	router.Post("/api/v1/calendar/plan", planFromWaitlist(service, page, csrfCookie, logger, true))
 	router.Route("/api/v1/appointments/{appointmentID}", func(appointmentRouter chi.Router) {
-		appointmentRouter.Get("/", appointmentDetail(service, dependencies.Notifications, dependencies.Config.Mail.Enabled, dependencies.Config.SMS.Enabled, logger))
+		appointmentRouter.Get("/", appointmentDetail(service, dependencies.Notifications, appointmentDetailOptions{
+			MailEnabled: dependencies.Config.Mail.Enabled, SMSEnabled: dependencies.Config.SMS.Enabled,
+			BusinessName: dependencies.Config.Business.Name, BusinessAddress: dependencies.Config.Business.Address,
+			BusinessPhone: dependencies.Config.Business.Phone, BusinessOpen: dependencies.Config.Planning.BusinessOpen,
+			BusinessClose: dependencies.Config.Planning.BusinessClose,
+		}, logger))
+		appointmentRouter.Post("/preview", appointmentMutationPreview(service, dependencies.Config.Mail.Enabled, dependencies.Config.SMS.Enabled, dependencies.Config.Planning.BusinessOpen, dependencies.Config.Planning.BusinessClose, logger))
 		appointmentRouter.Post("/assign", assignAppointment(service, logger))
 		appointmentRouter.Post("/propose", proposeAppointment(service, logger))
 		appointmentRouter.Post("/move", moveAppointment(service, logger, false))
@@ -53,6 +63,12 @@ func registerAppointmentRoutes(router chi.Router, dependencies Dependencies, pag
 			appointmentRouter.Post("/confirmation/reset", resetConfirmationResponse(dependencies.Notifications, logger))
 		}
 	})
+}
+
+type appointmentDetailOptions struct {
+	MailEnabled, SMSEnabled                      bool
+	BusinessName, BusinessAddress, BusinessPhone string
+	BusinessOpen, BusinessClose                  string
 }
 
 func appointmentSwapCandidates(service *appointment.Service, logger *slog.Logger) http.HandlerFunc {
@@ -120,7 +136,7 @@ func swapAppointments(service *appointment.Service, logger *slog.Logger) http.Ha
 	}
 }
 
-func appointmentDetail(service *appointment.Service, notifications *notification.AdminService, mailEnabled, smsEnabled bool, logger *slog.Logger) http.HandlerFunc {
+func appointmentDetail(service *appointment.Service, notifications *notification.AdminService, options appointmentDetailOptions, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
 		value, err := service.AppointmentDetail(request.Context(), session.Actor, chi.URLParam(request, "appointmentID"))
@@ -128,8 +144,8 @@ func appointmentDetail(service *appointment.Service, notifications *notification
 			appointmentAPIError(response, request, logger, err, "appointment_detail_rejected")
 			return
 		}
-		channels := notificationChannels(value, mailEnabled, smsEnabled)
-		assessment := notification.AssessChannels(value.NotificationPreference, value.Email, value.Phone, mailEnabled, smsEnabled)
+		channels := notificationChannels(value, options.MailEnabled, options.SMSEnabled)
+		assessment := notification.AssessChannels(value.NotificationPreference, value.Email, value.Phone, options.MailEnabled, options.SMSEnabled)
 		targets := make([]map[string]string, 0, len(assessment.Targets))
 		for _, target := range assessment.Targets {
 			targets = append(targets, map[string]string{"channel": target.Label, "recipient": target.Recipient})
@@ -142,7 +158,7 @@ func appointmentDetail(service *appointment.Service, notifications *notification
 				return
 			}
 		}
-		writeJSON(response, http.StatusOK, map[string]any{
+		payload := map[string]any{
 			"id": value.ID, "job_id": value.JobID, "customer_id": value.CustomerID,
 			"title": value.CustomerName + " · " + value.JobNumber,
 			"start": value.StartsAt, "end": value.EndsAt, "lifecycle": value.Lifecycle, "status_label": templates.AppointmentStatusLabel(value.Lifecycle, value.Confirmation),
@@ -164,11 +180,107 @@ func appointmentDetail(service *appointment.Service, notifications *notification
 			"can_swap":                   session.Actor.Role == auth.RoleAdmin && (value.Lifecycle == appointment.LifecycleDraft || value.Lifecycle == appointment.LifecycleProposal),
 			"can_reissue":                session.Actor.Role == auth.RoleAdmin && value.Lifecycle == appointment.LifecycleFixed,
 			"can_reset_confirmation":     session.Actor.Role == auth.RoleAdmin && value.Lifecycle == appointment.LifecycleFixed && value.Confirmation != appointment.ConfirmationPending && value.Confirmation != appointment.ConfirmationNotRequested,
-		})
+			"working_minutes":            value.EstimatedHackMinutes, "transport_minutes": value.EstimatedTransportMinutes,
+			"buffer_before_minutes": value.BufferBeforeMinutes, "buffer_after_minutes": value.BufferAfterMinutes,
+		}
+		if session.Actor.Role == auth.RoleAdmin {
+			location, locationErr := time.LoadLocation("Europe/Vienna")
+			if locationErr != nil {
+				appointmentAPIError(response, request, logger, appointment.ErrValidation, "appointment_preview_rejected")
+				return
+			}
+			preview, previewErr := notification.AppointmentPreview(notification.TemplateInput{
+				CustomerName: value.CustomerName, JobType: value.JobType, VolumeM3: value.VolumeM3,
+				StartsAt: value.StartsAt, EndsAt: value.EndsAt, BusinessName: options.BusinessName,
+				BusinessAddress: options.BusinessAddress, BusinessPhone: options.BusinessPhone,
+			}, location)
+			if previewErr != nil {
+				appointmentAPIError(response, request, logger, appointment.ErrValidation, "appointment_preview_rejected")
+				return
+			}
+			payload["message_preview"] = preview
+		}
+		response.Header().Set("Cache-Control", "no-store")
+		writeJSON(response, http.StatusOK, payload)
 	}
 }
 
-func appointmentDetailPage(service *appointment.Service, page templates.PageData, csrfCookie string, confirmationsEnabled bool, logger *slog.Logger) http.HandlerFunc {
+func appointmentMutationPreview(service *appointment.Service, mailEnabled, smsEnabled bool, businessOpen, businessClose string, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Cache-Control", "no-store")
+		session, _ := sessionFromContext(request.Context())
+		version, err := parseVersion(request.Form.Get("version"))
+		if err != nil {
+			appointmentAPIError(response, request, logger, appointment.ErrValidation, "appointment_preflight_rejected")
+			return
+		}
+		input := appointment.PreflightInput{
+			AppointmentID: chi.URLParam(request, "appointmentID"), Action: request.Form.Get("action"), ExpectedVersion: version,
+		}
+		if input.Action != "assign" && input.Action != "move" && input.Action != "resize" && input.Action != "fix" {
+			appointmentAPIError(response, request, logger, appointment.ErrValidation, "appointment_preflight_rejected")
+			return
+		}
+		if startsAt := request.Form.Get("starts_at"); startsAt != "" {
+			input.StartsAt, err = time.Parse(time.RFC3339, startsAt)
+			if err == nil {
+				input.EndsAt, err = time.Parse(time.RFC3339, request.Form.Get("ends_at"))
+			}
+			input.StartsAt, input.EndsAt = input.StartsAt.UTC(), input.EndsAt.UTC()
+		}
+		if input.Action == "assign" {
+			assignments := planningAssignments(request)
+			input.Assignments = &assignments
+		}
+		if err != nil {
+			appointmentAPIError(response, request, logger, appointment.ErrValidation, "appointment_preflight_rejected")
+			return
+		}
+		preview, err := service.PreviewMutation(request.Context(), session.Actor, input)
+		if err != nil {
+			appointmentAPIError(response, request, logger, err, "appointment_preflight_rejected")
+			return
+		}
+		detail, err := service.AppointmentDetail(request.Context(), session.Actor, input.AppointmentID)
+		if err != nil {
+			appointmentAPIError(response, request, logger, err, "appointment_preflight_rejected")
+			return
+		}
+		assessment := notification.AssessChannels(detail.NotificationPreference, detail.Email, detail.Phone, mailEnabled, smsEnabled)
+		notificationPassed := len(assessment.Targets) > 0 || strings.TrimSpace(request.Form.Get("without_notification_reason")) != ""
+		preview.Checks = append(preview.Checks, appointment.PreflightCheck{
+			Key: "notification", Label: "Benachrichtigung", Passed: notificationPassed,
+			Detail: firstNonEmpty(assessment.Warning, "Kanal und maskiertes Ziel sind verfügbar."),
+		})
+		location, locationErr := time.LoadLocation("Europe/Vienna")
+		openAt, openErr := time.Parse("15:04", businessOpen)
+		closeAt, closeErr := time.Parse("15:04", businessClose)
+		if locationErr != nil || openErr != nil || closeErr != nil {
+			appointmentAPIError(response, request, logger, appointment.ErrValidation, "appointment_preflight_rejected")
+			return
+		}
+		localStart, localEnd := preview.ProposedStartsAt.In(location), preview.ProposedEndsAt.In(location)
+		insideOperatingDay := localStart.Year() == localEnd.Year() && localStart.YearDay() == localEnd.YearDay() &&
+			localStart.Hour()*60+localStart.Minute() >= openAt.Hour()*60+openAt.Minute() &&
+			localEnd.Hour()*60+localEnd.Minute() <= closeAt.Hour()*60+closeAt.Minute()
+		preview.Checks = append(preview.Checks, appointment.PreflightCheck{
+			Key: "overtime", Label: "Überstundenrisiko", Passed: insideOperatingDay,
+			Detail: "Hinweis aus konfigurierter Betriebszeit; keine arbeitsrechtliche Freigabe.",
+		})
+		writeJSON(response, http.StatusOK, preview)
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func appointmentDetailPage(service *appointment.Service, page templates.PageData, csrfCookie string, confirmationsEnabled bool, detailOptions appointmentDetailOptions, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Cache-Control", "no-store")
 		session, _ := sessionFromContext(request.Context())
@@ -183,6 +295,18 @@ func appointmentDetailPage(service *appointment.Service, page templates.PageData
 			return
 		}
 		shellData := shell(request, page, csrfCookie)
+		var messagePreview *notification.TemplatePreview
+		location, locationErr := time.LoadLocation("Europe/Vienna")
+		if session.Actor.Role == auth.RoleAdmin && locationErr == nil {
+			preview, previewErr := notification.AppointmentPreview(notification.TemplateInput{
+				CustomerName: detail.CustomerName, JobType: detail.JobType, VolumeM3: detail.VolumeM3,
+				StartsAt: detail.StartsAt, EndsAt: detail.EndsAt, BusinessName: detailOptions.BusinessName,
+				BusinessAddress: detailOptions.BusinessAddress, BusinessPhone: detailOptions.BusinessPhone,
+			}, location)
+			if previewErr == nil {
+				messagePreview = &preview
+			}
+		}
 		notice := ""
 		if request.URL.Query().Get("assigned") == "1" {
 			notice = "Fahrer und Ressourcen wurden gespeichert."
@@ -204,7 +328,8 @@ func appointmentDetailPage(service *appointment.Service, page templates.PageData
 		}
 		render(response, request, templates.AppointmentDetailPage(templates.AppointmentDetailData{
 			Shell: shellData, Options: options, Detail: detail,
-			Values: appointmentAssignmentValues(detail, shellData.CSRFToken), Notice: notice, ConfirmationActionError: actionError,
+			MessagePreview: messagePreview,
+			Values:         appointmentAssignmentValues(detail, shellData.CSRFToken), Notice: notice, ConfirmationActionError: actionError,
 			CanReissueConfirmation: confirmationsEnabled && detail.Lifecycle == appointment.LifecycleFixed,
 			CanResetConfirmation:   confirmationsEnabled && detail.Lifecycle == appointment.LifecycleFixed && detail.Confirmation != appointment.ConfirmationPending && detail.Confirmation != appointment.ConfirmationNotRequested,
 		}), http.StatusOK, logger)

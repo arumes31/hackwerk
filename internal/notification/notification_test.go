@@ -3,12 +3,15 @@ package notification
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"log/slog"
 	"strings"
 	"testing"
 	"time"
+
+	"example.invalid/hackplan/internal/auth"
 )
 
 func TestTokenMaterialIsStableHashedAndRotatable(t *testing.T) {
@@ -100,6 +103,30 @@ func TestSyntheticPreviewAndSMSSegments(t *testing.T) {
 	}
 }
 
+func TestAppointmentPreviewUsesWorkerTemplateWithoutRawToken(t *testing.T) {
+	t.Parallel()
+	location, err := time.LoadLocation("Europe/Vienna")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := TemplateInput{
+		CustomerName: "Maria Muster", JobType: "chipping_only", VolumeM3: "42",
+		StartsAt: time.Date(2026, 10, 25, 7, 30, 0, 0, time.UTC), EndsAt: time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC),
+		BusinessName: "HackWerk", BusinessAddress: "Werk 1", BusinessPhone: "+43 1 2",
+	}
+	preview, err := AppointmentPreview(input, location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	combined := preview.Text + preview.SMS
+	if !strings.Contains(combined, "[BESTÄTIGUNGSLINK]") || strings.Contains(combined, "preview.invalid") || strings.Contains(combined, "VORSCHAU-OHNE-TOKEN") {
+		t.Fatalf("preview contains unsafe or missing link placeholder: %#v", preview)
+	}
+	if preview.SMSSegments < 1 || preview.SMSEncoding == "" || !strings.Contains(preview.Text, "Sonntag, 25.10.2026 um 08:30 Uhr") {
+		t.Fatalf("preview metadata/time = %#v", preview)
+	}
+}
+
 func TestBackoffAndRecipientMasking(t *testing.T) {
 	if first, repeat := Backoff(3, "same"), Backoff(3, "same"); first != repeat || first < 4*time.Second || first >= 5*time.Second {
 		t.Fatalf("unexpected deterministic backoff %s/%s", first, repeat)
@@ -129,6 +156,96 @@ type processorStore struct {
 	markErr     error
 	stateErr    error
 	completeErr error
+}
+
+type identityEmailProcessorStore struct {
+	events    []IdentityEmailEvent
+	delivery  IdentityEmailDelivery
+	marked    bool
+	completed bool
+	retried   bool
+	dead      bool
+	errorCode string
+}
+
+func (store *identityEmailProcessorStore) ClaimIdentityEmail(_ context.Context, _ string, _, _ time.Time, batchSize int32) ([]IdentityEmailEvent, error) {
+	if len(store.events) == 0 {
+		return nil, nil
+	}
+	limit := min(len(store.events), int(batchSize))
+	result := append([]IdentityEmailEvent(nil), store.events[:limit]...)
+	store.events = store.events[limit:]
+	return result, nil
+}
+
+func (store *identityEmailProcessorStore) LoadIdentityEmail(context.Context, string) (IdentityEmailDelivery, error) {
+	return store.delivery, nil
+}
+
+func (store *identityEmailProcessorStore) MarkIdentityEmailSending(context.Context, IdentityEmailEvent, string, time.Time, time.Time) error {
+	store.marked = true
+	return nil
+}
+
+func (store *identityEmailProcessorStore) CompleteIdentityEmail(context.Context, IdentityEmailEvent, string) error {
+	store.completed = true
+	return nil
+}
+
+func (store *identityEmailProcessorStore) RetryIdentityEmail(_ context.Context, _ IdentityEmailEvent, _ string, _ time.Time, code string) error {
+	store.retried, store.errorCode = true, code
+	return nil
+}
+
+func (store *identityEmailProcessorStore) DeadIdentityEmail(_ context.Context, _ IdentityEmailEvent, _, code string) error {
+	store.dead, store.errorCode = true, code
+	return nil
+}
+
+func TestProcessorSendsIdentityVerificationWithoutLoggingToken(t *testing.T) {
+	now := time.Date(2026, 8, 30, 15, 0, 0, 0, time.UTC)
+	keys, err := auth.NewSecurityKeyRing(map[string]string{
+		"test-v1": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x34}, 32)),
+	}, "test-v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := IdentityEmailEvent{OutboxID: "outbox", VerificationID: "verification", IdempotencyKey: "identity:verification:1", Attempt: 1, MaxAttempts: 3}
+	store := &identityEmailProcessorStore{
+		events: []IdentityEmailEvent{event},
+		delivery: IdentityEmailDelivery{
+			VerificationID: "verification", UserID: "user", Recipient: "private@example.test", DisplayName: "<Private>",
+			TokenKeyID: "test-v1", TokenVersion: 1, Status: "pending", ExpiresAt: now.Add(time.Hour),
+		},
+	}
+	provider := NewFakeProvider(nil)
+	var logs bytes.Buffer
+	processor, err := NewProcessor(&processorStore{}, map[Channel]Provider{ChannelEmail: provider}, DevelopmentKeyRing(), time.UTC, ProcessorConfig{
+		BaseURL: "https://hackwerk.example", Lease: time.Minute, BatchSize: 1,
+	}, func() time.Time { return now }, slog.New(slog.NewTextHandler(&logs, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := processor.ConfigureIdentityEmail(store, keys); err != nil {
+		t.Fatal(err)
+	}
+	count, err := processor.RunOnce(t.Context())
+	if err != nil || count != 1 || !store.marked || !store.completed || len(provider.Deliveries()) != 1 {
+		t.Fatalf("identity delivery count=%d err=%v store=%+v provider=%d", count, err, store, len(provider.Deliveries()))
+	}
+	token, err := keys.ReconstructEmailToken("test-v1", "verification", "user", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := provider.Deliveries()[0]
+	if !strings.Contains(message.Text, "/profil/email/bestaetigen?token="+token) || strings.Contains(message.HTML, "<Private>") || !strings.Contains(message.HTML, "&lt;Private&gt;") {
+		t.Fatalf("verification message was not linked/escaped: %#v", message)
+	}
+	for _, private := range []string{token, "private@example.test", "<Private>"} {
+		if strings.Contains(logs.String(), private) {
+			t.Fatalf("identity worker log leaked %q: %s", private, logs.String())
+		}
+	}
 }
 
 func (store *processorStore) Claim(_ context.Context, _ string, _, _ time.Time, batchSize int32) ([]ClaimedEvent, error) {

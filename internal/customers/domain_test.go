@@ -120,6 +120,36 @@ func TestDurationAndFilter(t *testing.T) {
 	}
 }
 
+func TestJobPreferenceModeValidation(t *testing.T) {
+	t.Parallel()
+	base := JobInput{
+		JobType: JobTypeChippingOnly, VolumeM3: "80", EstimatedHackMinutes: 180,
+		TransportMode: TransportNone, Urgency: UrgencyNormal, Source: SourcePhone,
+	}
+	for _, test := range []struct {
+		name    string
+		mode    PreferenceMode
+		start   string
+		end     string
+		wantErr bool
+	}{
+		{name: "legacy empty defaults to window"},
+		{name: "window", mode: PreferenceWindow, start: "2026-09-01", end: "2026-09-05"},
+		{name: "flexible", mode: PreferenceFlexible},
+		{name: "fixed exact", mode: PreferenceFixed, start: "2026-09-01", end: "2026-09-01"},
+		{name: "fixed range rejected", mode: PreferenceFixed, start: "2026-09-01", end: "2026-09-02", wantErr: true},
+		{name: "unknown rejected", mode: "unknown", wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			input := base
+			input.PreferenceMode, input.PreferredStartDate, input.PreferredEndDate = test.mode, test.start, test.end
+			if err := input.Validate(); test.wantErr != errors.Is(err, ErrValidation) {
+				t.Fatalf("Validate() error = %v, want validation error %t", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestMapsURLDoesNotAcceptArbitraryURL(t *testing.T) {
 	t.Parallel()
 	link := MapsURL(CustomerInput{Street: "Waldstraße 9", PostalCode: "4710", Locality: "Test", CountryCode: "AT", AddressFreeform: "https://evil.invalid"})

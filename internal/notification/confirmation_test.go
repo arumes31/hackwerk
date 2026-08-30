@@ -97,6 +97,9 @@ func TestConfirmationServiceRespondsWithValidatedTokenAndNonce(t *testing.T) {
 	if _, err := service.Respond(t.Context(), material.Raw, material.FormNonce, ResponseDeclined, "  Bitte vormittags  ", "request-note"); err != nil || store.responseNote != "Bitte vormittags" {
 		t.Fatalf("decline response note = %q / %v", store.responseNote, err)
 	}
+	if _, err := service.Respond(t.Context(), material.Raw, material.FormNonce, ResponseCallback, "  Bitte nach 14 Uhr  ", "request-callback"); err != nil || store.responseNote != "Bitte nach 14 Uhr" {
+		t.Fatalf("callback response note = %q / %v", store.responseNote, err)
+	}
 	store.responseNote = ""
 	if _, err := service.Respond(t.Context(), material.Raw, material.FormNonce, ResponseConfirmed, "nicht erlaubt", "request"); !errors.Is(err, ErrResponseNoteNotAllowed) || store.responseNote != "" {
 		t.Fatalf("confirmed response accepted note: %q / %v", store.responseNote, err)

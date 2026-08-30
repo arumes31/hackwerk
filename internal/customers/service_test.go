@@ -3,6 +3,7 @@ package customers
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"example.invalid/hackplan/internal/auth"
@@ -32,6 +33,8 @@ type storeStub struct {
 	waitlistFilter WaitlistFilter
 	priorityID     string
 	priority       int32
+	priorityReason string
+	searchResults  []SearchResult
 	removeID       string
 	removeReason   string
 	noteJobID      string
@@ -103,9 +106,12 @@ func (store *storeStub) SaveWaitlistFilterFavorite(_ context.Context, _ string, 
 func (store *storeStub) DeleteWaitlistFilterFavorite(context.Context, string, string) error {
 	return nil
 }
-func (store *storeStub) UpdateWaitlistPriority(_ context.Context, _ auth.Actor, id string, priority int32, _ int32, _ string) error {
+func (store *storeStub) SearchWorkspace(context.Context, string) ([]SearchResult, error) {
+	return store.searchResults, nil
+}
+func (store *storeStub) UpdateWaitlistPriority(_ context.Context, _ auth.Actor, id string, priority int32, reason string, _ int32, _ string) error {
 	store.priorityCalls++
-	store.priorityID, store.priority = id, priority
+	store.priorityID, store.priority, store.priorityReason = id, priority, reason
 	return nil
 }
 func (store *storeStub) RemoveWaitlist(_ context.Context, _ auth.Actor, id string, _ int32, reason string, _ string) error {
@@ -156,7 +162,7 @@ func TestDriverCannotPrioritizeWaitlist(t *testing.T) {
 	t.Parallel()
 	store := &storeStub{}
 	service, _ := NewService(store)
-	err := service.UpdateWaitlistPriority(context.Background(), auth.Actor{UserID: "driver-1", Role: auth.RoleDriver}, "entry", 10, 1, "")
+	err := service.UpdateWaitlistPriority(context.Background(), auth.Actor{UserID: "driver-1", Role: auth.RoleDriver}, "entry", 10, "Ausnahme", 1, "")
 	if !errors.Is(err, auth.ErrForbidden) {
 		t.Fatalf("error = %v, want forbidden", err)
 	}
@@ -277,7 +283,7 @@ func TestCustomerServiceDelegatesAuthorizedOperations(t *testing.T) {
 	if _, err := service.ListWaitlist(t.Context(), driver, WaitlistFilter{Sort: "volume", Direction: "desc"}); err != nil || store.waitlistFilter.Sort != "volume" {
 		t.Fatalf("ListWaitlist filter/error = %#v / %v", store.waitlistFilter, err)
 	}
-	if err := service.UpdateWaitlistPriority(t.Context(), admin, "entry-1", -10, 3, "request"); err != nil || store.priorityID != "entry-1" || store.priority != -10 {
+	if err := service.UpdateWaitlistPriority(t.Context(), admin, "entry-1", -10, "Termin noch offen", 3, "request"); err != nil || store.priorityID != "entry-1" || store.priority != -10 || store.priorityReason != "Termin noch offen" {
 		t.Fatalf("UpdateWaitlistPriority input/error = %q/%d/%v", store.priorityID, store.priority, err)
 	}
 	if err := service.RemoveWaitlist(t.Context(), admin, "entry-1", 3, "scheduled", "request"); err != nil || store.removeID != "entry-1" || store.removeReason != "scheduled" {
@@ -312,7 +318,9 @@ func TestCustomerServiceRejectsInvalidArgumentsBeforeStore(t *testing.T) {
 		}},
 		{name: "empty archive customer", call: func() error { return service.ArchiveCustomer(t.Context(), admin, " ", 1, "request") }},
 		{name: "invalid archive job", call: func() error { return service.ArchiveJob(t.Context(), admin, "job", 0, "request") }},
-		{name: "invalid waitlist priority", call: func() error { return service.UpdateWaitlistPriority(t.Context(), admin, "entry", 101, 1, "request") }},
+		{name: "invalid waitlist priority", call: func() error {
+			return service.UpdateWaitlistPriority(t.Context(), admin, "entry", 101, "Außerhalb Bereich", 1, "request")
+		}},
 		{name: "invalid removal reason", call: func() error { return service.RemoveWaitlist(t.Context(), admin, "entry", 1, "untrusted", "request") }},
 		{name: "invalid create job", call: func() error {
 			_, err := service.CreateJob(t.Context(), driver, CreateJobInput{Job: validIntake().Job})
@@ -350,12 +358,45 @@ func TestCustomerServiceAppliesConfiguredDurationReviewThresholds(t *testing.T) 
 	}
 }
 
+func TestWaitlistAssessmentAndWorkspaceSearchAreDerivedAndBounded(t *testing.T) {
+	t.Parallel()
+	store := &storeStub{searchResults: []SearchResult{{Kind: "job", ID: "job-1", Title: "HA-2026-0001"}}}
+	service, _ := NewService(store)
+	driver := auth.Actor{UserID: "driver-1", Role: auth.RoleDriver}
+	results, err := service.SearchWorkspace(t.Context(), driver, "  HA-2026  ")
+	if err != nil || len(results) != 1 || results[0].ID != "job-1" {
+		t.Fatalf("SearchWorkspace() = %#v, %v", results, err)
+	}
+	for _, query := range []string{"x", strings.Repeat("x", 121)} {
+		if _, err := service.SearchWorkspace(t.Context(), driver, query); !errors.Is(err, ErrValidation) {
+			t.Fatalf("SearchWorkspace(%q) error = %v", query, err)
+		}
+	}
+	if _, err := service.SearchWorkspace(t.Context(), auth.Actor{}, "HA"); !errors.Is(err, auth.ErrForbidden) {
+		t.Fatalf("unauthorized SearchWorkspace() error = %v", err)
+	}
+
+	item := WaitlistItem{JobType: JobTypeChippingWithTransport, TransportMode: TransportUndecided, PreferenceMode: PreferenceWindow, DurationIssue: true}
+	assessWaitlistItem(&item)
+	if item.PlanReady || item.Completeness != 0 || len(item.MissingFields) != 6 || item.NextStep != "Einsatzort vollständig erfassen" {
+		t.Fatalf("incomplete assessment = %#v", item)
+	}
+	ready := WaitlistItem{
+		JobType: JobTypeChippingOnly, TransportMode: TransportNone, PreferenceMode: PreferenceFlexible,
+		HasPileLocation: true, HasPileSource: true, HasContact: true, Region: "Nord",
+	}
+	assessWaitlistItem(&ready)
+	if !ready.PlanReady || ready.Completeness != 100 || ready.NextStep != "Planungsbereit" {
+		t.Fatalf("ready assessment = %#v", ready)
+	}
+}
+
 func validIntake() IntakeInput {
 	return IntakeInput{
 		Customer: CustomerInput{FirstName: "Franz", LastName: "Huber", CountryCode: "AT", NotificationPreference: NotifyNone},
 		Job: JobInput{
 			JobType: JobTypeChippingOnly, VolumeM3: "80", EstimatedHackMinutes: 180,
-			TransportMode: TransportNone, Urgency: UrgencyNormal, Source: SourcePhone,
+			TransportMode: TransportNone, PreferenceMode: PreferenceWindow, Urgency: UrgencyNormal, Source: SourcePhone,
 		},
 	}
 }

@@ -13,14 +13,28 @@ import (
 
 const getDashboardCounts = `-- name: GetDashboardCounts :one
 SELECT
-    (SELECT count(*) FROM waitlist_entries w JOIN jobs j ON j.id=w.job_id
-     WHERE w.removed_at IS NULL AND j.archived_at IS NULL)::bigint AS waitlist_count,
+    (SELECT count(*) FROM waitlist_entries w JOIN jobs j ON j.id=w.job_id JOIN customers c ON c.id=j.customer_id
+     WHERE w.removed_at IS NULL AND j.archived_at IS NULL AND c.archived_at IS NULL)::bigint AS waitlist_count,
     (SELECT count(*) FROM appointments a
      WHERE a.starts_at < $1::timestamptz AND a.ends_at > $2::timestamptz
        AND a.lifecycle_status IN ('proposal','fixed'))::bigint AS appointment_count,
     (SELECT count(*) FROM appointments a
      WHERE a.starts_at < $3::timestamptz AND a.ends_at > $2::timestamptz
        AND a.lifecycle_status='fixed' AND a.confirmation_status IN ('pending','declined','callback_requested'))::bigint AS attention_count,
+    (SELECT count(*) FROM appointments a
+       JOIN confirmation_requests cr ON cr.appointment_id=a.id AND cr.status='active'
+     WHERE a.starts_at < $3::timestamptz AND a.ends_at > $2::timestamptz
+       AND a.lifecycle_status='fixed' AND a.confirmation_status='pending'
+       AND cr.created_at <= $4::timestamptz)::bigint AS overdue_confirmation_count,
+    (SELECT count(*) FROM appointments a
+     WHERE a.starts_at < $3::timestamptz AND a.ends_at > $2::timestamptz
+       AND a.lifecycle_status='fixed' AND a.confirmation_status='declined')::bigint AS declined_confirmation_count,
+    (SELECT count(*) FROM appointments a
+     WHERE a.starts_at < $3::timestamptz AND a.ends_at > $2::timestamptz
+       AND a.lifecycle_status='fixed' AND a.confirmation_status='callback_requested')::bigint AS callback_request_count,
+    (SELECT count(*) FROM waitlist_entries w JOIN jobs j ON j.id=w.job_id JOIN customers c ON c.id=j.customer_id
+     WHERE w.removed_at IS NULL AND j.archived_at IS NULL AND c.archived_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed')))::bigint AS unplanned_count,
     (SELECT count(*) FROM notifications n
        JOIN confirmation_requests cr ON cr.id=n.confirmation_request_id AND cr.status='active'
        JOIN appointments a ON a.id=n.appointment_id AND a.lifecycle_status='fixed'
@@ -43,13 +57,17 @@ type GetDashboardCountsParams struct {
 }
 
 type GetDashboardCountsRow struct {
-	WaitlistCount          int64
-	AppointmentCount       int64
-	AttentionCount         int64
-	NotificationIssueCount int64
-	OverrideCount          int64
-	ActiveDriverCount      int64
-	VoiceDraftCount        int64
+	WaitlistCount             int64
+	AppointmentCount          int64
+	AttentionCount            int64
+	OverdueConfirmationCount  int64
+	DeclinedConfirmationCount int64
+	CallbackRequestCount      int64
+	UnplannedCount            int64
+	NotificationIssueCount    int64
+	OverrideCount             int64
+	ActiveDriverCount         int64
+	VoiceDraftCount           int64
 }
 
 func (q *Queries) GetDashboardCounts(ctx context.Context, arg GetDashboardCountsParams) (GetDashboardCountsRow, error) {
@@ -65,6 +83,10 @@ func (q *Queries) GetDashboardCounts(ctx context.Context, arg GetDashboardCounts
 		&i.WaitlistCount,
 		&i.AppointmentCount,
 		&i.AttentionCount,
+		&i.OverdueConfirmationCount,
+		&i.DeclinedConfirmationCount,
+		&i.CallbackRequestCount,
+		&i.UnplannedCount,
 		&i.NotificationIssueCount,
 		&i.OverrideCount,
 		&i.ActiveDriverCount,
@@ -186,8 +208,8 @@ ORDER BY lower(r.name), r.id, ar.reserved_starts_at NULLS LAST
 `
 
 type ListDashboardChipperBookingsParams struct {
-	BusinessEnd   pgtype.Timestamptz
-	BusinessStart pgtype.Timestamptz
+	CapacityEnd   pgtype.Timestamptz
+	CapacityStart pgtype.Timestamptz
 }
 
 type ListDashboardChipperBookingsRow struct {
@@ -198,7 +220,7 @@ type ListDashboardChipperBookingsRow struct {
 }
 
 func (q *Queries) ListDashboardChipperBookings(ctx context.Context, arg ListDashboardChipperBookingsParams) ([]ListDashboardChipperBookingsRow, error) {
-	rows, err := q.db.Query(ctx, listDashboardChipperBookings, arg.BusinessEnd, arg.BusinessStart)
+	rows, err := q.db.Query(ctx, listDashboardChipperBookings, arg.CapacityEnd, arg.CapacityStart)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +269,20 @@ SELECT d.id::text, COALESCE(d.user_id::text, '')::text AS user_id, d.display_nam
          WHERE e.driver_id=d.id AND e.exception_type<>'available_override'
            AND ((e.all_day AND e.local_date=$2::date)
              OR (NOT e.all_day AND e.starts_at < $3::timestamptz AND e.ends_at > $4::timestamptz))
-       ) AS has_unavailable_exception
+       ) AS has_unavailable_exception,
+       COALESCE((SELECT string_agg(to_char(r.local_start, 'HH24:MI') || '–' || to_char(r.local_end, 'HH24:MI'), ', ' ORDER BY r.local_start)
+         FROM availability_rules r
+         WHERE r.driver_id=d.id AND r.iso_weekday=$1::smallint
+           AND r.valid_from <= $2::date
+           AND (r.valid_until IS NULL OR r.valid_until >= $2::date)), '')::text AS availability_windows,
+       COALESCE((SELECT string_agg(DISTINCT CASE e.exception_type WHEN 'sick' THEN 'krank' WHEN 'vacation' THEN 'Urlaub' WHEN 'unavailable' THEN 'nicht verfügbar' ELSE 'Sonderverfügbarkeit' END, ', ')
+         FROM availability_exceptions e
+         WHERE e.driver_id=d.id AND ((e.all_day AND e.local_date=$2::date)
+           OR (NOT e.all_day AND e.starts_at < $3::timestamptz AND e.ends_at > $4::timestamptz))), '')::text AS exception_reasons,
+       COALESCE((SELECT round(sum(EXTRACT(EPOCH FROM (LEAST(a.ends_at, $3::timestamptz) - GREATEST(a.starts_at, $4::timestamptz))) / 60))::integer
+         FROM appointment_drivers ad JOIN appointments a ON a.id=ad.appointment_id
+         WHERE ad.driver_id=d.id AND a.lifecycle_status IN ('proposal','fixed')
+           AND a.starts_at < $3::timestamptz AND a.ends_at > $4::timestamptz), 0)::integer AS booked_minutes
 FROM drivers d
 WHERE d.active
 ORDER BY lower(d.display_name), d.id
@@ -269,6 +304,9 @@ type ListDashboardDriverAvailabilityRow struct {
 	HasLimitedRule          bool
 	HasAvailableOverride    bool
 	HasUnavailableException bool
+	AvailabilityWindows     string
+	ExceptionReasons        string
+	BookedMinutes           int32
 }
 
 func (q *Queries) ListDashboardDriverAvailability(ctx context.Context, arg ListDashboardDriverAvailabilityParams) ([]ListDashboardDriverAvailabilityRow, error) {
@@ -293,6 +331,67 @@ func (q *Queries) ListDashboardDriverAvailability(ctx context.Context, arg ListD
 			&i.HasLimitedRule,
 			&i.HasAvailableOverride,
 			&i.HasUnavailableException,
+			&i.AvailabilityWindows,
+			&i.ExceptionReasons,
+			&i.BookedMinutes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboardUnplannedJobs = `-- name: ListDashboardUnplannedJobs :many
+SELECT j.id::text, j.customer_id::text AS customer_id, j.job_number, j.urgency, j.volume_m3::text, j.received_at,
+       j.preferred_end_date,
+       concat_ws(' ', NULLIF(c.first_name,''), NULLIF(c.last_name,''), NULLIF(c.company_name,''))::text AS customer_name,
+       c.locality
+FROM waitlist_entries w
+JOIN jobs j ON j.id=w.job_id
+JOIN customers c ON c.id=j.customer_id
+WHERE w.removed_at IS NULL AND j.archived_at IS NULL AND c.archived_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed'))
+ORDER BY w.manual_priority DESC,
+         array_position(ARRAY['urgent','high','normal','low'], j.urgency),
+         j.preferred_end_date NULLS LAST, w.entered_at, w.id
+LIMIT $1
+`
+
+type ListDashboardUnplannedJobsRow struct {
+	JID              string
+	CustomerID       string
+	JobNumber        string
+	Urgency          string
+	JVolumeM3        string
+	ReceivedAt       pgtype.Timestamptz
+	PreferredEndDate pgtype.Date
+	CustomerName     string
+	Locality         string
+}
+
+func (q *Queries) ListDashboardUnplannedJobs(ctx context.Context, resultLimit int32) ([]ListDashboardUnplannedJobsRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardUnplannedJobs, resultLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardUnplannedJobsRow{}
+	for rows.Next() {
+		var i ListDashboardUnplannedJobsRow
+		if err := rows.Scan(
+			&i.JID,
+			&i.CustomerID,
+			&i.JobNumber,
+			&i.Urgency,
+			&i.JVolumeM3,
+			&i.ReceivedAt,
+			&i.PreferredEndDate,
+			&i.CustomerName,
+			&i.Locality,
 		); err != nil {
 			return nil, err
 		}

@@ -379,15 +379,42 @@ func TestAppointmentDetailHidesCustomerResponseNoteFromDrivers(t *testing.T) {
 	driverRouter, driverSession, driverCSRF := appointmentTestRouterWithNotifications(t, auth.RoleDriver, appointmentStore, notificationStore)
 	driverResponse := httptest.NewRecorder()
 	driverRouter.ServeHTTP(driverResponse, authenticatedCustomerRequest(t, http.MethodGet, "/api/v1/appointments/"+testAppointmentID, nil, driverSession, driverCSRF))
-	if driverResponse.Code != http.StatusOK || strings.Contains(driverResponse.Body.String(), "Vertrauliche Kundennotiz") || strings.Contains(driverResponse.Body.String(), `"response_note"`) {
+	if driverResponse.Code != http.StatusOK || strings.Contains(driverResponse.Body.String(), "Vertrauliche Kundennotiz") || strings.Contains(driverResponse.Body.String(), `"response_note"`) || strings.Contains(driverResponse.Body.String(), `"message_preview"`) {
 		t.Fatalf("driver appointment detail leaked response note: %d %s", driverResponse.Code, driverResponse.Body.String())
 	}
 
 	adminRouter, adminSession, adminCSRF := appointmentTestRouterWithNotifications(t, auth.RoleAdmin, appointmentStore, notificationStore)
 	adminResponse := httptest.NewRecorder()
 	adminRouter.ServeHTTP(adminResponse, authenticatedCustomerRequest(t, http.MethodGet, "/api/v1/appointments/"+testAppointmentID, nil, adminSession, adminCSRF))
-	if adminResponse.Code != http.StatusOK || !strings.Contains(adminResponse.Body.String(), "Vertrauliche Kundennotiz") {
+	if adminResponse.Code != http.StatusOK || !strings.Contains(adminResponse.Body.String(), "Vertrauliche Kundennotiz") || !strings.Contains(adminResponse.Body.String(), `"message_preview"`) || strings.Contains(adminResponse.Body.String(), "preview.invalid") {
 		t.Fatalf("admin appointment detail lost response note: %d %s", adminResponse.Code, adminResponse.Body.String())
+	}
+}
+
+func TestAppointmentPreflightIsAdminOnlyNoStoreAndSideEffectFree(t *testing.T) {
+	current := appointment.Appointment{
+		ID: testAppointmentID, JobID: testJobID, JobNumber: "HW-2026-0001", JobType: "chipping_only", TransportMode: "none",
+		Lifecycle: appointment.LifecycleProposal, StartsAt: time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC), EndsAt: time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC),
+		EstimatedHackMinutes: 180, Version: 4,
+		Drivers:   []appointment.DriverAssignment{{ID: operationDriverID, Name: "Anna Fahrerin", Primary: true}},
+		Resources: []appointment.AssignedResource{{ID: testAppointmentResourceID, Name: "Hacker 1", Type: resource.TypeChipper, Purpose: appointment.PurposeChipping, Exclusive: true}},
+	}
+	detail := appointment.Detail{CalendarEvent: appointment.CalendarEvent{Appointment: current, CustomerID: testCustomerID, CustomerName: "Franz Huber", VolumeM3: "80"}, NotificationPreference: "email", Email: "franz@example.test"}
+	store := &appointmentHTTPStore{current: current, detail: detail, planningOptions: appointmentPlanningOptionsFixture()}
+	router, session, csrf := appointmentTestRouter(t, auth.RoleAdmin, store)
+	form := url.Values{"csrf_token": {csrf}, "version": {"4"}, "action": {"fix"}}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/api/v1/appointments/"+testAppointmentID+"/preview", form, session, csrf))
+	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" || !strings.Contains(response.Body.String(), `"key":"conflicts"`) || store.fixCalls != 0 || store.rescheduleCalls != 0 || store.assignCalls != 0 {
+		t.Fatalf("preflight response/side effects = %d cache=%q body=%q calls=%d/%d/%d", response.Code, response.Header().Get("Cache-Control"), response.Body.String(), store.fixCalls, store.rescheduleCalls, store.assignCalls)
+	}
+
+	driverRouter, driverSession, driverCSRF := appointmentTestRouter(t, auth.RoleDriver, store)
+	form.Set("csrf_token", driverCSRF)
+	forbidden := httptest.NewRecorder()
+	driverRouter.ServeHTTP(forbidden, authenticatedCustomerRequest(t, http.MethodPost, "/api/v1/appointments/"+testAppointmentID+"/preview", form, driverSession, driverCSRF))
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("driver preflight status = %d body=%q", forbidden.Code, forbidden.Body.String())
 	}
 }
 
@@ -629,6 +656,8 @@ func appointmentTestRouterWithNotifications(t *testing.T, role auth.Role, store 
 	}
 	cfg := configForWebTest()
 	cfg.Mail.Enabled = true
+	cfg.Planning.BusinessOpen = "07:00"
+	cfg.Planning.BusinessClose = "17:00"
 	dependencies := Dependencies{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pinger{}, Build: buildinfo.Info{Version: "test"}, Identity: identity, Appointments: service}
 	if notificationStore != nil {
 		dependencies.Notifications, err = notification.NewAdminService(notificationStore, func() time.Time { return now })

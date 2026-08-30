@@ -65,6 +65,17 @@ type AuditEvent struct {
 	OccurredAt  pgtype.Timestamptz
 }
 
+type AuthLoginChallenge struct {
+	ID              pgtype.UUID
+	UserID          pgtype.UUID
+	TokenHash       []byte
+	ExpiresAt       pgtype.Timestamptz
+	AttemptCount    int32
+	WebauthnSession []byte
+	ConsumedAt      pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+}
+
 type AuthRateLimit struct {
 	KeyHash         []byte
 	WindowStartedAt pgtype.Timestamptz
@@ -203,6 +214,7 @@ type Job struct {
 	PileLongitude              pgtype.Numeric
 	PileLocationSource         *string
 	PileLocationUpdatedAt      pgtype.Timestamptz
+	PreferenceMode             string
 }
 
 type JobNote struct {
@@ -387,21 +399,81 @@ type Session struct {
 	LastUsedAt        pgtype.Timestamptz
 	RevokedAt         pgtype.Timestamptz
 	CreatedAt         pgtype.Timestamptz
+	DeviceLabel       string
 }
 
 type User struct {
-	ID                 pgtype.UUID
-	Username           string
-	DisplayName        string
-	Email              *string
-	Role               string
-	PasswordHash       string
-	MustChangePassword bool
-	Active             bool
-	LastLoginAt        pgtype.Timestamptz
-	Version            int32
-	CreatedAt          pgtype.Timestamptz
-	UpdatedAt          pgtype.Timestamptz
+	ID                  pgtype.UUID
+	Username            string
+	DisplayName         string
+	Email               *string
+	Role                string
+	PasswordHash        string
+	MustChangePassword  bool
+	Active              bool
+	LastLoginAt         pgtype.Timestamptz
+	Version             int32
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+	Salutation          string
+	WorkPhoneRaw        string
+	WorkPhoneNormalized string
+	EmailVerifiedAt     pgtype.Timestamptz
+	WebauthnUserHandle  []byte
+}
+
+type UserEmailVerification struct {
+	ID           pgtype.UUID
+	UserID       pgtype.UUID
+	Email        string
+	TokenHash    []byte
+	TokenKeyID   string
+	TokenVersion int32
+	Status       string
+	SendCount    int32
+	LastSentAt   pgtype.Timestamptz
+	ExpiresAt    pgtype.Timestamptz
+	VerifiedAt   pgtype.Timestamptz
+	CancelledAt  pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
+type UserRecoveryCode struct {
+	UserID    pgtype.UUID
+	CodeHash  []byte
+	UsedAt    pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+}
+
+type UserTotpCredential struct {
+	UserID           pgtype.UUID
+	Name             string
+	SecretKeyID      string
+	SecretCiphertext []byte
+	EnabledAt        pgtype.Timestamptz
+	LastUsedStep     *int64
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
+type UserWebauthnCredential struct {
+	CredentialID         []byte
+	UserID               pgtype.UUID
+	Name                 string
+	CredentialKeyID      string
+	CredentialCiphertext []byte
+	CreatedAt            pgtype.Timestamptz
+	LastUsedAt           pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+}
+
+type UserWebauthnRegistrationChallenge struct {
+	SessionID   pgtype.UUID
+	UserID      pgtype.UUID
+	SessionData []byte
+	ExpiresAt   pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
 }
 
 type VoiceDraft struct {
@@ -459,6 +531,7 @@ type WaitlistEntry struct {
 	RemovedAt      pgtype.Timestamptz
 	RemovedReason  *string
 	Version        int32
+	PriorityReason string
 }
 
 type WaitlistFilterFavorite struct {
@@ -480,6 +553,7 @@ type WaitlistFilterFavorite struct {
 	Overdue          bool
 	Unassigned       bool
 	TransportPending bool
+	Incomplete       bool
 }
 
 type WorkerHeartbeat struct {

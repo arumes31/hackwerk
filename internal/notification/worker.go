@@ -5,9 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"html"
 	"log/slog"
+	"net/url"
 	"strings"
 	"time"
+
+	"example.invalid/hackplan/internal/auth"
 )
 
 type ClaimedEvent struct {
@@ -33,20 +38,52 @@ type WorkerStore interface {
 	Dead(context.Context, ClaimedEvent, string, string) error
 }
 
+type IdentityEmailEvent struct {
+	OutboxID, VerificationID, IdempotencyKey string
+	Attempt, MaxAttempts                     int32
+}
+
+type IdentityEmailDelivery struct {
+	VerificationID, UserID, Recipient, DisplayName, TokenKeyID, Status string
+	TokenVersion                                                       int32
+	ExpiresAt                                                          time.Time
+}
+
+type IdentityEmailWorkerStore interface {
+	ClaimIdentityEmail(context.Context, string, time.Time, time.Time, int32) ([]IdentityEmailEvent, error)
+	LoadIdentityEmail(context.Context, string) (IdentityEmailDelivery, error)
+	MarkIdentityEmailSending(context.Context, IdentityEmailEvent, string, time.Time, time.Time) error
+	CompleteIdentityEmail(context.Context, IdentityEmailEvent, string) error
+	RetryIdentityEmail(context.Context, IdentityEmailEvent, string, time.Time, string) error
+	DeadIdentityEmail(context.Context, IdentityEmailEvent, string, string) error
+}
+
 type Processor struct {
-	store         WorkerStore
-	providers     map[Channel]Provider
-	tokens        *KeyRing
-	baseURL       string
-	location      *time.Location
-	businessName  string
-	businessAddr  string
-	businessPhone string
-	workerID      string
-	lease         time.Duration
-	batchSize     int32
-	now           func() time.Time
-	logger        *slog.Logger
+	store          WorkerStore
+	providers      map[Channel]Provider
+	tokens         *KeyRing
+	baseURL        string
+	location       *time.Location
+	businessName   string
+	businessAddr   string
+	businessPhone  string
+	workerID       string
+	lease          time.Duration
+	batchSize      int32
+	now            func() time.Time
+	logger         *slog.Logger
+	identityEmails IdentityEmailWorkerStore
+	securityKeys   *auth.SecurityKeyRing
+}
+
+// ConfigureIdentityEmail enables transactional verification-mail delivery on the existing worker.
+func (processor *Processor) ConfigureIdentityEmail(store IdentityEmailWorkerStore, keys *auth.SecurityKeyRing) error {
+	if store == nil || keys == nil {
+		return errors.New("notification: invalid identity email dependencies")
+	}
+	processor.identityEmails = store
+	processor.securityKeys = keys
+	return nil
 }
 
 type ProcessorConfig struct {
@@ -86,19 +123,107 @@ func NewWorkerID() string {
 
 func (processor *Processor) RunOnce(ctx context.Context) (int, error) {
 	processed := 0
+	preferIdentity := processor.identityEmails != nil
 	for processed < int(processor.batchSize) {
 		now := processor.now().UTC()
+		if preferIdentity && processor.identityEmails != nil {
+			events, err := processor.identityEmails.ClaimIdentityEmail(ctx, processor.workerID, now, now.Add(processor.lease), 1)
+			if err != nil {
+				return processed, err
+			}
+			if len(events) > 0 {
+				processor.processIdentityEmail(ctx, events[0], now)
+				processed++
+				preferIdentity = false
+				continue
+			}
+		}
 		events, err := processor.store.Claim(ctx, processor.workerID, now, now.Add(processor.lease), 1)
 		if err != nil {
 			return processed, err
 		}
 		if len(events) == 0 {
+			if !preferIdentity && processor.identityEmails != nil {
+				preferIdentity = true
+				continue
+			}
 			break
 		}
 		processor.process(ctx, events[0], now)
 		processed++
+		preferIdentity = true
 	}
 	return processed, nil
+}
+
+func (processor *Processor) processIdentityEmail(ctx context.Context, event IdentityEmailEvent, now time.Time) {
+	delivery, err := processor.identityEmails.LoadIdentityEmail(ctx, event.VerificationID)
+	if err != nil {
+		processor.failIdentityEmail(ctx, event, now, "identity_email_load_failed", err)
+		return
+	}
+	if delivery.Status != "pending" || !now.Before(delivery.ExpiresAt) {
+		processor.deadIdentityEmail(ctx, event, "identity_email_inactive")
+		return
+	}
+	rawToken, err := processor.securityKeys.ReconstructEmailToken(delivery.TokenKeyID, delivery.VerificationID, delivery.UserID, delivery.TokenVersion)
+	if err != nil {
+		processor.deadIdentityEmail(ctx, event, "identity_email_key_unavailable")
+		return
+	}
+	provider := processor.providers[ChannelEmail]
+	if provider == nil {
+		processor.failIdentityEmail(ctx, event, now, "provider_disabled", ErrTemporary)
+		return
+	}
+	markNow := processor.now().UTC()
+	if err := processor.identityEmails.MarkIdentityEmailSending(ctx, event, processor.workerID, markNow, markNow.Add(processor.lease)); err != nil {
+		processor.failIdentityEmail(ctx, event, now, "identity_email_lease_lost", err)
+		return
+	}
+	verificationURL := processor.baseURL + "/profil/email/bestaetigen?token=" + url.QueryEscape(rawToken)
+	name := strings.TrimSpace(delivery.DisplayName)
+	if name == "" {
+		name = "HackWerk-Nutzer"
+	}
+	subject := "E-Mail-Adresse für HackWerk bestätigen"
+	textBody := fmt.Sprintf("Hallo %s,\n\nbestätigen Sie Ihre neue E-Mail-Adresse über diesen Link:\n%s\n\nDer Link ist zeitlich begrenzt. Wenn Sie die Änderung nicht angefordert haben, ignorieren Sie diese Nachricht.\n", name, verificationURL)
+	htmlBody := fmt.Sprintf("<p>Hallo %s,</p><p>Bestätigen Sie Ihre neue E-Mail-Adresse:</p><p><a href=\"%s\">E-Mail-Adresse bestätigen</a></p><p>Der Link ist zeitlich begrenzt. Wenn Sie die Änderung nicht angefordert haben, ignorieren Sie diese Nachricht.</p>", html.EscapeString(name), html.EscapeString(verificationURL))
+	_, sendErr := provider.Send(ctx, Message{
+		NotificationID: delivery.VerificationID, IdempotencyKey: event.IdempotencyKey, Channel: ChannelEmail,
+		Recipient: delivery.Recipient, Subject: subject, Text: textBody, HTML: htmlBody,
+	})
+	if sendErr != nil {
+		code := "provider_temporary"
+		if errors.Is(sendErr, ErrPermanent) {
+			code = "provider_permanent"
+		}
+		processor.failIdentityEmail(ctx, event, now, code, sendErr)
+		return
+	}
+	if err := processor.identityEmails.CompleteIdentityEmail(ctx, event, processor.workerID); err != nil {
+		processor.logger.WarnContext(ctx, "identity email completion failed", slog.String("error_code", "identity_email_completion_failed"))
+	}
+}
+
+func (processor *Processor) failIdentityEmail(ctx context.Context, event IdentityEmailEvent, now time.Time, code string, cause error) {
+	permanent := errors.Is(cause, ErrPermanent) || event.Attempt >= event.MaxAttempts
+	var stateErr error
+	if permanent {
+		stateErr = processor.identityEmails.DeadIdentityEmail(ctx, event, processor.workerID, code)
+	} else {
+		stateErr = processor.identityEmails.RetryIdentityEmail(ctx, event, processor.workerID, now.Add(Backoff(int(event.Attempt), event.IdempotencyKey)), code)
+	}
+	if stateErr != nil {
+		processor.logger.ErrorContext(ctx, "identity email state could not be persisted", slog.String("error_code", "identity_email_state_failed"))
+	}
+	processor.logger.WarnContext(ctx, "identity email delivery failed", slog.String("error_code", code), slog.Int("attempt", int(event.Attempt)))
+}
+
+func (processor *Processor) deadIdentityEmail(ctx context.Context, event IdentityEmailEvent, code string) {
+	if err := processor.identityEmails.DeadIdentityEmail(ctx, event, processor.workerID, code); err != nil {
+		processor.logger.ErrorContext(ctx, "identity email dead state could not be persisted", slog.String("error_code", "identity_email_dead_state_failed"))
+	}
 }
 
 func (processor *Processor) process(ctx context.Context, event ClaimedEvent, now time.Time) {

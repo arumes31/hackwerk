@@ -105,6 +105,26 @@ func TestTask09VoiceReviewMobileJourney(t *testing.T) {
 		chromedp.SetUploadFiles("[data-voice-upload] input[type=file]", []string{audioPath}, chromedp.ByQuery),
 		chromedp.SetValue("[data-voice-upload] input[name=duration_seconds]", "3", chromedp.ByQuery),
 		chromedp.Click("[data-voice-upload] button[type=submit]", chromedp.ByQuery),
+		chromedp.WaitReady("[data-voice-processing], form[action$='/commit']", chromedp.ByQuery),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			ticker := time.NewTicker(20 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				var status string
+				if queryErr := pool.QueryRow(ctx, "SELECT status FROM voice_drafts ORDER BY created_at DESC LIMIT 1").Scan(&status); queryErr != nil {
+					return queryErr
+				}
+				if status == string(voice.StatusNeedsReview) {
+					return nil
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-ticker.C:
+				}
+			}
+		}),
+		chromedp.Reload(),
 		chromedp.WaitVisible("form[action$='/commit']", chromedp.ByQuery),
 		chromedp.Click("form[action$='/discard'] button[type=submit]", chromedp.ByQuery),
 		chromedp.WaitVisible("[data-voice-upload]", chromedp.ByQuery),

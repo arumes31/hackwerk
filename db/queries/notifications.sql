@@ -221,7 +221,7 @@ LIMIT sqlc.arg(result_limit);
 SELECT a.id::text AS appointment_id, j.job_number,
        concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, ''))::text AS customer_name,
        c.locality, COALESCE(c.phone_normalized, c.phone_raw, '')::text AS phone,
-       cr.responded_at, cr.expires_at
+       COALESCE(cr.response_note, '')::text AS response_note, cr.responded_at, cr.expires_at
 FROM confirmation_requests cr
 JOIN appointments a ON a.id=cr.appointment_id AND a.lifecycle_status='fixed'
 JOIN jobs j ON j.id=a.job_id
