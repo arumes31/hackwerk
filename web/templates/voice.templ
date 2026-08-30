@@ -12,6 +12,7 @@ type VoiceCaptureData struct {
 	MaxBytes, MaxSeconds, ProcessingMinutes  int
 	ProviderNotice                           string
 	Error                                    string
+	UploadKey                                string
 }
 
 type VoiceReviewData struct {
@@ -67,16 +68,17 @@ templ VoiceCapture(data VoiceCaptureData) {
 							<button class="button button--quiet" type="button" data-voice-cancel disabled>Abbrechen</button>
 							<span class="status-badge" data-voice-timer aria-label="Verbleibende Aufnahmezeit">Verbleibend: { fmt.Sprintf("%02d:%02d", data.MaxSeconds/60, data.MaxSeconds%60) }</span>
 						</div>
-						<div class="voice-level" data-voice-level-wrap hidden><span>Audiopegel</span><meter min="0" max="1" value="0" data-voice-level>0</meter></div>
+						<div class="voice-level" data-voice-level-wrap hidden><label for="voice-level-meter">Audiopegel</label><meter id="voice-level-meter" min="0" max="1" value="0" data-voice-level>0</meter></div>
 						<p data-voice-status role="status">Das Mikrofon wird erst nach „Aufnahme starten“ angefragt.</p>
 						<section class="voice-preview" data-voice-preview hidden aria-labelledby="voice-preview-title">
 							<h3 id="voice-preview-title">Aufnahme vor dem Upload prüfen</h3>
 							<audio controls preload="metadata" data-voice-audio></audio>
 							<div class="action-row"><button class="button" type="button" data-voice-send>Aufnahme als Entwurf hochladen</button><button class="button button--quiet" type="button" data-voice-discard>Aufnahme verwerfen</button><button class="button button--quiet" type="button" data-voice-retry hidden>Upload erneut versuchen</button></div>
-							<progress max="100" value="0" data-voice-progress hidden>0 %</progress>
+							<label class="visually-hidden" for="voice-upload-progress">Uploadfortschritt</label><progress id="voice-upload-progress" max="100" value="0" data-voice-progress hidden>0 %</progress>
 						</section>
 						<form method="post" action="/voice/upload" enctype="multipart/form-data" data-voice-upload>
 							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
+							<input type="hidden" name="idempotency_key" value={ data.UploadKey } data-voice-idempotency-key/>
 							<label>Oder vorhandene Audiodatei prüfen und hochladen<input type="file" name="audio" accept="audio/webm,audio/ogg,audio/wav,video/webm" required/></label>
 							<label>Dauer in Sekunden<input name="duration_seconds" type="number" min="1" max={ fmt.Sprint(data.MaxSeconds) } required/></label>
 							<button class="button button--quiet" type="submit">Datei als Entwurf verarbeiten</button>
@@ -109,7 +111,12 @@ templ VoiceReview(data VoiceReviewData) {
 					</section>
 				} else if data.Draft.Status == voice.StatusFailed {
 					<div class="form-alert" role="alert">Die Transkription ist nach mehreren Versuchen fehlgeschlagen. Die geschützte Originalaufnahme bleibt bis zum Ablauf der 30-Tage-Frist für Administratoren verfügbar.</div>
-					<a class="button" href="/voice">Neu aufnehmen</a>
+					if data.Draft.ManualRetryCount < 1 {
+						<form method="post" action={ "/voice/drafts/" + data.Draft.ID + "/retranscribe" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(data.Draft.Version) }/><button class="button" type="submit">Originalaufnahme einmalig neu transkribieren</button></form>
+					} else {
+						<p>Die einmalige manuelle Neu-Transkription wurde bereits verwendet.</p>
+					}
+					<a class="button button--quiet" href="/voice">Neu aufnehmen</a>
 				} else if data.Draft.Status == voice.StatusExpired {
 					<div class="form-alert form-alert--warning" role="alert">Dieser Entwurf ist abgelaufen und enthält keine weiter nutzbaren Daten.</div>
 				} else if data.Draft.Status == voice.StatusCommitted {

@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -31,6 +32,14 @@ type webVoiceStore struct {
 	listLimit      int32
 	listOffset     int32
 	creates        int
+	uploadKeyHash  []byte
+}
+
+func (store *webVoiceStore) FindRecordingByUploadKey(_ context.Context, actor auth.Actor, uploadKeyHash []byte) (voice.Draft, bool, error) {
+	if bytes.Equal(store.uploadKeyHash, uploadKeyHash) && store.draft.ID != "" && store.draft.OwnerUserID == actor.UserID {
+		return store.draft, true, nil
+	}
+	return voice.Draft{}, false, nil
 }
 
 type webVoiceTranscriber struct {
@@ -47,9 +56,19 @@ func (store *webVoiceStore) Create(_ context.Context, actor auth.Actor, expires 
 	store.draft = voice.Draft{ID: "voice-draft", OwnerUserID: actor.UserID, Status: voice.StatusTranscribing, Version: 1, ExpiresAt: expires}
 	return store.draft, nil
 }
-func (store *webVoiceStore) CreateRecording(_ context.Context, actor auth.Actor, _ []byte, _ string, _ voice.Metadata, expires, _ time.Time) (voice.Draft, error) {
+func (store *webVoiceStore) CreateRecording(_ context.Context, actor auth.Actor, uploadKeyHash []byte, _ []byte, _ string, _ voice.Metadata, expires, _ time.Time) (voice.Draft, error) {
 	store.creates++
+	store.uploadKeyHash = append([]byte(nil), uploadKeyHash...)
 	store.draft = voice.Draft{ID: "voice-draft", OwnerUserID: actor.UserID, Status: voice.StatusRecorded, Version: 1, ExpiresAt: expires}
+	return store.draft, nil
+}
+func (store *webVoiceStore) RetryRecording(_ context.Context, actor auth.Actor, _ string, expectedVersion int32, _ time.Time) (voice.Draft, error) {
+	if store.draft.OwnerUserID != actor.UserID || store.draft.Status != voice.StatusFailed || store.draft.Version != expectedVersion || store.draft.ManualRetryCount >= 1 {
+		return voice.Draft{}, voice.ErrConflict
+	}
+	store.draft.Status = voice.StatusRecorded
+	store.draft.ManualRetryCount++
+	store.draft.Version++
 	return store.draft, nil
 }
 func (*webVoiceStore) ClaimRecording(context.Context, string, time.Time, time.Time) (voice.ClaimedRecording, bool, error) {
@@ -331,6 +350,47 @@ func secureVoiceTestCookie(name, value string) *http.Cookie {
 	}
 }
 
+func TestFailedVoiceDraftOffersOneNoJavaScriptRetranscription(t *testing.T) {
+	store := &webVoiceStore{draft: voice.Draft{
+		ID: "voice-draft", OwnerUserID: "voice-user", Status: voice.StatusFailed, Version: 4,
+		ExpiresAt: time.Date(2026, 8, 25, 11, 0, 0, 0, time.UTC),
+	}}
+	router, _ := voiceHTTPRouter(t, store)
+	page := httptest.NewRecorder()
+	router.ServeHTTP(page, authenticatedCustomerRequest(t, http.MethodGet, "/voice/drafts/voice-draft", nil, "session-token", "csrf-token"))
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "/voice/drafts/voice-draft/retranscribe") || !strings.Contains(page.Body.String(), `name="version" value="4"`) {
+		t.Fatalf("failed draft page = %d %s", page.Code, page.Body.String())
+	}
+
+	retry := httptest.NewRecorder()
+	form := url.Values{"csrf_token": {"csrf-token"}, "version": {"4"}}
+	router.ServeHTTP(retry, authenticatedCustomerRequest(t, http.MethodPost, "/voice/drafts/voice-draft/retranscribe", form, "session-token", "csrf-token"))
+	if retry.Code != http.StatusSeeOther || store.draft.Status != voice.StatusRecorded || store.draft.ManualRetryCount != 1 {
+		t.Fatalf("retry response/draft = %d/%#v", retry.Code, store.draft)
+	}
+}
+
+func TestVoicePageRendersFreshUploadIdempotencyKey(t *testing.T) {
+	store := &webVoiceStore{}
+	router, _ := voiceHTTPRouter(t, store)
+	page := httptest.NewRecorder()
+	router.ServeHTTP(page, authenticatedCustomerRequest(t, http.MethodGet, "/voice", nil, "session-token", "csrf-token"))
+	if page.Code != http.StatusOK {
+		t.Fatalf("voice page status = %d", page.Code)
+	}
+	markup := page.Body.String()
+	marker := `name="idempotency_key" value="`
+	start := strings.Index(markup, marker)
+	if start < 0 {
+		t.Fatal("voice page is missing the upload idempotency key")
+	}
+	value := markup[start+len(marker):]
+	end := strings.IndexByte(value, '"')
+	if end != 43 {
+		t.Fatalf("voice upload idempotency key length = %d, want 43", end)
+	}
+}
+
 func voiceHTTPRouter(t *testing.T, store *webVoiceStore) (http.Handler, string) {
 	return voiceHTTPRouterWithTranscriber(t, store, voice.FakeTranscriber{Text: "Franz Huber, 80 m³, drei Stunden"})
 }
@@ -380,6 +440,9 @@ func voiceRequestBodyWithAudio(t *testing.T, csrfToken, duration, audioType stri
 		if err := writer.WriteField("csrf_token", csrfToken); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := writer.WriteField("idempotency_key", "web-test-upload-key-0001"); err != nil {
+		t.Fatal(err)
 	}
 	durationField := "duration_seconds"
 	if duration == "3000" {

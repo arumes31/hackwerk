@@ -121,6 +121,136 @@ func TestEmbeddedStylesDefineFeedbackAndOverlayContracts(t *testing.T) {
 	}
 }
 
+func TestInstallPromptIsHiddenUntilBrowserOffersInstallation(t *testing.T) {
+	t.Parallel()
+
+	stylesheet, err := Files.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stylesheet), ":where([hidden])") || !strings.Contains(string(stylesheet), "display: none !important;") {
+		t.Fatal("global hidden attribute must override component display rules")
+	}
+
+	source, err := os.ReadFile("src/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(source)
+	for _, contract := range []string{
+		`typeof event.prompt !== "function"`,
+		`window.addEventListener("beforeinstallprompt"`,
+		`window.addEventListener("appinstalled"`,
+		`hideInstallPrompt();`,
+		`announce("HackWerk kann auf diesem Gerät installiert werden.")`,
+	} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("install prompt script does not preserve %q", contract)
+		}
+	}
+}
+
+func TestLowPriorityUIContractsRemainAccessibleAndRaceSafe(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("src/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(source)
+	for _, contract := range []string{
+		`window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"`,
+		`if (!/^\d{7,15}$/.test(digits)) return "";`,
+		`Bitte 7 bis 15 Ziffern als gültige Telefonnummer eingeben.`,
+		`note.setAttribute("aria-invalid", "true")`,
+		`data-confirmation-note-feedback`,
+		`searchController = new AbortController()`,
+		`if (sequence !== searchSequence) return;`,
+	} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("application script does not preserve %q", contract)
+		}
+	}
+
+	routeLocations, err := Files.ReadFile("static/route-locations.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, contract := range []string{`searchController = new AbortController()`, `signal: searchController.signal`, `sequence !== searchSequence`} {
+		if !strings.Contains(string(routeLocations), contract) {
+			t.Errorf("route location script does not preserve %q", contract)
+		}
+	}
+}
+
+func TestVoiceUploadUsesStableOwnerScopedIdempotencyKey(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("src/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(source)
+	for _, contract := range []string{
+		`[data-voice-idempotency-key]`,
+		`form.append("idempotency_key", pendingUploadKey)`,
+		`crypto.randomUUID()`,
+		`data-voice-retry`,
+	} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("voice idempotency script does not preserve %q", contract)
+		}
+	}
+}
+
+func TestAppointmentMutationsAndCopyFallbackReportTruthfulState(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("src/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(source)
+	for _, contract := range []string{
+		`dialog.dataset.actionPending = "true"`,
+		`dialog.querySelectorAll("button, input, select, textarea")`,
+		`control.disabled = true`,
+		`dialog.inert = true`,
+		`if (dialog.dataset.actionPending === "true") return;`,
+		`event.currentTarget.dataset.actionPending === "true"`,
+		`document.execCommand?.("copy")`,
+		`if (await copyText(value))`,
+		`bitte mit Strg+C kopieren`,
+	} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("application script does not preserve %q", contract)
+		}
+	}
+}
+
+func TestPlanningFiltersAndRouteEndpointsSynchronizeTheMap(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("src/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(source)
+	for _, contract := range []string{
+		`new CustomEvent("planningfilterchange"`,
+		`context.closest("[data-planning-workbench]") || context`,
+		`context.querySelector("[data-route-map-count]")`,
+		`const filteredCandidates = () =>`,
+		`features: filteredCandidates().map`,
+		`context.addEventListener("route-location-status"`,
+		`renderEndpointMarkers(true)`,
+	} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("route map synchronization does not preserve %q", contract)
+		}
+	}
+}
+
 func TestRouteLocationCardsAndFooterKeepStableLayoutContracts(t *testing.T) {
 	t.Parallel()
 
@@ -171,6 +301,19 @@ func TestRouteMapMarkersRemainCompactPointedAndTouchSized(t *testing.T) {
 		if !strings.Contains(javascript, contract) {
 			t.Errorf("route marker script does not define %q", contract)
 		}
+	}
+}
+
+func TestWaitlistFilterActionsRemainTouchSized(t *testing.T) {
+	t.Parallel()
+
+	stylesheet, err := Files.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(stylesheet)
+	if !strings.Contains(css, ".waitlist-filter-chips .button, .waitlist-regions .button, .waitlist-favorites .button { min-height: 44px;") {
+		t.Fatal("waitlist filter and favorite actions must remain at least 44px high")
 	}
 }
 

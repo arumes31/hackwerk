@@ -18,12 +18,15 @@ import (
 )
 
 type notificationHTTPStore struct {
-	statuses  []notification.Status
-	callbacks []notification.CallbackRequest
-	reviewed  bool
-	retryErr  error
-	reviewErr error
-	retried   bool
+	statuses     []notification.Status
+	callbacks    []notification.CallbackRequest
+	reviewed     bool
+	retryErr     error
+	reviewErr    error
+	retried      bool
+	reissueCalls int
+	resetCalls   int
+	adminErr     error
 }
 
 func (store *notificationHTTPStore) ListAppointment(context.Context, string) ([]notification.Status, error) {
@@ -43,11 +46,13 @@ func (store *notificationHTTPStore) Review(context.Context, auth.Actor, string, 
 	store.reviewed = true
 	return store.reviewErr
 }
-func (*notificationHTTPStore) Reissue(context.Context, auth.Actor, string, int32, string, string, time.Time) error {
-	return nil
+func (store *notificationHTTPStore) Reissue(context.Context, auth.Actor, string, int32, string, string, time.Time) error {
+	store.reissueCalls++
+	return store.adminErr
 }
-func (*notificationHTTPStore) ResetResponse(context.Context, auth.Actor, string, int32, string, string, time.Time) error {
-	return nil
+func (store *notificationHTTPStore) ResetResponse(context.Context, auth.Actor, string, int32, string, string, time.Time) error {
+	store.resetCalls++
+	return store.adminErr
 }
 
 func TestNotificationFailuresRendersSafeOperationalDetails(t *testing.T) {

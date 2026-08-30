@@ -156,7 +156,7 @@ func Login(data LoginData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</span><nav aria-label=\"Rechtliche Informationen\"><a href=\"/impressum\">Impressum</a> <a href=\"/datenschutz\">Datenschutz</a> <a href=\"/cookies\">Cookies</a> <button type=\"button\" data-privacy-notice-open>Cookie-Hinweis</button></nav></footer>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</span><nav aria-label=\"Rechtliche Informationen\"><a href=\"/impressum\">Impressum</a> <a href=\"/datenschutz\">Datenschutz</a> <a href=\"/cookies\">Cookies</a> <a href=\"/cookies\" data-privacy-notice-open>Cookie-Hinweis</a></nav></footer>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

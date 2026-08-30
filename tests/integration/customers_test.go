@@ -252,6 +252,28 @@ func TestCustomersPersistence(t *testing.T) {
 			t.Fatalf("urgency/month filter = %#v, error = %v", page.Items, err)
 		}
 	})
+
+	t.Run("waitlist filter favorite round trips every visible filter", func(t *testing.T) {
+		ctx, _, service, admin, _ := customerFixture(t)
+		filter := customers.WaitlistFilter{
+			JobType: string(customers.JobTypeChippingWithTransport), Region: "Nord", Urgency: string(customers.UrgencyUrgent),
+			PreferredMonth: "2026-10", Workflow: "proposal", DurationGroup: "long",
+			MissingLocation: true, DurationIssue: true, Overdue: true, Unassigned: true, TransportPending: true,
+			Sort: "duration", Direction: "desc",
+		}
+		if err := service.SaveWaitlistFilterFavorite(ctx, admin, "Disposition", filter); err != nil {
+			t.Fatal(err)
+		}
+		favorites, err := service.ListWaitlistFilterFavorites(ctx, admin)
+		if err != nil || len(favorites) != 1 {
+			t.Fatalf("favorites=%#v error=%v", favorites, err)
+		}
+		got := favorites[0].Filter
+		if got.DurationGroup != "long" || !got.MissingLocation || !got.DurationIssue || !got.Overdue ||
+			!got.Unassigned || !got.TransportPending || got.Sort != "duration" || got.Direction != "desc" {
+			t.Fatalf("favorite filter=%#v", got)
+		}
+	})
 }
 
 func customerFixture(t *testing.T) (context.Context, *pgxpool.Pool, *customers.Service, auth.Actor, auth.Actor) {

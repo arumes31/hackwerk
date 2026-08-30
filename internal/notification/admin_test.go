@@ -56,7 +56,8 @@ func TestAdminServiceMasksOperationalViewsAndKeepsProviderReferenceAdminOnly(t *
 		statuses: []Status{{
 			ID: "notification", AppointmentID: "appointment", Channel: "email", State: "failed",
 			Recipient: "private@example.test", ErrorCode: "provider_permanent", ProviderReference: "provider-reference-0123456789",
-			CreatedAt: now.Add(-time.Hour), ReviewedAt: now,
+			ResponseNote: "Bitte nur vormittags zurückrufen",
+			CreatedAt:    now.Add(-time.Hour), ReviewedAt: now,
 		}},
 		callbacks: []CallbackRequest{{AppointmentID: "appointment", Phone: "+43 664 1234567", RespondedAt: now}},
 	}
@@ -73,11 +74,15 @@ func TestAdminServiceMasksOperationalViewsAndKeepsProviderReferenceAdminOnly(t *
 		t.Fatalf("prepared failure = %+v filter=%s", failed[0], store.filter)
 	}
 	appointment, err := service.AppointmentStatuses(t.Context(), admin, "appointment")
-	if err != nil || appointment[0].ProviderReference != "" {
+	if err != nil || appointment[0].ProviderReference != "" || appointment[0].ResponseNote == "" {
 		t.Fatalf("appointment status leaked provider reference: %+v, %v", appointment, err)
 	}
+	driverAppointment, err := service.AppointmentStatuses(t.Context(), auth.Actor{UserID: "driver", Role: auth.RoleDriver}, "appointment")
+	if err != nil || driverAppointment[0].ResponseNote != "" {
+		t.Fatalf("driver appointment status leaked response note: %+v, %v", driverAppointment, err)
+	}
 	adminHistory, err := service.AdminAppointmentHistory(t.Context(), admin, "appointment")
-	if err != nil || adminHistory[0].ProviderReference != "provider…6789" {
+	if err != nil || adminHistory[0].ProviderReference != "provider…6789" || adminHistory[0].ResponseNote == "" {
 		t.Fatalf("admin history = %+v, %v", adminHistory, err)
 	}
 	callbacks, err := service.Callbacks(t.Context(), admin, 20)
@@ -137,6 +142,9 @@ func TestAdminActionsRequireAdministratorAndValidatedReason(t *testing.T) {
 	if err := service.ResetResponse(t.Context(), admin, "appointment", 3, "  Irrtum korrigieren  ", "request"); err != nil || !store.reset || store.version != 3 || store.reason != "Irrtum korrigieren" {
 		t.Fatalf("ResetResponse() store/error = %#v / %v", store, err)
 	}
+	if err := service.Reissue(t.Context(), admin, "appointment", 4, strings.Repeat("ä", 500), "request"); err != nil {
+		t.Fatalf("500-character Unicode reason rejected: %v", err)
+	}
 	for _, test := range []struct {
 		name string
 		call func() error
@@ -147,7 +155,7 @@ func TestAdminActionsRequireAdministratorAndValidatedReason(t *testing.T) {
 		{name: "driver reissue", call: func() error { return service.Reissue(t.Context(), driver, "appointment", 1, "reason", "request") }, want: auth.ErrForbidden},
 		{name: "missing reissue reason", call: func() error { return service.Reissue(t.Context(), admin, "appointment", 1, " ", "request") }, want: ErrAdminActionUnavailable},
 		{name: "oversize reset reason", call: func() error {
-			return service.ResetResponse(t.Context(), admin, "appointment", 1, strings.Repeat("x", 501), "request")
+			return service.ResetResponse(t.Context(), admin, "appointment", 1, strings.Repeat("ä", 501), "request")
 		}, want: ErrAdminActionUnavailable},
 		{name: "empty appointment", call: func() error { return service.ResetResponse(t.Context(), admin, "", 1, "reason", "request") }, want: ErrAdminActionUnavailable},
 	} {

@@ -6,15 +6,16 @@ import (
 )
 
 type ConfirmationData struct {
-	Page          PageData
-	Token         string
-	Value         notification.Confirmation
-	Invalid       bool
-	Expired       bool
-	Revoked       bool
-	Retryable     bool
-	AlreadyStored bool
-	Result        string
+	Page              PageData
+	Token             string
+	Value             notification.Confirmation
+	Invalid           bool
+	Retryable         bool
+	AlreadyStored     bool
+	CallbackStored    bool
+	Result            string
+	ResponseNote      string
+	ResponseNoteError string
 }
 
 templ ConfirmationPage(data ConfirmationData) {
@@ -41,13 +42,7 @@ templ ConfirmationPage(data ConfirmationData) {
 							<span>· </span><a href={ "mailto:" + data.Page.Legal.Email }>{ data.Page.Legal.Email }</a>
 						}
 					</address>
-					if data.Expired {
-						<h1 id="confirmation-title">Link abgelaufen</h1>
-						<p>Die Antwortfrist dieses Links ist beendet. Bitte kontaktieren Sie den Betrieb direkt, um den Termin abzustimmen.</p>
-					} else if data.Revoked {
-						<h1 id="confirmation-title">Link widerrufen</h1>
-						<p>Dieser gültig ausgestellte Link wurde ersetzt oder bewusst widerrufen. Verwenden Sie gegebenenfalls die neueste Nachricht oder kontaktieren Sie den Betrieb.</p>
-					} else if data.Invalid {
+					if data.Invalid {
 						<h1 id="confirmation-title">Link nicht verfügbar</h1>
 						<p>Dieser Bestätigungslink ist nicht mehr gültig. Bitte kontaktieren Sie den Betrieb, wenn Sie Ihren Termin abstimmen möchten.</p>
 					} else if data.Retryable {
@@ -69,6 +64,9 @@ templ ConfirmationPage(data ConfirmationData) {
 						<button class="button button--quiet" type="button" data-print-page>Bestätigung drucken</button>
 					} else {
 						<h1 id="confirmation-title">Ihr Termin</h1>
+						if data.CallbackStored {
+							<p role="status">Ihr Rückrufwunsch ist gespeichert. Sie können den Termin weiterhin direkt bestätigen oder ablehnen.</p>
+						}
 						<p>Guten Tag { data.Value.CustomerName },</p>
 						<dl class="appointment-detail-list">
 							<div><dt>Auftrag</dt><dd>{ data.Value.JobNumber }</dd></div>
@@ -80,11 +78,17 @@ templ ConfirmationPage(data ConfirmationData) {
 						<p>Bitte wählen Sie genau eine Rückmeldung. Sie können den Termin hier nicht verschieben oder stornieren.</p>
 						<form method="post" action={ "/termin/" + data.Token + "/antwort" } class="confirmation-actions" data-confirmation-form>
 							<input type="hidden" name="form_nonce" value={ data.Value.FormNonce }/>
-							<label>Optionale Rückrufnotiz bei Ablehnung<textarea name="response_note" maxlength="500" rows="3" placeholder="z. B. Bitte vormittags zurückrufen"></textarea><small>Maximal 500 Zeichen; nur zusammen mit „Termin ablehnen“.</small></label>
+							<label for="confirmation-response-note">Optionale Rückrufnotiz bei Ablehnung</label><textarea id="confirmation-response-note" name="response_note" maxlength="500" rows="3" placeholder="z. B. Bitte vormittags zurückrufen" aria-invalid={ confirmationNoteInvalid(data.ResponseNoteError) } aria-describedby={ confirmationNoteDescription(data.ResponseNoteError) }>{ data.ResponseNote }</textarea><small id="confirmation-note-help">Maximal 500 Zeichen; nur zusammen mit „Termin ablehnen“.</small>
+							if data.ResponseNoteError != "" {
+								<small id="confirmation-note-error" class="field-error" role="alert">{ data.ResponseNoteError }</small>
+							}
+							<small id="confirmation-note-feedback" data-confirmation-note-feedback role="status" aria-live="polite">Die Notiz wird nur bei einer Ablehnung übermittelt.</small>
 							<p class="form-hint" data-confirmation-summary>Die gewählte Antwort wird unmittelbar und einmalig gespeichert.</p>
 							<button class="button" type="submit" name="action" value="confirmed" data-response-label="Sie bestätigen den angezeigten Termin.">Termin bestätigen</button>
 							<button class="button button--quiet" type="submit" name="action" value="declined" data-response-label="Sie lehnen den angezeigten Termin ab.">Termin ablehnen</button>
-							<button class="button button--quiet" type="submit" name="action" value="callback_requested" data-response-label="Sie bitten den Betrieb um einen Rückruf.">Rückruf wünschen</button>
+							if !data.CallbackStored {
+								<button class="button button--quiet" type="submit" name="action" value="callback_requested" data-response-label="Sie bitten den Betrieb um einen Rückruf.">Rückruf wünschen</button>
+							}
 						</form>
 					}
 				</section>
@@ -99,3 +103,17 @@ func confirmationDateTime(value time.Time) string {
 	return weekdays[local.Weekday()] + ", " + local.Format("02.01.2006 · 15:04")
 }
 func confirmationTime(value time.Time) string { return value.In(viennaLocation()).Format("15:04") }
+
+func confirmationNoteInvalid(message string) string {
+	if message != "" {
+		return "true"
+	}
+	return "false"
+}
+
+func confirmationNoteDescription(message string) string {
+	if message != "" {
+		return "confirmation-note-help confirmation-note-error confirmation-note-feedback"
+	}
+	return "confirmation-note-help confirmation-note-feedback"
+}

@@ -126,9 +126,20 @@ function initializeRouteLocationEditor(editor) {
     results.append(item);
     results.hidden = false;
   };
+  let searchSequence = 0;
+  let searchController;
+  const stopSearchBusy = () => {
+    if (!searchButton) return;
+    searchButton.disabled = false;
+    searchButton.removeAttribute("aria-busy");
+  };
   const searchAddress = async () => {
+    const sequence = ++searchSequence;
+    searchController?.abort();
+    searchController = new AbortController();
     const query = String(search?.value || "").trim();
     if (query.length < 3) {
+      stopSearchBusy();
       clearResults();
       showSearchStatus("Bitte mindestens drei Zeichen eingeben.");
       search?.focus();
@@ -136,6 +147,7 @@ function initializeRouteLocationEditor(editor) {
     }
     const csrf = form?.querySelector("[name='csrf_token']")?.value;
     if (!csrf) {
+      stopSearchBusy();
       showSearchStatus("Die Sicherheitsprüfung ist abgelaufen. Bitte laden Sie die Seite neu.");
       return;
     }
@@ -149,8 +161,10 @@ function initializeRouteLocationEditor(editor) {
         headers: { "X-CSRF-Token": csrf, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
         body: new URLSearchParams({ query }),
         credentials: "same-origin",
+        signal: searchController.signal,
       });
       const payload = await response.json().catch(() => ({}));
+      if (sequence !== searchSequence) return;
       if (!response.ok) throw new Error(payload?.error?.message || "Die Adresssuche ist derzeit nicht verfügbar.");
       const matches = Array.isArray(payload.results) ? payload.results.slice(0, 10) : [];
       for (const match of matches) {
@@ -188,11 +202,12 @@ function initializeRouteLocationEditor(editor) {
       results.hidden = false;
       showSearchStatus(`${results.children.length} Treffer gefunden. Bitte einen Ort auswählen.`);
     } catch (cause) {
+      if (sequence !== searchSequence || cause?.name === "AbortError") return;
       clearResults();
       showSearchStatus(cause instanceof Error ? cause.message : "Die Adresssuche ist derzeit nicht verfügbar.");
     } finally {
-      searchButton.disabled = false;
-      searchButton.removeAttribute("aria-busy");
+      if (sequence !== searchSequence) return;
+      stopSearchBusy();
     }
   };
   searchButton?.addEventListener("click", searchAddress);

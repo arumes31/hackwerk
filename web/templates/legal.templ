@@ -48,7 +48,7 @@ templ siteFooter(page PageData) {
 				<a href="/impressum">Impressum</a>
 				<a href="/datenschutz">Datenschutz</a>
 				<a href="/cookies">Cookies</a>
-				<button type="button" data-privacy-notice-open>Cookie-Hinweis öffnen</button>
+				<a href="/cookies" data-privacy-notice-open>Cookie-Hinweis öffnen</a>
 			</nav>
 		</div>
 	</footer>
@@ -185,7 +185,7 @@ templ cookiesContent(data LegalData) {
 		<section><h2>Browser-Speicher ohne Cookie</h2><div class="table-scroll"><table class="legal-table"><thead><tr><th>Schlüssel</th><th>Speicher</th><th>Zweck</th><th>Dauer</th></tr></thead><tbody><tr><td><code>hackwerk:density</code></td><td>localStorage</td><td>Gewählte Darstellungsdichte.</td><td>Bis zum Löschen im Browser.</td></tr><tr><td><code>hackwerk:outdoor</code></td><td>localStorage</td><td>Gewählter Outdoor-Kontrast.</td><td>Bis zum Löschen im Browser.</td></tr><tr><td><code>hackwerk:install-dismissed</code></td><td>localStorage</td><td>Merkt, dass der optionale Installationshinweis dauerhaft ausgeblendet wurde.</td><td>Bis zum Löschen im Browser.</td></tr><tr><td><code>hackwerk:privacy-notice:v1</code></td><td>localStorage</td><td>Merkt, dass der notwendige Cookie-Hinweis gelesen wurde.</td><td>Bis zum Löschen oder einer neuen Hinweisversion.</td></tr><tr><td><code>hackwerk:return-scroll-y</code></td><td>sessionStorage</td><td>Speichert einmalig nur eine numerische Scrollposition für die Rückkehr in eine Liste.</td><td>Bis zur nächsten Anzeige oder zum Schließen des Tabs.</td></tr></tbody></table></div><p>In diesen Speichern liegen keine Kontakt-, Auftrags-, Standort-, Objekt- oder Sitzungsdaten. Akkordeonzustand verwendet ausschließlich sichere semantische Abschnittsnamen in der URL.</p></section>
 		<section><h2>Warum gibt es keinen „Alle akzeptieren“-Button?</h2><p>Für unbedingt erforderliche Speicherungen ist keine Auswahl zwischen Annehmen und Ablehnen sinnvoll. Der Hinweis erklärt transparent, was geschieht. Sollte HackWerk später optionale Kategorien erhalten, dürfen diese erst nach einer freiwilligen, spezifischen Einwilligung aktiviert werden.</p></section>
 		<section><h2>Vorgeschaltete Infrastruktur und fremde Domain-Cookies</h2><p>Ein Reverse Proxy oder ein anderer Dienst unter derselben übergeordneten Domain kann eigene Sicherheits- oder Anmeldecookies setzen. Ebenso kann der Browser Cookies einer anderen Subdomain mitsenden, wenn deren Domainbereich zu weit gewählt wurde. HackWerk wertet nur die oben genannten eigenen Cookie-Namen aus. Der Betreiber muss zusätzliche Infrastruktur-Cookies separat dokumentieren und unnötig weit gefasste Domain-Cookies einschränken.</p></section>
-		<section><h2>Hinweis erneut anzeigen oder Daten löschen</h2><p>Mit „Cookie-Hinweis öffnen“ im Footer kann der Hinweis jederzeit erneut geöffnet werden. Browser-Speicher lassen sich zusätzlich in den Website-Daten des Browsers löschen; danach werden Sie abgemeldet und Darstellungspräferenzen zurückgesetzt.</p><button class="button button--quiet" type="button" data-privacy-notice-open>Cookie-Hinweis öffnen</button></section>
+		<section><h2>Hinweis erneut anzeigen oder Daten löschen</h2><p>Mit „Cookie-Hinweis öffnen“ im Footer kann der Hinweis jederzeit erneut geöffnet werden. Browser-Speicher lassen sich zusätzlich in den Website-Daten des Browsers löschen; danach werden Sie abgemeldet und Darstellungspräferenzen zurückgesetzt.</p><a class="button button--quiet" href="/cookies" data-privacy-notice-open>Cookie-Hinweis öffnen</a></section>
 	</div>
 }
 

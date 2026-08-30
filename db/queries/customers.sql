@@ -237,7 +237,8 @@ LIMIT sqlc.arg(result_limit);
 
 -- name: ListWaitlistFilterFavorites :many
 SELECT id::text, name, job_type, region, urgency, preferred_month, workflow,
-       missing_location, duration_issue, sort_key, sort_direction
+       missing_location, duration_issue, duration_group, overdue, unassigned,
+       transport_pending, sort_key, sort_direction
 FROM waitlist_filter_favorites
 WHERE user_id=sqlc.arg(user_id)::uuid
 ORDER BY updated_at DESC, id;
@@ -254,14 +255,19 @@ SELECT EXISTS (
 -- name: UpsertWaitlistFilterFavorite :exec
 INSERT INTO waitlist_filter_favorites
     (id, user_id, name, job_type, region, urgency, preferred_month, workflow,
-     missing_location, duration_issue, sort_key, sort_direction)
+     missing_location, duration_issue, duration_group, overdue, unassigned,
+     transport_pending, sort_key, sort_direction)
 VALUES (gen_random_uuid(), sqlc.arg(user_id)::uuid, sqlc.arg(name), sqlc.arg(job_type),
         sqlc.arg(region), sqlc.arg(urgency), sqlc.arg(preferred_month), sqlc.arg(workflow),
-        sqlc.arg(missing_location), sqlc.arg(duration_issue), sqlc.arg(sort_key), sqlc.arg(sort_direction))
+        sqlc.arg(missing_location), sqlc.arg(duration_issue), sqlc.arg(duration_group),
+        sqlc.arg(overdue), sqlc.arg(unassigned), sqlc.arg(transport_pending),
+        sqlc.arg(sort_key), sqlc.arg(sort_direction))
 ON CONFLICT (user_id, lower(name)) DO UPDATE SET
     job_type=excluded.job_type, region=excluded.region, urgency=excluded.urgency,
     preferred_month=excluded.preferred_month, workflow=excluded.workflow,
     missing_location=excluded.missing_location, duration_issue=excluded.duration_issue,
+    duration_group=excluded.duration_group, overdue=excluded.overdue,
+    unassigned=excluded.unassigned, transport_pending=excluded.transport_pending,
     sort_key=excluded.sort_key, sort_direction=excluded.sort_direction, updated_at=now();
 
 -- name: DeleteWaitlistFilterFavorite :execrows
@@ -383,8 +389,14 @@ ORDER BY
   CASE WHEN sqlc.arg(sort)::text = 'region' AND sqlc.arg(direction)::text = 'desc' THEN lower(w.region_snapshot) END DESC,
   CASE WHEN sqlc.arg(sort)::text = 'customer' AND sqlc.arg(direction)::text = 'asc' THEN lower(concat_ws(' ', c.company_name, c.last_name, c.first_name)) END ASC,
   CASE WHEN sqlc.arg(sort)::text = 'customer' AND sqlc.arg(direction)::text = 'desc' THEN lower(concat_ws(' ', c.company_name, c.last_name, c.first_name)) END DESC,
-  CASE WHEN sqlc.arg(sort)::text = 'workflow' AND sqlc.arg(direction)::text = 'asc' THEN j.workflow_status END ASC,
-  CASE WHEN sqlc.arg(sort)::text = 'workflow' AND sqlc.arg(direction)::text = 'desc' THEN j.workflow_status END DESC,
+  CASE WHEN sqlc.arg(sort)::text = 'workflow' AND sqlc.arg(direction)::text = 'asc' THEN CASE
+       WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='fixed') THEN 'scheduled'
+       WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
+       ELSE 'unplanned' END END ASC,
+  CASE WHEN sqlc.arg(sort)::text = 'workflow' AND sqlc.arg(direction)::text = 'desc' THEN CASE
+       WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='fixed') THEN 'scheduled'
+       WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
+       ELSE 'unplanned' END END DESC,
   CASE WHEN sqlc.arg(sort)::text = 'updated' AND sqlc.arg(direction)::text = 'asc' THEN j.updated_at END ASC,
   CASE WHEN sqlc.arg(sort)::text = 'updated' AND sqlc.arg(direction)::text = 'desc' THEN j.updated_at END DESC,
   CASE WHEN sqlc.arg(sort)::text = 'duration' AND sqlc.arg(direction)::text = 'asc' THEN j.estimated_hack_minutes+j.estimated_transport_minutes END ASC,

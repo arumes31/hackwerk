@@ -27,9 +27,10 @@ type customerHTTPStore struct {
 	waitlist customers.Page[customers.WaitlistItem]
 	list     customers.Page[customers.CustomerSummary]
 
-	created customers.CreatedIntake
-	input   customers.IntakeInput
-	jobEdit customers.UpdateJobInput
+	created    customers.CreatedIntake
+	input      customers.IntakeInput
+	jobEdit    customers.UpdateJobInput
+	listFilter customers.CustomerListFilter
 
 	createCalls          int
 	updateCustomerCalls  int
@@ -42,6 +43,7 @@ type customerHTTPStore struct {
 	listSearch           string
 
 	updateCustomerErr error
+	updateJobErr      error
 }
 
 func (store *customerHTTPStore) FindDuplicates(context.Context, customers.CustomerInput) ([]customers.Duplicate, error) {
@@ -61,7 +63,7 @@ func (store *customerHTTPStore) CreateJob(context.Context, auth.Actor, customers
 func (store *customerHTTPStore) UpdateJob(_ context.Context, _ auth.Actor, input customers.UpdateJobInput) error {
 	store.updateJobCalls++
 	store.jobEdit = input
-	return nil
+	return store.updateJobErr
 }
 
 func (store *customerHTTPStore) ArchiveJob(context.Context, auth.Actor, string, int32, string) error {
@@ -72,6 +74,7 @@ func (store *customerHTTPStore) ArchiveJob(context.Context, auth.Actor, string, 
 func (store *customerHTTPStore) ListCustomers(_ context.Context, filter customers.CustomerListFilter) (customers.Page[customers.CustomerSummary], error) {
 	store.listCalls++
 	store.listSearch = filter.Search
+	store.listFilter = filter
 	if store.list.Page == 0 {
 		store.list.Page = 1
 		store.list.PageSize = 25
@@ -238,7 +241,7 @@ func TestCustomerHTTPInvalidIntakeAssociatesAndRetainsFieldErrors(t *testing.T) 
 }
 
 func TestCustomerHTTPStaleEditReturnsConflict(t *testing.T) {
-	store := &customerHTTPStore{updateCustomerErr: customers.ErrConflict}
+	store := &customerHTTPStore{updateCustomerErr: customers.ErrConflict, detail: customers.CustomerDetail{Customer: customers.Customer{ID: testCustomerID, FirstName: "Maria", LastName: "Maier", CountryCode: "AT", NotificationPreference: customers.NotifyNone, Version: 2}}}
 	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
 	form := url.Values{
 		"csrf_token": {csrfToken}, "version": {"1"}, "first_name": {"Maria"},
@@ -248,11 +251,83 @@ func TestCustomerHTTPStaleEditReturnsConflict(t *testing.T) {
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 
-	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "zwischenzeitlich geändert") {
+	body := response.Body.String()
+	if response.Code != http.StatusConflict || !strings.Contains(body, "zwischenzeitlich geändert") ||
+		!strings.Contains(body, `value="Maria"`) || !strings.Contains(body, `href="/customers/`+testCustomerID+`"`) ||
+		!strings.Contains(body, `<details class="edit-card" open`) {
 		t.Fatalf("stale response = %d %q", response.Code, response.Body.String())
 	}
 	if store.updateCustomerCalls != 1 {
 		t.Fatalf("update customer calls = %d", store.updateCustomerCalls)
+	}
+}
+
+func TestCustomerHTTPEditValidationKeepsValuesAndFieldErrors(t *testing.T) {
+	store := &customerHTTPStore{detail: customers.CustomerDetail{Customer: customers.Customer{ID: testCustomerID, FirstName: "Alt", LastName: "Stand", CountryCode: "AT", NotificationPreference: customers.NotifyNone, Version: 3}}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	form := url.Values{
+		"csrf_token": {csrfToken}, "version": {"3"}, "first_name": {""}, "last_name": {""}, "company_name": {""},
+		"phone": {"abc"}, "email": {"ungueltig"}, "notification": {"none"}, "locality": {"Eigener Wert"},
+	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/customers/"+testCustomerID, form, sessionToken, csrfToken))
+	body := response.Body.String()
+	for _, expected := range []string{`value="Eigener Wert"`, `value="ungueltig"`, `aria-invalid="true"`, `id="email-error"`, "Ihre Eingaben wurden beibehalten"} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("edit validation missing %q in %q", expected, body)
+		}
+	}
+	if response.Code != http.StatusUnprocessableEntity || store.updateCustomerCalls != 0 {
+		t.Fatalf("edit validation status/calls=%d/%d", response.Code, store.updateCustomerCalls)
+	}
+}
+
+func TestCustomerHTTPJobEditValidationAndConflictRenderStructuredForm(t *testing.T) {
+	job := customers.Job{ID: testJobID, JobNumber: "HA-2026-0001", JobType: customers.JobTypeChippingOnly, VolumeM3: "80.00", EstimatedHackMinutes: 180, TransportMode: customers.TransportNone, Urgency: customers.UrgencyNormal, Source: customers.SourcePhone, WorkflowStatus: "waitlist", Version: 7}
+	detail := customers.CustomerDetail{Customer: customers.Customer{ID: testCustomerID, FirstName: "Maria", LastName: "Maier", CountryCode: "AT", NotificationPreference: customers.NotifyNone, Version: 1}, Jobs: []customers.Job{job}, Notes: map[string][]customers.Note{}}
+
+	t.Run("validation", func(t *testing.T) {
+		store := &customerHTTPStore{detail: detail}
+		router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+		form := validCustomerHTTPForm(csrfToken)
+		form.Set("customer_id", testCustomerID)
+		form.Set("version", "7")
+		form.Set("volume_m3", "kaputt")
+		form.Set("hack_duration", "falsch")
+		form.Set("transport_duration", "30")
+		form.Set("external_confirmed", "true")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/jobs/"+testJobID, form, sessionToken, csrfToken))
+		body := response.Body.String()
+		if response.Code != http.StatusUnprocessableEntity || store.updateJobCalls != 0 || !strings.Contains(body, `value="kaputt"`) || !strings.Contains(body, `value="falsch"`) || !strings.Contains(body, `id="job-edit-error-`+testJobID+`"`) || !strings.Contains(body, `aria-describedby="job_type-error"`) || !strings.Contains(body, `id="job_type-error"`) || !strings.Contains(body, `aria-describedby="external_confirmed-error"`) || !strings.Contains(body, `id="external_confirmed-error"`) {
+			t.Fatalf("job validation status/calls/body=%d/%d/%q", response.Code, store.updateJobCalls, body)
+		}
+	})
+
+	t.Run("conflict", func(t *testing.T) {
+		store := &customerHTTPStore{detail: detail, updateJobErr: customers.ErrConflict}
+		router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+		form := validCustomerHTTPForm(csrfToken)
+		form.Set("customer_id", testCustomerID)
+		form.Set("version", "7")
+		form.Set("volume_m3", "91")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/jobs/"+testJobID, form, sessionToken, csrfToken))
+		body := response.Body.String()
+		if response.Code != http.StatusConflict || store.updateJobCalls != 1 || !strings.Contains(body, `value="91"`) || !strings.Contains(body, "Aktuellen Stand neu laden") {
+			t.Fatalf("job conflict status/calls/body=%d/%d/%q", response.Code, store.updateJobCalls, body)
+		}
+	})
+}
+
+func TestCustomerHTTPArchivedFlagSurvivesSortAndPagination(t *testing.T) {
+	store := &customerHTTPStore{list: customers.Page[customers.CustomerSummary]{Page: 2, PageSize: 25, Total: 75, TotalPages: 3}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleAdmin, store)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodGet, "/customers?archived=1&sort=name&direction=asc&page=2&q=Maier", nil, sessionToken, csrfToken))
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !store.listFilter.IncludeArchived || store.listSearch != "Maier" || !strings.Contains(body, `href="/customers?archived=1&amp;direction=desc&amp;q=Maier&amp;sort=jobs"`) || strings.Count(body, `name="archived" value="1"`) < 2 {
+		t.Fatalf("archived list status/filter/body=%d/%#v/%q", response.Code, store.listFilter, body)
 	}
 }
 

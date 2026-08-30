@@ -20,6 +20,7 @@ var (
 	ErrConfirmationExpired     = errors.New("notification: confirmation expired")
 	ErrConfirmationRevoked     = errors.New("notification: confirmation revoked")
 	ErrResponseLocked          = errors.New("notification: confirmation response locked")
+	ErrResponseNoteNotAllowed  = errors.New("notification: response note requires decline")
 )
 
 type Confirmation struct {
@@ -87,8 +88,11 @@ func (service *ConfirmationService) Respond(ctx context.Context, rawToken, formN
 		return Confirmation{}, ErrConfirmationUnavailable
 	}
 	responseNote = strings.TrimSpace(responseNote)
-	if len([]rune(responseNote)) > 500 || (response != ResponseDeclined && responseNote != "") {
+	if len([]rune(responseNote)) > 500 {
 		return Confirmation{}, ErrConfirmationUnavailable
+	}
+	if response != ResponseDeclined && responseNote != "" {
+		return Confirmation{}, ErrResponseNoteNotAllowed
 	}
 	tokenHash, err := HashRawToken(strings.TrimSpace(rawToken))
 	if err != nil {

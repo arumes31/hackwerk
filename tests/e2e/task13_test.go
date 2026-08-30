@@ -156,7 +156,7 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 			return
 		}
 		exceptionLock.Lock()
-		exceptions = append(exceptions, value.ExceptionDetails.Text)
+		exceptions = append(exceptions, value.ExceptionDetails.Error())
 		exceptionLock.Unlock()
 	})
 

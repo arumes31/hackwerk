@@ -14,15 +14,16 @@ import (
 )
 
 type ConfirmationData struct {
-	Page          PageData
-	Token         string
-	Value         notification.Confirmation
-	Invalid       bool
-	Expired       bool
-	Revoked       bool
-	Retryable     bool
-	AlreadyStored bool
-	Result        string
+	Page              PageData
+	Token             string
+	Value             notification.Confirmation
+	Invalid           bool
+	Retryable         bool
+	AlreadyStored     bool
+	CallbackStored    bool
+	Result            string
+	ResponseNote      string
+	ResponseNoteError string
 }
 
 func ConfirmationPage(data ConfirmationData) templ.Component {
@@ -53,7 +54,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(data.Page.AppName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 27, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 28, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
@@ -66,7 +67,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 		var templ_7745c5c3_Var3 templ.SafeURL
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinURLErrs(data.Page.CSSPath)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 28, Col: 50}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 29, Col: 50}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -79,7 +80,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Page.JSPath)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 29, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 30, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
 		if templ_7745c5c3_Err != nil {
@@ -92,7 +93,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(data.Page.Legal.OperatorName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 34, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 35, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
@@ -105,7 +106,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(data.Page.Legal.OperatorName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 36, Col: 44}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 37, Col: 44}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 		if templ_7745c5c3_Err != nil {
@@ -123,7 +124,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 			var templ_7745c5c3_Var7 templ.SafeURL
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinURLErrs(customerPhoneURL(data.Page.Legal.Phone))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 38, Col: 72}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 39, Col: 72}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 			if templ_7745c5c3_Err != nil {
@@ -136,7 +137,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(data.Page.Legal.Phone)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 38, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 39, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
@@ -155,7 +156,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 			var templ_7745c5c3_Var9 templ.SafeURL
 			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinURLErrs("mailto:" + data.Page.Legal.Email)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 41, Col: 66}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 42, Col: 66}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 			if templ_7745c5c3_Err != nil {
@@ -168,7 +169,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(data.Page.Legal.Email)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 41, Col: 92}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 42, Col: 92}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 			if templ_7745c5c3_Err != nil {
@@ -183,99 +184,99 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if data.Expired {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<h1 id=\"confirmation-title\">Link abgelaufen</h1><p>Die Antwortfrist dieses Links ist beendet. Bitte kontaktieren Sie den Betrieb direkt, um den Termin abzustimmen.</p>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		} else if data.Revoked {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<h1 id=\"confirmation-title\">Link widerrufen</h1><p>Dieser gültig ausgestellte Link wurde ersetzt oder bewusst widerrufen. Verwenden Sie gegebenenfalls die neueste Nachricht oder kontaktieren Sie den Betrieb.</p>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		} else if data.Invalid {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<h1 id=\"confirmation-title\">Link nicht verfügbar</h1><p>Dieser Bestätigungslink ist nicht mehr gültig. Bitte kontaktieren Sie den Betrieb, wenn Sie Ihren Termin abstimmen möchten.</p>")
+		if data.Invalid {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<h1 id=\"confirmation-title\">Link nicht verfügbar</h1><p>Dieser Bestätigungslink ist nicht mehr gültig. Bitte kontaktieren Sie den Betrieb, wenn Sie Ihren Termin abstimmen möchten.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if data.Retryable {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<h1 id=\"confirmation-title\">Rückmeldung derzeit nicht möglich</h1><p>Die Rückmeldung konnte gerade nicht verarbeitet werden. Bitte öffnen Sie die Terminseite erneut und versuchen Sie es noch einmal.</p><a class=\"button\" href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<h1 id=\"confirmation-title\">Rückmeldung derzeit nicht möglich</h1><p>Die Rückmeldung konnte gerade nicht verarbeitet werden. Bitte öffnen Sie die Terminseite erneut und versuchen Sie es noch einmal.</p><a class=\"button\" href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var11 templ.SafeURL
 			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinURLErrs("/termin/" + data.Token)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 56, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 51, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\">Termin erneut öffnen</a>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\">Termin erneut öffnen</a>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if data.AlreadyStored {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<h1 id=\"confirmation-title\">Antwort bereits gespeichert</h1>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<h1 id=\"confirmation-title\">Antwort bereits gespeichert</h1>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if data.Result != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var12 string
 				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(data.Result)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 60, Col: 23}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 55, Col: 23}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<p>Für diesen Link wurde bereits eine Rückmeldung gespeichert. Bitte kontaktieren Sie den Betrieb, wenn Sie Ihre Antwort abstimmen möchten.</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<p>Für diesen Link wurde bereits eine Rückmeldung gespeichert. Bitte kontaktieren Sie den Betrieb, wenn Sie Ihre Antwort abstimmen möchten.</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, " <p>Der Betrieb sieht die gespeicherte Rückmeldung unmittelbar in der Terminplanung.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, " <p>Der Betrieb sieht die gespeicherte Rückmeldung unmittelbar in der Terminplanung.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if data.Result != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<h1 id=\"confirmation-title\">Antwort gespeichert</h1><p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<h1 id=\"confirmation-title\">Antwort gespeichert</h1><p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var13 string
 			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(data.Result)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 67, Col: 22}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 62, Col: 22}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</p><p>Danke. Der Betrieb sieht Ihre Rückmeldung unmittelbar in der Terminplanung.</p><button class=\"button button--quiet\" type=\"button\" data-print-page>Bestätigung drucken</button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</p><p>Danke. Der Betrieb sieht Ihre Rückmeldung unmittelbar in der Terminplanung.</p><button class=\"button button--quiet\" type=\"button\" data-print-page>Bestätigung drucken</button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<h1 id=\"confirmation-title\">Ihr Termin</h1><p>Guten Tag ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<h1 id=\"confirmation-title\">Ihr Termin</h1>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.CallbackStored {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<p role=\"status\">Ihr Rückrufwunsch ist gespeichert. Sie können den Termin weiterhin direkt bestätigen oder ablehnen.</p>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, " <p>Guten Tag ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var14 string
 			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(data.Value.CustomerName)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 72, Col: 44}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 70, Col: 44}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 			if templ_7745c5c3_Err != nil {
@@ -288,7 +289,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 			var templ_7745c5c3_Var15 string
 			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(data.Value.JobNumber)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 74, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 72, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 			if templ_7745c5c3_Err != nil {
@@ -301,7 +302,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(confirmationDateTime(data.Value.StartsAt))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 75, Col: 72}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 73, Col: 72}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 			if templ_7745c5c3_Err != nil {
@@ -314,7 +315,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 			var templ_7745c5c3_Var17 string
 			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(confirmationTime(data.Value.EndsAt))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 75, Col: 114}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 73, Col: 114}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 			if templ_7745c5c3_Err != nil {
@@ -327,7 +328,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 			var templ_7745c5c3_Var18 string
 			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(data.Value.Locality)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 77, Col: 49}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 75, Col: 49}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 			if templ_7745c5c3_Err != nil {
@@ -340,7 +341,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 			var templ_7745c5c3_Var19 string
 			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(data.Value.VolumeM3)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 78, Col: 51}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 76, Col: 51}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 			if templ_7745c5c3_Err != nil {
@@ -353,7 +354,7 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 			var templ_7745c5c3_Var20 templ.SafeURL
 			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinURLErrs("/termin/" + data.Token + "/antwort")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 81, Col: 71}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 79, Col: 71}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 			if templ_7745c5c3_Err != nil {
@@ -366,18 +367,90 @@ func ConfirmationPage(data ConfirmationData) templ.Component {
 			var templ_7745c5c3_Var21 string
 			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Value.FormNonce)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 82, Col: 74}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 80, Col: 74}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\"> <label>Optionale Rückrufnotiz bei Ablehnung<textarea name=\"response_note\" maxlength=\"500\" rows=\"3\" placeholder=\"z. B. Bitte vormittags zurückrufen\"></textarea><small>Maximal 500 Zeichen; nur zusammen mit „Termin ablehnen“.</small></label><p class=\"form-hint\" data-confirmation-summary>Die gewählte Antwort wird unmittelbar und einmalig gespeichert.</p><button class=\"button\" type=\"submit\" name=\"action\" value=\"confirmed\" data-response-label=\"Sie bestätigen den angezeigten Termin.\">Termin bestätigen</button> <button class=\"button button--quiet\" type=\"submit\" name=\"action\" value=\"declined\" data-response-label=\"Sie lehnen den angezeigten Termin ab.\">Termin ablehnen</button> <button class=\"button button--quiet\" type=\"submit\" name=\"action\" value=\"callback_requested\" data-response-label=\"Sie bitten den Betrieb um einen Rückruf.\">Rückruf wünschen</button></form>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\"> <label for=\"confirmation-response-note\">Optionale Rückrufnotiz bei Ablehnung</label><textarea id=\"confirmation-response-note\" name=\"response_note\" maxlength=\"500\" rows=\"3\" placeholder=\"z. B. Bitte vormittags zurückrufen\" aria-invalid=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var22 string
+			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(confirmationNoteInvalid(data.ResponseNoteError))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 81, Col: 292}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\" aria-describedby=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var23 string
+			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(confirmationNoteDescription(data.ResponseNoteError))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 81, Col: 365}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var24 string
+			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(data.ResponseNote)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 81, Col: 387}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</textarea><small id=\"confirmation-note-help\">Maximal 500 Zeichen; nur zusammen mit „Termin ablehnen“.</small> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.ResponseNoteError != "" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<small id=\"confirmation-note-error\" class=\"field-error\" role=\"alert\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var25 string
+				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(data.ResponseNoteError)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/confirmation.templ`, Line: 83, Col: 101}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</small> ")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<small id=\"confirmation-note-feedback\" data-confirmation-note-feedback role=\"status\" aria-live=\"polite\">Die Notiz wird nur bei einer Ablehnung übermittelt.</small><p class=\"form-hint\" data-confirmation-summary>Die gewählte Antwort wird unmittelbar und einmalig gespeichert.</p><button class=\"button\" type=\"submit\" name=\"action\" value=\"confirmed\" data-response-label=\"Sie bestätigen den angezeigten Termin.\">Termin bestätigen</button> <button class=\"button button--quiet\" type=\"submit\" name=\"action\" value=\"declined\" data-response-label=\"Sie lehnen den angezeigten Termin ab.\">Termin ablehnen</button> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if !data.CallbackStored {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<button class=\"button button--quiet\" type=\"submit\" name=\"action\" value=\"callback_requested\" data-response-label=\"Sie bitten den Betrieb um einen Rückruf.\">Rückruf wünschen</button>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</form>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</section></main></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "</section></main></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -391,5 +464,19 @@ func confirmationDateTime(value time.Time) string {
 	return weekdays[local.Weekday()] + ", " + local.Format("02.01.2006 · 15:04")
 }
 func confirmationTime(value time.Time) string { return value.In(viennaLocation()).Format("15:04") }
+
+func confirmationNoteInvalid(message string) string {
+	if message != "" {
+		return "true"
+	}
+	return "false"
+}
+
+func confirmationNoteDescription(message string) string {
+	if message != "" {
+		return "confirmation-note-help confirmation-note-error confirmation-note-feedback"
+	}
+	return "confirmation-note-help confirmation-note-feedback"
+}
 
 var _ = templruntime.GeneratedTemplate

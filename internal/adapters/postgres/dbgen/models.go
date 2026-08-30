@@ -428,23 +428,25 @@ type VoiceDraft struct {
 }
 
 type VoiceRecording struct {
-	ID           pgtype.UUID
-	DraftID      pgtype.UUID
-	OwnerUserID  pgtype.UUID
-	ContentType  string
-	AudioBytes   []byte
-	ByteSize     int32
-	DurationMs   int32
-	RecordedAt   pgtype.Timestamptz
-	ExpiresAt    pgtype.Timestamptz
-	AvailableAt  pgtype.Timestamptz
-	ClaimedBy    *string
-	LeaseUntil   pgtype.Timestamptz
-	AttemptCount int16
-	MaxAttempts  int16
-	FailureCode  string
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
+	ID               pgtype.UUID
+	DraftID          pgtype.UUID
+	OwnerUserID      pgtype.UUID
+	ContentType      string
+	AudioBytes       []byte
+	ByteSize         int32
+	DurationMs       int32
+	RecordedAt       pgtype.Timestamptz
+	ExpiresAt        pgtype.Timestamptz
+	AvailableAt      pgtype.Timestamptz
+	ClaimedBy        *string
+	LeaseUntil       pgtype.Timestamptz
+	AttemptCount     int16
+	MaxAttempts      int16
+	FailureCode      string
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	UploadKeyHash    []byte
+	ManualRetryCount int16
 }
 
 type WaitlistEntry struct {
@@ -460,20 +462,24 @@ type WaitlistEntry struct {
 }
 
 type WaitlistFilterFavorite struct {
-	ID              pgtype.UUID
-	UserID          pgtype.UUID
-	Name            string
-	JobType         string
-	Region          string
-	Urgency         string
-	PreferredMonth  string
-	Workflow        string
-	MissingLocation bool
-	DurationIssue   bool
-	SortKey         string
-	SortDirection   string
-	CreatedAt       pgtype.Timestamptz
-	UpdatedAt       pgtype.Timestamptz
+	ID               pgtype.UUID
+	UserID           pgtype.UUID
+	Name             string
+	JobType          string
+	Region           string
+	Urgency          string
+	PreferredMonth   string
+	Workflow         string
+	MissingLocation  bool
+	DurationIssue    bool
+	SortKey          string
+	SortDirection    string
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	DurationGroup    string
+	Overdue          bool
+	Unassigned       bool
+	TransportPending bool
 }
 
 type WorkerHeartbeat struct {

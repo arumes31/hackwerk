@@ -63,8 +63,9 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [audio, duration_ms]
+              required: [idempotency_key, audio, duration_ms]
               properties:
+                idempotency_key: { type: string, minLength: 16, maxLength: 128, description: Eigentümergebundener Wiederholungsschlüssel; serverseitig wird ausschließlich SHA-256 persistiert. }
                 audio: { type: string, format: binary, description: WebM, Ogg, WAV oder MP4; serverseitig auf Container und Größe geprüft. }
                 duration_ms: { type: integer, minimum: 1, maximum: 90000 }
       responses:
@@ -115,9 +116,10 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [csrf_token, audio, duration_seconds]
+              required: [csrf_token, idempotency_key, audio, duration_seconds]
               properties:
                 csrf_token: { type: string }
+                idempotency_key: { type: string, minLength: 16, maxLength: 128, description: Eigentümergebundener Wiederholungsschlüssel; serverseitig wird ausschließlich SHA-256 persistiert. }
                 audio: { type: string, format: binary, description: WebM, Ogg, WAV oder MP4; serverseitig auf Container und Größe geprüft. }
                 duration_seconds: { type: integer, minimum: 1, maximum: 90 }
       responses:
@@ -128,6 +130,32 @@ paths:
         "422": { description: Datei ist leer oder die angegebene Dauer ungültig; Formular bleibt nutzbar. }
         "429": { description: Benutzerbezogenes Rate- oder Parallelitätslimit erreicht. }
         "503": { description: Spracheingabe administrativ deaktiviert. }
+  /voice/drafts/{draftID}/retranscribe:
+    post:
+      operationId: retryVoiceDraftTranscription
+      description: Reiht einen fehlgeschlagenen, nicht abgelaufenen Entwurf seines Besitzers genau einmal erneut zur Transkription ein. Erzeugt weiterhin nur einen prüfbaren Entwurf.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: draftID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [csrf_token, version]
+              properties:
+                csrf_token: { type: string }
+                version: { type: integer, minimum: 1 }
+      responses:
+        "303": { description: Neuverarbeitung eingereiht; Weiterleitung zum Entwurf. }
+        "403": { description: Session, Besitzer oder CSRF ungültig. }
+        "409": { description: Status, Version, Ablauf oder einmaliges Retry-Limit erlauben keine Neuverarbeitung. }
+        "422": { description: Entwurfs-ID oder Version ungültig. }
   /api/v1/planning/suggestions:
     post:
       operationId: createPlanningSuggestions

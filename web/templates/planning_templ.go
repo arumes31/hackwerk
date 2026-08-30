@@ -164,20 +164,20 @@ func Planning(data PlanningData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</ol><form id=\"planning-route-selection\" method=\"get\" action=\"/planning/routes\"></form><section id=\"planung-auftrag\" class=\"planning-workspace route-workspace\" data-route-context tabindex=\"-1\"><div class=\"planning-orders form-card\"><div class=\"section-heading\"><div><p class=\"eyebrow\">Auftragsvorrat</p><h2>Aufträge</h2></div><span class=\"status-badge\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</ol><form id=\"planning-route-selection\" method=\"get\" action=\"/planning/routes\"></form><section id=\"planung-auftrag\" class=\"planning-workspace route-workspace\" data-route-context tabindex=\"-1\"><div class=\"planning-orders form-card\"><div class=\"section-heading\"><div><p class=\"eyebrow\">Auftragsvorrat</p><h2>Aufträge</h2></div><span class=\"status-badge\" data-planning-visible-count>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(len(data.Candidates)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/planning.templ`, Line: 60, Col: 162}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/planning.templ`, Line: 60, Col: 190}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, " vollständig</span></div><label class=\"planning-search\">Suchen<input type=\"search\" placeholder=\"Auftrag, Kunde, Ort oder Region\" data-planning-search autocomplete=\"off\"></label><div class=\"planning-filter-row\"><label>Region  <select data-planning-region><option value=\"\">Alle Regionen</option> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, " sichtbar</span></div><label class=\"planning-search\">Suchen<input type=\"search\" placeholder=\"Auftrag, Kunde, Ort oder Region\" data-planning-search autocomplete=\"off\"></label><div class=\"planning-filter-row\"><label>Region  <select data-planning-region><option value=\"\">Alle Regionen</option> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -111,28 +111,44 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 
 	var usersDesktopScreenshot []byte
 	var loginDesktopScreenshot []byte
+	var installPromptFlow struct {
+		HiddenStateHonored bool `json:"hiddenStateHonored"`
+		ShownAfterEvent    bool `json:"shownAfterEvent"`
+		HiddenAfterUse     bool `json:"hiddenAfterUse"`
+		PromptCalls        int  `json:"promptCalls"`
+	}
 	var desktopLogin struct {
-		HasStyles      bool    `json:"hasStyles"`
-		HasLegacyAsset bool    `json:"hasLegacyAsset"`
-		Grid           bool    `json:"grid"`
-		PanelWidth     float64 `json:"panelWidth"`
-		CenterDelta    float64 `json:"centerDelta"`
-		HasBuildMeta   bool    `json:"hasBuildMeta"`
+		HasStyles          bool    `json:"hasStyles"`
+		HasLegacyAsset     bool    `json:"hasLegacyAsset"`
+		Grid               bool    `json:"grid"`
+		PanelWidth         float64 `json:"panelWidth"`
+		CenterDelta        float64 `json:"centerDelta"`
+		HasBuildMeta       bool    `json:"hasBuildMeta"`
+		PasswordIconOnly   bool    `json:"passwordIconOnly"`
+		PasswordIconInline bool    `json:"passwordIconInline"`
+		HasScrollTop       bool    `json:"hasScrollTop"`
 	}
 	if err := chromedp.Run(browserContext,
 		chromedp.EmulateViewport(1280, 900),
 		chromedp.Navigate(server.URL+"/login"),
 		chromedp.WaitVisible(".login-panel", chromedp.ByQuery),
+		chromedp.WaitVisible(".password-reveal", chromedp.ByQuery),
 		chromedp.Evaluate(`(()=>{
 			const panel=document.querySelector('.login-panel').getBoundingClientRect();
 			const meta=document.querySelector('.login-meta').textContent;
+			const password=document.querySelector('#password').getBoundingClientRect();
+			const reveal=document.querySelector('.password-reveal');
+			const revealBox=reveal.getBoundingClientRect();
 			return {
 				hasStyles:!!document.querySelector('link[href^="/assets/login.css?v="]'),
 				hasLegacyAsset:!!document.querySelector('link[href^="/assets/login-original.css?v="],script[src^="/assets/login-background-loader.js?v="],.scene,#vehicles'),
 				grid:getComputedStyle(document.body).backgroundImage.includes('linear-gradient'),
 				panelWidth:panel.width,
 				centerDelta:Math.abs(panel.left+panel.width/2-window.innerWidth/2),
-				hasBuildMeta:meta.includes('HWK-SYS // V')&&meta.includes('ID:')
+				hasBuildMeta:meta.includes('HWK-SYS // V')&&meta.includes('ID:'),
+				passwordIconOnly:reveal.textContent.trim()===''&&!!reveal.querySelector('svg')&&reveal.getAttribute('aria-label')==='Passwort anzeigen',
+				passwordIconInline:revealBox.left>=password.left&&revealBox.right<=password.right&&revealBox.top===password.top&&revealBox.bottom===password.bottom,
+				hasScrollTop:!!document.querySelector('.scroll-top')
 			};
 		})()`, &desktopLogin),
 		chromedp.FullScreenshot(&loginDesktopScreenshot, 90),
@@ -140,6 +156,19 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 		chromedp.SetValue("#password", adminPassword, chromedp.ByQuery),
 		chromedp.Click("form[action='/login'] button[type='submit']", chromedp.ByQuery),
 		chromedp.WaitVisible("[data-admin-menu] summary", chromedp.ByQuery),
+		chromedp.Evaluate(`(()=>{const prompt=document.querySelector('[data-install-prompt]');prompt.hidden=true;return getComputedStyle(prompt).display==='none'})()`, &installPromptFlow.HiddenStateHonored),
+		chromedp.Evaluate(`(()=>{
+			window.__hackwerkInstallPromptCalls=0;
+			const event=new Event('beforeinstallprompt',{cancelable:true});
+			event.prompt=async()=>{window.__hackwerkInstallPromptCalls+=1;};
+			event.userChoice=Promise.resolve({outcome:'accepted'});
+			window.dispatchEvent(event);
+		})()`, nil),
+		chromedp.Evaluate(`(()=>{const prompt=document.querySelector('[data-install-prompt]');return !prompt.hidden&&getComputedStyle(prompt).display!=='none'})()`, &installPromptFlow.ShownAfterEvent),
+		chromedp.Click("[data-install-accept]", chromedp.ByQuery),
+		chromedp.Sleep(20*time.Millisecond),
+		chromedp.Evaluate(`(()=>{const prompt=document.querySelector('[data-install-prompt]');return prompt.hidden&&getComputedStyle(prompt).display==='none'})()`, &installPromptFlow.HiddenAfterUse),
+		chromedp.Evaluate(`window.__hackwerkInstallPromptCalls`, &installPromptFlow.PromptCalls),
 		chromedp.Click("[data-admin-menu] summary", chromedp.ByQuery),
 		chromedp.WaitVisible("a[href='/admin/users']", chromedp.ByQuery),
 		chromedp.Navigate(server.URL+"/admin/users"),
@@ -148,8 +177,11 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 	); err != nil {
 		t.Fatalf("admin login: %s", browserDiagnostics(browserContext, err))
 	}
-	if !desktopLogin.HasStyles || desktopLogin.HasLegacyAsset || !desktopLogin.Grid || desktopLogin.PanelWidth < 400 || desktopLogin.PanelWidth > 440 || desktopLogin.CenterDelta > 2 || !desktopLogin.HasBuildMeta {
+	if !desktopLogin.HasStyles || desktopLogin.HasLegacyAsset || !desktopLogin.Grid || desktopLogin.PanelWidth < 400 || desktopLogin.PanelWidth > 440 || desktopLogin.CenterDelta > 2 || !desktopLogin.HasBuildMeta || !desktopLogin.PasswordIconOnly || !desktopLogin.PasswordIconInline || desktopLogin.HasScrollTop {
 		t.Fatalf("desktop login field-manual layout = %+v", desktopLogin)
+	}
+	if !installPromptFlow.HiddenStateHonored || !installPromptFlow.ShownAfterEvent || !installPromptFlow.HiddenAfterUse || installPromptFlow.PromptCalls != 1 {
+		t.Fatalf("install prompt flow = %+v", installPromptFlow)
 	}
 	detailsForm := "form[action='/admin/users/" + driverUserID + "/details']"
 	if err := runBrowserStep(browserContext, "submit user details",

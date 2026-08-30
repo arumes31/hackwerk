@@ -211,7 +211,7 @@ func TestReopenAppointmentRequiresAdminReasonAndCancelledVersion(t *testing.T) {
 			actor:   testAdmin(),
 			current: cancelledAppointment(),
 			input:   ReopenInput{MutateInput: MutateInput{ID: "appointment-1", ExpectedVersion: 1}, Reason: "Kunde wünscht Neuplanung"},
-			wantErr: ErrConflict,
+			wantErr: ErrVersionConflict,
 		},
 		{
 			name:    "only cancelled",
@@ -539,11 +539,35 @@ func TestConflictAndSwapValidationStopsBeforePersistence(t *testing.T) {
 	if _, err := service.SwapAppointments(t.Context(), testAdmin(), SwapInput{FirstID: current.ID, SecondID: current.ID, FirstVersion: 3, SecondVersion: 3}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("SwapAppointments() same appointment error = %v, want validation", err)
 	}
-	if _, err := service.SwapAppointments(t.Context(), testAdmin(), SwapInput{FirstID: current.ID, SecondID: "missing", FirstVersion: 2, SecondVersion: 3}); !errors.Is(err, ErrConflict) {
-		t.Fatalf("SwapAppointments() stale version error = %v, want conflict", err)
+	if _, err := service.SwapAppointments(t.Context(), testAdmin(), SwapInput{FirstID: current.ID, SecondID: "missing", FirstVersion: 2, SecondVersion: 3}); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("SwapAppointments() stale version error = %v, want version conflict", err)
 	}
 	if store.lastSwap.FirstID != "" {
 		t.Fatalf("SwapAppointments() persisted invalid request: %#v", store.lastSwap)
+	}
+}
+
+func TestSwapCandidatesAreAdminOnlyAndFilteredByLifecycle(t *testing.T) {
+	from := testStart()
+	store := &fakeStore{events: []CalendarEvent{
+		{Appointment: Appointment{ID: "current", Lifecycle: LifecycleDraft}},
+		{Appointment: Appointment{ID: "draft", Lifecycle: LifecycleDraft}},
+		{Appointment: Appointment{ID: "proposal", Lifecycle: LifecycleProposal}},
+		{Appointment: Appointment{ID: "fixed", Lifecycle: LifecycleFixed}},
+	}}
+	service, err := New(store, fakeAvailability{status: driver.StatusAvailable}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := service.SwapCandidates(t.Context(), testAdmin(), "current", from, from.Add(24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 2 || candidates[0].ID != "draft" || candidates[1].ID != "proposal" {
+		t.Fatalf("SwapCandidates() = %#v", candidates)
+	}
+	if _, err := service.SwapCandidates(t.Context(), auth.Actor{Role: auth.RoleDriver}, "current", from, from.Add(24*time.Hour)); !errors.Is(err, auth.ErrForbidden) {
+		t.Fatalf("driver SwapCandidates() error = %v, want forbidden", err)
 	}
 }
 
@@ -561,7 +585,7 @@ func TestAppointmentTransitionsRejectStaleOrInvalidStates(t *testing.T) {
 				_, err := service.ProposeAppointment(t.Context(), testAdmin(), MutateInput{ID: current.ID, ExpectedVersion: current.Version}, "")
 				return err
 			},
-			wantErr: ErrConflict,
+			wantErr: ErrTransition,
 		},
 		{
 			name:    "fix requires proposal",
@@ -570,7 +594,7 @@ func TestAppointmentTransitionsRejectStaleOrInvalidStates(t *testing.T) {
 				_, err := service.FixAppointment(t.Context(), testAdmin(), FixInput{MutateInput: MutateInput{ID: current.ID, ExpectedVersion: current.Version}})
 				return err
 			},
-			wantErr: ErrConflict,
+			wantErr: ErrTransition,
 		},
 		{
 			name:    "cancel cannot repeat",
@@ -591,7 +615,7 @@ func TestAppointmentTransitionsRejectStaleOrInvalidStates(t *testing.T) {
 				})
 				return err
 			},
-			wantErr: ErrConflict,
+			wantErr: ErrVersionConflict,
 		},
 	}
 
@@ -693,6 +717,7 @@ func (fake *capturingAvailability) IsAvailable(_ context.Context, _ auth.Actor, 
 type fakeStore struct {
 	current           Appointment
 	currents          map[string]Appointment
+	events            []CalendarEvent
 	options           PlanningOptions
 	conflictUntil     time.Time
 	lastSwap          SwapInput
@@ -773,7 +798,7 @@ func (fake *fakeStore) Detail(context.Context, string) (Detail, error) {
 	return Detail{CalendarEvent: CalendarEvent{Appointment: fake.current}}, nil
 }
 func (fake *fakeStore) ListCalendar(context.Context, time.Time, time.Time) ([]CalendarEvent, error) {
-	return nil, nil
+	return fake.events, nil
 }
 func (fake *fakeStore) PlanningOptions(context.Context) (PlanningOptions, error) {
 	return fake.options, nil

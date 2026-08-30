@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -29,6 +30,7 @@ func registerVoiceRoutes(router chi.Router, dependencies Dependencies, page temp
 	router.Post("/api/v1/voice/drafts", uploadVoice(dependencies.Voice, dependencies.Config.Voice, dependencies.Logger))
 	router.Get("/api/v1/voice/drafts/{draftID}", voiceDraftStatus(dependencies.Voice))
 	router.Get("/voice/drafts/{draftID}", voiceReview(dependencies.Voice, page, csrfCookie, dependencies.Logger))
+	router.Post("/voice/drafts/{draftID}/retranscribe", retryVoiceTranscription(dependencies.Voice, dependencies.Logger))
 	router.Post("/voice/drafts/{draftID}/commit", commitVoice(dependencies.Voice, page, csrfCookie, dependencies.Logger))
 	router.Post("/voice/drafts/{draftID}/discard", discardVoice(dependencies.Voice, dependencies.Logger))
 	router.With(requirePermission(auth.PermissionAuditView, page, dependencies.Logger)).Get("/admin/voice-recordings", voiceRecordingsPage(dependencies.Voice, page, csrfCookie, dependencies.Logger))
@@ -42,12 +44,18 @@ func voicePage(service *voice.Service, cfg config.Config, page templates.PageDat
 }
 
 func voiceCaptureData(request *http.Request, service *voice.Service, cfg config.Config, page templates.PageData, csrfCookie, message string) templates.VoiceCaptureData {
-	return templates.VoiceCaptureData{
+	uploadKey, tokenErr := auth.NewToken()
+	data := templates.VoiceCaptureData{
 		Shell: shell(request, page, csrfCookie), Enabled: service.Enabled(), MaxBytes: cfg.Voice.MaxBytes,
 		MaxSeconds: int(cfg.Voice.MaxDuration.Seconds()), ExternalProvider: cfg.Voice.Transcriber == "openai" || cfg.Voice.Extractor == "openai",
 		LocalProvider: cfg.Voice.Transcriber == "whisper-local" || cfg.Voice.Transcriber == "whisper-tailscale", ProcessingMinutes: int(cfg.Voice.ProviderTimeout.Minutes()),
-		ProviderNotice: cfg.Voice.ExternalProviderNote, Error: message,
+		ProviderNotice: cfg.Voice.ExternalProviderNote, Error: message, UploadKey: uploadKey,
 	}
+	if tokenErr != nil {
+		data.Enabled = false
+		data.Error = "Der sichere Uploadschlüssel konnte nicht erzeugt werden. Bitte laden Sie die Seite neu oder verwenden Sie die manuelle Erfassung."
+	}
+	return data
 }
 
 func uploadVoice(service *voice.Service, cfg config.Voice, logger *slog.Logger) http.HandlerFunc {
@@ -62,11 +70,12 @@ func uploadVoice(service *voice.Service, cfg config.Voice, logger *slog.Logger) 
 			writeVoiceError(response, request, http.StatusBadRequest, "invalid_upload", "Die Audiodatei ist ungültig. Bitte verwenden Sie die manuelle Erfassung.")
 			return
 		}
-		file, duration, mediaType, err := receiveVoiceUpload(reader, cfg)
+		received, err := receiveVoiceUploadFields(reader, cfg)
 		if err != nil {
 			writeVoiceUploadError(response, request, err)
 			return
 		}
+		file := received.file
 		defer func() {
 			name := file.Name()
 			_ = file.Close()
@@ -75,7 +84,7 @@ func uploadVoice(service *voice.Service, cfg config.Voice, logger *slog.Logger) 
 				logger.WarnContext(request.Context(), "temporary voice audio cleanup failed", slog.String("error_code", "voice_temp_cleanup_failed"))
 			}
 		}()
-		draft, err := processVoiceUpload(request, service, cfg, file, duration, mediaType)
+		draft, err := processVoiceUpload(request, service, cfg, file, received.duration, received.mediaType, received.idempotencyKey)
 		if err != nil {
 			if errors.Is(err, errVoiceType) || errors.Is(err, errVoiceDuration) {
 				writeVoiceUploadError(response, request, err)
@@ -104,9 +113,9 @@ func cleanupVoiceFile(ctx context.Context, file *os.File, logger *slog.Logger) {
 	}
 }
 
-func processVoiceUpload(request *http.Request, service *voice.Service, cfg config.Voice, file *os.File, duration time.Duration, mediaType string) (voice.Draft, error) {
+func processVoiceUpload(request *http.Request, service *voice.Service, cfg config.Voice, file *os.File, duration time.Duration, mediaType, idempotencyKey string) (voice.Draft, error) {
 	session, _ := sessionFromContext(request.Context())
-	return service.EnqueuePrepared(request.Context(), session.Actor, func() (voice.Audio, voice.Metadata, error) {
+	return service.EnqueuePrepared(request.Context(), session.Actor, idempotencyKey, func() (voice.Audio, voice.Metadata, error) {
 		actualDuration, err := inspectAudioDuration(file, mediaType)
 		if err != nil {
 			return voice.Audio{}, voice.Metadata{}, errVoiceType
@@ -154,7 +163,7 @@ func uploadVoiceNative(dependencies Dependencies, page templates.PageData) http.
 			return
 		}
 		defer cleanupVoiceFile(request.Context(), received.file, dependencies.Logger)
-		draft, err := processVoiceUpload(request, service, cfg.Voice, received.file, received.duration, received.mediaType)
+		draft, err := processVoiceUpload(request, service, cfg.Voice, received.file, received.duration, received.mediaType, received.idempotencyKey)
 		if err != nil {
 			if errors.Is(err, errVoiceType) || errors.Is(err, errVoiceDuration) {
 				status, _, message := voiceUploadError(err)
@@ -187,10 +196,11 @@ func renderNativeVoiceError(response http.ResponseWriter, request *http.Request,
 }
 
 type receivedVoiceUpload struct {
-	file      *os.File
-	duration  time.Duration
-	mediaType string
-	csrfToken string
+	file           *os.File
+	duration       time.Duration
+	mediaType      string
+	csrfToken      string
+	idempotencyKey string
 }
 
 var errVoiceTooLarge = errors.New("voice upload too large")
@@ -223,6 +233,7 @@ func receiveVoiceUploadFieldsVerified(reader *multipart.Reader, cfg config.Voice
 	var duration time.Duration
 	var declared string
 	var csrfToken string
+	var idempotencyKey string
 	csrfVerified := verifyCSRF == nil
 	cleanup := func() {
 		if file != nil {
@@ -242,6 +253,17 @@ func receiveVoiceUploadFieldsVerified(reader *multipart.Reader, cfg config.Voice
 		}
 		name := part.FormName()
 		switch name {
+		case "idempotency_key":
+			if idempotencyKey != "" {
+				cleanup()
+				return receivedVoiceUpload{}, errVoiceType
+			}
+			data, readErr := io.ReadAll(io.LimitReader(part, 129))
+			if readErr != nil || len(data) > 128 {
+				cleanup()
+				return receivedVoiceUpload{}, errVoiceType
+			}
+			idempotencyKey = strings.TrimSpace(string(data))
 		case "csrf_token":
 			if csrfToken != "" {
 				cleanup()
@@ -341,7 +363,7 @@ func receiveVoiceUploadFieldsVerified(reader *multipart.Reader, cfg config.Voice
 		cleanup()
 		return receivedVoiceUpload{}, err
 	}
-	return receivedVoiceUpload{file: file, duration: duration, mediaType: mediaType, csrfToken: csrfToken}, nil
+	return receivedVoiceUpload{file: file, duration: duration, mediaType: mediaType, csrfToken: csrfToken, idempotencyKey: idempotencyKey}, nil
 }
 
 func validateAudioFile(file *os.File, declared string) (string, error) {
@@ -427,6 +449,26 @@ func voiceDraftStatus(service *voice.Service) http.HandlerFunc {
 			return
 		}
 		writeJSON(response, http.StatusOK, map[string]any{"status": draft.Status, "version": draft.Version})
+	}
+}
+
+func retryVoiceTranscription(service *voice.Service, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		version, err := parseVersion(request.Form.Get("version"))
+		if err == nil {
+			_, err = service.RetryTranscription(request.Context(), session.Actor, chi.URLParam(request, "draftID"), version)
+		}
+		if err != nil {
+			status, _, _ := mapVoiceError(err)
+			if errors.Is(err, voice.ErrConflict) {
+				status = http.StatusConflict
+			}
+			logger.WarnContext(request.Context(), "voice retranscription rejected", slog.String("error_code", "voice_retranscription_rejected"))
+			http.Error(response, "Die Neu-Transkription ist nicht mehr möglich. Bitte laden Sie den Entwurf neu.", status)
+			return
+		}
+		http.Redirect(response, request, "/voice/drafts/"+url.PathEscape(chi.URLParam(request, "draftID")), http.StatusSeeOther)
 	}
 }
 

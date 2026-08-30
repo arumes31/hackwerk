@@ -4,6 +4,7 @@ package voice
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -69,7 +70,7 @@ type Draft struct {
 	Fields                                                                                 Fields
 	Warnings                                                                               []string
 	OverallConfidence                                                                      float64
-	RetryCount, Version                                                                    int32
+	RetryCount, ManualRetryCount, Version                                                  int32
 	Committed                                                                              customers.CreatedIntake
 	CreatedAt, UpdatedAt, ExpiresAt                                                        time.Time
 }
@@ -140,7 +141,9 @@ type Store interface {
 }
 
 type RecordingStore interface {
-	CreateRecording(context.Context, auth.Actor, []byte, string, Metadata, time.Time, time.Time) (Draft, error)
+	FindRecordingByUploadKey(context.Context, auth.Actor, []byte) (Draft, bool, error)
+	CreateRecording(context.Context, auth.Actor, []byte, []byte, string, Metadata, time.Time, time.Time) (Draft, error)
+	RetryRecording(context.Context, auth.Actor, string, int32, time.Time) (Draft, error)
 	ClaimRecording(context.Context, string, time.Time, time.Time) (ClaimedRecording, bool, error)
 	CompleteRecording(context.Context, string, ClaimedRecording, Transcript, Fields, []string, float64, string, time.Time) error
 	FailRecording(context.Context, string, ClaimedRecording, string, bool, time.Time, time.Time) error
@@ -205,7 +208,7 @@ func (service *Service) Enabled() bool { return service.config.Enabled }
 const maxStoredAudioBytes = 15 << 20
 
 // EnqueuePrepared validates and stores an audio recording for asynchronous processing.
-func (service *Service) EnqueuePrepared(ctx context.Context, actor auth.Actor, prepare AudioPreparation) (Draft, error) {
+func (service *Service) EnqueuePrepared(ctx context.Context, actor auth.Actor, idempotencyKey string, prepare AudioPreparation) (Draft, error) {
 	for _, permission := range []auth.Permission{auth.PermissionCustomerCreate, auth.PermissionJobCreate, auth.PermissionWaitlistAdd} {
 		if err := actor.Require(permission); err != nil {
 			return Draft{}, err
@@ -216,6 +219,22 @@ func (service *Service) EnqueuePrepared(ctx context.Context, actor auth.Actor, p
 	}
 	if prepare == nil {
 		return Draft{}, fmt.Errorf("%w: missing audio preparation", ErrValidation)
+	}
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if len(idempotencyKey) < 16 || len(idempotencyKey) > 128 {
+		return Draft{}, fmt.Errorf("%w: invalid idempotency key", ErrValidation)
+	}
+	idempotencyHash := sha256.Sum256([]byte(idempotencyKey))
+	queue, ok := service.store.(RecordingStore)
+	if !ok {
+		return Draft{}, errors.New("voice: recording store unavailable")
+	}
+	existing, found, err := queue.FindRecordingByUploadKey(ctx, actor, idempotencyHash[:])
+	if err != nil {
+		return Draft{}, err
+	}
+	if found {
+		return existing, nil
 	}
 	release, ok := service.limiter.acquire(actor.UserID, service.now())
 	if !ok {
@@ -236,12 +255,28 @@ func (service *Service) EnqueuePrepared(ctx context.Context, actor auth.Actor, p
 	if len(payload) == 0 || len(payload) > maxStoredAudioBytes || int64(len(payload)) != audio.Size {
 		return Draft{}, fmt.Errorf("%w: inconsistent audio size", ErrValidation)
 	}
+	now := service.now().UTC()
+	return queue.CreateRecording(ctx, actor, idempotencyHash[:], payload, audio.ContentType, metadata, now.Add(service.config.Retention), now.Add(service.config.RecordingRetention))
+}
+
+func (service *Service) RetryTranscription(ctx context.Context, actor auth.Actor, id string, expectedVersion int32) (Draft, error) {
+	for _, permission := range []auth.Permission{auth.PermissionCustomerCreate, auth.PermissionJobCreate, auth.PermissionWaitlistAdd} {
+		if err := actor.Require(permission); err != nil {
+			return Draft{}, err
+		}
+	}
+	if !service.config.Enabled {
+		return Draft{}, ErrDisabled
+	}
+	id = strings.TrimSpace(id)
+	if id == "" || expectedVersion < 1 {
+		return Draft{}, ErrValidation
+	}
 	queue, ok := service.store.(RecordingStore)
 	if !ok {
 		return Draft{}, errors.New("voice: recording store unavailable")
 	}
-	now := service.now().UTC()
-	return queue.CreateRecording(ctx, actor, payload, audio.ContentType, metadata, now.Add(service.config.Retention), now.Add(service.config.RecordingRetention))
+	return queue.RetryRecording(ctx, actor, id, expectedVersion, service.now().UTC())
 }
 
 // ProcessNext claims and processes at most one queued recording.

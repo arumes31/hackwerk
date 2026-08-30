@@ -130,7 +130,7 @@ func TestVoiceCaptureExplainsLocalGermanProcessing(t *testing.T) {
 		t.Fatal(err)
 	}
 	markup := output.String()
-	for _, expected := range []string{"voice-info__icon", "primär als deutsche Sprache", "internen CPU-Dienst", "bis zu 10 Minuten", "immer nur ein Entwurf"} {
+	for _, expected := range []string{"voice-info__icon", "primär als deutsche Sprache", "internen CPU-Dienst", "bis zu 10 Minuten", "immer nur ein Entwurf", `for="voice-level-meter"`, `for="voice-upload-progress"`, `name="idempotency_key"`} {
 		if !strings.Contains(markup, expected) {
 			t.Errorf("voice page missing %q", expected)
 		}

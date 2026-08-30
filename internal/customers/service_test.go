@@ -180,12 +180,16 @@ func TestFilterFavoriteDropsPersonalSearchAndNormalizesAllowlist(t *testing.T) {
 	store := &storeStub{}
 	service, _ := NewService(store)
 	err := service.SaveWaitlistFilterFavorite(context.Background(), auth.Actor{UserID: "driver-1", Role: auth.RoleDriver}, "  Nord  ", WaitlistFilter{
-		Query: "Franz Huber", JobType: "invalid", Region: "Nord", Workflow: "proposal", Sort: "customer", Direction: "desc",
+		Query: "Franz Huber", JobType: "invalid", Region: "Nord", Workflow: "proposal", DurationGroup: "long",
+		Overdue: true, Unassigned: true, TransportPending: true, Sort: "duration", Direction: "desc",
 	})
 	if err != nil {
 		t.Fatalf("SaveWaitlistFilterFavorite() error=%v", err)
 	}
-	if store.favoriteName != "Nord" || store.favoriteFilter.Query != "" || store.favoriteFilter.JobType != "" || store.favoriteFilter.Workflow != "proposal" {
+	if store.favoriteName != "Nord" || store.favoriteFilter.Query != "" || store.favoriteFilter.JobType != "" ||
+		store.favoriteFilter.Workflow != "proposal" || store.favoriteFilter.DurationGroup != "long" ||
+		!store.favoriteFilter.Overdue || !store.favoriteFilter.Unassigned || !store.favoriteFilter.TransportPending ||
+		store.favoriteFilter.Sort != "duration" {
 		t.Fatalf("favorite=%q filter=%#v", store.favoriteName, store.favoriteFilter)
 	}
 }

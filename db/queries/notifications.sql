@@ -108,7 +108,7 @@ FOR UPDATE OF cr;
 
 -- name: ResetConfirmationResponse :execrows
 UPDATE confirmation_requests
-SET response=NULL, responded_at=NULL, updated_at=now()
+SET response=NULL, response_note=NULL, responded_at=NULL, updated_at=now()
 WHERE id=sqlc.arg(id)::uuid AND status='active' AND response IS NOT NULL;
 
 -- name: InsertConfirmationRespondedEvent :exec

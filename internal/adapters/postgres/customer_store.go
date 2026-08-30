@@ -529,7 +529,9 @@ func (store *CustomerStore) ListWaitlistFilterFavorites(ctx context.Context, use
 		favorite := customers.WaitlistFilterFavorite{ID: row.ID, Name: row.Name, Filter: customers.WaitlistFilter{
 			JobType: row.JobType, Region: row.Region, Urgency: row.Urgency, PreferredMonth: row.PreferredMonth,
 			Workflow: row.Workflow, MissingLocation: row.MissingLocation, DurationIssue: row.DurationIssue,
-			Sort: row.SortKey, Direction: row.SortDirection,
+			DurationGroup: row.DurationGroup, Overdue: row.Overdue, Unassigned: row.Unassigned,
+			TransportPending: row.TransportPending,
+			Sort:             row.SortKey, Direction: row.SortDirection,
 		}}
 		favorite.Filter.Normalize()
 		result = append(result, favorite)
@@ -558,7 +560,9 @@ func (store *CustomerStore) SaveWaitlistFilterFavorite(ctx context.Context, user
 			UserID: parsedUserID, Name: name, JobType: filter.JobType, Region: filter.Region,
 			Urgency: filter.Urgency, PreferredMonth: filter.PreferredMonth, Workflow: filter.Workflow,
 			MissingLocation: filter.MissingLocation, DurationIssue: filter.DurationIssue,
-			SortKey: filter.Sort, SortDirection: filter.Direction,
+			DurationGroup: filter.DurationGroup, Overdue: filter.Overdue, Unassigned: filter.Unassigned,
+			TransportPending: filter.TransportPending,
+			SortKey:          filter.Sort, SortDirection: filter.Direction,
 		})
 	})
 }

@@ -20,12 +20,13 @@ const (
 )
 
 var (
-	ErrAvailability = errors.New("appointment: driver unavailable")
-	ErrConflict     = errors.New("appointment: reservation conflict")
-	ErrNotFound     = errors.New("appointment: not found")
-	ErrNotification = errors.New("appointment: no reachable notification channel")
-	ErrTransition   = errors.New("appointment: invalid transition")
-	ErrValidation   = errors.New("appointment: validation failed")
+	ErrAvailability    = errors.New("appointment: driver unavailable")
+	ErrConflict        = errors.New("appointment: reservation conflict")
+	ErrVersionConflict = errors.New("appointment: version conflict")
+	ErrNotFound        = errors.New("appointment: not found")
+	ErrNotification    = errors.New("appointment: no reachable notification channel")
+	ErrTransition      = errors.New("appointment: invalid transition")
+	ErrValidation      = errors.New("appointment: validation failed")
 )
 
 type Lifecycle string
@@ -315,8 +316,11 @@ func (s *Service) SwapAppointments(ctx context.Context, actor auth.Actor, input 
 	if err != nil {
 		return nil, err
 	}
-	if first.Version != input.FirstVersion || second.Version != input.SecondVersion || !swapEligible(first.Lifecycle) || !swapEligible(second.Lifecycle) {
-		return nil, ErrConflict
+	if first.Version != input.FirstVersion || second.Version != input.SecondVersion {
+		return nil, ErrVersionConflict
+	}
+	if !swapEligible(first.Lifecycle) || !swapEligible(second.Lifecycle) {
+		return nil, ErrTransition
 	}
 	firstFrom, firstTo := reservationRange(first, second.StartsAt, second.StartsAt.Add(first.EndsAt.Sub(first.StartsAt)))
 	secondFrom, secondTo := reservationRange(second, first.StartsAt, first.StartsAt.Add(second.EndsAt.Sub(second.StartsAt)))
@@ -433,8 +437,11 @@ func (s *Service) AssignDriversAndResources(ctx context.Context, actor auth.Acto
 	if err != nil {
 		return Appointment{}, err
 	}
-	if current.Version != input.ExpectedVersion || !current.Lifecycle.Editable() {
-		return Appointment{}, ErrConflict
+	if current.Version != input.ExpectedVersion {
+		return Appointment{}, ErrVersionConflict
+	}
+	if !current.Lifecycle.Editable() {
+		return Appointment{}, ErrTransition
 	}
 	candidate, err := s.assignmentSnapshot(ctx, current, input.Assignments)
 	if err != nil {
@@ -461,8 +468,11 @@ func (s *Service) ProposeAppointment(ctx context.Context, actor auth.Actor, inpu
 	if err != nil {
 		return Appointment{}, err
 	}
-	if current.Version != input.ExpectedVersion || current.Lifecycle != LifecycleDraft {
-		return Appointment{}, ErrConflict
+	if current.Version != input.ExpectedVersion {
+		return Appointment{}, ErrVersionConflict
+	}
+	if current.Lifecycle != LifecycleDraft {
+		return Appointment{}, ErrTransition
 	}
 	if err := validateAppointmentAssignments(current); err != nil {
 		return Appointment{}, err
@@ -498,8 +508,11 @@ func (s *Service) reschedule(ctx context.Context, actor auth.Actor, input MoveIn
 	if err != nil {
 		return Appointment{}, err
 	}
-	if current.Version != input.ExpectedVersion || !current.Lifecycle.Editable() {
-		return Appointment{}, ErrConflict
+	if current.Version != input.ExpectedVersion {
+		return Appointment{}, ErrVersionConflict
+	}
+	if !current.Lifecycle.Editable() {
+		return Appointment{}, ErrTransition
 	}
 	availableFrom, availableTo := reservationRange(current, input.StartsAt, input.EndsAt)
 	override, err := s.checkAvailability(ctx, actor, current.Drivers, availableFrom, availableTo, input.OverrideReason)
@@ -524,8 +537,11 @@ func (s *Service) FixAppointment(ctx context.Context, actor auth.Actor, input Fi
 	if err != nil {
 		return Appointment{}, err
 	}
-	if current.Version != input.ExpectedVersion || current.Lifecycle != LifecycleProposal {
-		return Appointment{}, ErrConflict
+	if current.Version != input.ExpectedVersion {
+		return Appointment{}, ErrVersionConflict
+	}
+	if current.Lifecycle != LifecycleProposal {
+		return Appointment{}, ErrTransition
 	}
 	if err := validateAppointmentAssignments(current); err != nil {
 		return Appointment{}, err
@@ -614,7 +630,7 @@ func (s *Service) ReopenAppointment(ctx context.Context, actor auth.Actor, input
 		return Appointment{}, err
 	}
 	if current.Version != input.ExpectedVersion {
-		return Appointment{}, ErrConflict
+		return Appointment{}, ErrVersionConflict
 	}
 	if current.Lifecycle != LifecycleCancelled {
 		return Appointment{}, ErrTransition
@@ -682,6 +698,26 @@ func (s *Service) ListCalendarRange(ctx context.Context, actor auth.Actor, fromU
 		return nil, err
 	}
 	return s.store.ListCalendar(ctx, fromUTC, toUTC)
+}
+
+func (s *Service) SwapCandidates(ctx context.Context, actor auth.Actor, excludeID string, fromUTC, toUTC time.Time) ([]CalendarEvent, error) {
+	if err := actor.Require(auth.PermissionAppointmentPlan); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(excludeID) == "" || validateRange(fromUTC, toUTC) != nil {
+		return nil, ErrValidation
+	}
+	events, err := s.store.ListCalendar(ctx, fromUTC, toUTC)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]CalendarEvent, 0, len(events))
+	for _, event := range events {
+		if event.ID != excludeID && swapEligible(event.Lifecycle) {
+			result = append(result, event)
+		}
+	}
+	return result, nil
 }
 
 func (s *Service) AppointmentDetail(ctx context.Context, actor auth.Actor, id string) (Detail, error) {

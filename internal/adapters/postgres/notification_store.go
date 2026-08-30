@@ -100,7 +100,7 @@ func (store *NotificationStore) ResetResponse(ctx context.Context, actor auth.Ac
 			return err
 		}
 		metadata, _ := json.Marshal(map[string]any{
-			"changed_fields":  []string{"confirmation_status"},
+			"changed_fields":  []string{"confirmation_status", "response", "response_note"},
 			"reason_category": "manual_admin_action", "reason_provided": reason != "",
 		})
 		return queries.InsertAuditEvent(ctx, dbgen.InsertAuditEventParams{

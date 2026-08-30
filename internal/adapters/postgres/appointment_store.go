@@ -290,7 +290,7 @@ func (s *AppointmentStore) Plan(ctx context.Context, actor auth.Actor, input app
 			return mapAppointmentError(bumpErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := queries.SetAppointmentOverrideReason(ctx, dbgen.SetAppointmentOverrideReasonParams{Reason: overrideReason, ID: appointmentID}); err != nil {
 			return err
@@ -304,7 +304,7 @@ func (s *AppointmentStore) Plan(ctx context.Context, actor auth.Actor, input app
 			return mapAppointmentError(proposalErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := refreshReservations(ctx, queries, appointmentID); err != nil {
 			return err
@@ -411,8 +411,11 @@ func (s *AppointmentStore) Assign(ctx context.Context, actor auth.Actor, input a
 		if getErr != nil {
 			return getErr
 		}
-		if current.Version != input.ExpectedVersion || !appointment.Lifecycle(current.LifecycleStatus).Editable() {
-			return appointment.ErrConflict
+		if current.Version != input.ExpectedVersion {
+			return appointment.ErrVersionConflict
+		}
+		if !appointment.Lifecycle(current.LifecycleStatus).Editable() {
+			return appointment.ErrTransition
 		}
 		if err := queries.DeleteAppointmentAssignments(ctx, appointmentID); err != nil {
 			return err
@@ -460,7 +463,7 @@ func (s *AppointmentStore) Assign(ctx context.Context, actor auth.Actor, input a
 			return mapAppointmentError(bumpErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := queries.SetAppointmentOverrideReason(ctx, dbgen.SetAppointmentOverrideReasonParams{Reason: input.Assignments.OverrideReason, ID: appointmentID}); err != nil {
 			return err
@@ -490,7 +493,7 @@ func (s *AppointmentStore) Propose(ctx context.Context, actor auth.Actor, input 
 			return mapAppointmentError(updateErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := refreshReservations(ctx, queries, id); err != nil {
 			return err
@@ -517,7 +520,7 @@ func (s *AppointmentStore) Reschedule(ctx context.Context, actor auth.Actor, inp
 			return mapAppointmentError(updateErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := queries.SetAppointmentOverrideReason(ctx, dbgen.SetAppointmentOverrideReasonParams{Reason: overrideReason, ID: id}); err != nil {
 			return err
@@ -563,7 +566,7 @@ func (s *AppointmentStore) Fix(ctx context.Context, actor auth.Actor, input appo
 			return mapAppointmentError(updateErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := refreshReservations(ctx, queries, id); err != nil {
 			return err
@@ -603,7 +606,7 @@ func (s *AppointmentStore) Cancel(ctx context.Context, actor auth.Actor, input a
 			return mapAppointmentError(updateErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := refreshReservations(ctx, queries, id); err != nil {
 			return err
@@ -658,7 +661,7 @@ func (s *AppointmentStore) Reopen(ctx context.Context, actor auth.Actor, input a
 			return mapAppointmentError(updateErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := refreshReservations(ctx, queries, id); err != nil {
 			return err
@@ -716,7 +719,7 @@ func (s *AppointmentStore) Complete(ctx context.Context, actor auth.Actor, input
 			return mapAppointmentError(updateErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := refreshReservations(ctx, queries, id); err != nil {
 			return err
@@ -888,8 +891,11 @@ func (s *AppointmentStore) Swap(ctx context.Context, actor auth.Actor, input app
 			locked[id], parsed[id] = row, value
 		}
 		first, second := locked[input.FirstID], locked[input.SecondID]
-		if first.Version != input.FirstVersion || second.Version != input.SecondVersion || !swapLifecycle(first.LifecycleStatus) || !swapLifecycle(second.LifecycleStatus) {
-			return appointment.ErrConflict
+		if first.Version != input.FirstVersion || second.Version != input.SecondVersion {
+			return appointment.ErrVersionConflict
+		}
+		if !swapLifecycle(first.LifecycleStatus) || !swapLifecycle(second.LifecycleStatus) {
+			return appointment.ErrTransition
 		}
 		for _, value := range []struct {
 			id      string
@@ -900,7 +906,7 @@ func (s *AppointmentStore) Swap(ctx context.Context, actor auth.Actor, input app
 				return mapAppointmentError(prepareErr)
 			}
 			if rows != 1 {
-				return appointment.ErrConflict
+				return appointment.ErrVersionConflict
 			}
 			if err := refreshReservations(ctx, queries, parsed[value.id]); err != nil {
 				return err
@@ -918,7 +924,7 @@ func (s *AppointmentStore) Swap(ctx context.Context, actor auth.Actor, input app
 				return mapAppointmentError(updateErr)
 			}
 			if rows != 1 {
-				return appointment.ErrConflict
+				return appointment.ErrVersionConflict
 			}
 		}
 		for _, value := range []struct {
@@ -930,7 +936,7 @@ func (s *AppointmentStore) Swap(ctx context.Context, actor auth.Actor, input app
 				return mapAppointmentError(restoreErr)
 			}
 			if rows != 1 {
-				return appointment.ErrConflict
+				return appointment.ErrVersionConflict
 			}
 			if err := refreshReservations(ctx, queries, parsed[value.id]); err != nil {
 				return err
@@ -987,7 +993,7 @@ func (s *AppointmentStore) mutate(ctx context.Context, id string, expectedVersio
 			return getErr
 		}
 		if current.Version != expectedVersion {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := operation(queries, appointmentID, current); err != nil {
 			return mapAppointmentError(err)
@@ -1199,7 +1205,7 @@ func uuidSlice(values []string) ([]pgtype.UUID, error) {
 }
 
 func mapAppointmentError(err error) error {
-	if errors.Is(err, appointment.ErrConflict) || errors.Is(err, appointment.ErrNotFound) ||
+	if errors.Is(err, appointment.ErrConflict) || errors.Is(err, appointment.ErrVersionConflict) || errors.Is(err, appointment.ErrNotFound) ||
 		errors.Is(err, appointment.ErrTransition) || errors.Is(err, appointment.ErrValidation) {
 		return err
 	}

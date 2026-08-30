@@ -80,6 +80,7 @@ type Querier interface {
 	GetResourceForUpdate(ctx context.Context, id pgtype.UUID) (GetResourceForUpdateRow, error)
 	GetRouteDraft(ctx context.Context, id pgtype.UUID) (GetRouteDraftRow, error)
 	GetRouteLocationForUpdate(ctx context.Context, id pgtype.UUID) (GetRouteLocationForUpdateRow, error)
+	GetVoiceDraftByUploadKey(ctx context.Context, arg GetVoiceDraftByUploadKeyParams) (GetVoiceDraftByUploadKeyRow, error)
 	GetVoiceDraftForOwner(ctx context.Context, arg GetVoiceDraftForOwnerParams) (GetVoiceDraftForOwnerRow, error)
 	GetVoiceRecordingAudio(ctx context.Context, id pgtype.UUID) (GetVoiceRecordingAudioRow, error)
 	HasActiveDriverReservations(ctx context.Context, driverID pgtype.UUID) (bool, error)
@@ -180,6 +181,7 @@ type Querier interface {
 	// locks alone cannot protect against newly inserted or non-overlapping moves.
 	LockSchedulingMutation(ctx context.Context) error
 	LockVoiceDraftForOwner(ctx context.Context, arg LockVoiceDraftForOwnerParams) (LockVoiceDraftForOwnerRow, error)
+	LockVoiceUploadKey(ctx context.Context, arg LockVoiceUploadKeyParams) error
 	MarkLogin(ctx context.Context, id pgtype.UUID) error
 	MarkNotificationFailed(ctx context.Context, arg MarkNotificationFailedParams) error
 	MarkNotificationRetry(ctx context.Context, arg MarkNotificationRetryParams) error
@@ -210,6 +212,7 @@ type Querier interface {
 	ResetConfirmationResponse(ctx context.Context, id pgtype.UUID) (int64, error)
 	RestoreAppointmentSwapStatus(ctx context.Context, arg RestoreAppointmentSwapStatusParams) (int64, error)
 	RestoreWaitlistAfterCancellation(ctx context.Context, jobID pgtype.UUID) error
+	RetryFailedVoiceRecording(ctx context.Context, arg RetryFailedVoiceRecordingParams) (RetryFailedVoiceRecordingRow, error)
 	RevokeActiveConfirmationRequests(ctx context.Context, arg RevokeActiveConfirmationRequestsParams) error
 	RevokeCalendarFeed(ctx context.Context, arg RevokeCalendarFeedParams) (RevokeCalendarFeedRow, error)
 	RevokeSession(ctx context.Context, tokenHash []byte) error

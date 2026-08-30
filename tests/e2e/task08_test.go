@@ -84,7 +84,7 @@ func TestTask08PlanningSuggestionsMobileJourney(t *testing.T) {
 	t.Cleanup(func() { _ = chromedp.Cancel(browser) })
 	var text string
 	var overflow, smallTarget bool
-	if err := chromedp.Run(browser, chromedp.Navigate(server.URL+"/login"), chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery), chromedp.SetValue("#username", "admin-task04", chromedp.ByQuery), chromedp.SetValue("#password", adminPassword, chromedp.ByQuery), chromedp.Click("form[action='/login'] button", chromedp.ByQuery), chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery)); err != nil {
+	if err := chromedp.Run(browser, chromedp.Navigate(server.URL+"/login"), chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery), chromedp.SetValue("#username", "admin-task04", chromedp.ByQuery), chromedp.SetValue("#password", adminPassword, chromedp.ByQuery), chromedp.Click("form[action='/login'] button[type='submit']", chromedp.ByQuery), chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery)); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
 	var desktopWorkbench bool
@@ -104,6 +104,22 @@ func TestTask08PlanningSuggestionsMobileJourney(t *testing.T) {
 	}
 	if !desktopWorkbench {
 		t.Fatal("planning workbench is not a compact three-column desktop layout")
+	}
+	var mapFilterSynced, mapFilterRestored bool
+	if err := runBrowserStep(browser, "planning filters synchronize list and map",
+		chromedp.Poll(`document.querySelector('[data-planning-workbench]')?.dataset.planningReady==='true'`, nil),
+		chromedp.Poll(`document.querySelector("button.route-map-marker[data-job-id='`+jobID+`']")`, nil),
+		chromedp.Evaluate(`(()=>{const field=document.querySelector('[data-planning-search]');field.value='kein passender auftrag';field.dispatchEvent(new Event('input',{bubbles:true}))})()`, nil),
+		chromedp.Poll(`document.querySelector('[data-planning-visible-count]')?.textContent.trim()==='0 sichtbar'&&document.querySelector('[data-route-map-count]')?.textContent.trim()==='0/0 Punkte sichtbar'`, nil),
+		chromedp.Evaluate(`(()=>{const row=document.querySelector("[data-planning-order][data-job-id='`+jobID+`']");const marker=document.querySelector("button.route-map-marker[data-job-id='`+jobID+`']");return row.hidden&&marker.hidden})()`, &mapFilterSynced),
+		chromedp.Evaluate(`(()=>{const field=document.querySelector('[data-planning-search]');field.value='';field.dispatchEvent(new Event('input',{bubbles:true}))})()`, nil),
+		chromedp.Poll(`document.querySelector('[data-planning-visible-count]')?.textContent.trim()==='1 sichtbar'&&document.querySelector('[data-route-map-count]')?.textContent.includes('/1 Punkte sichtbar')`, nil),
+		chromedp.Evaluate(`(()=>{const row=document.querySelector("[data-planning-order][data-job-id='`+jobID+`']");const marker=document.querySelector("button.route-map-marker[data-job-id='`+jobID+`']");return !row.hidden&&!marker.hidden})()`, &mapFilterRestored),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if !mapFilterSynced || !mapFilterRestored {
+		t.Fatalf("planning list/map filter synchronization = %v/%v", mapFilterSynced, mapFilterRestored)
 	}
 	var selectedSingle, selectedCheckbox, selectedRow, continueEnabled bool
 	var planningStepsReachable, frameReached, suggestionsReached, adoptionReached bool
@@ -200,7 +216,9 @@ func TestTask08PlanningSuggestionsMobileJourney(t *testing.T) {
 	if err := runBrowserStep(
 		browser,
 		"recalculate stale proposal",
+		chromedp.Evaluate(`document.documentElement.dataset.e2eNavigationMarker='pending'`, nil),
 		chromedp.Click(".module-card form[action='/planning/suggestions'] button[type='submit']", chromedp.ByQuery),
+		chromedp.WaitNotPresent("html[data-e2e-navigation-marker='pending']", chromedp.ByQuery),
 		chromedp.WaitVisible(".suggestion-card", chromedp.ByQuery),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
@@ -208,7 +226,8 @@ func TestTask08PlanningSuggestionsMobileJourney(t *testing.T) {
 	if err := runBrowserStep(
 		browser,
 		"adopt and focus proposal",
-		chromedp.Click(".suggestion-card:first-child form[action$='/adopt'] button", chromedp.ByQuery),
+		chromedp.Evaluate(`window.confirm=()=>true`, nil),
+		chromedp.Evaluate(`(()=>{const form=document.querySelector(".suggestion-card:first-child form[action$='/adopt']");form.requestSubmit(form.querySelector('button[type=submit]'))})()`, nil),
 		chromedp.WaitVisible("[data-calendar]", chromedp.ByQuery),
 		chromedp.Poll(`document.querySelector('[data-calendar]')?.dataset.focusedAppointment`, nil),
 		chromedp.WaitVisible("[data-appointment-dialog][open]", chromedp.ByQuery),

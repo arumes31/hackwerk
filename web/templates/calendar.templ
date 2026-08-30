@@ -29,6 +29,7 @@ type PlanningFormValues struct {
 	ChipperResourceID          string
 	TransportResourceID        string
 	TrailerResourceID          string
+	OtherResourceIDs           []string
 	OverrideReason             string
 	TransportMode              string
 	ExternalTransportConfirmed bool
@@ -45,6 +46,23 @@ type CalendarPlanData struct {
 	Job     appointment.WaitlistItem
 	Values  PlanningFormValues
 	Error   PlanningFormError
+}
+
+type AppointmentAssignmentValues struct {
+	CSRFToken, Version, PrimaryDriverID, ChipperResourceID, TransportResourceID, TrailerResourceID, OverrideReason string
+	DriverIDs, OtherResourceIDs                                                                                    []string
+}
+
+type AppointmentDetailData struct {
+	Shell                   ShellData
+	Options                 appointment.PlanningOptions
+	Detail                  appointment.Detail
+	Values                  AppointmentAssignmentValues
+	Error                   PlanningFormError
+	Notice                  string
+	ConfirmationActionError string
+	CanReissueConfirmation  bool
+	CanResetConfirmation    bool
 }
 
 templ Calendar(data CalendarData) {
@@ -118,13 +136,13 @@ templ Calendar(data CalendarData) {
 						<div class="empty-state"><p>In den nächsten Tagen sind keine Termine eingetragen.</p></div>
 					}
 					for _, event := range data.Events {
-						@agendaCard(event)
+						@agendaCard(event, data.Shell.Actor.Role == auth.RoleAdmin)
 					}
 				</section>
 				if data.Shell.Actor.Role == auth.RoleAdmin {
 					@planningDialog(data)
 				}
-				@appointmentDialog(data.Shell.CSRFToken, data.Shell.Actor.Role == auth.RoleAdmin)
+				@appointmentDialog(data.Shell.CSRFToken, data.Shell.Actor.Role == auth.RoleAdmin, data.Options)
 			</main>
 			@appFooter(data.Shell.Page)
 		</body>
@@ -255,6 +273,18 @@ templ planningFormFields(options appointment.PlanningOptions, values PlanningFor
 				</select>
 			</label>
 		</div>
+		if hasResourceType(options.Resources, resource.TypeOther) {
+			<fieldset>
+				<legend>Zusatzressourcen (optional)</legend>
+				<div class="choice-grid">
+					for _, item := range options.Resources {
+						if item.Type == resource.TypeOther {
+							<label class="check-label" for={ "planning-other-resource-" + item.ID }><input id={ "planning-other-resource-" + item.ID } type="checkbox" name="other_resource_id" value={ item.ID } checked?={ slices.Contains(values.OtherResourceIDs, item.ID) }/> { item.Name }</label>
+						}
+					}
+				</div>
+			</fieldset>
+		}
 	</fieldset>
 	<label for="planning-override-reason">Begründung für Verfügbarkeits-Override (nur falls nötig)<textarea id="planning-override-reason" name="override_reason" maxlength="1000">{ values.OverrideReason }</textarea></label>
 }
@@ -273,13 +303,19 @@ func planningFieldErrorID(formError PlanningFormError, fieldID string) string {
 	return ""
 }
 
-templ appointmentDialog(csrf string, admin bool) {
+templ appointmentDialog(csrf string, admin bool, options appointment.PlanningOptions) {
 	<dialog class="planning-dialog" data-appointment-dialog aria-labelledby="appointment-dialog-title">
 		<div class="dialog-heading"><div><p class="eyebrow">Termindetail</p><h2 id="appointment-dialog-title" data-appointment-title>Termin</h2></div><button class="icon-button" type="button" data-appointment-close aria-label="Dialog schließen">×</button></div>
 		<div data-appointment-detail></div>
 		<div class="appointment-actions" data-appointment-actions>
 			<div class="form-alert" role="alert" tabindex="-1" hidden data-appointment-error></div>
 			if admin {
+				<fieldset data-appointment-assignment hidden>
+					<legend>Fahrer und Ressourcen zuweisen</legend>
+					@appointmentAssignmentFields(options, AppointmentAssignmentValues{}, "appointment-dialog-")
+					<button class="button button--quiet" type="button" data-appointment-assign>Zuweisung speichern</button>
+					<p class="form-hint">Die aktuelle Terminversion, Verfügbarkeit und exklusive Belegungen werden serverseitig erneut geprüft.</p>
+				</fieldset>
 				<fieldset data-appointment-reschedule hidden>
 					<legend>Terminzeit ändern</legend>
 					<div class="form-grid">
@@ -298,6 +334,7 @@ templ appointmentDialog(csrf string, admin bool) {
 				</fieldset>
 				<fieldset data-appointment-swap-panel hidden>
 					<legend>Zeitfenster tauschen</legend>
+					<div class="form-grid"><label>Datum mit Vorschlägen<input type="date" data-appointment-swap-date/></label><button class="button button--quiet" type="button" data-appointment-swap-search>Vorschläge laden</button></div>
 					<label>Mit Vorschlag tauschen<select data-appointment-swap-target><option value="">Bitte wählen</option></select></label>
 					<button class="button button--quiet" type="button" data-appointment-swap>Zeitfenster tauschen</button>
 					<p class="form-hint">Nur Entwürfe und Vorschläge können getauscht werden. Beide Versionsstände und Belegungen werden atomisch geprüft.</p>
@@ -325,11 +362,147 @@ templ appointmentDialog(csrf string, admin bool) {
 	</dialog>
 }
 
-templ agendaCard(event appointment.CalendarEvent) {
+templ agendaCard(event appointment.CalendarEvent, admin bool) {
 	<article class={ "agenda-card agenda-card--" + string(event.Lifecycle) }>
 		<div><span class={ "appointment-badge appointment-badge--" + string(event.Lifecycle) }>{ AppointmentStatusLabel(event.Lifecycle, event.Confirmation) }</span><h3>{ event.CustomerName } · { event.JobNumber }</h3><p><strong>{ calendarLocalDateTime(event.StartsAt) }–{ calendarLocalTime(event.EndsAt) }</strong> · { event.VolumeM3 } m³ · { event.Locality }</p><p>{ namesDrivers(event.Drivers) } · { namesResources(event.Resources) }</p></div>
-		<div class="action-row"><a class="button button--quiet" href={ event.MapsURL } target="_blank" rel="noopener noreferrer">Navigation</a><a class="button button--quiet" href={ "/customers/" + event.CustomerID }>Auftrag öffnen</a></div>
+		<div class="action-row">
+			<a class="button button--quiet" href={ event.MapsURL } target="_blank" rel="noopener noreferrer">Navigation</a>
+			<a class="button button--quiet" href={ "/customers/" + event.CustomerID }>Auftrag öffnen</a>
+			if admin {
+				<a class="button button--quiet" href={ "/calendar/appointments/" + event.ID }>Termin verwalten</a>
+			}
+		</div>
 	</article>
+}
+
+templ AppointmentDetailPage(data AppointmentDetailData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data.Shell.Page, "Termin verwalten – "+data.Shell.Page.AppName)
+		<body>
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page">
+				<div class="page-heading"><div><p class="eyebrow">Termindetail</p><h1>{ data.Detail.CustomerName } · { data.Detail.JobNumber }</h1><p>{ calendarLocalDateTime(data.Detail.StartsAt) }–{ calendarLocalTime(data.Detail.EndsAt) } · { AppointmentStatusLabel(data.Detail.Lifecycle, data.Detail.Confirmation) }</p></div><a class="button button--quiet" href="/calendar">Zurück zum Kalender</a></div>
+				if data.Notice != "" {
+					<div class="form-alert form-alert--success" role="status">{ data.Notice }</div>
+				}
+				<section class="form-card" aria-labelledby="appointment-assignment-title">
+					<h2 id="appointment-assignment-title">Fahrer und Ressourcen</h2>
+					<p>Änderungen werden gegen Terminversion, Verfügbarkeit und Reservierungen geprüft.</p>
+					<form method="post" action={ "/calendar/appointments/" + data.Detail.ID + "/assign" } class="form-stack">
+						if data.Error.Message != "" {
+							<div id="appointment-assignment-error" class="form-alert" role="alert" tabindex="-1" autofocus><strong>Zuweisung konnte nicht gespeichert werden.</strong><p>{ data.Error.Message }</p></div>
+						}
+						@appointmentAssignmentFields(data.Options, data.Values, "appointment-page-")
+						<div class="form-actions"><button class="button" type="submit">Zuweisung speichern</button><a class="button button--quiet" href="/calendar">Abbrechen</a></div>
+					</form>
+				</section>
+				if data.CanReissueConfirmation || data.CanResetConfirmation {
+					<section class="form-card" aria-labelledby="appointment-confirmation-admin-title">
+						<h2 id="appointment-confirmation-admin-title">Kundenbestätigung verwalten</h2>
+						<p>Jede Aktion benötigt einen nachvollziehbaren Grund und prüft die aktuelle Terminversion erneut.</p>
+						if data.ConfirmationActionError != "" {
+							<div class="form-alert" role="alert" tabindex="-1" autofocus>{ data.ConfirmationActionError }</div>
+						}
+						<div class="form-grid">
+							if data.CanReissueConfirmation {
+								<form method="post" action={ "/calendar/appointments/" + data.Detail.ID + "/confirmation/reissue" } class="form-stack">
+									<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(data.Detail.Version) }/>
+									<label>Grund für neuen Link<textarea name="reason" maxlength="500" rows="2" required></textarea></label>
+									<button class="button button--quiet" type="submit">Neuen Link senden</button>
+								</form>
+							}
+							if data.CanResetConfirmation {
+								<form method="post" action={ "/calendar/appointments/" + data.Detail.ID + "/confirmation/reset" } class="form-stack">
+									<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(data.Detail.Version) }/>
+									<label>Grund für Zurücksetzen<textarea name="reason" maxlength="500" rows="2" required></textarea></label>
+									<button class="button button--quiet" type="submit">Antwort zurücksetzen</button>
+								</form>
+							}
+						</div>
+					</section>
+				}
+			</main>
+			@appFooter(data.Shell.Page)
+		</body>
+	</html>
+}
+
+templ appointmentAssignmentFields(options appointment.PlanningOptions, values AppointmentAssignmentValues, idPrefix string) {
+	<input type="hidden" name="csrf_token" value={ values.CSRFToken }/>
+	<input type="hidden" name="version" value={ values.Version } data-appointment-assignment-version/>
+	<fieldset>
+		<legend>Fahrer</legend>
+		<div class="choice-grid">
+			for _, item := range options.Drivers {
+				<label class="check-label" for={ idPrefix + "driver-" + item.ID }><input id={ idPrefix + "driver-" + item.ID } type="checkbox" name="driver_id" value={ item.ID } checked?={ slices.Contains(values.DriverIDs, item.ID) } data-appointment-driver/> { item.Name }</label>
+			}
+		</div>
+		<label for={ idPrefix + "primary-driver" }>
+			Primärfahrer
+			<select id={ idPrefix + "primary-driver" } name="primary_driver_id" required data-appointment-primary-driver>
+				<option value="">Bitte wählen</option>
+				for _, item := range options.Drivers {
+					<option value={ item.ID } selected?={ values.PrimaryDriverID == item.ID }>{ item.Name }</option>
+				}
+			</select>
+		</label>
+	</fieldset>
+	<fieldset>
+		<legend>Ressourcen</legend>
+		<div class="form-grid">
+			<label for={ idPrefix + "chipper" }>
+				Hackmaschine
+				<select id={ idPrefix + "chipper" } name="chipper_resource_id" required data-appointment-chipper>
+					<option value="">Bitte wählen</option>
+					for _, item := range options.Resources {
+						if item.Type == resource.TypeChipper {
+							<option value={ item.ID } selected?={ values.ChipperResourceID == item.ID }>{ item.Name }</option>
+						}
+					}
+				</select>
+			</label>
+			<label for={ idPrefix + "transport" }>
+				Transportmittel
+				<select id={ idPrefix + "transport" } name="transport_resource_id" data-appointment-transport>
+					<option value="">Keines / extern</option>
+					for _, item := range options.Resources {
+						if item.Type == resource.TypeTransportVehicle {
+							<option value={ item.ID } selected?={ values.TransportResourceID == item.ID }>{ item.Name }</option>
+						}
+					}
+				</select>
+			</label>
+			<label for={ idPrefix + "trailer" }>
+				Anhänger
+				<select id={ idPrefix + "trailer" } name="trailer_resource_id" data-appointment-trailer>
+					<option value="">Keiner</option>
+					for _, item := range options.Resources {
+						if item.Type == resource.TypeTrailer {
+							<option value={ item.ID } selected?={ values.TrailerResourceID == item.ID }>{ item.Name }</option>
+						}
+					}
+				</select>
+			</label>
+		</div>
+		if hasResourceType(options.Resources, resource.TypeOther) {
+			<fieldset>
+				<legend>Zusatzressourcen (optional)</legend>
+				<div class="choice-grid">
+					for _, item := range options.Resources {
+						if item.Type == resource.TypeOther {
+							<label class="check-label" for={ idPrefix + "other-resource-" + item.ID }><input id={ idPrefix + "other-resource-" + item.ID } type="checkbox" name="other_resource_id" value={ item.ID } checked?={ slices.Contains(values.OtherResourceIDs, item.ID) } data-appointment-other-resource/> { item.Name }</label>
+						}
+					}
+				</div>
+			</fieldset>
+		}
+	</fieldset>
+	<label for={ idPrefix + "override" }>Begründung für Verfügbarkeits-Override (nur falls nötig)<textarea id={ idPrefix + "override" } name="override_reason" maxlength="1000" rows="2" data-appointment-assignment-override>{ values.OverrideReason }</textarea></label>
+}
+
+func hasResourceType(resources []appointment.PlanningResource, resourceType resource.Type) bool {
+	return slices.ContainsFunc(resources, func(item appointment.PlanningResource) bool { return item.Type == resourceType })
 }
 
 func AppointmentStatusLabel(lifecycle appointment.Lifecycle, confirmation appointment.Confirmation) string {

@@ -274,6 +274,15 @@ func TestRouteHTTPValidationKeepsSubmittedSelectionAndNamesMissingFields(t *test
 	if response.Code != http.StatusUnprocessableEntity || store.savedRoute.ID != "" {
 		t.Fatalf("validation response=%d saved=%+v", response.Code, store.savedRoute)
 	}
+	confirmationStart := strings.Index(body, `name="start_custom_confirmed_native"`)
+	if confirmationStart < 0 {
+		t.Fatalf("rerendered custom endpoint has no native confirmation: %s", body)
+	}
+	confirmationEnd := strings.Index(body[confirmationStart:], ">")
+	if confirmationEnd < 0 || strings.Contains(body[confirmationStart:confirmationStart+confirmationEnd], "checked") ||
+		!strings.Contains(body, `name="start_custom_confirmed" value=""`) {
+		t.Fatalf("rerendered custom endpoint remained implicitly confirmed: %s", body)
+	}
 }
 
 func TestRouteHelperErrorAndComparisonMappings(t *testing.T) {
@@ -345,6 +354,16 @@ func TestRouteHTTPDraftMutationAndOwnRouteErrorFlows(t *testing.T) {
 	driverRouter.ServeHTTP(invalidReorder, authenticatedCustomerRequest(t, http.MethodPost, "/my-route/route-1/reorder", url.Values{"csrf_token": {driverCSRF}, "version": {"invalid"}}, driverSession, driverCSRF))
 	if invalidReorder.Code != http.StatusSeeOther || !strings.Contains(invalidReorder.Header().Get("Location"), "error=") {
 		t.Fatalf("invalid reorder=%d location=%q", invalidReorder.Code, invalidReorder.Header().Get("Location"))
+	}
+}
+
+func TestDraftMoveTargetSupportsNoJavaScriptEncodedSelection(t *testing.T) {
+	targetID, version, err := draftMoveTarget(url.Values{"target_route": {"route-2|7"}})
+	if err != nil || targetID != "route-2" || version != 7 {
+		t.Fatalf("draftMoveTarget() = %q, %d, %v", targetID, version, err)
+	}
+	if _, _, err := draftMoveTarget(url.Values{"target_route": {"route-2"}}); !errors.Is(err, planning.ErrValidation) {
+		t.Fatalf("invalid encoded target error = %v", err)
 	}
 }
 

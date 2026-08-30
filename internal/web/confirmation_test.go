@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -88,6 +89,14 @@ func TestConfirmationHTTPHeadersNativeFormOriginAndRedactedLogs(t *testing.T) {
 		t.Fatalf("cross-site response = %d calls=%d body=%q", crossResponse.Code, store.respondCalls, crossResponse.Body.String())
 	}
 
+	noteRequest := nativeConfirmationRequestWithNote(t, material.Raw, material.FormNonce, "confirmed", "Bitte vormittags")
+	noteRequest.Header.Set("Origin", "null")
+	noteResponse := httptest.NewRecorder()
+	router.ServeHTTP(noteResponse, noteRequest)
+	if noteResponse.Code != http.StatusUnprocessableEntity || store.respondCalls != 0 || !strings.Contains(noteResponse.Body.String(), "nur mit einer Ablehnung") || !strings.Contains(noteResponse.Body.String(), "Bitte vormittags") || !strings.Contains(noteResponse.Body.String(), `aria-invalid="true"`) {
+		t.Fatalf("confirmation note validation = %d calls=%d body=%q", noteResponse.Code, store.respondCalls, noteResponse.Body.String())
+	}
+
 	post := nativeConfirmationRequest(t, material.Raw, material.FormNonce, "confirmed")
 	post.Header.Set("Origin", "null")
 	postResponse := httptest.NewRecorder()
@@ -167,6 +176,44 @@ func TestConfirmationResponseLockedRendersStoredAnswer(t *testing.T) {
 	}
 }
 
+func TestConfirmationUnavailableExpiredAndRevokedLookIdentical(t *testing.T) {
+	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	ring := notification.DevelopmentKeyRing()
+	material, err := ring.Issue("oracle-request", "oracle-appointment", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &confirmationHTTPStore{value: notification.Confirmation{
+		RequestID: "oracle-request", AppointmentID: "oracle-appointment", TokenKeyID: notification.DevelopmentKeyID,
+		TokenVersion: 1, Status: "active", Lifecycle: "fixed", ExpiresAt: now.Add(time.Hour), TokenHash: material.Hash, FormNonceHash: material.NonceHash,
+	}}
+	service, err := notification.NewConfirmationService(store, ring, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := chi.NewRouter()
+	router.Get("/termin/{confirmationToken}", confirmationPage(service, newConfirmationRateLimiter(50, func() time.Time { return now }), templates.PageData{AppName: "HackWerk", CSSPath: "/assets/app.css"}, slog.New(slog.NewTextHandler(io.Discard, nil))))
+
+	renderPage := func(token string) string {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/termin/"+token, nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("confirmation status = %d", response.Code)
+		}
+		return response.Body.String()
+	}
+	invalid := renderPage("invalid")
+	store.value.Status = "active"
+	store.value.ExpiresAt = now
+	expired := renderPage(material.Raw)
+	store.value.Status = "revoked"
+	store.value.ExpiresAt = now.Add(time.Hour)
+	revoked := renderPage(material.Raw)
+	if invalid != expired || invalid != revoked || !strings.Contains(invalid, "Link nicht verfügbar") {
+		t.Fatalf("public token states differ: invalid=%q expired=%q revoked=%q", invalid, expired, revoked)
+	}
+}
+
 func TestConfirmationResponseLockedUsesSafeFallbackWhenViewFails(t *testing.T) {
 	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
 	ring := notification.DevelopmentKeyRing()
@@ -230,8 +277,12 @@ func TestConfirmationResponseIdempotentSameAnswer(t *testing.T) {
 }
 
 func nativeConfirmationRequest(t *testing.T, rawToken, nonce, action string) *http.Request {
+	return nativeConfirmationRequestWithNote(t, rawToken, nonce, action, "")
+}
+
+func nativeConfirmationRequestWithNote(t *testing.T, rawToken, nonce, action, note string) *http.Request {
 	t.Helper()
-	body := url.Values{"form_nonce": {nonce}, "action": {action}}.Encode()
+	body := url.Values{"form_nonce": {nonce}, "action": {action}, "response_note": {note}}.Encode()
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/termin/"+rawToken+"/antwort", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	return request

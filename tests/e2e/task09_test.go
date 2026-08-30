@@ -38,10 +38,40 @@ func TestTask09VoiceReviewMobileJourney(t *testing.T) {
 		t.Fatal(err)
 	}
 	location, _ := time.LoadLocation("Europe/Vienna")
-	voiceService, err := voice.New(postgres.NewVoiceStore(pool), voice.FakeTranscriber{Text: "Franz Huber, Unterneukirchen 15, Telefonnummer 0664 1234567, ungefähr 80 Kubikmeter Holz, ungefähr drei Stunden Hackzeit, möglichst Anfang September"}, voice.RuleExtractor{}, voice.Config{Enabled: true, Retention: time.Hour, RateLimitPerMinute: 10, ConcurrentPerUser: 2, Timezone: location}, time.Now)
+	voiceService, err := voice.New(postgres.NewVoiceStore(pool), voice.FakeTranscriber{Text: "Franz Huber, Unterneukirchen 15, Telefonnummer 0664 1234567, ungefähr 80 Kubikmeter Holz, ungefähr drei Stunden Hackzeit, möglichst Anfang September"}, voice.RuleExtractor{}, voice.Config{Enabled: true, Retention: time.Hour, RecordingRetention: 24 * time.Hour, RateLimitPerMinute: 10, ConcurrentPerUser: 2, Timezone: location}, time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
+	workerContext, cancelWorker := context.WithCancel(context.Background())
+	workerDone := make(chan error, 1)
+	go func() {
+		for {
+			processed, processErr := voiceService.ProcessNext(workerContext, "e2e-voice-worker", time.Minute)
+			if processErr != nil {
+				if workerContext.Err() != nil {
+					workerDone <- nil
+				} else {
+					workerDone <- processErr
+				}
+				return
+			}
+			if processed {
+				continue
+			}
+			select {
+			case <-workerContext.Done():
+				workerDone <- nil
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		cancelWorker()
+		if workerErr := <-workerDone; workerErr != nil {
+			t.Errorf("voice worker: %v", workerErr)
+		}
+	})
 	server := httptest.NewUnstartedServer(nil)
 	cfg := config.Config{AppName: "HackWerk", BaseURL: "http://" + server.Listener.Addr().String(), Timezone: "Europe/Vienna", Database: config.Database{ReadinessTimeout: 2 * time.Second}, Auth: config.Auth{SessionCookieName: "hackplan_session", CSRFCookieName: "hackplan_csrf", SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour}, Voice: config.Voice{Enabled: true, Transcriber: "fake", MaxDuration: 90 * time.Second, MaxBytes: 15 << 20, ProviderTimeout: 5 * time.Second, TempDir: t.TempDir(), ExternalProviderNote: "Testprovider"}}
 	router, err := web.NewRouter(web.Dependencies{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pool, Build: buildinfo.Info{Version: "e2e"}, Identity: identity, Customers: customerService, Drivers: drivers, Resources: resources, Appointments: appointments, Dashboard: e2eDashboard(t, pool), Voice: voiceService})
@@ -63,7 +93,7 @@ func TestTask09VoiceReviewMobileJourney(t *testing.T) {
 	browser, cancelTimeout := context.WithTimeout(browser, 180*time.Second)
 	t.Cleanup(cancelTimeout)
 	t.Cleanup(func() { _ = chromedp.Cancel(browser) })
-	if err = chromedp.Run(browser, chromedp.Navigate(server.URL+"/login"), chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery), chromedp.SetValue("#username", "driver-task04", chromedp.ByQuery), chromedp.SetValue("#password", driverPassword, chromedp.ByQuery), chromedp.Click("form[action='/login'] button", chromedp.ByQuery), chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery), chromedp.Navigate(server.URL+"/voice"), chromedp.WaitVisible("[data-voice-upload]", chromedp.ByQuery)); err != nil {
+	if err = chromedp.Run(browser, chromedp.Navigate(server.URL+"/login"), chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery), chromedp.SetValue("#username", "driver-task04", chromedp.ByQuery), chromedp.SetValue("#password", driverPassword, chromedp.ByQuery), chromedp.Click("form[action='/login'] button[type='submit']", chromedp.ByQuery), chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery), chromedp.Navigate(server.URL+"/voice"), chromedp.WaitVisible("[data-voice-upload]", chromedp.ByQuery)); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
 	var nativeFallbackConfigured bool

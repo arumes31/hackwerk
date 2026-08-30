@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"example.invalid/hackplan/internal/auth"
 )
@@ -84,7 +85,7 @@ func (service *AdminService) Reissue(ctx context.Context, actor auth.Actor, appo
 		return err
 	}
 	reason = strings.TrimSpace(reason)
-	if strings.TrimSpace(appointmentID) == "" || expectedVersion < 1 || reason == "" || len(reason) > 500 {
+	if strings.TrimSpace(appointmentID) == "" || expectedVersion < 1 || reason == "" || utf8.RuneCountInString(reason) > 500 {
 		return ErrAdminActionUnavailable
 	}
 	return service.store.Reissue(ctx, actor, appointmentID, expectedVersion, reason, requestID, service.now().UTC())
@@ -95,7 +96,7 @@ func (service *AdminService) ResetResponse(ctx context.Context, actor auth.Actor
 		return err
 	}
 	reason = strings.TrimSpace(reason)
-	if strings.TrimSpace(appointmentID) == "" || expectedVersion < 1 || reason == "" || len(reason) > 500 {
+	if strings.TrimSpace(appointmentID) == "" || expectedVersion < 1 || reason == "" || utf8.RuneCountInString(reason) > 500 {
 		return ErrAdminActionUnavailable
 	}
 	return service.store.ResetResponse(ctx, actor, appointmentID, expectedVersion, reason, requestID, service.now().UTC())
@@ -124,7 +125,8 @@ func (service *AdminService) AppointmentStatuses(ctx context.Context, actor auth
 		return nil, ErrRetryUnavailable
 	}
 	values, err := service.store.ListAppointment(ctx, appointmentID)
-	return prepareStatuses(values, false), err
+	includeResponseNote := actor.Require(auth.PermissionNotificationResend) == nil
+	return prepareStatuses(values, false, includeResponseNote), err
 }
 
 func (service *AdminService) AdminAppointmentHistory(ctx context.Context, actor auth.Actor, appointmentID string) ([]Status, error) {
@@ -135,7 +137,7 @@ func (service *AdminService) AdminAppointmentHistory(ctx context.Context, actor 
 		return nil, ErrRetryUnavailable
 	}
 	values, err := service.store.ListAppointment(ctx, appointmentID)
-	return prepareStatuses(values, true), err
+	return prepareStatuses(values, true, true), err
 }
 
 func (service *AdminService) Failed(ctx context.Context, actor auth.Actor, filter FailureFilter, limit int32) ([]Status, error) {
@@ -147,7 +149,7 @@ func (service *AdminService) Failed(ctx context.Context, actor auth.Actor, filte
 		limit = 100
 	}
 	values, err := service.store.ListFailed(ctx, filter, limit)
-	return prepareStatuses(values, true), err
+	return prepareStatuses(values, true, true), err
 }
 
 func (service *AdminService) Callbacks(ctx context.Context, actor auth.Actor, limit int32) ([]CallbackRequest, error) {
@@ -213,7 +215,7 @@ func (service *AdminService) CSV(ctx context.Context, actor auth.Actor, filter F
 	return output.Bytes(), nil
 }
 
-func prepareStatuses(values []Status, includeProviderReference bool) []Status {
+func prepareStatuses(values []Status, includeProviderReference, includeResponseNote bool) []Status {
 	result := make([]Status, len(values))
 	for index, value := range values {
 		result[index] = value
@@ -224,6 +226,9 @@ func prepareStatuses(values []Status, includeProviderReference bool) []Status {
 			result[index].ProviderReference = ShortProviderReference(value.ProviderReference)
 		} else {
 			result[index].ProviderReference = ""
+		}
+		if !includeResponseNote {
+			result[index].ResponseNote = ""
 		}
 	}
 	return result

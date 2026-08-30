@@ -98,14 +98,14 @@ func adminRouteViewData(request *http.Request, service *planning.RouteService, d
 func moveDraftStop(service *planning.RouteService, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
+		targetRouteID, targetVersion, targetErr := draftMoveTarget(request.Form)
 		sourceVersion, sourceErr := parseVersion(request.Form.Get("source_version"))
-		targetVersion, targetErr := parseVersion(request.Form.Get("target_version"))
 		var err error
 		if sourceErr != nil || targetErr != nil {
 			err = planning.ErrValidation
 		} else {
 			_, err = service.MoveDraftStop(request.Context(), session.Actor, planning.MoveDraftStopInput{
-				SourceRouteID: chi.URLParam(request, "routeID"), TargetRouteID: request.Form.Get("target_route_id"),
+				SourceRouteID: chi.URLParam(request, "routeID"), TargetRouteID: targetRouteID,
 				StopID: request.Form.Get("stop_id"), SourceVersion: sourceVersion, TargetVersion: targetVersion,
 				RequestID: middleware.GetReqID(request.Context()),
 			})
@@ -119,6 +119,23 @@ func moveDraftStop(service *planning.RouteService, logger *slog.Logger) http.Han
 		}
 		http.Redirect(response, request, "/planning/routes?"+values.Encode(), http.StatusSeeOther)
 	}
+}
+
+func draftMoveTarget(form url.Values) (string, int32, error) {
+	targetRouteID := strings.TrimSpace(form.Get("target_route_id"))
+	targetVersionValue := form.Get("target_version")
+	if combined := strings.TrimSpace(form.Get("target_route")); combined != "" {
+		var found bool
+		targetRouteID, targetVersionValue, found = strings.Cut(combined, "|")
+		if !found {
+			return "", 0, planning.ErrValidation
+		}
+	}
+	targetVersion, err := parseVersion(targetVersionValue)
+	if strings.TrimSpace(targetRouteID) == "" || err != nil {
+		return "", 0, planning.ErrValidation
+	}
+	return strings.TrimSpace(targetRouteID), targetVersion, nil
 }
 
 func planRoute(service *planning.RouteService, dependencies Dependencies, page templates.PageData, csrfCookie string) http.HandlerFunc {

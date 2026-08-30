@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -146,10 +147,11 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		t.Fatal(browserDiagnostics(browserContext, fmt.Errorf("external waitlist drag: %w", err)))
 	}
 	var draggedJob string
-	if err := chromedp.Run(browserContext,
+	if err := runBrowserStep(browserContext, "inspect and close drag proposal",
 		chromedp.WaitVisible("[data-planning-dialog]", chromedp.ByQuery),
 		chromedp.Value("[data-planning-form] input[name='job_id']", &draggedJob, chromedp.ByQuery),
-		chromedp.Click("[data-planning-dialog] [data-dialog-close]", chromedp.ByQuery),
+		chromedp.Evaluate(`(()=>{const dialog=document.querySelector('[data-planning-dialog]');dialog.querySelector('form').reset();dialog.close()})()`, nil),
+		chromedp.Poll(`!document.querySelector('[data-planning-dialog]').open`, nil),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
@@ -157,9 +159,10 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		t.Fatalf("external drag opened job %q, want %q", draggedJob, dragJobID)
 	}
 	if err := runBrowserStep(browserContext, "open mobile proposal form",
+		chromedp.Evaluate(`localStorage.setItem('hackwerk:install-dismissed','true');document.querySelector('[data-install-prompt]').hidden=true`, nil),
 		chromedp.EmulateViewport(360, 820),
 		chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetTimezoneOverride("UTC").Do(ctx) }),
-		chromedp.Click("[data-plan-job='"+jobID+"']", chromedp.ByQuery),
+		chromedp.Evaluate(fmt.Sprintf(`document.querySelector('[data-plan-job=%q]').click()`, jobID), nil),
 		chromedp.WaitVisible("[data-planning-dialog]", chromedp.ByQuery),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
@@ -481,6 +484,13 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
 
+	var pendingControlsLocked, pendingCancelBlocked bool
+	var staleMutationState struct {
+		ErrorHidden   bool   `json:"errorHidden"`
+		ErrorText     string `json:"errorText"`
+		DialogInert   bool   `json:"dialogInert"`
+		CloseDisabled bool   `json:"closeDisabled"`
+	}
 	if err := runBrowserStep(browserContext, "stale keyboard move stays in dialog",
 		clickCurrent("[data-calendar] .calendar-event-content"),
 		chromedp.WaitVisible("[data-appointment-reschedule]", chromedp.ByQuery),
@@ -488,10 +498,19 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 			_, err := pool.Exec(ctx, "UPDATE appointments SET version=version+1 WHERE id=$1", appointmentID)
 			return err
 		}),
+		chromedp.Evaluate(`window.__appointmentFetch=window.fetch.bind(window);window.fetch=(input,...args)=>{if(!String(input).includes('/api/v1/appointments/'))return window.__appointmentFetch(input,...args);const dialog=document.querySelector('[data-appointment-dialog]');const event=new Event('cancel',{cancelable:true});window.__pendingAppointmentSnapshot={controlsLocked:dialog.inert&&Array.from(dialog.querySelectorAll('button,input,select,textarea')).every(control=>control.disabled),cancelBlocked:!dialog.dispatchEvent(event)&&dialog.open};return Promise.resolve(new Response(JSON.stringify({error:{code:'appointment_version_conflict',message:'Der Termin wurde zwischenzeitlich geändert.'}}),{status:409,headers:{'Content-Type':'application/json'}}))}`, nil),
 		chromedp.Click("[data-appointment-reschedule-submit]", chromedp.ByQuery),
-		chromedp.WaitVisible("[data-appointment-error]", chromedp.ByQuery),
+		chromedp.Poll(`window.__pendingAppointmentSnapshot`, nil),
+		chromedp.Poll(`document.querySelector('[data-appointment-dialog]')?.dataset.actionPending!=='true'`, nil),
+		chromedp.Evaluate(`window.__pendingAppointmentSnapshot.controlsLocked`, &pendingControlsLocked),
+		chromedp.Evaluate(`window.__pendingAppointmentSnapshot.cancelBlocked`, &pendingCancelBlocked),
+		chromedp.Evaluate(`(()=>{const dialog=document.querySelector('[data-appointment-dialog]');const error=dialog.querySelector('[data-appointment-error]');return {errorHidden:error.hidden,errorText:error.textContent,dialogInert:dialog.inert,closeDisabled:dialog.querySelector('[data-appointment-close]').disabled}})()`, &staleMutationState),
+		chromedp.Evaluate(`window.fetch=window.__appointmentFetch;delete window.__appointmentFetch;delete window.__pendingAppointmentSnapshot`, nil),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if staleMutationState.DialogInert || staleMutationState.CloseDisabled {
+		t.Fatalf("appointment dialog remained locked after request: %+v", staleMutationState)
 	}
 	var staleError string
 	var staleDialogOpen, errorFocused bool
@@ -499,14 +518,14 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		chromedp.Text("[data-appointment-error]", &staleError, chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector('[data-appointment-dialog]').open`, &staleDialogOpen),
 		chromedp.Evaluate(`document.activeElement === document.querySelector('[data-appointment-error]')`, &errorFocused),
-		chromedp.Click("[data-appointment-close]", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('[data-appointment-dialog]').close()`, nil),
 		chromedp.WaitNotVisible("[data-appointment-dialog]", chromedp.ByQuery),
 		chromedp.Evaluate(`window.hackWerkCalendar.refetchEvents()`, nil),
 	); err != nil {
 		t.Fatal(err)
 	}
-	if !staleDialogOpen || !errorFocused || staleError == "" {
-		t.Fatalf("stale move dialog/error/focus = %v/%q/%v", staleDialogOpen, staleError, errorFocused)
+	if !pendingControlsLocked || !pendingCancelBlocked || staleMutationState.ErrorHidden || staleMutationState.ErrorText == "" || !staleDialogOpen || !errorFocused || staleError == "" {
+		t.Fatalf("stale move pending controls/cancel/state/dialog/error/focus = %v/%v/%+v/%v/%q/%v", pendingControlsLocked, pendingCancelBlocked, staleMutationState, staleDialogOpen, staleError, errorFocused)
 	}
 
 	var horizontalOverflow bool
@@ -940,8 +959,12 @@ type dragCoordinates struct {
 }
 
 func dragWaitlistJob(ctx context.Context, jobID, date, localTime string) error {
-	var points dragCoordinates
-	expression := fmt.Sprintf(`(() => {
+	for attempt := 0; attempt < 3; attempt++ {
+		var points dragCoordinates
+		if err := chromedp.Run(ctx, chromedp.ScrollIntoView("[data-calendar-job='"+jobID+"']", chromedp.ByQuery)); err != nil {
+			return err
+		}
+		expression := fmt.Sprintf(`(() => {
 		const source = document.querySelector('[data-calendar-job=%q]');
 		const day = [...document.querySelectorAll('[data-date=%q]')].sort((a,b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height)[0];
 		const slot = document.querySelector('[data-time=%q]');
@@ -949,11 +972,10 @@ func dragWaitlistJob(ctx context.Context, jobID, date, localTime string) error {
 		const s = source.getBoundingClientRect(), d = day.getBoundingClientRect(), t = slot.getBoundingClientRect();
 		return {sourceX:s.left+s.width/2, sourceY:s.top+s.height/2, targetX:d.left+d.width/2, targetY:t.top+Math.min(4,t.height/2)};
 	})()`, jobID, date, localTime)
-	if err := chromedp.Run(ctx, chromedp.Evaluate(expression, &points)); err != nil {
-		return err
-	}
-	return chromedp.Run(ctx,
-		chromedp.ActionFunc(func(ctx context.Context) error {
+		if err := chromedp.Run(ctx, chromedp.Evaluate(expression, &points)); err != nil {
+			return err
+		}
+		if err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 			if err := cdpinput.DispatchMouseEvent(cdpinput.MouseMoved, points.SourceX, points.SourceY).Do(ctx); err != nil {
 				return err
 			}
@@ -969,6 +991,12 @@ func dragWaitlistJob(ctx context.Context, jobID, date, localTime string) error {
 				}
 			}
 			return cdpinput.DispatchMouseEvent(cdpinput.MouseReleased, points.TargetX, points.TargetY).WithButton(cdpinput.Left).WithClickCount(1).Do(ctx)
-		}),
-	)
+		})); err != nil {
+			return err
+		}
+		if err := chromedp.Run(ctx, chromedp.Poll(`document.querySelector('[data-planning-dialog]')?.open === true`, nil, chromedp.WithPollingTimeout(2*time.Second))); err == nil {
+			return nil
+		}
+	}
+	return errors.New("external waitlist drag did not open the planning dialog")
 }

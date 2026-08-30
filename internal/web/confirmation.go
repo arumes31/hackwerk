@@ -30,10 +30,10 @@ func confirmationPage(service *notification.ConfirmationService, limiter *confir
 		}
 		token := chi.URLParam(request, "confirmationToken")
 		value, err := service.View(request.Context(), token)
-		data := templates.ConfirmationData{Page: page, Token: token, Value: value, Invalid: err != nil,
-			Expired: errors.Is(err, notification.ErrConfirmationExpired), Revoked: errors.Is(err, notification.ErrConfirmationRevoked)}
-		data.Invalid = err != nil && !data.Expired && !data.Revoked
-		if err == nil && value.Response != "" {
+		data := templates.ConfirmationData{Page: page, Token: token, Value: value, Invalid: err != nil}
+		if err == nil && value.Response == notification.ResponseCallback {
+			data.CallbackStored = true
+		} else if err == nil && value.Response != "" {
 			data.AlreadyStored = true
 			data.Result = confirmationResult(value.Response)
 		}
@@ -54,14 +54,21 @@ func confirmationResponse(service *notification.ConfirmationService, limiter *co
 			return
 		}
 		token := chi.URLParam(request, "confirmationToken")
-		value, err := service.Respond(request.Context(), token, request.Form.Get("form_nonce"), notification.Response(request.Form.Get("action")), request.Form.Get("response_note"), middleware.GetReqID(request.Context()))
+		responseNote := request.Form.Get("response_note")
+		value, err := service.Respond(request.Context(), token, request.Form.Get("form_nonce"), notification.Response(request.Form.Get("action")), responseNote, middleware.GetReqID(request.Context()))
 		if err != nil {
 			switch {
-			case errors.Is(err, notification.ErrConfirmationExpired):
-				render(response, request, templates.ConfirmationPage(templates.ConfirmationData{Page: page, Expired: true}), http.StatusOK, logger)
-			case errors.Is(err, notification.ErrConfirmationRevoked):
-				render(response, request, templates.ConfirmationPage(templates.ConfirmationData{Page: page, Revoked: true}), http.StatusOK, logger)
-			case errors.Is(err, notification.ErrConfirmationUnavailable):
+			case errors.Is(err, notification.ErrResponseNoteNotAllowed):
+				current, viewErr := service.View(request.Context(), token)
+				if viewErr != nil {
+					render(response, request, templates.ConfirmationPage(templates.ConfirmationData{Page: page, Invalid: true}), http.StatusOK, logger)
+					return
+				}
+				render(response, request, templates.ConfirmationPage(templates.ConfirmationData{
+					Page: page, Token: token, Value: current, ResponseNote: responseNote,
+					ResponseNoteError: "Die Rückrufnotiz kann nur mit einer Ablehnung gesendet werden. Bitte leeren Sie die Notiz oder wählen Sie „Termin ablehnen“.",
+				}), http.StatusUnprocessableEntity, logger)
+			case errors.Is(err, notification.ErrConfirmationExpired), errors.Is(err, notification.ErrConfirmationRevoked), errors.Is(err, notification.ErrConfirmationUnavailable):
 				render(response, request, templates.ConfirmationPage(templates.ConfirmationData{Page: page, Invalid: true}), http.StatusOK, logger)
 			case errors.Is(err, notification.ErrResponseLocked):
 				stored, viewErr := service.View(request.Context(), token)

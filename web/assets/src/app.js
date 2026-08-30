@@ -6,6 +6,37 @@ const announce = (message) => {
   if (target) target.textContent = message;
 };
 
+async function copyText(value, sourceElement = null) {
+  const text = String(value || "");
+  if (!text) return false;
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const fallback = sourceElement || document.createElement("textarea");
+    const temporary = !sourceElement;
+    if (temporary) {
+      document.querySelector("[data-copy-manual]")?.remove();
+      fallback.value = text;
+      fallback.className = "copy-manual-field";
+      fallback.dataset.copyManual = "true";
+      fallback.setAttribute("aria-label", "Text zum manuellen Kopieren");
+      document.body.append(fallback);
+    }
+    fallback.focus();
+    fallback.select?.();
+    try {
+      if (document.execCommand?.("copy")) {
+        if (temporary) fallback.remove();
+        return true;
+      }
+    } catch { /* Keep the selected text available for manual copying. */ }
+    announce("Automatisches Kopieren ist nicht verfügbar. Der Text ist markiert; bitte mit Strg+C kopieren.");
+    return false;
+  }
+}
+
 function safePreferenceGet(key) {
   try { return window.localStorage.getItem(key); } catch { return null; }
 }
@@ -21,6 +52,10 @@ function safePreferenceRemove(key) {
 function initializePrivacyNotice() {
   const notice = document.querySelector("[data-privacy-notice]");
   if (!notice) return;
+  // Keep the notice prominent without covering controls near the viewport edge.
+  // The template lives next to the footer so it can be reused on every page;
+  // moving it to the start of the body turns it into an in-flow page banner.
+  document.body.prepend(notice);
   const preferenceKey = "hackwerk:privacy-notice:v1";
   const open = ({ reset = false, focus = false } = {}) => {
     if (reset) safePreferenceRemove(preferenceKey);
@@ -33,7 +68,10 @@ function initializePrivacyNotice() {
     announce("Cookie-Hinweis geschlossen. Er kann im Footer erneut geöffnet werden.");
   };
   document.querySelectorAll("[data-privacy-notice-open]").forEach((button) => {
-    button.addEventListener("click", () => open({ reset: true, focus: true }));
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      open({ reset: true, focus: true });
+    });
   });
   notice.querySelector("[data-privacy-notice-dismiss]")?.addEventListener("click", dismiss);
   if (safePreferenceGet(preferenceKey) !== "read") open();
@@ -71,6 +109,7 @@ document.querySelectorAll("[data-outdoor-toggle]").forEach((button) => {
 applyPresentationPreferences();
 
 let lastSuccessfulConnection = navigator.onLine ? new Date() : null;
+let wasOffline = !navigator.onLine;
 function updateConnectivityBanner() {
   document.querySelectorAll("[data-connectivity-banner]").forEach((banner) => {
     banner.hidden = navigator.onLine;
@@ -78,10 +117,16 @@ function updateConnectivityBanner() {
       ? "Verbindung wiederhergestellt. Nicht gespeicherte Änderungen können jetzt gesendet werden."
       : `Offline: Lesen bleibt teilweise möglich. Letzte Verbindung${lastSuccessfulConnection ? ` um ${lastSuccessfulConnection.toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" })} Uhr` : " unbekannt"}. Änderungen werden nicht zwischengespeichert.`;
   });
+  const recovered = navigator.onLine && wasOffline;
   if (navigator.onLine) {
     lastSuccessfulConnection = new Date();
-    announce("Verbindung wiederhergestellt. Sichere Leseansichten werden aktualisiert.");
-    window.dispatchEvent(new CustomEvent("hackwerk:online"));
+    wasOffline = false;
+    if (recovered) {
+      announce("Verbindung wiederhergestellt. Sichere Leseansichten werden aktualisiert.");
+      window.dispatchEvent(new CustomEvent("hackwerk:online"));
+    }
+  } else {
+    wasOffline = true;
   }
 }
 window.addEventListener("online", updateConnectivityBanner);
@@ -118,11 +163,19 @@ document.querySelectorAll('input[type="tel"]').forEach((input) => {
   preview.className = "field-preview";
   preview.setAttribute("aria-live", "polite");
   input.insertAdjacentElement("afterend", preview);
+  const normalizePhone = (value) => {
+    let compact = value.trim().replace(/[\s()./-]+/g, "");
+    if (compact.startsWith("00")) compact = `+${compact.slice(2)}`;
+    if (compact.startsWith("0")) compact = `+43${compact.slice(1)}`;
+    if ((compact.match(/\+/g) || []).length > 1 || (compact.includes("+") && !compact.startsWith("+"))) return "";
+    const digits = compact.startsWith("+") ? compact.slice(1) : compact;
+    if (!/^\d{7,15}$/.test(digits)) return "";
+    return `+${digits}`;
+  };
   const update = () => {
     const raw = input.value.trim();
-    const compact = raw.replace(/[\s()./-]+/g, "");
-    const normalized = compact.startsWith("00") ? `+${compact.slice(2)}` : compact.startsWith("0") ? `+43${compact.slice(1)}` : compact;
-    preview.textContent = raw ? `Gespeichert als: ${normalized}` : "";
+    const normalized = normalizePhone(raw);
+    preview.textContent = !raw ? "" : normalized ? `Gespeichert als: ${normalized}` : "Bitte 7 bis 15 Ziffern als gültige Telefonnummer eingeben.";
   };
   input.addEventListener("input", update); update();
 });
@@ -159,17 +212,28 @@ document.querySelectorAll("[data-note-input]").forEach((input) => {
 });
 
 document.querySelectorAll('input[type="password"]').forEach((input) => {
+  const wrapper = document.createElement("span");
+  wrapper.className = "password-input";
+  input.before(wrapper);
+  wrapper.append(input);
   const toggle = document.createElement("button");
   toggle.type = "button"; toggle.className = "password-reveal";
-  toggle.textContent = "Anzeigen"; toggle.setAttribute("aria-pressed", "false");
+  toggle.setAttribute("aria-pressed", "false");
   toggle.setAttribute("aria-label", "Passwort anzeigen");
-  input.insertAdjacentElement("afterend", toggle);
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true"); icon.setAttribute("focusable", "false");
+  const eye = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  eye.setAttribute("d", "M2.5 12s3.5-5.5 9.5-5.5 9.5 5.5 9.5 5.5-3.5 5.5-9.5 5.5S2.5 12 2.5 12Z");
+  const pupil = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  pupil.setAttribute("cx", "12"); pupil.setAttribute("cy", "12"); pupil.setAttribute("r", "2.5");
+  const slash = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  slash.setAttribute("class", "password-reveal__slash"); slash.setAttribute("d", "m4 4 16 16");
+  icon.append(eye, pupil, slash); toggle.append(icon); wrapper.append(toggle);
   const caps = document.createElement("small"); caps.className = "field-preview field-preview--warning"; caps.setAttribute("role", "status");
-  toggle.insertAdjacentElement("afterend", caps);
+  wrapper.insertAdjacentElement("afterend", caps);
   toggle.addEventListener("click", () => {
     const reveal = input.type === "password";
     input.type = reveal ? "text" : "password";
-    toggle.textContent = reveal ? "Verbergen" : "Anzeigen";
     toggle.setAttribute("aria-pressed", String(reveal));
     toggle.setAttribute("aria-label", reveal ? "Passwort verbergen" : "Passwort anzeigen");
     input.focus();
@@ -180,16 +244,44 @@ document.querySelectorAll('input[type="password"]').forEach((input) => {
 
 let installEvent;
 const installPrompt = document.querySelector("[data-install-prompt]");
+const hideInstallPrompt = () => {
+  if (installPrompt) installPrompt.hidden = true;
+};
+const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+
+hideInstallPrompt();
 window.addEventListener("beforeinstallprompt", (event) => {
-  event.preventDefault(); installEvent = event;
-  if (safePreferenceGet("hackwerk:install-dismissed") !== "true" && installPrompt) installPrompt.hidden = false;
+  event.preventDefault();
+  if (typeof event.prompt !== "function") return;
+  installEvent = event;
+  if (safePreferenceGet("hackwerk:install-dismissed") !== "true" && !isStandalone() && installPrompt) {
+    installPrompt.hidden = false;
+    announce("HackWerk kann auf diesem Gerät installiert werden.");
+  }
 });
 installPrompt?.querySelector("[data-install-accept]")?.addEventListener("click", async () => {
-  if (!installEvent) return;
-  await installEvent.prompt(); installPrompt.hidden = true; installEvent = undefined;
+  if (!installEvent) {
+    hideInstallPrompt();
+    return;
+  }
+  const promptEvent = installEvent;
+  installEvent = undefined;
+  hideInstallPrompt();
+  try {
+    await promptEvent.prompt();
+    await promptEvent.userChoice;
+  } catch {
+    announce("Die Installation konnte nicht geöffnet werden. Verwenden Sie bei Bedarf die Installationsfunktion des Browsers.");
+  }
 });
 installPrompt?.querySelector("[data-install-dismiss]")?.addEventListener("click", () => {
-  safePreferenceSet("hackwerk:install-dismissed", "true"); installPrompt.hidden = true;
+  safePreferenceSet("hackwerk:install-dismissed", "true");
+  installEvent = undefined;
+  hideInstallPrompt();
+});
+window.addEventListener("appinstalled", () => {
+  installEvent = undefined;
+  hideInstallPrompt();
 });
 
 document.querySelectorAll("[data-mobile-menu] a").forEach((link) => link.addEventListener("click", () => { link.closest("details")?.removeAttribute("open"); }));
@@ -197,27 +289,40 @@ if (window.visualViewport) {
   const updateViewport = () => document.documentElement.style.setProperty("--visual-viewport-height", `${window.visualViewport.height}px`);
   window.visualViewport.addEventListener("resize", updateViewport); updateViewport();
 }
-const scrollTopButton = document.createElement("button");
-scrollTopButton.type = "button"; scrollTopButton.className = "scroll-top button button--quiet"; scrollTopButton.textContent = "Nach oben"; scrollTopButton.hidden = true;
-scrollTopButton.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
-document.body.append(scrollTopButton);
-window.addEventListener("scroll", () => { scrollTopButton.hidden = window.scrollY < 900; }, { passive: true });
+if (!document.body.classList.contains("login-body")) {
+  const scrollTopButton = document.createElement("button");
+  scrollTopButton.type = "button"; scrollTopButton.className = "scroll-top button button--quiet"; scrollTopButton.textContent = "Nach oben"; scrollTopButton.hidden = true;
+  scrollTopButton.addEventListener("click", () => window.scrollTo({ top: 0, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }));
+  document.body.append(scrollTopButton);
+  window.addEventListener("scroll", () => { scrollTopButton.hidden = window.scrollY < 900; }, { passive: true });
+}
 
 document.querySelectorAll("[data-confirmation-form]").forEach((form) => {
   const summary = form.querySelector("[data-confirmation-summary]");
+  const note = form.elements.namedItem("response_note");
+  const noteFeedback = form.querySelector("[data-confirmation-note-feedback]");
+  const updateNoteFeedback = () => {
+    if (!note || !noteFeedback) return;
+    note.removeAttribute("aria-invalid");
+    const length = note.value.length;
+    noteFeedback.textContent = length === 0 ? "Die Notiz wird nur bei einer Ablehnung übermittelt." : `${length} von 500 Zeichen. Die Notiz wird nur bei einer Ablehnung übermittelt.`;
+  };
+  note?.addEventListener("input", updateNoteFeedback);
+  updateNoteFeedback();
   form.querySelectorAll("button[name='action']").forEach((button) => {
     button.addEventListener("focus", () => { if (summary) summary.textContent = button.dataset.responseLabel; });
   });
   form.addEventListener("submit", (event) => {
     const button = event.submitter;
-    const note = form.elements.namedItem("response_note");
     if (note?.value.trim() && button?.value !== "declined") {
       event.preventDefault(); note.focus();
+      note.setAttribute("aria-invalid", "true");
+      if (noteFeedback) noteFeedback.textContent = "Die Rückrufnotiz kann nur mit einer Ablehnung gesendet werden.";
       if (summary) summary.textContent = "Die Rückrufnotiz kann nur mit einer Ablehnung gesendet werden. Bitte Notiz leeren oder „Termin ablehnen“ wählen.";
       return;
     }
     if (summary && button?.dataset.responseLabel) summary.textContent = `${button.dataset.responseLabel} Jetzt wird die Antwort einmalig gespeichert.`;
-    form.querySelectorAll("button").forEach((control) => { control.disabled = true; });
+    form.querySelectorAll("button").forEach((control) => { control.setAttribute("aria-disabled", "true"); });
   });
 });
 
@@ -242,7 +347,7 @@ document.querySelectorAll("[data-planning-results]").forEach((results) => {
     });
     card.querySelector("[data-copy-suggestion]")?.addEventListener("click", async () => {
       const explanation = Array.from(card.querySelectorAll("h3, .suggestion-facts dd, h4 + ul li, .planning-warning li"), (item) => item.textContent.trim()).join(" · ");
-      await navigator.clipboard.writeText(explanation); announce("Vorschlagserklärung kopiert.");
+      if (await copyText(explanation)) announce("Vorschlagserklärung kopiert.");
     });
     card.querySelector("[data-suggestion-adopt]")?.closest("form")?.addEventListener("submit", (event) => {
       if (!window.confirm(`${card.dataset.suggestionSummary}\n\nAls unverbindlichen Vorschlag übernehmen? Es wird nichts fixiert oder versendet.`)) event.preventDefault();
@@ -386,6 +491,7 @@ document.querySelectorAll("dialog").forEach((dialog) => {
   dialog.addEventListener("change", markDirty);
   dialog.addEventListener("cancel", (event) => {
     event.preventDefault();
+    if (dialog.dataset.actionPending === "true") return;
     closeDialogWithDirtyCheck(dialog);
   });
 });
@@ -408,7 +514,6 @@ document.addEventListener("submit", (event) => {
   }
   form.dataset.submitting = "true";
   submitters.forEach((control) => {
-    control.disabled = true;
     control.setAttribute("aria-disabled", "true");
     if (control instanceof HTMLButtonElement && !control.dataset.originalLabel) {
       control.dataset.originalLabel = control.textContent;
@@ -419,7 +524,6 @@ document.addEventListener("submit", (event) => {
     if (!event.defaultPrevented) return;
     delete form.dataset.submitting;
     submitters.forEach((control) => {
-      control.disabled = false;
       control.removeAttribute("aria-disabled");
       if (control instanceof HTMLButtonElement && control.dataset.originalLabel) {
         control.textContent = control.dataset.originalLabel;
@@ -662,7 +766,7 @@ function appointmentConflictCause(failure) {
   return ({
     driver_unavailable: "Fahrer-Verfügbarkeit",
     reservation_conflict: "Fahrer- oder Ressourcenreservierung",
-    version_conflict: "Zwischenzeitliche Terminänderung",
+    appointment_version_conflict: "Zwischenzeitliche Terminänderung",
   })[failure?.code] || "";
 }
 
@@ -1004,7 +1108,7 @@ async function appointmentDetail(event, loadedProps) {
   detail.append(list);
   const copyTime = document.createElement("button");
   copyTime.type = "button"; copyTime.className = "button button--quiet"; copyTime.textContent = "Beginn und Ende kopieren";
-  copyTime.addEventListener("click", async () => { await navigator.clipboard.writeText(`${dateTime.format(start)} – ${dateTime.format(end)} · Europe/Vienna`); announce("Terminzeit kopiert."); });
+  copyTime.addEventListener("click", async () => { if (await copyText(`${dateTime.format(start)} – ${dateTime.format(end)} · Europe/Vienna`)) announce("Terminzeit kopiert."); });
   detail.append(copyTime);
   if (props.maps_url) {
     const navigation = document.createElement("a");
@@ -1024,6 +1128,7 @@ async function appointmentDetail(event, loadedProps) {
   const permalink = document.createElement("a"); permalink.className = "button button--quiet"; permalink.href = `/calendar?appointment=${encodeURIComponent(event.id)}`; permalink.textContent = "Terminlink"; detail.append(permalink);
   const fix = dialog.querySelector("[data-appointment-fix]");
   const cancel = dialog.querySelector("[data-appointment-cancel]");
+  const assignment = dialog.querySelector("[data-appointment-assignment]");
   const reschedule = dialog.querySelector("[data-appointment-reschedule]");
 	const swapPanel = dialog.querySelector("[data-appointment-swap-panel]");
   const confirmationAdmin = dialog.querySelector("[data-confirmation-admin]");
@@ -1034,6 +1139,29 @@ async function appointmentDetail(event, loadedProps) {
   const completeOverride = dialog.querySelector("[data-appointment-complete-override]");
   if (fix) fix.hidden = !props.can_fix;
   if (cancel) cancel.hidden = !props.can_cancel;
+  if (assignment) {
+    assignment.hidden = !props.can_assign;
+    const selectedDrivers = new Set((props.drivers || []).map((item) => item.ID));
+    assignment.querySelectorAll("[data-appointment-driver]").forEach((input) => {
+      input.checked = selectedDrivers.has(input.value);
+    });
+    const primary = (props.drivers || []).find((item) => item.Primary);
+    const primaryInput = assignment.querySelector("[data-appointment-primary-driver]");
+    if (primaryInput) primaryInput.value = primary?.ID || "";
+    const resourceFor = (purpose) => (props.resources || []).find((item) => item.Purpose === purpose)?.ID || "";
+    const chipper = assignment.querySelector("[data-appointment-chipper]");
+    const transport = assignment.querySelector("[data-appointment-transport]");
+    const trailer = assignment.querySelector("[data-appointment-trailer]");
+    if (chipper) chipper.value = resourceFor("chipping");
+    if (transport) transport.value = resourceFor("transport");
+    if (trailer) trailer.value = resourceFor("trailer");
+    const selectedOtherResources = new Set((props.resources || []).filter((item) => item.Purpose === "other").map((item) => item.ID));
+    assignment.querySelectorAll("[data-appointment-other-resource]").forEach((input) => {
+      input.checked = selectedOtherResources.has(input.value);
+    });
+    const assignmentVersion = assignment.querySelector("[data-appointment-assignment-version]");
+    if (assignmentVersion) assignmentVersion.value = props.version;
+  }
   if (reschedule) reschedule.hidden = !props.can_reschedule;
 	if (swapPanel) swapPanel.hidden = !props.can_swap;
 	const swapTarget = dialog.querySelector("[data-appointment-swap-target]");
@@ -1067,23 +1195,47 @@ document.querySelectorAll("[data-appointment-close]").forEach((button) => {
     if (closeDialogWithDirtyCheck(button.closest("dialog"))) appointmentDetailSequence += 1;
   });
 });
+document.querySelector("[data-appointment-dialog]")?.addEventListener("cancel", (event) => {
+  if (event.currentTarget.dataset.actionPending === "true") event.preventDefault();
+});
 
 async function appointmentAction(action, extra = {}) {
   const dialog = document.querySelector("[data-appointment-dialog]");
+  if (dialog.dataset.actionPending === "true") throw new Error("appointment action pending");
+  const controls = Array.from(dialog.querySelectorAll("button, input, select, textarea"));
+  const controlStates = controls.map((control) => control.disabled);
+  dialog.dataset.actionPending = "true";
+  dialog.setAttribute("aria-busy", "true");
+  controls.forEach((control) => { control.disabled = true; });
+  dialog.inert = true;
   const csrf = dialog.querySelector("[data-appointment-csrf]").value;
   const form = new FormData();
   form.set("csrf_token", csrf); form.set("version", dialog.dataset.version);
-  Object.entries(extra).forEach(([key, value]) => form.set(key, value));
-  const result = await calendarRequest(`/api/v1/appointments/${encodeURIComponent(dialog.dataset.appointmentId)}/${action}`, form, csrf);
-  clearDialogDirtyState(dialog);
-  dialog.close(); window.hackWerkCalendar?.refetchEvents();
-  const message = action === "fix"
-    ? "Termin wurde ausdrücklich fixiert; der Versand erfolgt später über die Outbox."
-    : action === "complete"
-      ? "Termin und Auftrag wurden als erledigt markiert."
-      : "Termin wurde aktualisiert.";
-  announceCalendar(message);
-  return result;
+  Object.entries(extra).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      form.delete(key);
+      value.forEach((item) => form.append(key, item));
+      return;
+    }
+    form.set(key, value);
+  });
+  try {
+    const result = await calendarRequest(`/api/v1/appointments/${encodeURIComponent(dialog.dataset.appointmentId)}/${action}`, form, csrf);
+    clearDialogDirtyState(dialog);
+    dialog.close(); window.hackWerkCalendar?.refetchEvents();
+    const message = action === "fix"
+      ? "Termin wurde ausdrücklich fixiert; der Versand erfolgt später über die Outbox."
+      : action === "complete"
+        ? "Termin und Auftrag wurden als erledigt markiert."
+        : "Termin wurde aktualisiert.";
+    announceCalendar(message);
+    return result;
+  } finally {
+    delete dialog.dataset.actionPending;
+    dialog.removeAttribute("aria-busy");
+    dialog.inert = false;
+    controls.forEach((control, index) => { control.disabled = controlStates[index]; });
+  }
 }
 
 document.querySelector("[data-appointment-reschedule-submit]")?.addEventListener("click", async () => {
@@ -1126,6 +1278,24 @@ document.querySelector("[data-appointment-swap]")?.addEventListener("click", asy
   if (!target?.value || !option?.dataset.version) { showAppointmentError("Bitte wählen Sie einen anderen Entwurf oder Vorschlag.", target); return; }
   if (!window.confirm("Die Zeitfenster beider Vorschläge atomisch tauschen? Es wird kein Termin fixiert und keine Nachricht versendet.")) return;
   try { await appointmentAction("swap", { other_appointment_id: target.value, other_version: option.dataset.version }); } catch (failure) { showAppointmentFailure(failure); }
+});
+
+document.querySelector("[data-appointment-swap-search]")?.addEventListener("click", async () => {
+  const dialog = document.querySelector("[data-appointment-dialog]");
+  const date = dialog?.querySelector("[data-appointment-swap-date]");
+  const target = dialog?.querySelector("[data-appointment-swap-target]");
+  if (!date?.value || !target) { showAppointmentError("Bitte wählen Sie ein Datum.", date); return; }
+  const response = await fetch(`/api/v1/appointments/${encodeURIComponent(dialog.dataset.appointmentId)}/swap-candidates?date=${encodeURIComponent(date.value)}`, { headers: { Accept: "application/json" } });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) { showAppointmentFailure(payload); return; }
+  target.replaceChildren(new Option("Bitte wählen", ""));
+  (payload.candidates || []).forEach((candidate) => {
+    const label = new Intl.DateTimeFormat("de-AT", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Vienna" }).format(new Date(candidate.start));
+    const option = new Option(`${candidate.title} · ${label}`, candidate.id);
+    option.dataset.version = candidate.version;
+    target.add(option);
+  });
+  announceCalendar(payload.candidates?.length ? `${payload.candidates.length} tauschbare Vorschläge geladen.` : "Keine tauschbaren Vorschläge an diesem Datum gefunden.");
 });
 
 document.querySelectorAll("[data-appointment-duration-adjust]").forEach((button) => {
@@ -1403,6 +1573,9 @@ if (calendarElement && window.FullCalendar) {
       calendar.gotoDate(target);
     });
   });
+  controls?.querySelector("[data-calendar-reload]")?.addEventListener("click", () => { calendar.refetchEvents(); announceCalendar("Kalender wird neu geladen; Ansicht und Datum bleiben erhalten."); });
+  controls?.querySelector("[data-calendar-share]")?.addEventListener("click", async () => { const link = new URL(window.location.href); link.searchParams.delete("appointment"); if (await copyText(link.href)) announceCalendar("Datenschutzarmer Ansichtslink kopiert."); });
+  window.addEventListener("hackwerk:online", () => { if (calendarElement.dataset.loadFailed === "true") calendar.refetchEvents(); });
   if (requestedAppointment) {
     loadAppointmentDetail(requestedAppointment).then(async (props) => {
       const startsAt = new Date(props.start);
@@ -1469,16 +1642,11 @@ document.querySelectorAll("[data-copy-source]").forEach((button) => {
     const input = document.getElementById(button.dataset.copySource);
     if (!input) return;
     const original = button.textContent;
-    try {
-      await navigator.clipboard.writeText(input.value);
+    if (await copyText(input.value, input)) {
       button.textContent = "Kopiert";
-    } catch {
-      input.select();
-      document.execCommand("copy");
-      button.textContent = "Kopiert";
+      announce("In die Zwischenablage kopiert.");
+      window.setTimeout(() => { button.textContent = original; }, 1800);
     }
-    announce("In die Zwischenablage kopiert.");
-    window.setTimeout(() => { button.textContent = original; }, 1800);
   });
 });
 
@@ -1487,20 +1655,11 @@ document.querySelectorAll("[data-copy-value]").forEach((button) => {
     const value = String(button.dataset.copyValue || "").trim();
     if (!value) return;
     const original = button.textContent;
-    try {
-      await navigator.clipboard.writeText(value);
-    } catch {
-      const fallback = document.createElement("textarea");
-      fallback.value = value;
-      fallback.className = "visually-hidden";
-      document.body.append(fallback);
-      fallback.select();
-      document.execCommand("copy");
-      fallback.remove();
+    if (await copyText(value)) {
+      button.textContent = "Kopiert";
+      announce("In die Zwischenablage kopiert.");
+      window.setTimeout(() => { button.textContent = original; }, 1800);
     }
-    button.textContent = "Kopiert";
-    announce("In die Zwischenablage kopiert.");
-    window.setTimeout(() => { button.textContent = original; }, 1800);
   });
 });
 
@@ -1705,9 +1864,6 @@ document.querySelectorAll("[data-planning-workbench]").forEach((workbench) => {
     if (current) step.setAttribute("aria-current", "step");
     else step.removeAttribute("aria-current");
   });
-  controls?.querySelector("[data-calendar-reload]")?.addEventListener("click", () => { calendar.refetchEvents(); announceCalendar("Kalender wird neu geladen; Ansicht und Datum bleiben erhalten."); });
-  controls?.querySelector("[data-calendar-share]")?.addEventListener("click", async () => { const link = new URL(window.location.href); link.searchParams.delete("appointment"); await navigator.clipboard.writeText(link.href); announceCalendar("Datenschutzarmer Ansichtslink kopiert."); });
-  window.addEventListener("hackwerk:online", () => { if (calendarElement.dataset.loadFailed === "true") calendar.refetchEvents(); });
   planningSteps.filter((step) => step.matches("a[href^='#']")).forEach((step) => {
     step.addEventListener("click", (event) => {
       const target = document.querySelector(step.hash);
@@ -1748,7 +1904,13 @@ document.querySelectorAll("[data-planning-workbench]").forEach((workbench) => {
 	const selectedRegion = String(region?.value || "");
     return (!query || String(row.dataset.search || "").includes(query)) && (!selectedRegion || row.dataset.region === selectedRegion) && (!maximum || (radiusOrigin && distanceKM(row) <= maximum));
   };
-  const renderFilters = () => rows.forEach((row) => { row.hidden = !visible(row); });
+  const renderFilters = () => {
+    rows.forEach((row) => { row.hidden = !visible(row); });
+    const count = rows.filter((row) => !row.hidden).length;
+    const label = workbench.querySelector("[data-planning-visible-count]");
+    if (label) label.textContent = `${count} sichtbar`;
+    workbench.dispatchEvent(new CustomEvent("planningfilterchange", { bubbles: true, detail: { count } }));
+  };
   const checkedRows = () => rows.filter((row) => row.querySelector('input[name="job_id"]')?.checked);
   const update = ({ syncSingle = true } = {}) => {
     const selected = checkedRows();
@@ -1794,7 +1956,7 @@ document.querySelectorAll("[data-planning-workbench]").forEach((workbench) => {
     update({ syncSingle: false });
   });
   workbench.querySelector("[data-planning-select-visible]")?.addEventListener("click", () => { rows.filter(visible).forEach((row) => { const box = row.querySelector('input[name="job_id"]'); if (box && !box.disabled) box.checked = true; }); update(); });
-	workbench.querySelector("[data-planning-reset]")?.addEventListener("click", () => { rows.forEach((row) => { const box = row.querySelector('input[name="job_id"]'); if (box) box.checked = false; row.hidden = false; }); if (search) search.value = ""; if (radius) radius.value = ""; if (region) region.value = ""; update(); });
+	workbench.querySelector("[data-planning-reset]")?.addEventListener("click", () => { rows.forEach((row) => { const box = row.querySelector('input[name="job_id"]'); if (box) box.checked = false; }); if (search) search.value = ""; if (radius) radius.value = ""; if (region) region.value = ""; renderFilters(); update(); });
   if (single?.value) {
     const selectedRow = rows.find((row) => row.dataset.jobId === single.value);
     const selectedBox = selectedRow?.querySelector('input[name="job_id"]');
@@ -1867,6 +2029,7 @@ if (voiceCapture) {
   const timer = voiceCapture.querySelector("[data-voice-timer]");
   const status = voiceCapture.querySelector("[data-voice-status]");
   const uploadForm = voiceCapture.querySelector("[data-voice-upload]");
+  const idempotencyInput = voiceCapture.querySelector("[data-voice-idempotency-key]");
   const preview = voiceCapture.querySelector("[data-voice-preview]");
   const previewAudio = voiceCapture.querySelector("[data-voice-audio]");
   const sendButton = voiceCapture.querySelector("[data-voice-send]");
@@ -1889,6 +2052,18 @@ if (voiceCapture) {
   let pendingAudio;
   let pendingDurationMs = 0;
   let previewURL = "";
+  let pendingUploadKey = idempotencyInput?.value || "";
+
+  const newUploadKey = () => {
+    if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+    const values = new Uint32Array(4);
+    crypto.getRandomValues(values);
+    return Array.from(values, (value) => value.toString(16).padStart(8, "0")).join("-");
+  };
+  const resetUploadKey = () => {
+    pendingUploadKey = newUploadKey();
+    if (idempotencyInput) idempotencyInput.value = pendingUploadKey;
+  };
 
   const announce = (message) => { status.textContent = message; };
   const resetControls = () => {
@@ -1923,6 +2098,7 @@ if (voiceCapture) {
   };
   const uploadAudio = (blob, durationMs) => new Promise((resolve, reject) => {
     const form = new FormData();
+    form.append("idempotency_key", pendingUploadKey);
     form.append("duration_ms", String(Math.max(1, Math.min(maxSeconds * 1000, durationMs))));
     form.append("audio", blob, "aufnahme.webm");
     announce("Aufnahme wird sicher übertragen und für die Verarbeitung eingereiht …");
@@ -1960,6 +2136,7 @@ if (voiceCapture) {
     if (preview) preview.hidden = true;
     if (retryButton) retryButton.hidden = true;
     if (progress) progress.hidden = true;
+    resetUploadKey();
   };
   const submitPendingAudio = async () => {
     if (!pendingAudio) return;
@@ -1982,6 +2159,7 @@ if (voiceCapture) {
   } else {
     startButton.addEventListener("click", async () => {
       try {
+        resetUploadKey();
         stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         chunks = [];
         cancelled = false;
@@ -2045,6 +2223,7 @@ if (voiceCapture) {
     const audio = uploadForm.elements.audio.files[0];
     const seconds = Number(uploadForm.elements.duration_seconds.value);
     if (!audio || !Number.isFinite(seconds) || seconds <= 0 || seconds > maxSeconds) { announce("Bitte Datei und gültige Dauer innerhalb des Limits angeben."); return; }
+    resetUploadKey();
     uploadForm.querySelector("button[type='submit']").disabled = true;
     pendingAudio = audio;
     pendingDurationMs = seconds * 1000;
@@ -2053,6 +2232,9 @@ if (voiceCapture) {
       window.location.assign(payload.location);
     } catch (failure) {
       announce(failure.message);
+      if (previewURL) URL.revokeObjectURL(previewURL);
+      previewURL = URL.createObjectURL(audio);
+      if (previewAudio) previewAudio.src = previewURL;
       preview.hidden = false;
       retryButton.hidden = false;
       uploadForm.querySelector("button[type='submit']").disabled = false;
@@ -2275,9 +2457,20 @@ function initializeJobLocationEditor(editor, maplibregl) {
   const showSearchStatus = (text) => {
     if (searchStatus) searchStatus.textContent = text;
   };
+  let searchSequence = 0;
+  let searchController;
+  const stopSearchBusy = () => {
+    if (!searchSubmit) return;
+    searchSubmit.disabled = false;
+    searchSubmit.removeAttribute("aria-busy");
+  };
   const searchAddress = async () => {
+    const sequence = ++searchSequence;
+    searchController?.abort();
+    searchController = new AbortController();
     const query = String(searchInput?.value || "").trim();
     if (query.length < 3) {
+      stopSearchBusy();
       clearSearchResults();
       showSearchStatus("Bitte mindestens drei Zeichen eingeben.");
       searchInput?.focus();
@@ -2285,6 +2478,7 @@ function initializeJobLocationEditor(editor, maplibregl) {
     }
     const csrf = editor.closest("form")?.querySelector("[name='csrf_token']")?.value;
     if (!csrf) {
+      stopSearchBusy();
       showSearchStatus("Die Sicherheitsprüfung ist abgelaufen. Bitte laden Sie die Seite neu.");
       return;
     }
@@ -2298,8 +2492,10 @@ function initializeJobLocationEditor(editor, maplibregl) {
         headers: { "X-CSRF-Token": csrf, "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
         body: new URLSearchParams({ query }),
         credentials: "same-origin",
+        signal: searchController.signal,
       });
       const payload = await response.json().catch(() => ({}));
+      if (sequence !== searchSequence) return;
       if (!response.ok) throw new Error(payload?.error?.message || "Die Adresssuche ist derzeit nicht verfügbar.");
       const results = Array.isArray(payload.results) ? payload.results.slice(0, 10) : [];
       if (results.length === 0) {
@@ -2338,11 +2534,12 @@ function initializeJobLocationEditor(editor, maplibregl) {
       searchResults.hidden = searchResults.children.length === 0;
       showSearchStatus(searchResults.hidden ? "Keine nutzbaren Treffer erhalten." : `${searchResults.children.length} Treffer gefunden. Wählen Sie eine Adresse.`);
     } catch (error) {
+      if (sequence !== searchSequence || error?.name === "AbortError") return;
       clearSearchResults();
       showSearchStatus(error instanceof Error ? error.message : "Die Adresssuche ist derzeit nicht verfügbar.");
     } finally {
-      searchSubmit.disabled = false;
-      searchSubmit.removeAttribute("aria-busy");
+      if (sequence !== searchSequence) return;
+      stopSearchBusy();
     }
   };
 
@@ -2433,6 +2630,37 @@ function initializeJobLocationEditor(editor, maplibregl) {
 
   if (!map) markMapUnavailable(canvas);
 }
+
+document.querySelector("[data-appointment-assign]")?.addEventListener("click", async () => {
+  const dialog = document.querySelector("[data-appointment-dialog]");
+  const assignment = dialog?.querySelector("[data-appointment-assignment]");
+  const drivers = [...(assignment?.querySelectorAll("[data-appointment-driver]:checked") || [])].map((input) => input.value);
+  const primary = assignment?.querySelector("[data-appointment-primary-driver]");
+  const chipper = assignment?.querySelector("[data-appointment-chipper]");
+  const otherResources = [...(assignment?.querySelectorAll("[data-appointment-other-resource]:checked") || [])].map((input) => input.value);
+  if (!drivers.length || !primary?.value || !drivers.includes(primary.value)) {
+    showAppointmentError("Bitte wählen Sie mindestens einen Fahrer und daraus den Primärfahrer.", primary);
+    return;
+  }
+  if (!chipper?.value) {
+    showAppointmentError("Bitte wählen Sie eine Hackmaschine.", chipper);
+    return;
+  }
+  clearAppointmentError();
+  try {
+    await appointmentAction("assign", {
+      driver_id: drivers,
+      primary_driver_id: primary.value,
+      chipper_resource_id: chipper.value,
+      transport_resource_id: assignment.querySelector("[data-appointment-transport]")?.value || "",
+      trailer_resource_id: assignment.querySelector("[data-appointment-trailer]")?.value || "",
+      other_resource_id: otherResources,
+      override_reason: assignment.querySelector("[data-appointment-assignment-override]")?.value.trim() || "",
+    });
+  } catch (failure) {
+    showAppointmentFailure(failure);
+  }
+});
 
 const voiceProcessing = document.querySelector("[data-voice-processing]");
 if (voiceProcessing) {
@@ -2806,23 +3034,28 @@ function initializeRouteMap(canvas, maplibregl) {
   const routeEnd = mapPoint(canvas.dataset.routeEndLatitude, canvas.dataset.routeEndLongitude);
   const start = routeStart || mapPoint(selectedStart?.dataset.routeLocationLatitude, selectedStart?.dataset.routeLocationLongitude);
   const end = routeEnd || mapPoint(selectedEnd?.dataset.routeLocationLatitude, selectedEnd?.dataset.routeLocationLongitude);
-  const sameEndpoint = start && end && Math.abs(start.latitude - end.latitude) < 1e-7 && Math.abs(start.longitude - end.longitude) < 1e-7;
+  let currentStart = start;
+  let currentEnd = end;
   const stopJobIDs = new Set(stops.map((stop) => stop.jobID).filter(Boolean));
   const visibleCandidates = candidates.filter((candidate) => !stopJobIDs.has(candidate.jobID));
+  const filteredCandidates = () => visibleCandidates.filter((candidate) => !candidate.element.hidden);
   candidates.forEach((candidate) => {
     const syncRow = () => candidate.element.classList.toggle("route-candidate--selected", candidate.checkbox.checked);
     candidate.checkbox.addEventListener("change", syncRow);
     syncRow();
   });
-  const allCoordinates = [
-    ...(start ? [[start.longitude, start.latitude]] : []),
-    ...(end && !sameEndpoint ? [[end.longitude, end.latitude]] : []),
-    ...geometryCoordinates,
-    ...stops.map((stop) => [stop.point.longitude, stop.point.latitude]),
-    ...visibleCandidates.map((candidate) => [candidate.point.longitude, candidate.point.latitude]),
-  ];
+  const allCoordinates = () => {
+    const sameEndpoint = currentStart && currentEnd && Math.abs(currentStart.latitude - currentEnd.latitude) < 1e-7 && Math.abs(currentStart.longitude - currentEnd.longitude) < 1e-7;
+    return [
+      ...(currentStart ? [[currentStart.longitude, currentStart.latitude]] : []),
+      ...(currentEnd && !sameEndpoint ? [[currentEnd.longitude, currentEnd.latitude]] : []),
+      ...geometryCoordinates,
+      ...stops.map((stop) => [stop.point.longitude, stop.point.latitude]),
+      ...filteredCandidates().map((candidate) => [candidate.point.longitude, candidate.point.latitude]),
+    ];
+  };
 
-  const first = allCoordinates[0];
+  const first = allCoordinates()[0];
   const map = new maplibregl.Map({
     container: canvas,
     style: hackWerkRasterStyle(),
@@ -2837,16 +3070,17 @@ function initializeRouteMap(canvas, maplibregl) {
   });
   let ready = false;
   const fitAll = () => {
-    if (allCoordinates.length === 0) {
+    const coordinates = allCoordinates();
+    if (coordinates.length === 0) {
       map.fitBounds([[9.5, 46.3], [17.3, 49.2]], { padding: 36, maxZoom: 7, duration: 0 });
       return;
     }
-    if (allCoordinates.length === 1) {
-      map.easeTo({ center: allCoordinates[0], zoom: 11, duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300 });
+    if (coordinates.length === 1) {
+      map.easeTo({ center: coordinates[0], zoom: 11, duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300 });
       return;
     }
     const bounds = new maplibregl.LngLatBounds();
-    allCoordinates.forEach((coordinate) => bounds.extend(coordinate));
+    coordinates.forEach((coordinate) => bounds.extend(coordinate));
     map.fitBounds(bounds, {
       padding: window.matchMedia("(max-width: 680px)").matches ? 36 : 56,
       maxZoom: 15,
@@ -2863,10 +3097,15 @@ function initializeRouteMap(canvas, maplibregl) {
     canvas.insertAdjacentElement("beforebegin", toolbar);
   }
   const startButton = toolbar.querySelector("[data-route-map-start]");
-  if (!start) {
-    startButton?.setAttribute("disabled", "");
-    startButton?.setAttribute("title", "Wählen Sie zuerst einen Startort.");
-  } else startButton?.addEventListener("click", () => map.easeTo({ center: [start.longitude, start.latitude], zoom: 13 }));
+  const updateStartButton = () => {
+    startButton?.toggleAttribute("disabled", !currentStart);
+    if (!currentStart) startButton?.setAttribute("title", "Wählen Sie zuerst einen Startort.");
+    else startButton?.removeAttribute("title");
+  };
+  startButton?.addEventListener("click", () => {
+    if (currentStart) map.easeTo({ center: [currentStart.longitude, currentStart.latitude], zoom: 13 });
+  });
+  updateStartButton();
   toolbar.querySelector("[data-route-map-fit]")?.addEventListener("click", fitAll);
   toolbar.querySelector("[data-route-map-labels]")?.addEventListener("click", (event) => {
     const visible = !context.classList.toggle("route-map-labels-hidden");
@@ -2901,9 +3140,10 @@ function initializeRouteMap(canvas, maplibregl) {
   }
   const updateVisibleCount = () => {
     const bounds = map.getBounds();
-    const count = [...stops, ...visibleCandidates].filter((item) => bounds.contains([item.point.longitude, item.point.latitude])).length;
-    const label = toolbar.querySelector("[data-route-map-count]");
-    if (label) label.textContent = `${count}/${stops.length + visibleCandidates.length} Punkte sichtbar`;
+    const candidatesInFilter = filteredCandidates();
+    const count = [...stops, ...candidatesInFilter].filter((item) => bounds.contains([item.point.longitude, item.point.latitude])).length;
+    const label = context.querySelector("[data-route-map-count]");
+    if (label) label.textContent = `${count}/${stops.length + candidatesInFilter.length} Punkte sichtbar`;
   };
   map.on("moveend", updateVisibleCount);
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
@@ -2933,6 +3173,65 @@ function initializeRouteMap(canvas, maplibregl) {
     }
     if (!ready) markRouteMapUnavailable(canvas);
   });
+  let startMarker = null;
+  let endMarker = null;
+  let endpointSelectionChanged = false;
+  const selectedEndpoint = (prefix) => {
+    const picker = context.querySelector(`[data-route-location-prefix="${prefix}"]`);
+    const choice = picker?.querySelector("[data-route-location-choice]:checked");
+    if (!picker || !choice) return { point: null, label: prefix === "start" ? "Startort" : "Endort" };
+    if (choice.dataset.routeLocationKind === "saved") {
+      return {
+        point: mapPoint(choice.dataset.routeLocationLatitude, choice.dataset.routeLocationLongitude),
+        label: String(choice.dataset.routeLocationLabel || (prefix === "start" ? "Startort" : "Endort")).trim(),
+      };
+    }
+    if (choice.dataset.routeLocationKind === "last-stop") {
+      const last = stops.at(-1);
+      return { point: last?.point || null, label: last?.label || "Letzter Stopp" };
+    }
+    return {
+      point: mapPoint(picker.querySelector("[data-route-location-latitude]")?.value, picker.querySelector("[data-route-location-longitude]")?.value),
+      label: String(picker.querySelector("[data-route-location-label]")?.value || picker.querySelector("[data-route-location-address]")?.value || (prefix === "start" ? "Startort" : "Endort")).trim(),
+    };
+  };
+  const renderEndpointMarkers = (fromPicker = false) => {
+    const startEndpoint = fromPicker
+      ? selectedEndpoint("start")
+      : { point: start, label: String(canvas.dataset.routeStartLabel || selectedStart?.dataset.routeLocationLabel || "Startort").trim() };
+    const endEndpoint = fromPicker
+      ? selectedEndpoint("end")
+      : { point: end, label: String(canvas.dataset.routeEndLabel || selectedEnd?.dataset.routeLocationLabel || "Endort").trim() };
+    currentStart = startEndpoint.point;
+    currentEnd = endEndpoint.point;
+    updateStartButton();
+    startMarker?.remove();
+    endMarker?.remove();
+    startMarker = null;
+    endMarker = null;
+    const sameEndpoint = currentStart && currentEnd && Math.abs(currentStart.latitude - currentEnd.latitude) < 1e-7 && Math.abs(currentStart.longitude - currentEnd.longitude) < 1e-7;
+    if (currentStart) {
+      const popup = routePopupContent({ label: startEndpoint.label || "Startort", customer: sameEndpoint ? "Start und Ende der Route" : "Start der Route" });
+      startMarker = new maplibregl.Marker({ element: startMarkerElement(), anchor: "bottom" })
+        .setLngLat([currentStart.longitude, currentStart.latitude])
+        .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(popup.content))
+        .addTo(map);
+    }
+    if (currentEnd && !sameEndpoint) {
+      const popup = routePopupContent({ label: endEndpoint.label || "Endort", customer: "Ende der Route" });
+      endMarker = new maplibregl.Marker({ element: endMarkerElement(), anchor: "bottom" })
+        .setLngLat([currentEnd.longitude, currentEnd.latitude])
+        .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(popup.content))
+        .addTo(map);
+    }
+  };
+  context.addEventListener("route-location-status", () => {
+    endpointSelectionChanged = true;
+    if (!ready) return;
+    renderEndpointMarkers(true);
+    fitAll();
+    updateVisibleCount();
+  });
   map.once("style.load", () => {
     if (geometry && canvas.dataset.routeLineState !== "failed") {
       routeMapNotice(context, "Die berechnete Routenlinie wird geladen …");
@@ -2948,22 +3247,7 @@ function initializeRouteMap(canvas, maplibregl) {
       routeMapNotice(context, "Die Grundkarte ist aktiv. Noch kein offener Auftrag besitzt einen gespeicherten Haufenstandort.");
     }
 
-    if (start) {
-      const startLabel = String(canvas.dataset.routeStartLabel || selectedStart?.dataset.routeLocationLabel || "Startort").trim() || "Startort";
-      const startPopup = routePopupContent({ label: startLabel, customer: sameEndpoint ? "Start und Ende der Route" : "Start der Route" });
-      new maplibregl.Marker({ element: startMarkerElement(), anchor: "bottom" })
-        .setLngLat([start.longitude, start.latitude])
-        .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(startPopup.content))
-        .addTo(map);
-    }
-    if (end && !sameEndpoint) {
-      const endLabel = String(canvas.dataset.routeEndLabel || selectedEnd?.dataset.routeLocationLabel || "Endort").trim() || "Endort";
-      const endPopup = routePopupContent({ label: endLabel, customer: "Ende der Route" });
-      new maplibregl.Marker({ element: endMarkerElement(), anchor: "bottom" })
-        .setLngLat([end.longitude, end.latitude])
-        .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(endPopup.content))
-        .addTo(map);
-    }
+    renderEndpointMarkers(endpointSelectionChanged);
 
     const stopMarkers = new Map();
     stops.forEach((stop) => {
@@ -2980,7 +3264,7 @@ function initializeRouteMap(canvas, maplibregl) {
     let clusteredSource;
     const clusteredData = () => ({
       type: "FeatureCollection",
-      features: visibleCandidates.map((candidate) => ({
+      features: filteredCandidates().map((candidate) => ({
         type: "Feature",
         geometry: { type: "Point", coordinates: [candidate.point.longitude, candidate.point.latitude] },
         properties: {
@@ -3072,6 +3356,18 @@ function initializeRouteMap(canvas, maplibregl) {
       candidate.element.addEventListener("focusout", () => focusPair(false));
     });
 
+    const applyPlanningFilterToMap = () => {
+      if (clusteredSource) clusteredSource.setData(clusteredData());
+      candidateMarkers.forEach((markerElement, jobID) => {
+        const candidate = visibleCandidates.find((item) => item.jobID === jobID);
+        markerElement.hidden = Boolean(candidate?.element.hidden);
+      });
+      updateVisibleCount();
+      fitAll();
+    };
+    (context.closest("[data-planning-workbench]") || context).addEventListener("planningfilterchange", applyPlanningFilterToMap);
+    applyPlanningFilterToMap();
+
     context.addEventListener("routecandidateorderchange", () => {
       routeCandidates(context).forEach((ordered, index) => {
         const candidate = visibleCandidates.find((item) => item.jobID === ordered.jobID);
@@ -3099,7 +3395,6 @@ function initializeRouteMap(canvas, maplibregl) {
       routeMapNotice(context, "Die Reihenfolge wurde in der Liste geändert. Nach dem Speichern wird die Routenlinie neu berechnet.");
     });
 
-    fitAll();
     initializeRouteLineOverlay(canvas, map, geometry, routeSource, context);
     updateVisibleCount();
     ready = true;

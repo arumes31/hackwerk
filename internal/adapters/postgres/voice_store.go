@@ -27,24 +27,79 @@ func NewVoiceStore(pool *pgxpool.Pool) *VoiceStore {
 	return &VoiceStore{pool: pool, queries: dbgen.New(pool), now: time.Now}
 }
 
-func (store *VoiceStore) CreateRecording(ctx context.Context, actor auth.Actor, audio []byte, contentType string, metadata voice.Metadata, draftExpiresAt, recordingExpiresAt time.Time) (voice.Draft, error) {
-	if len(audio) == 0 || len(audio) > 15<<20 || metadata.Duration <= 0 || metadata.Duration > 5*time.Minute {
+func (store *VoiceStore) FindRecordingByUploadKey(ctx context.Context, actor auth.Actor, uploadKeyHash []byte) (voice.Draft, bool, error) {
+	if len(uploadKeyHash) != 32 {
+		return voice.Draft{}, false, voice.ErrValidation
+	}
+	existing, err := store.queries.GetVoiceDraftByUploadKey(ctx, dbgen.GetVoiceDraftByUploadKeyParams{
+		OwnerUserID: mustUUID(actor.UserID), UploadKeyHash: uploadKeyHash,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return voice.Draft{}, false, nil
+	}
+	if err != nil {
+		return voice.Draft{}, false, err
+	}
+	return voice.Draft{
+		ID: existing.DraftID, OwnerUserID: actor.UserID, Status: voice.Status(existing.Status),
+		Version: existing.Version, ExpiresAt: existing.ExpiresAt.Time.UTC(),
+	}, true, nil
+}
+
+func (store *VoiceStore) CreateRecording(ctx context.Context, actor auth.Actor, uploadKeyHash, audio []byte, contentType string, metadata voice.Metadata, draftExpiresAt, recordingExpiresAt time.Time) (result voice.Draft, resultErr error) {
+	if len(uploadKeyHash) != 32 || len(audio) == 0 || len(audio) > 15<<20 || metadata.Duration <= 0 || metadata.Duration > 5*time.Minute {
 		return voice.Draft{}, voice.ErrValidation
 	}
 	// #nosec G115 -- the validation above bounds the payload far below MaxInt32.
 	byteSize := int32(len(audio))
 	// #nosec G115 -- the validation above bounds duration to at most 300,000 ms.
 	durationMS := int32(metadata.Duration / time.Millisecond)
-	draftID, err := store.queries.InsertVoiceRecording(ctx, dbgen.InsertVoiceRecordingParams{
-		OwnerUserID: mustUUID(actor.UserID), ContentType: contentType, AudioBytes: audio,
-		ByteSize: byteSize, DurationMs: durationMS,
-		RecordedAt: timestamp(metadata.RecordedAt.UTC()), RecordingExpiresAt: timestamp(recordingExpiresAt.UTC()),
-		DraftExpiresAt: timestamp(draftExpiresAt.UTC()),
+	ownerID := mustUUID(actor.UserID)
+	resultErr = withQueries(ctx, store.pool, func(queries *dbgen.Queries) error {
+		if err := queries.LockVoiceUploadKey(ctx, dbgen.LockVoiceUploadKeyParams{OwnerUserID: actor.UserID, UploadKeyHash: uploadKeyHash}); err != nil {
+			return err
+		}
+		existing, err := queries.GetVoiceDraftByUploadKey(ctx, dbgen.GetVoiceDraftByUploadKeyParams{OwnerUserID: ownerID, UploadKeyHash: uploadKeyHash})
+		if err == nil {
+			result = voice.Draft{ID: existing.DraftID, OwnerUserID: actor.UserID, Status: voice.Status(existing.Status), Version: existing.Version, ExpiresAt: existing.ExpiresAt.Time.UTC()}
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		draftID, err := queries.InsertVoiceRecording(ctx, dbgen.InsertVoiceRecordingParams{
+			OwnerUserID: ownerID, UploadKeyHash: uploadKeyHash, ContentType: contentType, AudioBytes: audio,
+			ByteSize: byteSize, DurationMs: durationMS,
+			RecordedAt: timestamp(metadata.RecordedAt.UTC()), RecordingExpiresAt: timestamp(recordingExpiresAt.UTC()),
+			DraftExpiresAt: timestamp(draftExpiresAt.UTC()),
+		})
+		if err != nil {
+			return err
+		}
+		result = voice.Draft{ID: draftID, OwnerUserID: actor.UserID, Status: voice.StatusRecorded, Version: 1, ExpiresAt: draftExpiresAt.UTC()}
+		return nil
 	})
+	return result, resultErr
+}
+
+func (store *VoiceStore) RetryRecording(ctx context.Context, actor auth.Actor, id string, expectedVersion int32, now time.Time) (voice.Draft, error) {
+	parsedID, err := uuid(id)
+	if err != nil {
+		return voice.Draft{}, voice.ErrNotFound
+	}
+	row, err := store.queries.RetryFailedVoiceRecording(ctx, dbgen.RetryFailedVoiceRecordingParams{
+		NowUtc: timestamp(now.UTC()), DraftID: parsedID, OwnerUserID: mustUUID(actor.UserID), ExpectedVersion: expectedVersion,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return voice.Draft{}, voice.ErrConflict
+	}
 	if err != nil {
 		return voice.Draft{}, err
 	}
-	return voice.Draft{ID: draftID, OwnerUserID: actor.UserID, Status: voice.StatusRecorded, Version: 1, ExpiresAt: draftExpiresAt.UTC()}, nil
+	return voice.Draft{
+		ID: row.DraftID, OwnerUserID: row.DraftOwnerUserID, Status: voice.Status(row.Status), RetryCount: int32(row.RetryCount),
+		ManualRetryCount: int32(row.ManualRetryCount), Version: row.Version, CreatedAt: row.CreatedAt.Time.UTC(), UpdatedAt: row.UpdatedAt.Time.UTC(), ExpiresAt: row.ExpiresAt.Time.UTC(),
+	}, nil
 }
 
 func (store *VoiceStore) ClaimRecording(ctx context.Context, workerID string, now, leaseUntil time.Time) (voice.ClaimedRecording, bool, error) {
@@ -198,7 +253,7 @@ func (store *VoiceStore) Get(ctx context.Context, actor auth.Actor, id string) (
 	if row.ExpiresAt.Time.Before(store.now().UTC()) && status != voice.StatusCommitted {
 		status = voice.StatusExpired
 	}
-	return voice.Draft{ID: row.ID, OwnerUserID: row.OwnerUserID, Status: status, Transcript: row.Transcript, Fields: fields, Warnings: row.Warnings, OverallConfidence: confidence, ProviderName: row.ProviderName, ProviderVersion: row.ProviderVersion, ParserVersion: row.ParserVersion, FailureCode: row.FailureCode, RetryCount: int32(row.RetryCount), Version: row.Version, Committed: customers.CreatedIntake{CustomerID: row.CommittedCustomerID, JobID: row.CommittedJobID, WaitlistID: row.CommittedWaitlistID}, CreatedAt: row.CreatedAt.Time.UTC(), UpdatedAt: row.UpdatedAt.Time.UTC(), ExpiresAt: row.ExpiresAt.Time.UTC()}, nil
+	return voice.Draft{ID: row.ID, OwnerUserID: row.OwnerUserID, Status: status, Transcript: row.Transcript, Fields: fields, Warnings: row.Warnings, OverallConfidence: confidence, ProviderName: row.ProviderName, ProviderVersion: row.ProviderVersion, ParserVersion: row.ParserVersion, FailureCode: row.FailureCode, RetryCount: int32(row.RetryCount), ManualRetryCount: row.ManualRetryCount, Version: row.Version, Committed: customers.CreatedIntake{CustomerID: row.CommittedCustomerID, JobID: row.CommittedJobID, WaitlistID: row.CommittedWaitlistID}, CreatedAt: row.CreatedAt.Time.UTC(), UpdatedAt: row.UpdatedAt.Time.UTC(), ExpiresAt: row.ExpiresAt.Time.UTC()}, nil
 }
 
 func (store *VoiceStore) FindDuplicates(ctx context.Context, input customers.CustomerInput) ([]customers.Duplicate, error) {

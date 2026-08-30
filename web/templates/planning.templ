@@ -57,7 +57,7 @@ templ Planning(data PlanningData) {
 				<form id="planning-route-selection" method="get" action="/planning/routes"></form>
 				<section id="planung-auftrag" class="planning-workspace route-workspace" data-route-context tabindex="-1">
 					<div class="planning-orders form-card">
-						<div class="section-heading"><div><p class="eyebrow">Auftragsvorrat</p><h2>Aufträge</h2></div><span class="status-badge">{ fmt.Sprint(len(data.Candidates)) } vollständig</span></div>
+						<div class="section-heading"><div><p class="eyebrow">Auftragsvorrat</p><h2>Aufträge</h2></div><span class="status-badge" data-planning-visible-count>{ fmt.Sprint(len(data.Candidates)) } sichtbar</span></div>
 						<label class="planning-search">Suchen<input type="search" placeholder="Auftrag, Kunde, Ort oder Region" data-planning-search autocomplete="off"/></label>
 						<div class="planning-filter-row">
 							<label>

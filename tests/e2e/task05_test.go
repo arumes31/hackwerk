@@ -173,6 +173,33 @@ func TestTask05NotificationConfirmationBrowserJourney(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	var noteGuard struct {
+		Path     string `json:"path"`
+		Invalid  string `json:"invalid"`
+		Feedback string `json:"feedback"`
+		Live     string `json:"live"`
+	}
+	if err := runBrowserStep(browserContext, "customer confirmation note guard",
+		chromedp.SetValue("#confirmation-response-note", "Bitte vormittags", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('[data-confirmation-note-feedback]')?.textContent.includes('von 500 Zeichen')`, nil),
+		chromedp.Click("form.confirmation-actions button[value='confirmed']", chromedp.ByQuery),
+		chromedp.Evaluate(`({
+			path: location.pathname,
+			invalid: document.querySelector('#confirmation-response-note')?.getAttribute('aria-invalid'),
+			feedback: document.querySelector('[data-confirmation-note-feedback]')?.textContent,
+			live: document.querySelector('[data-confirmation-note-feedback]')?.getAttribute('aria-live')
+		})`, &noteGuard),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if noteGuard.Path != mustURLPath(t, link) || noteGuard.Invalid != "true" || noteGuard.Live != "polite" || !strings.Contains(noteGuard.Feedback, "nur mit einer Ablehnung") {
+		t.Fatalf("confirmation note guard = %#v", noteGuard)
+	}
+	if err := chromedp.Run(browserContext,
+		chromedp.Evaluate(`(()=>{const note=document.querySelector('#confirmation-response-note');note.value='';note.dispatchEvent(new Event('input',{bubbles:true}))})()`, nil),
+	); err != nil {
+		t.Fatalf("clear confirmation note: %s", browserDiagnostics(browserContext, err))
+	}
 	if err := chromedp.Run(browserContext,
 		chromedp.Click("form.confirmation-actions button[value='confirmed']", chromedp.ByQuery),
 	); err != nil {
@@ -226,7 +253,7 @@ func TestTask05NotificationConfirmationBrowserJourney(t *testing.T) {
 	if err := runBrowserStep(browserContext, "old link revoked", chromedp.Navigate(link), chromedp.WaitVisible("h1", chromedp.ByQuery), chromedp.Text("main", &invalidText, chromedp.ByQuery)); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(invalidText, "nicht mehr gültig") {
+	if !strings.Contains(invalidText, "Link nicht verfügbar") || strings.Contains(invalidText, "widerrufen") || strings.Contains(invalidText, "abgelaufen") {
 		t.Fatalf("old link result = %q", invalidText)
 	}
 
@@ -389,4 +416,13 @@ func confirmationLink(message string) string {
 		}
 	}
 	return ""
+}
+
+func mustURLPath(t *testing.T, rawURL string) string {
+	t.Helper()
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed.Path
 }

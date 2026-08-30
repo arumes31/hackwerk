@@ -883,7 +883,7 @@ func (q *Queries) RequeueNotificationOutbox(ctx context.Context, notificationID 
 
 const resetConfirmationResponse = `-- name: ResetConfirmationResponse :execrows
 UPDATE confirmation_requests
-SET response=NULL, responded_at=NULL, updated_at=now()
+SET response=NULL, response_note=NULL, responded_at=NULL, updated_at=now()
 WHERE id=$1::uuid AND status='active' AND response IS NOT NULL
 `
 

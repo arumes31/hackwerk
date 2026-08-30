@@ -167,7 +167,7 @@ func TestExplainExclusionsNamesUnusedCapacityWithoutInternalIDs(t *testing.T) {
 		t.Fatal("ExplainExclusions() returned no unused capacity")
 	}
 	for _, exclusion := range exclusions {
-		if exclusion.Name == "" || exclusion.Reason == "" || strings.Contains(exclusion.Reason, snapshot.Drivers[0].ID) {
+		if exclusion.Name == "" || exclusion.Reason != "nicht in den drei bestbewerteten Vorschlägen enthalten" || strings.Contains(exclusion.Reason, snapshot.Drivers[0].ID) {
 			t.Fatalf("unsafe or incomplete exclusion = %#v", exclusion)
 		}
 	}

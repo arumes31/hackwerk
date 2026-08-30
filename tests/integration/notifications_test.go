@@ -153,7 +153,7 @@ func TestMoveRevokesOldTokenAndPlansNewVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	confirmed, err := confirmationService.Respond(fixture.ctx, oldMaterial.Raw, view.FormNonce, notification.ResponseConfirmed, "", "confirm")
+	confirmed, err := confirmationService.Respond(fixture.ctx, oldMaterial.Raw, view.FormNonce, notification.ResponseDeclined, "Bitte vormittags zurückrufen", "confirm")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestMoveRevokesOldTokenAndPlansNewVersion(t *testing.T) {
 	if moved.Confirmation != appointment.ConfirmationPending {
 		t.Fatalf("moved confirmation = %s", moved.Confirmation)
 	}
-	if _, err := confirmationService.View(fixture.ctx, oldMaterial.Raw); !errors.Is(err, notification.ErrConfirmationUnavailable) {
+	if _, err := confirmationService.View(fixture.ctx, oldMaterial.Raw); !errors.Is(err, notification.ErrConfirmationRevoked) {
 		t.Fatalf("old token remains usable: %v", err)
 	}
 	var activeVersion int32
@@ -245,11 +245,12 @@ func TestAdminCanResetResponseAndReissueTokenWithReason(t *testing.T) {
 	var confirmationStatus string
 	var version int32
 	var responseValue *string
-	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT a.confirmation_status, a.version, cr.response FROM appointments a JOIN confirmation_requests cr ON cr.appointment_id=a.id AND cr.status='active' WHERE a.id=$1", fixed.ID).Scan(&confirmationStatus, &version, &responseValue); err != nil {
+	var responseNote *string
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT a.confirmation_status, a.version, cr.response, cr.response_note FROM appointments a JOIN confirmation_requests cr ON cr.appointment_id=a.id AND cr.status='active' WHERE a.id=$1", fixed.ID).Scan(&confirmationStatus, &version, &responseValue, &responseNote); err != nil {
 		t.Fatal(err)
 	}
-	if confirmationStatus != "pending" || responseValue != nil {
-		t.Fatalf("reset status/response = %s/%v", confirmationStatus, responseValue)
+	if confirmationStatus != "pending" || responseValue != nil || responseNote != nil {
+		t.Fatalf("reset status/response/note = %s/%v/%v", confirmationStatus, responseValue, responseNote)
 	}
 	reissueReason := "Neuer Link für second-canary@example.test"
 	var requestsBefore, notificationsBefore, outboxBefore int
@@ -268,7 +269,7 @@ func TestAdminCanResetResponseAndReissueTokenWithReason(t *testing.T) {
 	if err := adminService.Reissue(fixture.ctx, fixture.admin, fixed.ID, version, reissueReason, "reissue-replay"); !errors.Is(err, notification.ErrAdminActionUnavailable) {
 		t.Fatalf("same-version reissue replay error = %v", err)
 	}
-	if _, err := confirmationService.View(fixture.ctx, oldMaterial.Raw); !errors.Is(err, notification.ErrConfirmationUnavailable) {
+	if _, err := confirmationService.View(fixture.ctx, oldMaterial.Raw); !errors.Is(err, notification.ErrConfirmationRevoked) {
 		t.Fatalf("reissued old token remains valid: %v", err)
 	}
 	var activeCount, revokedCount, auditCount, currentVersion, requestCount, notificationCount, outboxCount int

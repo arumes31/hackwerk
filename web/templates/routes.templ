@@ -190,7 +190,7 @@ templ routeLocationChooser(prefix string, heading string, locations []RouteLocat
 		<input type="hidden" name={ prefix + "_location_version" } data-route-location-version-value/>
 		<input type="hidden" data-route-location-hidden-latitude/>
 		<input type="hidden" data-route-location-hidden-longitude/>
-		<input type="hidden" name={ prefix + "_custom_confirmed" } value={ routeConfirmedValue(state.Confirmed) } data-route-location-confirmed/>
+		<input type="hidden" name={ prefix + "_custom_confirmed" } value="" data-route-location-confirmed/>
 		<input type="hidden" name={ prefix + "_at_last_stop" } value="" data-route-location-last-stop/>
 		<div class="route-location-picker__choices" role="radiogroup" aria-label={ heading + " auswählen" }>
 			for _, location := range locations {
@@ -224,7 +224,7 @@ templ routeLocationChooser(prefix string, heading string, locations []RouteLocat
 					<label>Breitengrad<input type="text" name={ prefix + "_latitude" } inputmode="decimal" autocomplete="off" placeholder="48,208000" value={ state.Latitude } data-route-location-latitude aria-describedby={ prefix + "-custom-hint" }/></label>
 					<label>Längengrad<input type="text" name={ prefix + "_longitude" } inputmode="decimal" autocomplete="off" placeholder="16,373000" value={ state.Longitude } data-route-location-longitude aria-describedby={ prefix + "-custom-hint" }/></label>
 				</div>
-				<label class="check-label route-location-native-confirm"><input type="checkbox" name={ prefix + "_custom_confirmed_native" } value="true" checked?={ state.Confirmed } data-route-location-native-confirmed/> Adresse und Koordinaten geprüft</label>
+				<label class="check-label route-location-native-confirm"><input type="checkbox" name={ prefix + "_custom_confirmed_native" } value="true" data-route-location-native-confirmed/> Adresse und Koordinaten geprüft</label>
 				<div class="route-location-custom__confirm"><button class="button button--quiet" type="button" data-route-location-confirm>Standort übernehmen</button><span id={ prefix + "-custom-hint" } class="form-hint" data-route-location-message aria-live="polite">Bitte Adresse oder Koordinaten prüfen und anschließend übernehmen.</span></div>
 			</div>
 		</div>
@@ -251,11 +251,11 @@ templ parallelRouteBoard(data RoutePageData) {
 									<form method="post" action={ "/planning/routes/" + route.ID + "/move-stop" } class="parallel-move-form">
 										<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="source_version" value={ strconv.Itoa(int(route.Version)) }/><input type="hidden" name="stop_id" value={ stop.ID }/><input type="hidden" name="date" value={ data.SelectedDay }/>
 										<label class="visually-hidden" for={ "target-" + stop.ID }>Zielroute</label>
-										<select id={ "target-" + stop.ID } name="target_route_id" data-route-target required>
+										<select id={ "target-" + stop.ID } name="target_route" data-route-target required>
 											<option value="">Verschieben nach …</option>
 											for _, target := range data.ParallelRoutes {
 												if target.ID != route.ID {
-													<option value={ target.ID } data-version={ strconv.Itoa(int(target.Version)) }>{ target.DriverName } · { target.ChipperName }</option>
+													<option value={ target.ID + "|" + strconv.Itoa(int(target.Version)) } data-version={ strconv.Itoa(int(target.Version)) }>{ target.DriverName } · { target.ChipperName }</option>
 												}
 											}
 										</select><input type="hidden" name="target_version" value="" data-target-version/><button class="button button--quiet" type="submit">Verschieben</button>

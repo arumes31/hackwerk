@@ -246,6 +246,9 @@ func TestLegalPagesArePublicAndDoNotSetCookies(t *testing.T) {
 					t.Errorf("body does not contain footer contract %q", link)
 				}
 			}
+			if !strings.Contains(response.Body.String(), `href="/cookies" data-privacy-notice-open`) {
+				t.Error("cookie notice control is not a usable no-JavaScript link")
+			}
 			if tt.name == "privacy" && strings.Contains(response.Body.String(), "@legalEmail") {
 				t.Error("privacy page renders the legal email component call as literal text")
 			}

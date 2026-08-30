@@ -190,7 +190,7 @@ func TestVoiceProviderTimeoutPersistsOnlyFailureCode(t *testing.T) {
 func TestVoiceRecordingQueueClaimsOnceAndDeletesAfterThirtyDays(t *testing.T) {
 	ctx, pool, service, driver, _ := voiceFixture(t)
 	for _, payload := range []string{"audio-one", "audio-two"} {
-		_, err := service.EnqueuePrepared(ctx, driver, func() (voice.Audio, voice.Metadata, error) {
+		_, err := service.EnqueuePrepared(ctx, driver, "integration-upload-"+payload, func() (voice.Audio, voice.Metadata, error) {
 			return voice.Audio{Reader: bytes.NewReader([]byte(payload)), Size: int64(len(payload)), ContentType: "audio/webm"}, voice.Metadata{RecordedAt: time.Now().UTC(), Duration: time.Second}, nil
 		})
 		if err != nil {
@@ -263,6 +263,62 @@ func TestVoiceRecordingQueueClaimsOnceAndDeletesAfterThirtyDays(t *testing.T) {
 	}
 	if _, err = service.RecordingAudio(ctx, admin, firstID); !errors.Is(err, voice.ErrNotFound) {
 		t.Fatalf("expired recording playback error = %v", err)
+	}
+}
+
+func TestVoiceUploadIdempotencyIsOwnerScopedAndManualRetryIsBounded(t *testing.T) {
+	ctx, pool, _, owner, other := voiceFixture(t)
+	location, _ := time.LoadLocation("Europe/Vienna")
+	service, err := voice.New(postgres.NewVoiceStore(pool), voice.FakeTranscriber{Text: "fixture"}, voice.RuleExtractor{}, voice.Config{
+		Enabled: true, Retention: time.Hour, RateLimitPerMinute: 1, ConcurrentPerUser: 1, Timezone: location,
+	}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparations := 0
+	prepare := func() (voice.Audio, voice.Metadata, error) {
+		preparations++
+		payload := []byte("same-audio")
+		return voice.Audio{Reader: bytes.NewReader(payload), Size: int64(len(payload)), ContentType: "audio/webm"}, voice.Metadata{RecordedAt: time.Now().UTC(), Duration: time.Second}, nil
+	}
+	first, err := service.EnqueuePrepared(ctx, owner, "browser-recording-key-0001", prepare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := service.EnqueuePrepared(ctx, owner, "browser-recording-key-0001", prepare)
+	if err != nil || replayed.ID != first.ID {
+		t.Fatalf("same-owner replay = %#v, %v; first=%#v", replayed, err, first)
+	}
+	if preparations != 1 {
+		t.Fatalf("same-owner replay prepared audio %d times, want once", preparations)
+	}
+	foreign, err := service.EnqueuePrepared(ctx, other, "browser-recording-key-0001", prepare)
+	if err != nil || foreign.ID == first.ID {
+		t.Fatalf("other-owner upload = %#v, %v; first=%#v", foreign, err, first)
+	}
+	var recordingCount, hashLength int
+	if err := pool.QueryRow(ctx, "SELECT count(*), min(octet_length(upload_key_hash)) FROM voice_recordings").Scan(&recordingCount, &hashLength); err != nil {
+		t.Fatal(err)
+	}
+	if recordingCount != 2 || hashLength != 32 {
+		t.Fatalf("recordings/hash length = %d/%d", recordingCount, hashLength)
+	}
+
+	if _, err := pool.Exec(ctx, "UPDATE voice_drafts SET status='failed', version=4 WHERE id=$1", first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE voice_recordings SET attempt_count=max_attempts WHERE draft_id=$1", first.ID); err != nil {
+		t.Fatal(err)
+	}
+	retried, err := service.RetryTranscription(ctx, owner, first.ID, 4)
+	if err != nil || retried.Status != voice.StatusRecorded || retried.ManualRetryCount != 1 || retried.Version != 5 {
+		t.Fatalf("manual retry = %#v, %v", retried, err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE voice_drafts SET status='failed', version=6 WHERE id=$1", first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RetryTranscription(ctx, owner, first.ID, 6); !errors.Is(err, voice.ErrConflict) {
+		t.Fatalf("second manual retry error = %v, want conflict", err)
 	}
 }
 

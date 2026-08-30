@@ -11,13 +11,23 @@ WITH draft AS (
 )
 INSERT INTO voice_recordings (
     draft_id, owner_user_id, content_type, audio_bytes, byte_size, duration_ms,
-    recorded_at, expires_at, available_at
+    recorded_at, expires_at, available_at, upload_key_hash
 )
 SELECT id, sqlc.arg(owner_user_id)::uuid, sqlc.arg(content_type), sqlc.arg(audio_bytes),
        sqlc.arg(byte_size), sqlc.arg(duration_ms), sqlc.arg(recorded_at)::timestamptz,
-       sqlc.arg(recording_expires_at)::timestamptz, now()
+       sqlc.arg(recording_expires_at)::timestamptz, now(), sqlc.arg(upload_key_hash)::bytea
 FROM draft
 RETURNING draft_id::text;
+
+-- name: LockVoiceUploadKey :exec
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(owner_user_id)::text || encode(sqlc.arg(upload_key_hash)::bytea, 'hex'), 0));
+
+-- name: GetVoiceDraftByUploadKey :one
+SELECT draft.id::text, draft.status, draft.version, draft.expires_at
+FROM voice_recordings recording
+JOIN voice_drafts draft ON draft.id=recording.draft_id
+WHERE recording.owner_user_id=sqlc.arg(owner_user_id)::uuid
+  AND recording.upload_key_hash=sqlc.arg(upload_key_hash)::bytea;
 
 -- name: ClaimVoiceRecording :one
 WITH candidate AS (
@@ -92,6 +102,30 @@ FROM released
 WHERE draft.id = released.draft_id AND draft.status = 'transcribing'
 RETURNING draft.status;
 
+-- name: RetryFailedVoiceRecording :one
+WITH queued AS (
+    UPDATE voice_recordings recording
+    SET attempt_count=0, manual_retry_count=manual_retry_count+1,
+        claimed_by=NULL, lease_until=NULL, available_at=sqlc.arg(now_utc)::timestamptz,
+        failure_code='', updated_at=sqlc.arg(now_utc)::timestamptz
+    FROM voice_drafts draft
+    WHERE recording.draft_id=draft.id
+      AND draft.id=sqlc.arg(draft_id)::uuid
+      AND draft.owner_user_id=sqlc.arg(owner_user_id)::uuid
+      AND draft.status='failed' AND draft.version=sqlc.arg(expected_version)
+      AND draft.expires_at>sqlc.arg(now_utc)::timestamptz
+      AND recording.expires_at>sqlc.arg(now_utc)::timestamptz
+      AND recording.manual_retry_count<1
+    RETURNING recording.draft_id, recording.manual_retry_count
+)
+UPDATE voice_drafts draft
+SET status='recorded', failure_code='', retry_count=0,
+    version=version+1, updated_at=sqlc.arg(now_utc)::timestamptz
+FROM queued
+WHERE draft.id=queued.draft_id
+RETURNING draft.id::text, draft.owner_user_id::text, draft.status, draft.retry_count,
+          queued.manual_retry_count, draft.version, draft.created_at, draft.updated_at, draft.expires_at;
+
 -- name: ListVoiceRecordingsForAdmin :many
 SELECT recording.id::text, recording.draft_id::text, recording.content_type, recording.byte_size,
        recording.duration_ms, recording.recorded_at, recording.expires_at, recording.created_at,
@@ -143,6 +177,7 @@ WHERE id = sqlc.arg(id)::uuid AND owner_user_id = sqlc.arg(owner_user_id)::uuid
 SELECT id::text, owner_user_id::text, status, COALESCE(transcript, '')::text AS transcript,
        extracted_fields, warnings, COALESCE(overall_confidence::text, '')::text AS overall_confidence,
        provider_name, provider_version, parser_version, failure_code, retry_count,
+	   COALESCE((SELECT recording.manual_retry_count FROM voice_recordings recording WHERE recording.draft_id=voice_drafts.id), 0)::int AS manual_retry_count,
        COALESCE(committed_customer_id::text, '')::text AS committed_customer_id,
        COALESCE(committed_job_id::text, '')::text AS committed_job_id,
        COALESCE(committed_waitlist_id::text, '')::text AS committed_waitlist_id,

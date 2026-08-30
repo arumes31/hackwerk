@@ -331,10 +331,43 @@ func (q *Queries) FailVoiceDraft(ctx context.Context, arg FailVoiceDraftParams) 
 	return result.RowsAffected(), nil
 }
 
+const getVoiceDraftByUploadKey = `-- name: GetVoiceDraftByUploadKey :one
+SELECT draft.id::text, draft.status, draft.version, draft.expires_at
+FROM voice_recordings recording
+JOIN voice_drafts draft ON draft.id=recording.draft_id
+WHERE recording.owner_user_id=$1::uuid
+  AND recording.upload_key_hash=$2::bytea
+`
+
+type GetVoiceDraftByUploadKeyParams struct {
+	OwnerUserID   pgtype.UUID
+	UploadKeyHash []byte
+}
+
+type GetVoiceDraftByUploadKeyRow struct {
+	DraftID   string
+	Status    string
+	Version   int32
+	ExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) GetVoiceDraftByUploadKey(ctx context.Context, arg GetVoiceDraftByUploadKeyParams) (GetVoiceDraftByUploadKeyRow, error) {
+	row := q.db.QueryRow(ctx, getVoiceDraftByUploadKey, arg.OwnerUserID, arg.UploadKeyHash)
+	var i GetVoiceDraftByUploadKeyRow
+	err := row.Scan(
+		&i.DraftID,
+		&i.Status,
+		&i.Version,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
 const getVoiceDraftForOwner = `-- name: GetVoiceDraftForOwner :one
 SELECT id::text, owner_user_id::text, status, COALESCE(transcript, '')::text AS transcript,
        extracted_fields, warnings, COALESCE(overall_confidence::text, '')::text AS overall_confidence,
        provider_name, provider_version, parser_version, failure_code, retry_count,
+	   COALESCE((SELECT recording.manual_retry_count FROM voice_recordings recording WHERE recording.draft_id=voice_drafts.id), 0)::int AS manual_retry_count,
        COALESCE(committed_customer_id::text, '')::text AS committed_customer_id,
        COALESCE(committed_job_id::text, '')::text AS committed_job_id,
        COALESCE(committed_waitlist_id::text, '')::text AS committed_waitlist_id,
@@ -361,6 +394,7 @@ type GetVoiceDraftForOwnerRow struct {
 	ParserVersion       string
 	FailureCode         string
 	RetryCount          int16
+	ManualRetryCount    int32
 	CommittedCustomerID string
 	CommittedJobID      string
 	CommittedWaitlistID string
@@ -387,6 +421,7 @@ func (q *Queries) GetVoiceDraftForOwner(ctx context.Context, arg GetVoiceDraftFo
 		&i.ParserVersion,
 		&i.FailureCode,
 		&i.RetryCount,
+		&i.ManualRetryCount,
 		&i.CommittedCustomerID,
 		&i.CommittedJobID,
 		&i.CommittedWaitlistID,
@@ -456,16 +491,16 @@ func (q *Queries) InsertVoiceDraft(ctx context.Context, arg InsertVoiceDraftPara
 const insertVoiceRecording = `-- name: InsertVoiceRecording :one
 WITH draft AS (
     INSERT INTO voice_drafts (owner_user_id, status, expires_at)
-    VALUES ($1::uuid, 'recorded', $8::timestamptz)
+    VALUES ($1::uuid, 'recorded', $9::timestamptz)
     RETURNING id, version
 )
 INSERT INTO voice_recordings (
     draft_id, owner_user_id, content_type, audio_bytes, byte_size, duration_ms,
-    recorded_at, expires_at, available_at
+    recorded_at, expires_at, available_at, upload_key_hash
 )
 SELECT id, $1::uuid, $2, $3,
        $4, $5, $6::timestamptz,
-       $7::timestamptz, now()
+       $7::timestamptz, now(), $8::bytea
 FROM draft
 RETURNING draft_id::text
 `
@@ -478,6 +513,7 @@ type InsertVoiceRecordingParams struct {
 	DurationMs         int32
 	RecordedAt         pgtype.Timestamptz
 	RecordingExpiresAt pgtype.Timestamptz
+	UploadKeyHash      []byte
 	DraftExpiresAt     pgtype.Timestamptz
 }
 
@@ -490,6 +526,7 @@ func (q *Queries) InsertVoiceRecording(ctx context.Context, arg InsertVoiceRecor
 		arg.DurationMs,
 		arg.RecordedAt,
 		arg.RecordingExpiresAt,
+		arg.UploadKeyHash,
 		arg.DraftExpiresAt,
 	)
 	var draft_id string
@@ -595,6 +632,86 @@ func (q *Queries) LockVoiceDraftForOwner(ctx context.Context, arg LockVoiceDraft
 		&i.CommittedCustomerID,
 		&i.CommittedJobID,
 		&i.CommittedWaitlistID,
+	)
+	return i, err
+}
+
+const lockVoiceUploadKey = `-- name: LockVoiceUploadKey :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text || encode($2::bytea, 'hex'), 0))
+`
+
+type LockVoiceUploadKeyParams struct {
+	OwnerUserID   string
+	UploadKeyHash []byte
+}
+
+func (q *Queries) LockVoiceUploadKey(ctx context.Context, arg LockVoiceUploadKeyParams) error {
+	_, err := q.db.Exec(ctx, lockVoiceUploadKey, arg.OwnerUserID, arg.UploadKeyHash)
+	return err
+}
+
+const retryFailedVoiceRecording = `-- name: RetryFailedVoiceRecording :one
+WITH queued AS (
+    UPDATE voice_recordings recording
+    SET attempt_count=0, manual_retry_count=manual_retry_count+1,
+        claimed_by=NULL, lease_until=NULL, available_at=$1::timestamptz,
+        failure_code='', updated_at=$1::timestamptz
+    FROM voice_drafts draft
+    WHERE recording.draft_id=draft.id
+      AND draft.id=$2::uuid
+      AND draft.owner_user_id=$3::uuid
+      AND draft.status='failed' AND draft.version=$4
+      AND draft.expires_at>$1::timestamptz
+      AND recording.expires_at>$1::timestamptz
+      AND recording.manual_retry_count<1
+    RETURNING recording.draft_id, recording.manual_retry_count
+)
+UPDATE voice_drafts draft
+SET status='recorded', failure_code='', retry_count=0,
+    version=version+1, updated_at=$1::timestamptz
+FROM queued
+WHERE draft.id=queued.draft_id
+RETURNING draft.id::text, draft.owner_user_id::text, draft.status, draft.retry_count,
+          queued.manual_retry_count, draft.version, draft.created_at, draft.updated_at, draft.expires_at
+`
+
+type RetryFailedVoiceRecordingParams struct {
+	NowUtc          pgtype.Timestamptz
+	DraftID         pgtype.UUID
+	OwnerUserID     pgtype.UUID
+	ExpectedVersion int32
+}
+
+type RetryFailedVoiceRecordingRow struct {
+	DraftID          string
+	DraftOwnerUserID string
+	Status           string
+	RetryCount       int16
+	ManualRetryCount int16
+	Version          int32
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	ExpiresAt        pgtype.Timestamptz
+}
+
+func (q *Queries) RetryFailedVoiceRecording(ctx context.Context, arg RetryFailedVoiceRecordingParams) (RetryFailedVoiceRecordingRow, error) {
+	row := q.db.QueryRow(ctx, retryFailedVoiceRecording,
+		arg.NowUtc,
+		arg.DraftID,
+		arg.OwnerUserID,
+		arg.ExpectedVersion,
+	)
+	var i RetryFailedVoiceRecordingRow
+	err := row.Scan(
+		&i.DraftID,
+		&i.DraftOwnerUserID,
+		&i.Status,
+		&i.RetryCount,
+		&i.ManualRetryCount,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }

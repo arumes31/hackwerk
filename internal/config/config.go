@@ -22,7 +22,7 @@ const (
 	EnvironmentDevelopment = "development"
 	EnvironmentTest        = "test"
 	EnvironmentProduction  = "production"
-	CurrentSchemaVersion   = int64(15)
+	CurrentSchemaVersion   = int64(17)
 
 	businessNamePlaceholder                  = "HackWerk – Betreiber noch nicht hinterlegt"
 	businessAddressPlaceholder               = "Ladungsfähige Anschrift noch nicht hinterlegt"

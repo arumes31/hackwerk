@@ -26,7 +26,7 @@ func registerCustomerRoutes(router chi.Router, dependencies Dependencies, page t
 	router.Post("/customers/new/search", intakeCustomerSearch(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers", createIntake(service, page, csrfCookie, dependencies.Logger))
 	router.Get("/customers/{customerID}", customerDetail(service, page, csrfCookie, dependencies.Logger))
-	router.Post("/customers/{customerID}", updateCustomer(service, dependencies.Logger))
+	router.Post("/customers/{customerID}", updateCustomer(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers/{customerID}/archive", archiveCustomer(service, dependencies.Logger))
 	router.Get("/customers/{customerID}/jobs/new", jobForm(service, page, csrfCookie, dependencies.Logger))
 	router.Get("/jobs/{jobID}/duplicate", duplicateJobForm(service, page, csrfCookie, dependencies.Logger))
@@ -34,7 +34,7 @@ func registerCustomerRoutes(router chi.Router, dependencies Dependencies, page t
 	router.Post("/recent/customers/{customerID}", recordRecentCustomer(service, dependencies.Logger))
 	router.Post("/recent/jobs/{jobID}", recordRecentJob(service, dependencies.Logger))
 	router.Post("/jobs/{jobID}/notes", addJobNote(service, dependencies.Logger))
-	router.Post("/jobs/{jobID}", updateJob(service, dependencies.Logger))
+	router.Post("/jobs/{jobID}", updateJob(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/jobs/{jobID}/archive", archiveJob(service, dependencies.Logger))
 	router.Get("/waitlist", waitlistPage(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/waitlist/{waitlistID}/priority", updateWaitlistPriority(service, dependencies.Logger))
@@ -43,18 +43,24 @@ func registerCustomerRoutes(router chi.Router, dependencies Dependencies, page t
 	router.Post("/waitlist/filter-favorites/{favoriteID}/delete", deleteWaitlistFilterFavorite(service, dependencies.Logger))
 }
 
-func updateCustomer(service *customers.Service, logger *slog.Logger) http.HandlerFunc {
+func updateCustomer(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
+		values := intakeValues(request)
+		fieldErrors := customerEditFormErrors(values)
+		if len(fieldErrors) > 0 {
+			renderCustomerEditFailure(response, request, service, page, csrfCookie, logger, customers.ErrValidation, values, fieldErrors, "")
+			return
+		}
 		session, _ := sessionFromContext(request.Context())
 		version, err := parseVersion(request.Form.Get("version"))
 		if err == nil {
 			err = service.UpdateCustomer(request.Context(), session.Actor, customers.UpdateCustomerInput{
 				ID: chi.URLParam(request, "customerID"), ExpectedVersion: version,
-				RequestID: middleware.GetReqID(request.Context()), Customer: customerInputFromForm(request),
+				RequestID: middleware.GetReqID(request.Context()), Customer: customerInputFromValues(values),
 			})
 		}
 		if err != nil {
-			mutationError(response, err, logger, request, "customer_update_rejected")
+			renderCustomerEditFailure(response, request, service, page, csrfCookie, logger, err, values, fieldErrors, "")
 			return
 		}
 		http.Redirect(response, request, "/customers/"+url.PathEscape(chi.URLParam(request, "customerID")), http.StatusSeeOther)
@@ -254,6 +260,7 @@ func customerDetail(service *customers.Service, page templates.PageData, csrfCoo
 			renderCustomerError(response, request, page, logger, err, "Kundenakte nicht verfügbar")
 			return
 		}
+		detail.PageRequestID = middleware.GetReqID(request.Context())
 		message := ""
 		if request.URL.Query().Get("duplicate_warning") == "1" {
 			message = "Hinweis: Es gibt ähnlich wirkende Kundenakten. Bitte prüfen Sie diese vor einer späteren Zusammenführung. Es wurde nichts automatisch verbunden."
@@ -265,6 +272,7 @@ func customerDetail(service *customers.Service, page templates.PageData, csrfCoo
 		}
 		render(response, request, templates.CustomerDetail(templates.CustomerDetailData{
 			Shell: shell(request, page, csrfCookie), Detail: detail, Error: message,
+			CustomerValues: customerEditValues(detail.Customer), CustomerVersion: strconv.FormatInt(int64(detail.Customer.Version), 10),
 		}), http.StatusOK, logger)
 	}
 }
@@ -301,13 +309,19 @@ func addJobNote(service *customers.Service, logger *slog.Logger) http.HandlerFun
 	}
 }
 
-func updateJob(service *customers.Service, logger *slog.Logger) http.HandlerFunc {
+func updateJob(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
+		values := intakeValues(request)
+		fieldErrors := intakeFormErrors(values, false)
+		if len(fieldErrors) > 0 {
+			renderCustomerEditFailure(response, request, service, page, csrfCookie, logger, customers.ErrValidation, values, fieldErrors, chi.URLParam(request, "jobID"))
+			return
+		}
 		session, _ := sessionFromContext(request.Context())
 		version, err := parseVersion(request.Form.Get("version"))
 		var job customers.JobInput
 		if err == nil {
-			job, err = jobInput(intakeValues(request))
+			job, err = jobInput(values)
 		}
 		if err == nil {
 			err = service.UpdateJob(request.Context(), session.Actor, customers.UpdateJobInput{
@@ -316,10 +330,77 @@ func updateJob(service *customers.Service, logger *slog.Logger) http.HandlerFunc
 			})
 		}
 		if err != nil {
-			mutationError(response, err, logger, request, "job_update_rejected")
+			renderCustomerEditFailure(response, request, service, page, csrfCookie, logger, err, values, fieldErrors, chi.URLParam(request, "jobID"))
 			return
 		}
 		redirectCustomer(response, request)
+	}
+}
+
+func customerEditFormErrors(values templates.IntakeValues) []templates.FormFieldError {
+	fieldErrors := make([]templates.FormFieldError, 0, 4)
+	validateCustomerForm(values, func(field, label, message string) {
+		fieldErrors = append(fieldErrors, templates.FormFieldError{Field: field, Label: label, Message: message})
+	})
+	return fieldErrors
+}
+
+func renderCustomerEditFailure(response http.ResponseWriter, request *http.Request, service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger, mutationErr error, values templates.IntakeValues, fieldErrors []templates.FormFieldError, jobID string) {
+	status := http.StatusUnprocessableEntity
+	message := "Bitte korrigieren Sie die markierten Felder. Ihre Eingaben wurden beibehalten."
+	conflict := errors.Is(mutationErr, customers.ErrConflict)
+	if conflict {
+		status = http.StatusConflict
+		message = "Der Datensatz wurde zwischenzeitlich geändert. Ihre Eingaben bleiben zum Vergleichen sichtbar; laden Sie den aktuellen Stand neu, bevor Sie erneut speichern."
+	} else if errors.Is(mutationErr, auth.ErrForbidden) {
+		renderCustomerError(response, request, page, logger, mutationErr, "Änderung nicht erlaubt")
+		return
+	}
+	logger.WarnContext(request.Context(), "customer edit rejected", slog.String("error_code", "customer_edit_rejected"), slog.Bool("version_conflict", conflict))
+	session, _ := sessionFromContext(request.Context())
+	customerID := chi.URLParam(request, "customerID")
+	if jobID != "" {
+		customerID = request.Form.Get("customer_id")
+	}
+	if !safeID(customerID) {
+		renderCustomerError(response, request, page, logger, customers.ErrNotFound, "Kundenakte nicht verfügbar")
+		return
+	}
+	detail, err := service.CustomerDetail(request.Context(), session.Actor, customerID)
+	if err != nil {
+		renderCustomerError(response, request, page, logger, err, "Kundenakte nicht verfügbar")
+		return
+	}
+	detail.PageRequestID = middleware.GetReqID(request.Context())
+	shellData := shell(request, page, csrfCookie)
+	data := templates.CustomerDetailData{
+		Shell: shellData, Detail: detail,
+		CustomerValues: customerEditValues(detail.Customer), CustomerVersion: strconv.FormatInt(int64(detail.Customer.Version), 10),
+	}
+	if jobID == "" {
+		data.OpenCustomerEdit = true
+		data.CustomerValues = values
+		data.CustomerVersion = request.Form.Get("version")
+		data.CustomerEditError = message
+		data.CustomerFieldErrors = fieldErrors
+		data.CustomerConflict = conflict
+	} else {
+		data.JobEditID = jobID
+		data.JobValues = values
+		data.JobVersion = request.Form.Get("version")
+		data.JobEditError = message
+		data.JobFieldErrors = fieldErrors
+		data.JobConflict = conflict
+	}
+	render(response, request, templates.CustomerDetail(data), status, logger)
+}
+
+func customerEditValues(customer customers.Customer) templates.IntakeValues {
+	return templates.IntakeValues{
+		FirstName: customer.FirstName, LastName: customer.LastName, CompanyName: customer.CompanyName,
+		Street: customer.Street, PostalCode: customer.PostalCode, Locality: customer.Locality, Region: customer.Region,
+		AddressFreeform: customer.AddressFreeform, Phone: customer.PhoneRaw, Email: customer.Email,
+		Notification: string(customer.NotificationPreference),
 	}
 }
 
@@ -693,16 +774,6 @@ func customerInputFromValues(values templates.IntakeValues) customers.CustomerIn
 		CountryCode: "AT", AddressFreeform: values.AddressFreeform, PhoneRaw: values.Phone,
 		Email: values.Email, NotificationPreference: customers.NotificationPreference(values.Notification),
 	}
-}
-
-func customerInputFromForm(request *http.Request) customers.CustomerInput {
-	return customerInputFromValues(templates.IntakeValues{
-		FirstName: request.Form.Get("first_name"), LastName: request.Form.Get("last_name"),
-		CompanyName: request.Form.Get("company_name"), Street: request.Form.Get("street"),
-		PostalCode: request.Form.Get("postal_code"), Locality: request.Form.Get("locality"),
-		Region: request.Form.Get("region"), AddressFreeform: request.Form.Get("address_freeform"),
-		Phone: request.Form.Get("phone"), Email: request.Form.Get("email"), Notification: request.Form.Get("notification"),
-	})
 }
 
 func displayCustomerName(customer customers.Customer) string {

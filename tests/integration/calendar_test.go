@@ -94,8 +94,8 @@ func TestCalendarReservationsAndAtomicFix(t *testing.T) {
 		MutateInput: appointment.MutateInput{ID: fixed.ID, ExpectedVersion: fixed.Version, RequestID: "stale"},
 		StartsAt:    start.Add(48 * time.Hour), EndsAt: start.Add(51 * time.Hour),
 	})
-	if !errors.Is(err, appointment.ErrConflict) {
-		t.Fatalf("stale move error = %v, want conflict", err)
+	if !errors.Is(err, appointment.ErrVersionConflict) {
+		t.Fatalf("stale move error = %v, want version conflict", err)
 	}
 }
 
@@ -364,7 +364,7 @@ func TestConcurrentFixIsIdempotentByVersionAndAtomic(t *testing.T) {
 	for err := range results {
 		if err == nil {
 			successes++
-		} else if errors.Is(err, appointment.ErrConflict) {
+		} else if errors.Is(err, appointment.ErrVersionConflict) {
 			conflicts++
 		} else {
 			t.Fatalf("parallel fix error = %v", err)
@@ -613,7 +613,7 @@ func TestSwapProposalWindowsIsAtomicAndNotificationFree(t *testing.T) {
 	if outboxCount != 0 {
 		t.Fatalf("swap created %d outbox events", outboxCount)
 	}
-	if _, err := fixture.service.SwapAppointments(fixture.ctx, fixture.admin, appointment.SwapInput{FirstID: first.ID, SecondID: second.ID, FirstVersion: first.Version, SecondVersion: second.Version}); !errors.Is(err, appointment.ErrConflict) {
+	if _, err := fixture.service.SwapAppointments(fixture.ctx, fixture.admin, appointment.SwapInput{FirstID: first.ID, SecondID: second.ID, FirstVersion: first.Version, SecondVersion: second.Version}); !errors.Is(err, appointment.ErrVersionConflict) {
 		t.Fatalf("stale swap error = %v", err)
 	}
 }

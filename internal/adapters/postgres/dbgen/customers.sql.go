@@ -1011,8 +1011,14 @@ ORDER BY
   CASE WHEN $15::text = 'region' AND $16::text = 'desc' THEN lower(w.region_snapshot) END DESC,
   CASE WHEN $15::text = 'customer' AND $16::text = 'asc' THEN lower(concat_ws(' ', c.company_name, c.last_name, c.first_name)) END ASC,
   CASE WHEN $15::text = 'customer' AND $16::text = 'desc' THEN lower(concat_ws(' ', c.company_name, c.last_name, c.first_name)) END DESC,
-  CASE WHEN $15::text = 'workflow' AND $16::text = 'asc' THEN j.workflow_status END ASC,
-  CASE WHEN $15::text = 'workflow' AND $16::text = 'desc' THEN j.workflow_status END DESC,
+  CASE WHEN $15::text = 'workflow' AND $16::text = 'asc' THEN CASE
+       WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='fixed') THEN 'scheduled'
+       WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
+       ELSE 'unplanned' END END ASC,
+  CASE WHEN $15::text = 'workflow' AND $16::text = 'desc' THEN CASE
+       WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='fixed') THEN 'scheduled'
+       WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
+       ELSE 'unplanned' END END DESC,
   CASE WHEN $15::text = 'updated' AND $16::text = 'asc' THEN j.updated_at END ASC,
   CASE WHEN $15::text = 'updated' AND $16::text = 'desc' THEN j.updated_at END DESC,
   CASE WHEN $15::text = 'duration' AND $16::text = 'asc' THEN j.estimated_hack_minutes+j.estimated_transport_minutes END ASC,
@@ -1151,24 +1157,29 @@ func (q *Queries) ListWaitlist(ctx context.Context, arg ListWaitlistParams) ([]L
 
 const listWaitlistFilterFavorites = `-- name: ListWaitlistFilterFavorites :many
 SELECT id::text, name, job_type, region, urgency, preferred_month, workflow,
-       missing_location, duration_issue, sort_key, sort_direction
+       missing_location, duration_issue, duration_group, overdue, unassigned,
+       transport_pending, sort_key, sort_direction
 FROM waitlist_filter_favorites
 WHERE user_id=$1::uuid
 ORDER BY updated_at DESC, id
 `
 
 type ListWaitlistFilterFavoritesRow struct {
-	ID              string
-	Name            string
-	JobType         string
-	Region          string
-	Urgency         string
-	PreferredMonth  string
-	Workflow        string
-	MissingLocation bool
-	DurationIssue   bool
-	SortKey         string
-	SortDirection   string
+	ID               string
+	Name             string
+	JobType          string
+	Region           string
+	Urgency          string
+	PreferredMonth   string
+	Workflow         string
+	MissingLocation  bool
+	DurationIssue    bool
+	DurationGroup    string
+	Overdue          bool
+	Unassigned       bool
+	TransportPending bool
+	SortKey          string
+	SortDirection    string
 }
 
 func (q *Queries) ListWaitlistFilterFavorites(ctx context.Context, userID pgtype.UUID) ([]ListWaitlistFilterFavoritesRow, error) {
@@ -1190,6 +1201,10 @@ func (q *Queries) ListWaitlistFilterFavorites(ctx context.Context, userID pgtype
 			&i.Workflow,
 			&i.MissingLocation,
 			&i.DurationIssue,
+			&i.DurationGroup,
+			&i.Overdue,
+			&i.Unassigned,
+			&i.TransportPending,
 			&i.SortKey,
 			&i.SortDirection,
 		); err != nil {
@@ -1542,29 +1557,38 @@ func (q *Queries) UpsertRecentJob(ctx context.Context, arg UpsertRecentJobParams
 const upsertWaitlistFilterFavorite = `-- name: UpsertWaitlistFilterFavorite :exec
 INSERT INTO waitlist_filter_favorites
     (id, user_id, name, job_type, region, urgency, preferred_month, workflow,
-     missing_location, duration_issue, sort_key, sort_direction)
+     missing_location, duration_issue, duration_group, overdue, unassigned,
+     transport_pending, sort_key, sort_direction)
 VALUES (gen_random_uuid(), $1::uuid, $2, $3,
         $4, $5, $6, $7,
-        $8, $9, $10, $11)
+        $8, $9, $10,
+        $11, $12, $13,
+        $14, $15)
 ON CONFLICT (user_id, lower(name)) DO UPDATE SET
     job_type=excluded.job_type, region=excluded.region, urgency=excluded.urgency,
     preferred_month=excluded.preferred_month, workflow=excluded.workflow,
     missing_location=excluded.missing_location, duration_issue=excluded.duration_issue,
+    duration_group=excluded.duration_group, overdue=excluded.overdue,
+    unassigned=excluded.unassigned, transport_pending=excluded.transport_pending,
     sort_key=excluded.sort_key, sort_direction=excluded.sort_direction, updated_at=now()
 `
 
 type UpsertWaitlistFilterFavoriteParams struct {
-	UserID          pgtype.UUID
-	Name            string
-	JobType         string
-	Region          string
-	Urgency         string
-	PreferredMonth  string
-	Workflow        string
-	MissingLocation bool
-	DurationIssue   bool
-	SortKey         string
-	SortDirection   string
+	UserID           pgtype.UUID
+	Name             string
+	JobType          string
+	Region           string
+	Urgency          string
+	PreferredMonth   string
+	Workflow         string
+	MissingLocation  bool
+	DurationIssue    bool
+	DurationGroup    string
+	Overdue          bool
+	Unassigned       bool
+	TransportPending bool
+	SortKey          string
+	SortDirection    string
 }
 
 func (q *Queries) UpsertWaitlistFilterFavorite(ctx context.Context, arg UpsertWaitlistFilterFavoriteParams) error {
@@ -1578,6 +1602,10 @@ func (q *Queries) UpsertWaitlistFilterFavorite(ctx context.Context, arg UpsertWa
 		arg.Workflow,
 		arg.MissingLocation,
 		arg.DurationIssue,
+		arg.DurationGroup,
+		arg.Overdue,
+		arg.Unassigned,
+		arg.TransportPending,
 		arg.SortKey,
 		arg.SortDirection,
 	)

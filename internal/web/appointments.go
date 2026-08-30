@@ -26,6 +26,12 @@ func registerAppointmentRoutes(router chi.Router, dependencies Dependencies, pag
 	router.Get("/calendar", calendarPage(service, page, csrfCookie, logger))
 	router.Get("/calendar/plan", calendarPlanPage(service, page, csrfCookie, logger))
 	router.Post("/calendar/plan", planFromWaitlist(service, page, csrfCookie, logger, false))
+	router.Get("/calendar/appointments/{appointmentID}", appointmentDetailPage(service, page, csrfCookie, dependencies.Notifications != nil, logger))
+	router.Post("/calendar/appointments/{appointmentID}/assign", assignAppointmentPage(service, page, csrfCookie, logger))
+	if dependencies.Notifications != nil {
+		router.Post("/calendar/appointments/{appointmentID}/confirmation/reissue", confirmationAdminPageAction(dependencies.Notifications, false, logger))
+		router.Post("/calendar/appointments/{appointmentID}/confirmation/reset", confirmationAdminPageAction(dependencies.Notifications, true, logger))
+	}
 	router.Get("/api/v1/calendar", calendarEvents(service, logger))
 	router.Get("/api/v1/calendar/conflicts", appointmentConflicts(service, logger))
 	router.Post("/api/v1/calendar/plan", planFromWaitlist(service, page, csrfCookie, logger, true))
@@ -36,6 +42,7 @@ func registerAppointmentRoutes(router chi.Router, dependencies Dependencies, pag
 		appointmentRouter.Post("/move", moveAppointment(service, logger, false))
 		appointmentRouter.Post("/resize", moveAppointment(service, logger, true))
 		appointmentRouter.Get("/alternatives", appointmentAlternatives(service, logger))
+		appointmentRouter.Get("/swap-candidates", appointmentSwapCandidates(service, logger))
 		appointmentRouter.Post("/swap", swapAppointments(service, logger))
 		appointmentRouter.Post("/fix", fixAppointment(service, logger))
 		appointmentRouter.Post("/cancel", cancelAppointment(service, logger))
@@ -46,6 +53,31 @@ func registerAppointmentRoutes(router chi.Router, dependencies Dependencies, pag
 			appointmentRouter.Post("/confirmation/reset", resetConfirmationResponse(dependencies.Notifications, logger))
 		}
 	})
+}
+
+func appointmentSwapCandidates(service *appointment.Service, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		location, err := time.LoadLocation("Europe/Vienna")
+		date, dateErr := time.ParseInLocation(time.DateOnly, request.URL.Query().Get("date"), location)
+		if err != nil || dateErr != nil {
+			appointmentAPIError(response, request, logger, appointment.ErrValidation, "appointment_swap_candidates_rejected")
+			return
+		}
+		events, err := service.SwapCandidates(request.Context(), session.Actor, chi.URLParam(request, "appointmentID"), date.UTC(), date.AddDate(0, 0, 1).UTC())
+		if err != nil {
+			appointmentAPIError(response, request, logger, err, "appointment_swap_candidates_rejected")
+			return
+		}
+		result := make([]map[string]any, 0, len(events))
+		for _, event := range events {
+			result = append(result, map[string]any{
+				"id": event.ID, "title": event.CustomerName + " · " + event.JobNumber,
+				"start": event.StartsAt, "end": event.EndsAt, "version": event.Version,
+			})
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"candidates": result})
+	}
 }
 
 func appointmentAlternatives(service *appointment.Service, logger *slog.Logger) http.HandlerFunc {
@@ -123,12 +155,151 @@ func appointmentDetail(service *appointment.Service, notifications *notification
 			"can_fix":                    session.Actor.Role == auth.RoleAdmin && value.Lifecycle == appointment.LifecycleProposal,
 			"can_cancel":                 session.Actor.Role == auth.RoleAdmin && value.Lifecycle.Editable(),
 			"can_reopen":                 session.Actor.Role == auth.RoleAdmin && value.Lifecycle == appointment.LifecycleCancelled,
+			"can_assign":                 session.Actor.Role == auth.RoleAdmin && value.Lifecycle.Editable(),
 			"can_reschedule":             session.Actor.Role == auth.RoleAdmin && value.Lifecycle.Editable(),
 			"can_swap":                   session.Actor.Role == auth.RoleAdmin && (value.Lifecycle == appointment.LifecycleDraft || value.Lifecycle == appointment.LifecycleProposal),
 			"can_reissue":                session.Actor.Role == auth.RoleAdmin && value.Lifecycle == appointment.LifecycleFixed,
 			"can_reset_confirmation":     session.Actor.Role == auth.RoleAdmin && value.Lifecycle == appointment.LifecycleFixed && value.Confirmation != appointment.ConfirmationPending && value.Confirmation != appointment.ConfirmationNotRequested,
 		})
 	}
+}
+
+func appointmentDetailPage(service *appointment.Service, page templates.PageData, csrfCookie string, confirmationsEnabled bool, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Cache-Control", "no-store")
+		session, _ := sessionFromContext(request.Context())
+		detail, err := service.AppointmentDetail(request.Context(), session.Actor, chi.URLParam(request, "appointmentID"))
+		if err != nil {
+			calendarPlanPageError(response, request, page, logger, err)
+			return
+		}
+		options, err := service.PlanningOptions(request.Context(), session.Actor)
+		if err != nil {
+			calendarPlanPageError(response, request, page, logger, err)
+			return
+		}
+		shellData := shell(request, page, csrfCookie)
+		notice := ""
+		if request.URL.Query().Get("assigned") == "1" {
+			notice = "Fahrer und Ressourcen wurden gespeichert."
+		}
+		switch request.URL.Query().Get("confirmation_action") {
+		case "reissued":
+			notice = "Ein neuer Bestätigungslink wurde für den Versand vorgemerkt."
+		case "reset":
+			notice = "Die Kundenantwort wurde einschließlich ihrer Notiz zurückgesetzt."
+		}
+		actionError := ""
+		switch request.URL.Query().Get("confirmation_error") {
+		case "forbidden":
+			actionError = "Für diese Bestätigungsaktion fehlt die Berechtigung."
+		case "conflict":
+			actionError = "Der Terminstand hat sich geändert oder die Aktion ist nicht mehr möglich. Bitte prüfen Sie den aktuellen Stand."
+		case "invalid":
+			actionError = "Bitte geben Sie einen nachvollziehbaren Grund an."
+		}
+		render(response, request, templates.AppointmentDetailPage(templates.AppointmentDetailData{
+			Shell: shellData, Options: options, Detail: detail,
+			Values: appointmentAssignmentValues(detail, shellData.CSRFToken), Notice: notice, ConfirmationActionError: actionError,
+			CanReissueConfirmation: confirmationsEnabled && detail.Lifecycle == appointment.LifecycleFixed,
+			CanResetConfirmation:   confirmationsEnabled && detail.Lifecycle == appointment.LifecycleFixed && detail.Confirmation != appointment.ConfirmationPending && detail.Confirmation != appointment.ConfirmationNotRequested,
+		}), http.StatusOK, logger)
+	}
+}
+
+func confirmationAdminPageAction(service *notification.AdminService, reset bool, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		appointmentID := chi.URLParam(request, "appointmentID")
+		version, err := parseVersion(request.Form.Get("version"))
+		if err == nil {
+			if reset {
+				err = service.ResetResponse(request.Context(), session.Actor, appointmentID, version, request.Form.Get("reason"), middleware.GetReqID(request.Context()))
+			} else {
+				err = service.Reissue(request.Context(), session.Actor, appointmentID, version, request.Form.Get("reason"), middleware.GetReqID(request.Context()))
+			}
+		}
+		values := url.Values{}
+		if err == nil {
+			if reset {
+				values.Set("confirmation_action", "reset")
+			} else {
+				values.Set("confirmation_action", "reissued")
+			}
+		} else {
+			code := "invalid"
+			if errors.Is(err, auth.ErrForbidden) {
+				code = "forbidden"
+			} else if errors.Is(err, notification.ErrAdminActionUnavailable) {
+				code = "conflict"
+			}
+			values.Set("confirmation_error", code)
+			logger.WarnContext(request.Context(), "notification admin page action rejected", slog.String("error_code", code))
+		}
+		http.Redirect(response, request, "/calendar/appointments/"+url.PathEscape(appointmentID)+"?"+values.Encode(), http.StatusSeeOther)
+	}
+}
+
+func assignAppointmentPage(service *appointment.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Cache-Control", "no-store")
+		session, _ := sessionFromContext(request.Context())
+		appointmentID := chi.URLParam(request, "appointmentID")
+		version, err := parseVersion(request.Form.Get("version"))
+		if err == nil {
+			_, err = service.AssignDriversAndResources(request.Context(), session.Actor, appointment.AssignInput{
+				MutateInput: appointment.MutateInput{ID: appointmentID, ExpectedVersion: version, RequestID: middleware.GetReqID(request.Context())},
+				Assignments: planningAssignments(request),
+			})
+		}
+		if err == nil {
+			http.Redirect(response, request, "/calendar/appointments/"+url.PathEscape(appointmentID)+"?assigned=1", http.StatusSeeOther)
+			return
+		}
+		presentation := appointmentErrorPresentation(err)
+		logger.WarnContext(request.Context(), "appointment assignment page rejected", slog.String("error_code", presentation.Code))
+		detail, detailErr := service.AppointmentDetail(request.Context(), session.Actor, appointmentID)
+		options, optionsErr := service.PlanningOptions(request.Context(), session.Actor)
+		if detailErr != nil || optionsErr != nil {
+			calendarPlanPageError(response, request, page, logger, err)
+			return
+		}
+		shellData := shell(request, page, csrfCookie)
+		values := templates.AppointmentAssignmentValues{
+			CSRFToken: shellData.CSRFToken, Version: request.Form.Get("version"),
+			DriverIDs: request.Form["driver_id"], PrimaryDriverID: request.Form.Get("primary_driver_id"),
+			ChipperResourceID: request.Form.Get("chipper_resource_id"), TransportResourceID: request.Form.Get("transport_resource_id"),
+			TrailerResourceID: request.Form.Get("trailer_resource_id"), OverrideReason: request.Form.Get("override_reason"),
+		}
+		render(response, request, templates.AppointmentDetailPage(templates.AppointmentDetailData{
+			Shell: shellData, Options: options, Detail: detail, Values: values,
+			Error: templates.PlanningFormError{Message: presentation.Message},
+		}), presentation.Status, logger)
+	}
+}
+
+func appointmentAssignmentValues(detail appointment.Detail, csrf string) templates.AppointmentAssignmentValues {
+	values := templates.AppointmentAssignmentValues{CSRFToken: csrf, Version: strconv.FormatInt(int64(detail.Version), 10)}
+	values.DriverIDs = make([]string, 0, len(detail.Drivers))
+	for _, assigned := range detail.Drivers {
+		values.DriverIDs = append(values.DriverIDs, assigned.ID)
+		if assigned.Primary {
+			values.PrimaryDriverID = assigned.ID
+		}
+	}
+	for _, assigned := range detail.Resources {
+		switch assigned.Purpose {
+		case appointment.PurposeChipping:
+			values.ChipperResourceID = assigned.ID
+		case appointment.PurposeTransport:
+			values.TransportResourceID = assigned.ID
+		case appointment.PurposeTrailer:
+			values.TrailerResourceID = assigned.ID
+		case appointment.PurposeOther:
+			values.OtherResourceIDs = append(values.OtherResourceIDs, assigned.ID)
+		}
+	}
+	return values
 }
 
 func reissueConfirmation(service *notification.AdminService, logger *slog.Logger) http.HandlerFunc {
@@ -389,7 +560,7 @@ func renderCalendarPlanError(response http.ResponseWriter, request *http.Request
 			JobID:     jobID, StartsAt: request.Form.Get("starts_at"), DurationMinutes: request.Form.Get("duration_minutes"),
 			DriverIDs: append([]string(nil), request.Form["driver_id"]...), PrimaryDriverID: request.Form.Get("primary_driver_id"),
 			ChipperResourceID: request.Form.Get("chipper_resource_id"), TransportResourceID: request.Form.Get("transport_resource_id"),
-			TrailerResourceID: request.Form.Get("trailer_resource_id"), OverrideReason: request.Form.Get("override_reason"),
+			TrailerResourceID: request.Form.Get("trailer_resource_id"), OtherResourceIDs: append([]string(nil), request.Form["other_resource_id"]...), OverrideReason: request.Form.Get("override_reason"),
 			TransportMode: job.TransportMode, ExternalTransportConfirmed: job.ExternalTransportConfirmed,
 		},
 		Error: templates.PlanningFormError{Message: presentation.Message, FieldID: planningErrorField(request, job, planErr)},
@@ -614,6 +785,11 @@ func planningAssignments(request *http.Request) appointment.AssignmentInput {
 			resources = append(resources, appointment.ResourceAssignment{ID: id, Purpose: appointment.PurposeTrailer})
 		}
 	}
+	for _, id := range request.Form["other_resource_id"] {
+		if id != "" {
+			resources = append(resources, appointment.ResourceAssignment{ID: id, Purpose: appointment.PurposeOther})
+		}
+	}
 	return appointment.AssignmentInput{DriverIDs: drivers, PrimaryDriverID: primary, Resources: resources, OverrideReason: request.Form.Get("override_reason")}
 }
 
@@ -663,8 +839,10 @@ func appointmentErrorPresentation(err error) appointmentErrorView {
 		result = appointmentErrorView{Status: http.StatusForbidden, Code: "forbidden", Message: "Für diese Planungsaktion fehlt die Berechtigung."}
 	case errors.Is(err, appointment.ErrNotFound):
 		result = appointmentErrorView{Status: http.StatusNotFound, Code: "not_found", Message: "Termin oder Auftrag wurde nicht gefunden."}
+	case errors.Is(err, appointment.ErrVersionConflict):
+		result = appointmentErrorView{Status: http.StatusConflict, Code: "appointment_version_conflict", Message: "Der Termin wurde zwischenzeitlich geändert. Bitte laden Sie den aktuellen Stand neu."}
 	case errors.Is(err, appointment.ErrConflict):
-		result = appointmentErrorView{Status: http.StatusConflict, Code: "reservation_conflict", Message: "Der Stand ist veraltet oder der Slot ist bereits belegt. Bitte Kalender neu laden."}
+		result = appointmentErrorView{Status: http.StatusConflict, Code: "reservation_conflict", Message: "Der Slot ist durch einen Fahrer oder eine Ressource belegt. Wählen Sie eine andere Belegung oder Zeit."}
 	case errors.Is(err, appointment.ErrAvailability):
 		result.Code, result.Message = "driver_unavailable", "Mindestens ein Fahrer ist nicht verfügbar. Wählen Sie einen anderen Slot oder begründen Sie den Admin-Override."
 	case errors.Is(err, appointment.ErrNotification):

@@ -382,7 +382,7 @@ func GenerateWithDefaultStart(ctx context.Context, snapshot Snapshot, router Rou
 	return generate(ctx, snapshot, router, cfg, defaultStart, now)
 }
 
-func ExplainExclusions(snapshot Snapshot, suggestions []Suggestion, from, to time.Time) []Exclusion {
+func ExplainExclusions(snapshot Snapshot, suggestions []Suggestion, _, _ time.Time) []Exclusion {
 	usedDrivers, usedResources := make(map[string]bool), make(map[string]bool)
 	for _, suggestion := range suggestions {
 		usedDrivers[suggestion.DriverID] = true
@@ -395,18 +395,12 @@ func ExplainExclusions(snapshot Snapshot, suggestions []Suggestion, from, to tim
 		if usedDrivers[driver.ID] {
 			continue
 		}
-		reason := "keine konfliktfreie Kombination unter den drei bestbewerteten Vorschlägen"
-		if !slices.ContainsFunc(driver.Availability, func(value Interval) bool {
-			return value.Status == "available" && value.StartsAt.Before(to) && value.EndsAt.After(from)
-		}) {
-			reason = "kein Verfügbarkeitsfenster im Suchzeitraum"
-		}
-		result = append(result, Exclusion{Kind: "Fahrer", Name: driver.Name, Reason: reason})
+		result = append(result, Exclusion{Kind: "Fahrer", Name: driver.Name, Reason: "nicht in den drei bestbewerteten Vorschlägen enthalten"})
 	}
 	for _, resource := range snapshot.Resources {
 		relevant := resource.Type == "chipper" || (snapshot.Job.Type == "chipping_with_transport" && snapshot.Job.TransportMode == "internal" && resource.Type == "transport_vehicle")
 		if relevant && !usedResources[resource.ID] {
-			result = append(result, Exclusion{Kind: "Ressource", Name: resource.Name, Reason: "keine konfliktfreie Kombination unter den drei bestbewerteten Vorschlägen"})
+			result = append(result, Exclusion{Kind: "Ressource", Name: resource.Name, Reason: "nicht in den drei bestbewerteten Vorschlägen enthalten"})
 		}
 	}
 	sort.Slice(result, func(i, j int) bool {

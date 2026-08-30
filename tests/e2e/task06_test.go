@@ -208,7 +208,7 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 		width, height int64
 	}{{"720p", 1280, 720}, {"1080p", 1920, 1080}} {
 		audit := metricAudit(viewport.width, viewport.height)
-		if audit.BodyOverflow || audit.RailOverflow || audit.Count != 7 || audit.Rows != 1 || audit.SmallTargets != 0 || audit.MaxCardHeight > 64 {
+		if audit.BodyOverflow || audit.RailOverflow || audit.Count != 8 || audit.Rows != 1 || audit.SmallTargets != 0 || audit.MaxCardHeight > 64 {
 			t.Fatalf("%s dashboard metric audit = %+v", viewport.name, audit)
 		}
 	}
@@ -263,7 +263,7 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 		t.Fatalf("mobile accessibility audit = %+v", mobileAudit)
 	}
 	mobileMetrics := metricAudit(360, 800)
-	if mobileMetrics.BodyOverflow || !mobileMetrics.RailOverflow || mobileMetrics.Count != 7 || mobileMetrics.Rows != 1 ||
+	if mobileMetrics.BodyOverflow || !mobileMetrics.RailOverflow || mobileMetrics.Count != 8 || mobileMetrics.Rows != 1 ||
 		mobileMetrics.SmallTargets != 0 || mobileMetrics.MaxCardHeight > 64 {
 		t.Fatalf("mobile dashboard metric audit = %+v", mobileMetrics)
 	}

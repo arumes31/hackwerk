@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,12 +18,14 @@ import (
 	"example.invalid/hackplan/internal/auth"
 	"example.invalid/hackplan/internal/buildinfo"
 	"example.invalid/hackplan/internal/driver"
+	"example.invalid/hackplan/internal/notification"
 	"example.invalid/hackplan/internal/resource"
 	"example.invalid/hackplan/web/templates"
 )
 
 const testAppointmentID = "60000000-0000-0000-0000-000000000001"
 const testAppointmentResourceID = "70000000-0000-0000-0000-000000000001"
+const testAppointmentOtherResourceID = "70000000-0000-0000-0000-000000000003"
 
 func TestAppointmentHTTPDriverCannotMoveDirectly(t *testing.T) {
 	store := &appointmentHTTPStore{current: appointment.Appointment{ID: testAppointmentID, Lifecycle: appointment.LifecycleProposal, Version: 4}}
@@ -41,7 +44,7 @@ func TestAppointmentHTTPStaleMoveReturnsStableConflict(t *testing.T) {
 	form := url.Values{"csrf_token": {csrfToken}, "version": {"4"}, "starts_at": {"2026-09-01T06:00:00Z"}, "ends_at": {"2026-09-01T09:00:00Z"}}
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/api/v1/appointments/"+testAppointmentID+"/move", form, sessionToken, csrfToken))
-	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"reservation_conflict"`) || store.rescheduleCalls != 0 {
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"appointment_version_conflict"`) || store.rescheduleCalls != 0 {
 		t.Fatalf("stale response/calls = %d %q/%d", response.Code, response.Body.String(), store.rescheduleCalls)
 	}
 }
@@ -174,6 +177,7 @@ func TestAppointmentErrorPresentationMapsStablePublicErrors(t *testing.T) {
 	}{
 		{name: "forbidden", err: auth.ErrForbidden, status: http.StatusForbidden, code: "forbidden"},
 		{name: "not found", err: appointment.ErrNotFound, status: http.StatusNotFound, code: "not_found"},
+		{name: "version conflict", err: appointment.ErrVersionConflict, status: http.StatusConflict, code: "appointment_version_conflict"},
 		{name: "conflict", err: appointment.ErrConflict, status: http.StatusConflict, code: "reservation_conflict"},
 		{name: "availability", err: appointment.ErrAvailability, status: http.StatusUnprocessableEntity, code: "driver_unavailable"},
 		{name: "notification", err: appointment.ErrNotification, status: http.StatusUnprocessableEntity, code: "notification_channel_missing"},
@@ -189,6 +193,31 @@ func TestAppointmentErrorPresentationMapsStablePublicErrors(t *testing.T) {
 				t.Fatalf("presentation=%+v", presentation)
 			}
 		})
+	}
+}
+
+func TestAppointmentSwapCandidatesCanBeLoadedForAnotherDate(t *testing.T) {
+	store := &appointmentHTTPStore{
+		current:         appointment.Appointment{ID: testAppointmentID, Lifecycle: appointment.LifecycleDraft, Version: 1},
+		planningOptions: appointmentPlanningOptionsFixture(),
+	}
+	store.events = []appointment.CalendarEvent{
+		{Appointment: appointment.Appointment{ID: testAppointmentID, Lifecycle: appointment.LifecycleDraft}},
+		{Appointment: appointment.Appointment{ID: "candidate-proposal", JobNumber: "HW-2026-0042", Lifecycle: appointment.LifecycleProposal, StartsAt: time.Date(2026, 9, 14, 7, 0, 0, 0, time.UTC), Version: 5}, CustomerName: "Musterkunde"},
+		{Appointment: appointment.Appointment{ID: "fixed", Lifecycle: appointment.LifecycleFixed}},
+	}
+	router, session, csrf := appointmentTestRouter(t, auth.RoleAdmin, store)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodGet, "/api/v1/appointments/"+testAppointmentID+"/swap-candidates?date=2026-09-14", nil, session, csrf))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"candidate-proposal"`) || strings.Contains(response.Body.String(), `"id":"fixed"`) {
+		t.Fatalf("swap candidates response = %d %s", response.Code, response.Body.String())
+	}
+
+	driverRouter, driverSession, driverCSRF := appointmentTestRouter(t, auth.RoleDriver, store)
+	forbidden := httptest.NewRecorder()
+	driverRouter.ServeHTTP(forbidden, authenticatedCustomerRequest(t, http.MethodGet, "/api/v1/appointments/"+testAppointmentID+"/swap-candidates?date=2026-09-14", nil, driverSession, driverCSRF))
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("driver swap candidates response = %d %s", forbidden.Code, forbidden.Body.String())
 	}
 }
 
@@ -271,6 +300,89 @@ func TestCalendarPlanningFallbackUsesRealLinkAndAdminOnlyForm(t *testing.T) {
 	driverRouter.ServeHTTP(driverResponse, authenticatedCustomerRequest(t, http.MethodGet, "/calendar/plan?job_id="+testJobID, nil, driverSession, driverCSRF))
 	if driverResponse.Code != http.StatusForbidden || driverStore.createCalls != 0 {
 		t.Fatalf("driver fallback status/create = %d/%d", driverResponse.Code, driverStore.createCalls)
+	}
+}
+
+func TestAppointmentAssignmentHasVersionedNoJavaScriptForm(t *testing.T) {
+	options := appointmentPlanningOptionsFixture()
+	current := appointment.Appointment{
+		ID: testAppointmentID, JobID: testJobID, JobNumber: "HW-2026-0001", JobType: "chipping_only", TransportMode: "none",
+		Lifecycle: appointment.LifecycleProposal, Confirmation: appointment.ConfirmationNotRequested,
+		StartsAt: time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC), EndsAt: time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC), Version: 4,
+		Drivers: []appointment.DriverAssignment{{ID: operationDriverID, Name: "Anna Fahrerin", Primary: true}},
+		Resources: []appointment.AssignedResource{
+			{ID: testAppointmentResourceID, Name: "Hacker 1", Type: resource.TypeChipper, Purpose: appointment.PurposeChipping, Exclusive: true},
+			{ID: testAppointmentOtherResourceID, Name: "Werkzeugkiste", Type: resource.TypeOther, Purpose: appointment.PurposeOther},
+		},
+	}
+	detail := appointment.Detail{CalendarEvent: appointment.CalendarEvent{Appointment: current, CustomerID: testCustomerID, CustomerName: "Franz Huber", Locality: "Grieskirchen", VolumeM3: "80.00"}}
+	store := &appointmentHTTPStore{current: current, detail: detail, planningOptions: options}
+	router, sessionToken, csrfToken := appointmentTestRouter(t, auth.RoleAdmin, store)
+
+	pageResponse := httptest.NewRecorder()
+	router.ServeHTTP(pageResponse, authenticatedCustomerRequest(t, http.MethodGet, "/calendar/appointments/"+testAppointmentID, nil, sessionToken, csrfToken))
+	pageBody := pageResponse.Body.String()
+	for _, expected := range []string{
+		`action="/calendar/appointments/` + testAppointmentID + `/assign"`,
+		`name="csrf_token" value="` + csrfToken + `"`, `name="version" value="4"`,
+		`name="driver_id" value="` + operationDriverID + `" checked`,
+		`name="primary_driver_id" required`, `name="chipper_resource_id" required`,
+		`name="other_resource_id" value="` + testAppointmentOtherResourceID + `" checked`,
+		`name="override_reason"`, "Zuweisung speichern",
+	} {
+		if !strings.Contains(pageBody, expected) {
+			t.Errorf("assignment page missing %q in %q", expected, pageBody)
+		}
+	}
+	if pageResponse.Code != http.StatusOK || pageResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("assignment page status/cache = %d/%q", pageResponse.Code, pageResponse.Header().Get("Cache-Control"))
+	}
+
+	form := url.Values{
+		"csrf_token": {csrfToken}, "version": {"4"}, "driver_id": {operationDriverID},
+		"primary_driver_id": {operationDriverID}, "chipper_resource_id": {testAppointmentResourceID}, "other_resource_id": {testAppointmentOtherResourceID},
+	}
+	postResponse := httptest.NewRecorder()
+	router.ServeHTTP(postResponse, authenticatedCustomerRequest(t, http.MethodPost, "/calendar/appointments/"+testAppointmentID+"/assign", form, sessionToken, csrfToken))
+	if postResponse.Code != http.StatusSeeOther || postResponse.Header().Get("Location") != "/calendar/appointments/"+testAppointmentID+"?assigned=1" || store.assignCalls != 1 {
+		t.Fatalf("assignment post status/location/calls = %d/%q/%d body=%q", postResponse.Code, postResponse.Header().Get("Location"), store.assignCalls, postResponse.Body.String())
+	}
+	if !slices.ContainsFunc(store.current.Resources, func(item appointment.AssignedResource) bool {
+		return item.ID == testAppointmentOtherResourceID && item.Purpose == appointment.PurposeOther
+	}) {
+		t.Fatalf("additional resource was lost: %#v", store.current.Resources)
+	}
+
+	driverStore := &appointmentHTTPStore{current: current, detail: detail, planningOptions: options}
+	driverRouter, driverSession, driverCSRF := appointmentTestRouter(t, auth.RoleDriver, driverStore)
+	driverResponse := httptest.NewRecorder()
+	driverRouter.ServeHTTP(driverResponse, authenticatedCustomerRequest(t, http.MethodGet, "/calendar/appointments/"+testAppointmentID, nil, driverSession, driverCSRF))
+	if driverResponse.Code != http.StatusForbidden {
+		t.Fatalf("driver assignment page status = %d", driverResponse.Code)
+	}
+}
+
+func TestAppointmentDetailHidesCustomerResponseNoteFromDrivers(t *testing.T) {
+	current := appointment.Appointment{
+		ID: testAppointmentID, JobID: testJobID, JobNumber: "HW-2026-0001", Lifecycle: appointment.LifecycleFixed,
+		StartsAt: time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC), EndsAt: time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC), Version: 4,
+	}
+	detail := appointment.Detail{CalendarEvent: appointment.CalendarEvent{Appointment: current, CustomerID: testCustomerID, CustomerName: "Franz Huber"}}
+	appointmentStore := &appointmentHTTPStore{current: current, detail: detail, planningOptions: appointmentPlanningOptionsFixture()}
+	notificationStore := &notificationHTTPStore{statuses: []notification.Status{{ID: "notification", AppointmentID: testAppointmentID, Response: "declined", ResponseNote: "Vertrauliche Kundennotiz"}}}
+
+	driverRouter, driverSession, driverCSRF := appointmentTestRouterWithNotifications(t, auth.RoleDriver, appointmentStore, notificationStore)
+	driverResponse := httptest.NewRecorder()
+	driverRouter.ServeHTTP(driverResponse, authenticatedCustomerRequest(t, http.MethodGet, "/api/v1/appointments/"+testAppointmentID, nil, driverSession, driverCSRF))
+	if driverResponse.Code != http.StatusOK || strings.Contains(driverResponse.Body.String(), "Vertrauliche Kundennotiz") || strings.Contains(driverResponse.Body.String(), `"response_note"`) {
+		t.Fatalf("driver appointment detail leaked response note: %d %s", driverResponse.Code, driverResponse.Body.String())
+	}
+
+	adminRouter, adminSession, adminCSRF := appointmentTestRouterWithNotifications(t, auth.RoleAdmin, appointmentStore, notificationStore)
+	adminResponse := httptest.NewRecorder()
+	adminRouter.ServeHTTP(adminResponse, authenticatedCustomerRequest(t, http.MethodGet, "/api/v1/appointments/"+testAppointmentID, nil, adminSession, adminCSRF))
+	if adminResponse.Code != http.StatusOK || !strings.Contains(adminResponse.Body.String(), "Vertrauliche Kundennotiz") {
+		t.Fatalf("admin appointment detail lost response note: %d %s", adminResponse.Code, adminResponse.Body.String())
 	}
 }
 
@@ -428,12 +540,47 @@ func TestCalendarTemplateShowsReadOnlyNoticeOnlyToDriver(t *testing.T) {
 	}
 }
 
+func TestAppointmentConfirmationAdminActionsHaveNoJavaScriptPath(t *testing.T) {
+	detail := appointment.Detail{CalendarEvent: appointment.CalendarEvent{Appointment: appointment.Appointment{
+		ID: testAppointmentID, JobNumber: "HW-2026-0001", Lifecycle: appointment.LifecycleFixed,
+		Confirmation: appointment.ConfirmationConfirmed, Version: 4,
+	}}}
+	appointmentStore := &appointmentHTTPStore{current: detail.Appointment, detail: detail, planningOptions: appointmentPlanningOptionsFixture()}
+	notificationStore := &notificationHTTPStore{}
+	router, session, csrf := appointmentTestRouterWithNotifications(t, auth.RoleAdmin, appointmentStore, notificationStore)
+
+	page := httptest.NewRecorder()
+	router.ServeHTTP(page, authenticatedCustomerRequest(t, http.MethodGet, "/calendar/appointments/"+testAppointmentID, nil, session, csrf))
+	for _, expected := range []string{"Kundenbestätigung verwalten", "/confirmation/reissue", "/confirmation/reset", `name="reason"`, `name="version" value="4"`} {
+		if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), expected) {
+			t.Fatalf("appointment detail missing %q: %d %s", expected, page.Code, page.Body.String())
+		}
+	}
+
+	reissue := httptest.NewRecorder()
+	form := url.Values{"csrf_token": {csrf}, "version": {"4"}, "reason": {"Kunde benötigt einen neuen Link"}}
+	router.ServeHTTP(reissue, authenticatedCustomerRequest(t, http.MethodPost, "/calendar/appointments/"+testAppointmentID+"/confirmation/reissue", form, session, csrf))
+	if reissue.Code != http.StatusSeeOther || notificationStore.reissueCalls != 1 || !strings.Contains(reissue.Header().Get("Location"), "confirmation_action=reissued") {
+		t.Fatalf("reissue response/calls = %d/%d location=%q", reissue.Code, notificationStore.reissueCalls, reissue.Header().Get("Location"))
+	}
+
+	driverStore := &notificationHTTPStore{}
+	driverRouter, driverSession, driverCSRF := appointmentTestRouterWithNotifications(t, auth.RoleDriver, appointmentStore, driverStore)
+	forbidden := httptest.NewRecorder()
+	form.Set("csrf_token", driverCSRF)
+	driverRouter.ServeHTTP(forbidden, authenticatedCustomerRequest(t, http.MethodPost, "/calendar/appointments/"+testAppointmentID+"/confirmation/reset", form, driverSession, driverCSRF))
+	if forbidden.Code != http.StatusSeeOther || driverStore.resetCalls != 0 || !strings.Contains(forbidden.Header().Get("Location"), "confirmation_error=forbidden") {
+		t.Fatalf("driver reset response/calls = %d/%d location=%q", forbidden.Code, driverStore.resetCalls, forbidden.Header().Get("Location"))
+	}
+}
+
 func appointmentPlanningOptionsFixture() appointment.PlanningOptions {
 	return appointment.PlanningOptions{
 		Drivers: []appointment.PlanningDriver{{ID: operationDriverID, Name: "Anna Fahrerin"}},
 		Resources: []appointment.PlanningResource{
 			{ID: testAppointmentResourceID, Name: "Hacker 1", Type: resource.TypeChipper, IsExclusive: true},
 			{ID: "70000000-0000-0000-0000-000000000002", Name: "Transporter 1", Type: resource.TypeTransportVehicle, IsExclusive: true},
+			{ID: testAppointmentOtherResourceID, Name: "Werkzeugkiste", Type: resource.TypeOther},
 		},
 		Waitlist: []appointment.WaitlistItem{{
 			WaitlistID: "80000000-0000-0000-0000-000000000001", JobID: testJobID, JobNumber: "HW-2026-0001",
@@ -451,6 +598,10 @@ func validAppointmentPlanningForm(csrfToken string) url.Values {
 }
 
 func appointmentTestRouter(t *testing.T, role auth.Role, store *appointmentHTTPStore) (http.Handler, string, string) {
+	return appointmentTestRouterWithNotifications(t, role, store, nil)
+}
+
+func appointmentTestRouterWithNotifications(t *testing.T, role auth.Role, store *appointmentHTTPStore, notificationStore *notificationHTTPStore) (http.Handler, string, string) {
 	t.Helper()
 	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
 	// #nosec G101 -- deterministic non-secret test fixture tokens.
@@ -473,7 +624,14 @@ func appointmentTestRouter(t *testing.T, role auth.Role, store *appointmentHTTPS
 	}
 	cfg := configForWebTest()
 	cfg.Mail.Enabled = true
-	router, err := NewRouter(Dependencies{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pinger{}, Build: buildinfo.Info{Version: "test"}, Identity: identity, Appointments: service})
+	dependencies := Dependencies{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pinger{}, Build: buildinfo.Info{Version: "test"}, Identity: identity, Appointments: service}
+	if notificationStore != nil {
+		dependencies.Notifications, err = notification.NewAdminService(notificationStore, func() time.Time { return now })
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	router, err := NewRouter(dependencies)
 	if err != nil {
 		t.Fatal(err)
 	}
