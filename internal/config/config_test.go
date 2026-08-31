@@ -24,6 +24,9 @@ func TestLoad(t *testing.T) {
 		{name: "invalid dashboard hours", values: map[string]string{"DASHBOARD_BUSINESS_OPEN": "18:00", "DASHBOARD_BUSINESS_CLOSE": "07:00"}, expectError: "dashboard business hours"},
 		{name: "unbounded dashboard horizon", values: map[string]string{"DASHBOARD_HORIZON_DAYS": "90"}, expectError: "dashboard limits"},
 		{name: "invalid waitlist review limits", values: map[string]string{"WAITLIST_DURATION_REVIEW_MIN_MINUTES": "90", "WAITLIST_DURATION_REVIEW_MAX_MINUTES": "60"}, expectError: "waitlist duration review limits"},
+		{name: "invalid retired auth security key", values: map[string]string{"AUTH_SECURITY_KEYS": `{"development-v1":"ZGV2ZWxvcG1lbnQtb25seS1oYWNrd2Vyay1zZWN1cml0eS1rZXk=","retired":"not-base64"}`}, expectError: "auth security key ring"},
+		{name: "short retired auth security key", values: map[string]string{"AUTH_SECURITY_KEYS": `{"development-v1":"ZGV2ZWxvcG1lbnQtb25seS1oYWNrd2Vyay1zZWN1cml0eS1rZXk=","retired":"c2hvcnQ="}`}, expectError: "auth security key ring"},
+		{name: "missing auth security key id", values: map[string]string{"AUTH_SECURITY_KEYS": `{"development-v1":"ZGV2ZWxvcG1lbnQtb25seS1oYWNrd2Vyay1zZWN1cml0eS1rZXk=","":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`}, expectError: "auth security key ring"},
 		{name: "invalid calendar feed domain", values: map[string]string{"CALENDAR_UID_DOMAIN": "bad domain"}, expectError: "calendar feed"},
 		{name: "invalid planning horizon", values: map[string]string{"PLANNING_HORIZON_DAYS": "91"}, expectError: "planning settings"},
 		{name: "enabled voice needs transcriber", values: map[string]string{"VOICE_ENABLED": "true"}, expectError: "active transcriber"},
@@ -312,6 +315,11 @@ func TestProductionRequiresTrustedProxyAndRejectsWildcardHost(t *testing.T) {
 	base["APP_ALLOWED_HOSTS"] = "hackwerk.example"
 	if _, err := load(get(base), func(string) ([]byte, error) { return nil, errors.New("unexpected read") }); err != nil {
 		t.Fatalf("secure production config error=%v", err)
+	}
+	base["AUTH_SECURITY_KEY_ID"] = "renamed"
+	base["AUTH_SECURITY_KEYS"] = `{"renamed":"ZGV2ZWxvcG1lbnQtb25seS1oYWNrd2Vyay1zZWN1cml0eS1rZXk="}`
+	if _, err := load(get(base), func(string) ([]byte, error) { return nil, errors.New("unexpected read") }); err == nil || !strings.Contains(err.Error(), "production auth security key") {
+		t.Fatalf("renamed development auth key error=%v", err)
 	}
 }
 

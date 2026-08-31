@@ -474,9 +474,17 @@ func (service *Service) ConfirmTOTPEnrollment(ctx context.Context, actor Actor, 
 	if _, ok := validateTOTP(string(secret), code, service.now().UTC()); !ok {
 		return nil, ErrInvalidMFA
 	}
-	codes, hashes, err := newRecoveryCodes()
+	profile, err := service.security.LoadProfile(ctx, actor.UserID, service.now().UTC())
 	if err != nil {
 		return nil, err
+	}
+	var codes []string
+	var hashes [][]byte
+	if profile.RecoveryCodeCount == 0 {
+		codes, hashes, err = newRecoveryCodes()
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := service.security.EnableTOTP(ctx, actor, hashes, requestID); err != nil {
 		return nil, err

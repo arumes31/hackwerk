@@ -34,6 +34,7 @@ const (
 	businessChamberPlaceholder               = "Kammer/Fachgruppe noch nicht hinterlegt"
 	businessTradeRulesPlaceholder            = "Anwendbare gewerbe- oder berufsrechtliche Vorschriften noch nicht hinterlegt"
 	businessDataProtectionOfficerPlaceholder = "Kein Datenschutzbeauftragter hinterlegt"
+	developmentAuthSecurityKeyMaterial       = "development-only-hackwerk-security-key"
 )
 
 // Config contains the startup settings shared by serve, worker, and CLI modes.
@@ -800,6 +801,12 @@ func (cfg Config) Validate() error {
 	if !ok || decodeSecurityErr != nil || len(decodedSecurityKey) < 32 {
 		return errors.New("config: current auth security key is missing or too short")
 	}
+	for keyID, encoded := range cfg.Auth.SecurityKeys {
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		if strings.TrimSpace(keyID) == "" || err != nil || len(decoded) < 32 {
+			return errors.New("config: auth security key ring contains a missing, invalid or too short key")
+		}
+	}
 	if cfg.Confirmation.TokenTTL < time.Hour || cfg.Confirmation.TokenTTL > 90*24*time.Hour || cfg.Confirmation.RateLimit < 1 || cfg.Confirmation.RateLimit > 1000 {
 		return errors.New("config: invalid confirmation limits")
 	}
@@ -961,6 +968,12 @@ func (cfg Config) Validate() error {
 		}
 		if cfg.Auth.SecurityCurrentKeyID == "development-v1" {
 			return errors.New("config: production auth security key is required")
+		}
+		for _, encoded := range cfg.Auth.SecurityKeys {
+			decoded, _ := base64.StdEncoding.DecodeString(encoded)
+			if string(decoded) == developmentAuthSecurityKeyMaterial {
+				return errors.New("config: production auth security key is required")
+			}
 		}
 		if len(cfg.HTTP.TrustedProxyCIDRs) == 0 {
 			return errors.New("config: production trusted proxy CIDRs are required")

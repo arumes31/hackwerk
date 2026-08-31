@@ -89,7 +89,9 @@ func (store *fakeSecurityStore) TOTPCredential(context.Context, string) (TOTPCre
 func (store *fakeSecurityStore) EnableTOTP(_ context.Context, _ Actor, hashes [][]byte, _ string) error {
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 	store.totp.EnabledAt = &now
-	store.recoveryHashes = hashes
+	if len(hashes) > 0 {
+		store.recoveryHashes = hashes
+	}
 	return nil
 }
 
@@ -329,6 +331,32 @@ func TestSecurityTOTPRecoveryAndLoginWorkflows(t *testing.T) {
 	}
 	if err := service.DeleteTOTP(t.Context(), actor, "request-8"); err != nil || store.totp.Name != "" {
 		t.Fatalf("delete TOTP = %#v, %v", store.totp, err)
+	}
+}
+
+func TestConfirmTOTPEnrollmentPreservesExistingRecoveryCodes(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	service, store := newSecurityService(t, now)
+	actor := Actor{UserID: "user-1", Role: RoleDriver}
+	store.profile.RecoveryCodeCount = 1
+	existingHash := []byte("existing-recovery-hash")
+	store.recoveryHashes = [][]byte{append([]byte(nil), existingHash...)}
+	enrollment, err := service.BeginTOTPEnrollment(t.Context(), actor, "Telefon", "request-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, err := totp.GenerateCodeCustom(enrollment.Secret, now, totp.ValidateOpts{
+		Period: totpPeriodSeconds, Skew: 0, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	codes, err := service.ConfirmTOTPEnrollment(t.Context(), actor, code, "request-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(codes) != 0 || len(store.recoveryHashes) != 1 || !bytes.Equal(store.recoveryHashes[0], existingHash) {
+		t.Fatalf("ConfirmTOTPEnrollment() rotated existing recovery codes: codes=%d hashes=%q", len(codes), store.recoveryHashes)
 	}
 }
 
