@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -218,12 +219,14 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 	metricAudit := func(width, height int64) struct {
 		BodyOverflow, RailOverflow bool
 		Count, Rows, SmallTargets  int
+		VisibleCards, IconCount    int
 		MaxCardHeight              float64
 	} {
 		t.Helper()
 		var audit struct {
 			BodyOverflow, RailOverflow bool
 			Count, Rows, SmallTargets  int
+			VisibleCards, IconCount    int
 			MaxCardHeight              float64
 		}
 		if err := chromedp.Run(browserContext,
@@ -231,11 +234,14 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 			chromedp.Evaluate(`(() => {
 				const rail=document.querySelector('.dashboard-metrics');
 				const cards=[...rail.querySelectorAll('.metric-card')];
+				const railRect=rail.getBoundingClientRect();
 				const rects=cards.map(card=>card.getBoundingClientRect());
 				return {BodyOverflow:document.documentElement.scrollWidth>window.innerWidth,
 					RailOverflow:rail.scrollWidth>rail.clientWidth+1,Count:cards.length,
 					Rows:new Set(rects.map(rect=>Math.round(rect.top))).size,
 					SmallTargets:rects.filter(rect=>rect.height<44).length,
+					VisibleCards:rects.filter(rect=>rect.right>railRect.left&&rect.left<railRect.right).length,
+					IconCount:rail.querySelectorAll('.metric-card > span[aria-hidden="true"]').length,
 					MaxCardHeight:Math.max(...rects.map(rect=>rect.height))};
 			})()`, &audit),
 		); err != nil {
@@ -248,7 +254,8 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 		width, height int64
 	}{{"720p", 1280, 720}, {"1080p", 1920, 1080}} {
 		audit := metricAudit(viewport.width, viewport.height)
-		if audit.BodyOverflow || audit.RailOverflow || audit.Count != 8 || audit.Rows != 1 || audit.SmallTargets != 0 || audit.MaxCardHeight > 64 {
+		if audit.BodyOverflow || audit.RailOverflow || audit.Count != 8 || audit.Rows != 1 || audit.SmallTargets != 0 ||
+			audit.VisibleCards != 8 || audit.IconCount != 0 || audit.MaxCardHeight > 64 {
 			t.Fatalf("%s dashboard metric audit = %+v", viewport.name, audit)
 		}
 	}
@@ -272,10 +279,13 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 	}
 
 	var mobileAudit struct {
-		Overflow, MenuOpen, FocusReturned bool
-		H1Count, SmallTargets             int
-		MissingNames, UnlabelledFields    int
-		MissingLandmarks                  bool
+		Overflow, MenuOpen, FocusReturned       bool
+		H1Count, SmallTargets                   int
+		MissingNames, UnlabelledFields          int
+		MissingLandmarks                        bool
+		CaptureVisible, CaptureInsideNavigation bool
+		CaptureName, CaptureHref                string
+		CaptureWidth, CaptureHeight             float64
 	}
 	if err := chromedp.Run(browserContext,
 		chromedp.EmulateViewport(360, 800), chromedp.WaitVisible(".mobile-bottom-nav", chromedp.ByQuery),
@@ -283,6 +293,9 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 		chromedp.KeyEvent("\x1b"),
 		chromedp.Evaluate(`(() => {
 			const summary=document.querySelector('[data-mobile-menu] summary');
+			const capture=document.querySelector('.mobile-primary-action');
+			const captureRect=capture?capture.getBoundingClientRect():{width:0,height:0};
+			const navigation=document.querySelector('.mobile-bottom-nav');
 			const isVisible=node=>{const style=getComputedStyle(node),rect=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0};
 			const touchTargets=[...document.querySelectorAll('.mobile-bottom-nav a,.mobile-bottom-nav summary')].filter(isVisible);
 			const controls=[...document.querySelectorAll('a,button,summary,input:not([type=hidden]),select,textarea')].filter(isVisible);
@@ -293,19 +306,51 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 				SmallTargets:touchTargets.filter(node=>{const r=node.getBoundingClientRect();return r.width<44||r.height<44}).length,
 				MissingNames:controls.filter(node=>!named(node)).length,
 				UnlabelledFields:controls.filter(node=>node.matches('input,select,textarea')&&!named(node)).length,
+				CaptureVisible:!!capture&&isVisible(capture),CaptureInsideNavigation:!!capture&&capture.closest('.mobile-bottom-nav')===navigation,
+				CaptureName:capture?(capture.textContent||'').trim():'',CaptureHref:capture?capture.getAttribute('href')||'':'',
+				CaptureWidth:captureRect.width,CaptureHeight:captureRect.height,
 				MissingLandmarks:!document.querySelector('.skip-link')||!document.querySelector('header')||!document.querySelector('main')||!document.querySelector('footer')||document.documentElement.lang!=='de-AT'};
 		})()`, &mobileAudit),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
 	if mobileAudit.Overflow || mobileAudit.MenuOpen || !mobileAudit.FocusReturned || mobileAudit.H1Count != 1 || mobileAudit.SmallTargets != 0 ||
-		mobileAudit.MissingNames != 0 || mobileAudit.UnlabelledFields != 0 || mobileAudit.MissingLandmarks {
+		mobileAudit.MissingNames != 0 || mobileAudit.UnlabelledFields != 0 || mobileAudit.MissingLandmarks ||
+		!mobileAudit.CaptureVisible || !mobileAudit.CaptureInsideNavigation || mobileAudit.CaptureName != "Neuer Auftrag" ||
+		mobileAudit.CaptureHref != "/customers/new" || mobileAudit.CaptureWidth < 44 || mobileAudit.CaptureHeight < 44 {
 		t.Fatalf("mobile accessibility audit = %+v", mobileAudit)
 	}
 	mobileMetrics := metricAudit(360, 800)
 	if mobileMetrics.BodyOverflow || !mobileMetrics.RailOverflow || mobileMetrics.Count != 8 || mobileMetrics.Rows != 1 ||
-		mobileMetrics.SmallTargets != 0 || mobileMetrics.MaxCardHeight > 64 {
+		mobileMetrics.SmallTargets != 0 || mobileMetrics.VisibleCards < 1 || mobileMetrics.IconCount != 0 || mobileMetrics.MaxCardHeight > 64 {
 		t.Fatalf("mobile dashboard metric audit = %+v", mobileMetrics)
+	}
+	var mobileDashboardScreenshot, desktopDashboardScreenshot []byte
+	if err := chromedp.Run(browserContext,
+		chromedp.EmulateViewport(360, 800),
+		chromedp.FullScreenshot(&mobileDashboardScreenshot, 90),
+		chromedp.EmulateViewport(1280, 720),
+		chromedp.FullScreenshot(&desktopDashboardScreenshot, 90),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	for name, screenshot := range map[string][]byte{
+		"task06-mobile-dashboard.png":  mobileDashboardScreenshot,
+		"task06-desktop-dashboard.png": desktopDashboardScreenshot,
+	} {
+		artifact := filepath.Join(t.ArtifactDir(), name)
+		if err := os.WriteFile(artifact, screenshot, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("dashboard screenshot: %s", artifact)
+		if screenshotDir := os.Getenv("E2E_SCREENSHOT_DIR"); screenshotDir != "" {
+			if err := os.MkdirAll(screenshotDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(screenshotDir, name), screenshot, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 
 	var driverText string

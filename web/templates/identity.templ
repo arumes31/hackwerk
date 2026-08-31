@@ -148,12 +148,24 @@ templ appHeader(shell ShellData) {
 		@navLink(shell, "/dashboard", "Heute")
 		@navLink(shell, "/calendar", "Kalender")
 		@navLink(shell, "/waitlist", "Warteliste")
-		@navLink(shell, "/customers", "Kunden")
+		<a
+			href="/customers/new"
+			class={ "mobile-primary-action " + navClass(shell.ActivePath, "/customers/new") }
+			if isActivePath(shell.ActivePath, "/customers/new") {
+				aria-current="page"
+			}
+		>Neuer Auftrag</a>
+		<a
+			href="/customers"
+			class={ mobileCustomersNavClass(shell.ActivePath) }
+			if mobileCustomersActive(shell.ActivePath) {
+				aria-current="page"
+			}
+		>Kunden</a>
 		<details class="mobile-more" data-mobile-menu>
 			<summary aria-label="Weitere Bereiche">Mehr</summary>
 			<div class="mobile-more__panel">
 				<span class="mobile-more__label">Erfassen</span>
-				@navLink(shell, "/customers/new", "Auftrag erfassen")
 				@navLink(shell, "/voice", "Auftrag per Sprache")
 				if shell.Actor.Role == auth.RoleDriver && shell.Actor.DriverID != "" {
 					@navLink(shell, "/my-route", "Meine Route")
@@ -238,19 +250,19 @@ templ Dashboard(data DashboardData) {
 					</div>
 					<section class="dashboard-metrics" aria-label="Kennzahlen">
 						if data.View.Admin {
-							@metricCard("Warteliste", data.View.Counts.Waitlist, "/waitlist", "⌛")
-							@metricCard("Termine", data.View.Counts.Appointments, "/calendar", "▣")
-							@metricCard("Offene Antworten", data.View.Counts.Attention, "/calendar", "?")
-							@metricCard("Eigene Voice-Entwürfe", data.View.Counts.VoiceDrafts, "/voice", "◉")
-							@metricCard("Versandprobleme", data.View.Counts.NotificationIssues, "/admin/notifications", "!")
-							@metricCard("Konflikte/Overrides", data.View.Counts.Overrides, "/calendar", "⚠")
-							@metricCard("Freie Fenster", freeSlotCount(data.View.Capacities), "/calendar", "◷")
-							@metricCard("Fahrer", data.View.Counts.ActiveDrivers, driverLink(data.Shell.Actor.Role), "♟")
+							@metricCard("Warteliste", data.View.Counts.Waitlist, "/waitlist")
+							@metricCard("Termine", data.View.Counts.Appointments, "/calendar")
+							@metricCard("Offene Antworten", data.View.Counts.Attention, "/calendar")
+							@metricCard("Eigene Voice-Entwürfe", data.View.Counts.VoiceDrafts, "/voice")
+							@metricCard("Versandprobleme", data.View.Counts.NotificationIssues, "/admin/notifications")
+							@metricCard("Konflikte/Overrides", data.View.Counts.Overrides, "/calendar")
+							@metricCard("Freie Fenster", freeSlotCount(data.View.Capacities), "/calendar")
+							@metricCard("Fahrer", data.View.Counts.ActiveDrivers, driverLink(data.Shell.Actor.Role))
 						} else {
-							@metricCard("Termine", data.View.Counts.Appointments, "/calendar", "▣")
-							@metricCard("Eigene Voice-Entwürfe", data.View.Counts.VoiceDrafts, "/voice", "◉")
-							@metricCard("Warteliste", data.View.Counts.Waitlist, "/waitlist", "⌛")
-							@metricCard("Fahrer", data.View.Counts.ActiveDrivers, driverLink(data.Shell.Actor.Role), "♟")
+							@metricCard("Termine", data.View.Counts.Appointments, "/calendar")
+							@metricCard("Eigene Voice-Entwürfe", data.View.Counts.VoiceDrafts, "/voice")
+							@metricCard("Warteliste", data.View.Counts.Waitlist, "/waitlist")
+							@metricCard("Fahrer", data.View.Counts.ActiveDrivers, driverLink(data.Shell.Actor.Role))
 						}
 					</section>
 					if data.View.Counts.Attention > 0 || data.View.Counts.NotificationIssues > 0 || data.View.Counts.Overrides > 0 || len(data.View.UrgentJobs) > 0 {
@@ -359,8 +371,8 @@ templ Dashboard(data DashboardData) {
 	</html>
 }
 
-templ metricCard(label string, value int64, href string, icon string) {
-	<a class="metric-card" href={ templ.SafeURL(href) } aria-label={ fmt.Sprintf("%s: %d", label, value) }><span aria-hidden="true">{ icon }</span><strong>{ fmt.Sprint(value) }</strong><small>{ label }</small></a>
+templ metricCard(label string, value int64, href string) {
+	<a class="metric-card" href={ templ.SafeURL(href) } aria-label={ fmt.Sprintf("%s: %d", label, value) }><strong>{ fmt.Sprint(value) }</strong><small>{ label }</small></a>
 }
 
 templ dashboardAppointment(item dashboard.Appointment) {
@@ -783,6 +795,17 @@ func isActivePath(active string, path string) bool {
 
 func navClass(active string, path string) string {
 	if isActivePath(active, path) {
+		return "nav-link nav-link--active"
+	}
+	return "nav-link"
+}
+
+func mobileCustomersActive(active string) bool {
+	return isActivePath(active, "/customers") && !isActivePath(active, "/customers/new")
+}
+
+func mobileCustomersNavClass(active string) string {
+	if mobileCustomersActive(active) {
 		return "nav-link nav-link--active"
 	}
 	return "nav-link"

@@ -156,6 +156,7 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 		chromedp.SetValue("#password", adminPassword, chromedp.ByQuery),
 		chromedp.Click("form[action='/login'] button[type='submit']", chromedp.ByQuery),
 		chromedp.WaitVisible("[data-admin-menu] summary", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.scroll-top') !== null`, nil),
 		chromedp.Evaluate(`(()=>{const prompt=document.querySelector('[data-install-prompt]');prompt.hidden=true;return getComputedStyle(prompt).display==='none'})()`, &installPromptFlow.HiddenStateHonored),
 		chromedp.Evaluate(`(()=>{
 			window.__hackwerkInstallPromptCalls=0;

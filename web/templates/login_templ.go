@@ -69,14 +69,14 @@ func Login(data LoginData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<body class=\"login-body\"><div class=\"connectivity-banner\" role=\"status\" aria-live=\"polite\" data-connectivity-banner hidden></div><a class=\"skip-link\" href=\"#hauptinhalt\">Zum Anmeldeformular springen</a><main id=\"hauptinhalt\" class=\"login-page\"><section class=\"login-panel\" aria-labelledby=\"login-heading\"><header class=\"login-panel__header\"><div class=\"login-emblem\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\" focusable=\"false\"><path d=\"M12 3 8.4 9h2L7.2 14h3.3v4h3v-4h3.3l-3.2-5h2z\"></path></svg></div><p class=\"login-wordmark\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<body class=\"login-body\"><div class=\"connectivity-banner\" role=\"status\" aria-live=\"polite\" data-connectivity-banner hidden></div><a class=\"skip-link\" href=\"#hauptinhalt\">Zum Anmeldeformular springen</a><main id=\"hauptinhalt\" class=\"login-page\"><section class=\"login-panel\" aria-labelledby=\"login-heading\"><header class=\"login-panel__header\"><div class=\"login-emblem\" aria-hidden=\"true\">H</div><p class=\"login-wordmark\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(data.Page.AppName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 50, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 46, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
@@ -94,7 +94,7 @@ func Login(data LoginData) templ.Component {
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(data.Error)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 56, Col: 87}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 52, Col: 87}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
@@ -113,7 +113,7 @@ func Login(data LoginData) templ.Component {
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(data.Notice)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 59, Col: 74}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 55, Col: 74}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 			if templ_7745c5c3_Err != nil {
@@ -131,20 +131,20 @@ func Login(data LoginData) templ.Component {
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Username)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 64, Col: 65}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 60, Col: 65}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" autocomplete=\"username\" autocapitalize=\"none\" spellcheck=\"false\" placeholder=\"Einsatz-ID oder Name\" required autofocus></div><div class=\"login-field\"><label for=\"password\">Passwort</label> <input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Passwort eingeben\" data-password-input required></div><button class=\"login-submit\" type=\"submit\"><span>Anmelden</span> <svg viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 3.5a7.5 7.5 0 0 0-7.5 7.5m15 0A7.5 7.5 0 0 0 12 3.5m-4.7 8.1A4.7 4.7 0 0 1 12 6.9a4.7 4.7 0 0 1 4.7 4.7m-7.2 1.1A2.5 2.5 0 0 1 12 10.2a2.5 2.5 0 0 1 2.5 2.5c0 3.5-1 6-2.5 7.8m-5.1-6.9c.2 3.2 1 5.6 2.4 7m7.8-7c-.2 3.2-1 5.6-2.4 7\"></path></svg></button></form></section></main><footer class=\"login-meta\" aria-label=\"Buildinformationen\"><span>HWK-SYS // V ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" autocomplete=\"username\" autocapitalize=\"none\" spellcheck=\"false\" placeholder=\"Einsatz-ID oder Name\" required autofocus></div><div class=\"login-field\"><label for=\"password\">Passwort</label> <input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Passwort eingeben\" data-password-input required></div><button class=\"login-submit\" type=\"submit\">Anmelden</button></form></section></main><footer class=\"login-meta\" aria-label=\"Buildinformationen\"><span>HWK-SYS // V ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(loginBuildVersion(data.Page.BuildVersion))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 80, Col: 66}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 71, Col: 66}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 		if templ_7745c5c3_Err != nil {
@@ -157,7 +157,7 @@ func Login(data LoginData) templ.Component {
 		var templ_7745c5c3_Var7 string
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(loginBuildID(data.Page.BuildVersion))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 80, Col: 114}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 71, Col: 114}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 		if templ_7745c5c3_Err != nil {
@@ -208,14 +208,14 @@ func MFA(data MFAData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<body class=\"login-body\"><div class=\"connectivity-banner\" role=\"status\" aria-live=\"polite\" data-connectivity-banner hidden></div><a class=\"skip-link\" href=\"#hauptinhalt\">Zur Sicherheitsprüfung springen</a><main id=\"hauptinhalt\" class=\"login-page\"><section class=\"login-panel\" aria-labelledby=\"mfa-heading\"><header class=\"login-panel__header\"><div class=\"login-emblem\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\" focusable=\"false\"><path d=\"M12 2.5 4.5 5.8v5.1c0 5 3 8.8 7.5 10.6 4.5-1.8 7.5-5.6 7.5-10.6V5.8L12 2.5Zm0 4.2a2.8 2.8 0 0 1 1 5.4v3.2h-2v-3.2a2.8 2.8 0 0 1 1-5.4Z\"></path></svg></div><p class=\"login-wordmark\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<body class=\"login-body\"><div class=\"connectivity-banner\" role=\"status\" aria-live=\"polite\" data-connectivity-banner hidden></div><a class=\"skip-link\" href=\"#hauptinhalt\">Zur Sicherheitsprüfung springen</a><main id=\"hauptinhalt\" class=\"login-page\"><section class=\"login-panel\" aria-labelledby=\"mfa-heading\"><header class=\"login-panel__header\"><div class=\"login-emblem\" aria-hidden=\"true\">H</div><p class=\"login-wordmark\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var9 string
 		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(data.Page.AppName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 103, Col: 338}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 94, Col: 138}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 		if templ_7745c5c3_Err != nil {
@@ -233,7 +233,7 @@ func MFA(data MFAData) templ.Component {
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(data.Error)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 105, Col: 87}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 96, Col: 87}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 			if templ_7745c5c3_Err != nil {
@@ -263,7 +263,7 @@ func MFA(data MFAData) templ.Component {
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(loginBuildVersion(data.Page.BuildVersion))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 117, Col: 124}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 108, Col: 124}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 		if templ_7745c5c3_Err != nil {
@@ -276,7 +276,7 @@ func MFA(data MFAData) templ.Component {
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(loginBuildID(data.Page.BuildVersion))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 117, Col: 172}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/login.templ`, Line: 108, Col: 172}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 		if templ_7745c5c3_Err != nil {

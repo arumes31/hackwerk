@@ -42,11 +42,7 @@ templ Login(data LoginData) {
 			<main id="hauptinhalt" class="login-page">
 				<section class="login-panel" aria-labelledby="login-heading">
 					<header class="login-panel__header">
-						<div class="login-emblem" aria-hidden="true">
-							<svg viewBox="0 0 24 24" focusable="false">
-								<path d="M12 3 8.4 9h2L7.2 14h3.3v4h3v-4h3.3l-3.2-5h2z"></path>
-							</svg>
-						</div>
+						<div class="login-emblem" aria-hidden="true">H</div>
 						<p class="login-wordmark">{ data.Page.AppName }</p>
 						<span class="login-rule" aria-hidden="true"></span>
 						<h1 id="login-heading">Anmelden</h1>
@@ -67,12 +63,7 @@ templ Login(data LoginData) {
 							<label for="password">Passwort</label>
 							<input id="password" name="password" type="password" autocomplete="current-password" placeholder="Passwort eingeben" data-password-input required/>
 						</div>
-						<button class="login-submit" type="submit">
-							<span>Anmelden</span>
-							<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-								<path d="M12 3.5a7.5 7.5 0 0 0-7.5 7.5m15 0A7.5 7.5 0 0 0 12 3.5m-4.7 8.1A4.7 4.7 0 0 1 12 6.9a4.7 4.7 0 0 1 4.7 4.7m-7.2 1.1A2.5 2.5 0 0 1 12 10.2a2.5 2.5 0 0 1 2.5 2.5c0 3.5-1 6-2.5 7.8m-5.1-6.9c.2 3.2 1 5.6 2.4 7m7.8-7c-.2 3.2-1 5.6-2.4 7"></path>
-							</svg>
-						</button>
+						<button class="login-submit" type="submit">Anmelden</button>
 					</form>
 				</section>
 			</main>
@@ -100,7 +91,7 @@ templ MFA(data MFAData) {
 			<a class="skip-link" href="#hauptinhalt">Zur Sicherheitsprüfung springen</a>
 			<main id="hauptinhalt" class="login-page">
 				<section class="login-panel" aria-labelledby="mfa-heading">
-					<header class="login-panel__header"><div class="login-emblem" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M12 2.5 4.5 5.8v5.1c0 5 3 8.8 7.5 10.6 4.5-1.8 7.5-5.6 7.5-10.6V5.8L12 2.5Zm0 4.2a2.8 2.8 0 0 1 1 5.4v3.2h-2v-3.2a2.8 2.8 0 0 1 1-5.4Z"></path></svg></div><p class="login-wordmark">{ data.Page.AppName }</p><span class="login-rule" aria-hidden="true"></span><h1 id="mfa-heading">Anmeldung bestätigen</h1><p class="login-intro">Verwenden Sie eine Ihrer eingerichteten Sicherheitsmethoden.</p></header>
+					<header class="login-panel__header"><div class="login-emblem" aria-hidden="true">H</div><p class="login-wordmark">{ data.Page.AppName }</p><span class="login-rule" aria-hidden="true"></span><h1 id="mfa-heading">Anmeldung bestätigen</h1><p class="login-intro">Verwenden Sie eine Ihrer eingerichteten Sicherheitsmethoden.</p></header>
 					if data.Error != "" {
 						<div id="login-error" class="login-alert" role="alert" tabindex="-1">{ data.Error }</div>
 					}

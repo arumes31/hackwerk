@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -173,6 +174,46 @@ func TestTask05NotificationConfirmationBrowserJourney(t *testing.T) {
 		chromedp.Navigate(link), chromedp.WaitVisible("form.confirmation-actions", chromedp.ByQuery),
 	); err != nil {
 		t.Fatal(err)
+	}
+	var confirmationAudit struct {
+		Overflow, HeadingTooLarge     bool
+		ButtonCount, SmallTargets     int
+		SurfaceVariants, FontVariants int
+		ButtonWidthSpread             float64
+	}
+	var confirmationScreenshot []byte
+	if err := chromedp.Run(browserContext,
+		chromedp.Evaluate(`(() => {
+			const buttons=[...document.querySelectorAll('.confirmation-actions .button')];
+			const widths=buttons.map(button=>button.getBoundingClientRect().width);
+			return {Overflow:document.documentElement.scrollWidth>window.innerWidth,
+				HeadingTooLarge:parseFloat(getComputedStyle(document.querySelector('#confirmation-title')).fontSize)>46,
+				ButtonCount:buttons.length,SmallTargets:buttons.filter(button=>{const rect=button.getBoundingClientRect();return rect.width<44||rect.height<44}).length,
+				SurfaceVariants:new Set(buttons.map(button=>getComputedStyle(button).backgroundColor)).size,
+				FontVariants:new Set(buttons.map(button=>getComputedStyle(button).font)).size,
+				ButtonWidthSpread:Math.max(...widths)-Math.min(...widths)};
+		})()`, &confirmationAudit),
+		chromedp.FullScreenshot(&confirmationScreenshot, 90),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if confirmationAudit.Overflow || confirmationAudit.HeadingTooLarge || confirmationAudit.ButtonCount != 3 ||
+		confirmationAudit.SmallTargets != 0 || confirmationAudit.SurfaceVariants != 1 || confirmationAudit.FontVariants != 1 ||
+		confirmationAudit.ButtonWidthSpread > 1 {
+		t.Fatalf("mobile confirmation presentation audit = %+v", confirmationAudit)
+	}
+	confirmationArtifact := filepath.Join(t.ArtifactDir(), "task05-mobile-confirmation.png")
+	if err := os.WriteFile(confirmationArtifact, confirmationScreenshot, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("confirmation screenshot: %s", confirmationArtifact)
+	if screenshotDir := os.Getenv("E2E_SCREENSHOT_DIR"); screenshotDir != "" {
+		if err := os.MkdirAll(screenshotDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(screenshotDir, "task05-mobile-confirmation.png"), confirmationScreenshot, 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var noteGuard struct {
 		Path     string `json:"path"`

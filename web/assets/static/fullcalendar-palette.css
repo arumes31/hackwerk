@@ -1,66 +1,42 @@
 
 :root {
   /* buttons */
-  --fc-classic-button: #334155;
-  --fc-classic-button-border: #334155;
-  --fc-classic-button-strong: #1e293b;
-  --fc-classic-button-strong-border: #0f172a;
-  --fc-classic-button-outline: #47556980;
-  --fc-classic-button-foreground: #fff;
+  --fc-classic-button: var(--moss);
+  --fc-classic-button-border: var(--moss);
+  --fc-classic-button-strong: var(--ink);
+  --fc-classic-button-strong-border: var(--ink);
+  --fc-classic-button-outline: var(--focus-ring);
+  --fc-classic-button-foreground: var(--surface);
 
   /* primary */
-  --fc-classic-primary: #3788d8;
-  --fc-classic-primary-foreground: #fff;
+  --fc-classic-primary: var(--moss);
+  --fc-classic-primary-foreground: var(--surface);
 
   /* calendar content */
   --fc-classic-event: var(--fc-classic-primary);
   --fc-classic-event-contrast: var(--fc-classic-primary-foreground);
-  --fc-classic-background-event: #22c55e;
+  --fc-classic-background-event: var(--feedback-success);
   --fc-classic-background-event-opacity: 15%;
   --fc-classic-background-event-foreground-opacity: 50%;
-  --fc-classic-highlight: #cffafe66;
-  --fc-classic-today: #facc1526;
-  --fc-classic-now: #ef4444;
+  --fc-classic-highlight: var(--feedback-info-soft);
+  --fc-classic-today: var(--feedback-warning-soft);
+  --fc-classic-now: var(--feedback-error);
   /* non-colors */
   --fc-classic-small-dot-width: 8px;
   --fc-classic-large-dot-width: 10px;
 
   /* neutral backgrounds */
-  --fc-classic-background: #ffffff;
-  --fc-classic-faint: #0000000A;
-  --fc-classic-muted: #00000014;
-  --fc-classic-strong: #00000024;
+  --fc-classic-background: var(--surface);
+  --fc-classic-faint: var(--paper);
+  --fc-classic-muted: var(--paper-deep);
+  --fc-classic-strong: var(--line);
 
   /* neutral foregrounds */
-  --fc-classic-foreground: #030712;
-  --fc-classic-faint-foreground: #9ca3af;
-  --fc-classic-muted-foreground: #6b7280;
+  --fc-classic-foreground: var(--ink);
+  --fc-classic-faint-foreground: var(--muted);
+  --fc-classic-muted-foreground: var(--muted);
 
   /* neutral borders */
-  --fc-classic-border: #ddd;
-  --fc-classic-strong-border: #9ca3af;
+  --fc-classic-border: var(--line);
+  --fc-classic-strong-border: var(--muted);
 }
-
-@media not print {
-  [data-color-scheme=dark] {
-    /* calendar content */
-    --fc-classic-highlight: #3b82f633;
-    --fc-classic-today: #fef08a1A;
-
-    /* neutral backgrounds */
-    --fc-classic-background: #030712;
-    --fc-classic-faint: #ffffff0A;
-    --fc-classic-muted: #ffffff14;
-    --fc-classic-strong: #ffffff24;
-
-    /* neutral foregrounds */
-    --fc-classic-foreground: #fff;
-    --fc-classic-faint-foreground: #4b5563;
-    --fc-classic-muted-foreground: #9ca3af;
-
-    /* neutral borders */
-    --fc-classic-border: #1f2937;
-    --fc-classic-strong-border: #374151;
-  }
-}
-

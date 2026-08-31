@@ -150,6 +150,25 @@ func TestInstallPromptIsHiddenUntilBrowserOffersInstallation(t *testing.T) {
 	}
 }
 
+func TestTasteRefinementsPreserveFocusAndSafeAreas(t *testing.T) {
+	t.Parallel()
+
+	stylesheet, err := Files.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(stylesheet)
+	for name, contract := range map[string]*regexp.Regexp{
+		"appointment preflight focus": regexp.MustCompile(`(?s)\.appointment-preflight:focus\s*\{[^}]*outline:\s*3px solid var\(--focus-ring\)`),
+		"install prompt right inset":  regexp.MustCompile(`(?s)\.install-prompt\s*\{[^}]*padding:[^;]*max\([^;]*env\(safe-area-inset-right\)\)`),
+		"install prompt left inset":   regexp.MustCompile(`(?s)\.install-prompt\s*\{[^}]*padding:[^;]*max\([^;]*env\(safe-area-inset-left\)\)`),
+	} {
+		if !contract.MatchString(css) {
+			t.Errorf("%s contract is missing", name)
+		}
+	}
+}
+
 func TestLowPriorityUIContractsRemainAccessibleAndRaceSafe(t *testing.T) {
 	t.Parallel()
 

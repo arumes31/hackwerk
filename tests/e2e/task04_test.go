@@ -502,20 +502,21 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	if cleanAppointmentConfirmCalls != 0 {
 		t.Fatalf("clean reopened appointment dialog prompted %d times", cleanAppointmentConfirmCalls)
 	}
-	var preflightShown bool
+	var preflightShown, preflightFocusVisible bool
 	if err := runBrowserStep(browserContext, "extend duration from appointment dialog",
 		clickCurrent(appointmentEventSelector),
 		chromedp.WaitVisible("[data-appointment-reschedule]", chromedp.ByQuery),
 		chromedp.Click("[data-appointment-duration-adjust='15']", chromedp.ByQuery),
-		chromedp.Evaluate(`window.confirm=()=>{const preview=document.querySelector('[data-appointment-preflight]');window.__preflightShown=Boolean(preview&&!preview.hidden&&preview.querySelectorAll('.preflight-check').length>=8);return true}`, nil),
+		chromedp.Evaluate(`window.confirm=()=>{const preview=document.querySelector('[data-appointment-preflight]'),style=preview?getComputedStyle(preview):null;window.__preflightShown=Boolean(preview&&!preview.hidden&&preview.querySelectorAll('.preflight-check').length>=8);window.__preflightFocusVisible=Boolean(preview&&document.activeElement===preview&&style.outlineStyle!=='none'&&parseFloat(style.outlineWidth)>=3&&style.outlineColor==='rgb(111, 75, 18)');return true}`, nil),
 		chromedp.Click("[data-appointment-reschedule-submit]", chromedp.ByQuery),
 		chromedp.WaitNotVisible("[data-appointment-dialog]", chromedp.ByQuery),
 		chromedp.Evaluate(`window.__preflightShown===true`, &preflightShown),
+		chromedp.Evaluate(`window.__preflightFocusVisible===true`, &preflightFocusVisible),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
-	if !preflightShown {
-		t.Fatal("appointment mutation did not render the server preflight before confirmation")
+	if !preflightShown || !preflightFocusVisible {
+		t.Fatalf("appointment preflight shown/focus-visible = %v/%v", preflightShown, preflightFocusVisible)
 	}
 	var extendedStart, extendedEnd time.Time
 	var extendedVersion int32

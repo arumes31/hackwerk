@@ -43,6 +43,11 @@ type e2ePageAudit struct {
 	BadSelects             []string
 	CalendarAssetCount     int
 	CalendarAssetsExpected bool
+	MobileCaptureMissing   bool
+	MobileCaptureOverlaps  []string
+	MobileStickyOverlaps   []string
+	MobileWorkflowNavShown bool
+	MobileCurrentCount     int
 }
 
 func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
@@ -197,6 +202,9 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 	for _, viewport := range viewports {
 		auditPagesAtViewport(t, browser, server.URL, "admin-"+viewport.name, viewport.width, viewport.height, adminPages)
 	}
+	auditPagesAtViewport(t, browser, server.URL, "admin-short-landscape", 667, 375, []string{
+		"/customers/new", "/customers/" + customerID, "/planning", "/planning/routes",
+	})
 
 	if err := runBrowserStep(browser, "logout admin",
 		chromedp.Evaluate(`document.querySelector("header form[action='/logout']").requestSubmit()`, nil),
@@ -215,6 +223,9 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 	for _, viewport := range viewports {
 		auditPagesAtViewport(t, browser, server.URL, "driver-"+viewport.name, viewport.width, viewport.height, driverPages)
 	}
+	auditPagesAtViewport(t, browser, server.URL, "driver-short-landscape", 667, 375, []string{
+		"/customers/new", "/customers/" + customerID,
+	})
 
 	exceptionLock.Lock()
 	defer exceptionLock.Unlock()
@@ -246,30 +257,52 @@ func auditPagesAtViewport(t *testing.T, ctx context.Context, baseURL, name strin
 	}
 	for _, path := range paths {
 		var audit e2ePageAudit
+		var navigationAudit struct {
+			CaptureMissing bool
+			CurrentCount   int
+		}
 		if err := runBrowserStep(ctx, name+" "+path,
 			chromedp.Navigate(baseURL+path),
 			chromedp.WaitReady("main", chromedp.ByQuery),
+			chromedp.Evaluate(mobileNavigationAuditScript, &navigationAudit),
+			chromedp.Evaluate(`(()=>{if(innerWidth>760)return;const panel=document.querySelector('.intake-new-customer,.customer-edit-card');if(panel)panel.open=true})()`, nil),
 			chromedp.Evaluate(pageAuditScript, &audit),
 		); err != nil {
 			t.Errorf("%s: %s", name, browserDiagnostics(ctx, err))
 			continue
 		}
+		audit.MobileCaptureMissing = navigationAudit.CaptureMissing
+		audit.MobileCurrentCount = navigationAudit.CurrentCount
 		expectedPath := strings.SplitN(path, "?", 2)[0]
 		calendarExpected := strings.HasPrefix(path, "/calendar?")
 		audit.CalendarAssetsExpected = calendarExpected
 		if audit.Path != expectedPath || audit.TitleMissing || audit.ErrorPage || audit.Overflow || audit.MissingLandmarks || audit.H1Count != 1 ||
 			len(audit.DuplicateIDs) > 0 || len(audit.MissingLabels) > 0 || len(audit.SmallControls) > 0 ||
-			len(audit.SmallCheckboxLabels) > 0 || len(audit.BadSelects) > 0 ||
+			len(audit.SmallCheckboxLabels) > 0 || len(audit.BadSelects) > 0 || audit.MobileCaptureMissing ||
+			len(audit.MobileCaptureOverlaps) > 0 || len(audit.MobileStickyOverlaps) > 0 || audit.MobileWorkflowNavShown || audit.MobileCurrentCount > 1 ||
 			(calendarExpected && audit.CalendarAssetCount != 5) || (!calendarExpected && audit.CalendarAssetCount != 0) {
 			t.Errorf("%s %s usability audit: %+v", name, path, audit)
 		}
 	}
 }
 
+const mobileNavigationAuditScript = `(() => {
+	const visible=node=>{const style=getComputedStyle(node),rect=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0&&(!node.checkVisibility||node.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))};
+	const navigation=document.querySelector('.mobile-bottom-nav');
+	if (!navigation||!visible(navigation)) return {CaptureMissing:false,CurrentCount:0};
+	const capture=navigation.querySelector('.mobile-primary-action');
+	const more=navigation.querySelector('.mobile-more');
+	if (more) more.open=true;
+	const currentCount=navigation.querySelectorAll('[aria-current="page"]').length;
+	if (more) more.open=false;
+	return {CaptureMissing:!capture||!visible(capture),CurrentCount:currentCount};
+})()`
+
 const pageAuditScript = `(() => {
 	const visible = node => {
 		const style=getComputedStyle(node), rect=node.getBoundingClientRect();
-		return style.display!=='none' && style.visibility!=='hidden' && rect.width>0 && rect.height>0;
+		return style.display!=='none' && style.visibility!=='hidden' && rect.width>0 && rect.height>0 &&
+			(!node.checkVisibility || node.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}));
 	};
 	const describe = node => {
 		const text=(node.getAttribute('aria-label')||node.getAttribute('name')||node.id||node.textContent||node.tagName).trim();
@@ -289,6 +322,26 @@ const pageAuditScript = `(() => {
 		const style=getComputedStyle(node), color=style.backgroundColor.replace(/\s/g,'');
 		return !style.colorScheme.includes('light') || color==='rgb(0,0,0)' || color==='rgba(0,0,0,1)';
 	}).map(describe);
+	const mobileNavigation=document.querySelector('.mobile-bottom-nav');
+	const mobileNavigationVisible=Boolean(mobileNavigation&&visible(mobileNavigation));
+	const mobileCapture=document.querySelector('.mobile-primary-action');
+	const mobileCaptureVisible=Boolean(mobileCapture&&visible(mobileCapture));
+	const overlaps=(first,second)=>first.left<second.right&&first.right>second.left&&first.top<second.bottom&&first.bottom>second.top;
+	const mobileCaptureRect=mobileCaptureVisible?mobileCapture.getBoundingClientRect():null;
+	const stickyControls=[...document.querySelectorAll('.planning-selection,form[data-sticky-actions] > .form-actions,form[data-sticky-actions] > * > .form-actions:last-child,.route-sticky-navigation')].filter(visible);
+	const navigationRect=mobileNavigationVisible?mobileNavigation.getBoundingClientRect():null;
+	const geometry=node=>{const rect=node.getBoundingClientRect(),style=getComputedStyle(node),details=node.closest('details');return describe(node)+'@'+Math.round(rect.top)+'-'+Math.round(rect.bottom)+' position='+style.position+' bottom='+style.bottom+' details='+(details?details.className+'/'+details.open:'none')};
+	const mobileCaptureOverlaps=[];
+	const mobileStickyOverlaps=[];
+	if (mobileNavigationVisible) {
+		for (const node of stickyControls) {
+			node.scrollIntoView({block:'end'});
+			const rect=node.getBoundingClientRect();
+			if (mobileCaptureVisible&&overlaps(mobileCaptureRect,rect)) mobileCaptureOverlaps.push(geometry(node));
+			if (overlaps(navigationRect,rect)) mobileStickyOverlaps.push(geometry(node));
+		}
+		window.scrollTo(0,0);
+	}
 	return {
 		Path:location.pathname, TitleMissing:document.title.trim()==='', ErrorPage:Boolean(document.querySelector('.error-page')),
 		Overflow:document.documentElement.scrollWidth>window.innerWidth+1,
@@ -298,6 +351,11 @@ const pageAuditScript = `(() => {
 		SmallControls:innerWidth<=760 ? touchControls.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<43.5||rect.height<43.5}).map(node=>{const rect=node.getBoundingClientRect();return describe(node)+'@'+Math.round(rect.width)+'x'+Math.round(rect.height)+'.'+node.className}) : [],
 		SmallCheckboxLabels:innerWidth<=760 ? checkboxLabels.filter(node=>node.getBoundingClientRect().height<43.5).map(describe) : [],
 		BadSelects:badSelects,
+		MobileCaptureMissing:mobileNavigationVisible&&(!mobileCaptureVisible||mobileCapture.closest('.mobile-bottom-nav')!==mobileNavigation),
+		MobileCaptureOverlaps:mobileCaptureOverlaps,
+		MobileStickyOverlaps:mobileStickyOverlaps,
+		MobileWorkflowNavShown:mobileNavigationVisible&&stickyControls.length>0,
+		MobileCurrentCount:mobileNavigationVisible?document.querySelectorAll('.mobile-bottom-nav > [aria-current="page"]').length:0,
 		CalendarAssetCount:[...document.querySelectorAll('link[href],script[src]')].filter(node=>(node.href||node.src).includes('fullcalendar')).length
 	};
 })()`
