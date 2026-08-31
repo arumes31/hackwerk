@@ -19,7 +19,9 @@
   --fc-classic-background-event-opacity: 15%;
   --fc-classic-background-event-foreground-opacity: 50%;
   --fc-classic-highlight: var(--feedback-info-soft);
-  --fc-classic-today: var(--feedback-warning-soft);
+  /* Time-grid day lanes sit above the slot table. A translucent highlight
+     keeps the underlying quarter-hour dividers visible on the current day. */
+  --fc-classic-today: rgb(255 248 231 / 62%);
   --fc-classic-now: var(--feedback-error);
   /* non-colors */
   --fc-classic-small-dot-width: 8px;
