@@ -234,7 +234,7 @@ func (s *Service) PreviewMutation(ctx context.Context, actor auth.Actor, input P
 		primaryDriver = primaryDriver || assigned.Primary
 	}
 	chipper := false
-	transport := candidate.TransportMode != "internal"
+	transport := validateAppointmentTransport(candidate) == nil
 	driverIDs := make([]string, 0, len(candidate.Drivers))
 	for _, assigned := range candidate.Drivers {
 		driverIDs = append(driverIDs, assigned.ID)
@@ -242,7 +242,6 @@ func (s *Service) PreviewMutation(ctx context.Context, actor auth.Actor, input P
 	resourceIDs := make([]string, 0, len(candidate.Resources))
 	for _, assigned := range candidate.Resources {
 		chipper = chipper || assigned.Purpose == PurposeChipping
-		transport = transport || assigned.Purpose == PurposeTransport
 		if assigned.Exclusive {
 			resourceIDs = append(resourceIDs, assigned.ID)
 		}
@@ -250,7 +249,7 @@ func (s *Service) PreviewMutation(ctx context.Context, actor auth.Actor, input P
 	result.Checks = append(result.Checks,
 		PreflightCheck{Key: "driver", Label: "Primärfahrer", Passed: primaryDriver, Detail: "Mindestens ein Fahrer und genau ein Primärfahrer."},
 		PreflightCheck{Key: "chipper", Label: "Hackressource", Passed: chipper, Detail: "Eine aktive Hackmaschine ist erforderlich."},
-		PreflightCheck{Key: "transport", Label: "Transport", Passed: transport, Detail: "Interner Transport benötigt ein Transportmittel."},
+		PreflightCheck{Key: "transport", Label: "Transport", Passed: transport, Detail: "Interner Transport benötigt ein Transportmittel; externer Transport muss bestätigt sein."},
 	)
 	from, to := reservationRange(candidate, startsAt, endsAt)
 	availabilityPassed := true
@@ -825,7 +824,8 @@ func (s *Service) SwapCandidates(ctx context.Context, actor auth.Actor, excludeI
 	if err := actor.Require(auth.PermissionAppointmentPlan); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(excludeID) == "" || validateRange(fromUTC, toUTC) != nil {
+	excludeID = strings.TrimSpace(excludeID)
+	if excludeID == "" || validateRange(fromUTC, toUTC) != nil {
 		return nil, ErrValidation
 	}
 	events, err := s.store.ListCalendar(ctx, fromUTC, toUTC)
@@ -912,21 +912,26 @@ func validateAppointmentAssignments(value Appointment) error {
 	}) {
 		return fmt.Errorf("%w: chipping resource required", ErrValidation)
 	}
-	if value.JobType == "chipping_with_transport" {
-		switch value.TransportMode {
-		case "internal":
-			if !slices.ContainsFunc(value.Resources, func(item AssignedResource) bool {
-				return item.Type == resource.TypeTransportVehicle && item.Purpose == PurposeTransport
-			}) {
-				return fmt.Errorf("%w: transport resource required", ErrValidation)
-			}
-		case "external":
-			if !value.ExternalTransportConfirmed {
-				return fmt.Errorf("%w: external transport not confirmed", ErrValidation)
-			}
-		default:
-			return fmt.Errorf("%w: transport plan required", ErrValidation)
+	return validateAppointmentTransport(value)
+}
+
+func validateAppointmentTransport(value Appointment) error {
+	if value.JobType != "chipping_with_transport" {
+		return nil
+	}
+	switch value.TransportMode {
+	case "internal":
+		if !slices.ContainsFunc(value.Resources, func(item AssignedResource) bool {
+			return item.Type == resource.TypeTransportVehicle && item.Purpose == PurposeTransport
+		}) {
+			return fmt.Errorf("%w: transport resource required", ErrValidation)
 		}
+	case "external":
+		if !value.ExternalTransportConfirmed {
+			return fmt.Errorf("%w: external transport not confirmed", ErrValidation)
+		}
+	default:
+		return fmt.Errorf("%w: transport plan required", ErrValidation)
 	}
 	return nil
 }

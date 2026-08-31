@@ -566,6 +566,13 @@ func TestSwapCandidatesAreAdminOnlyAndFilteredByLifecycle(t *testing.T) {
 	if len(candidates) != 2 || candidates[0].ID != "draft" || candidates[1].ID != "proposal" {
 		t.Fatalf("SwapCandidates() = %#v", candidates)
 	}
+	candidates, err = service.SwapCandidates(t.Context(), testAdmin(), "  current\t", from, from.Add(24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 2 || candidates[0].ID != "draft" || candidates[1].ID != "proposal" {
+		t.Fatalf("SwapCandidates() with padded exclusion = %#v", candidates)
+	}
 	if _, err := service.SwapCandidates(t.Context(), auth.Actor{Role: auth.RoleDriver}, "current", from, from.Add(24*time.Hour)); !errors.Is(err, auth.ErrForbidden) {
 		t.Fatalf("driver SwapCandidates() error = %v, want forbidden", err)
 	}
@@ -866,6 +873,51 @@ func TestPreviewMutationIsAdminOnlyAndReportsAuthoritativeChecks(t *testing.T) {
 	}
 	if preview.WorkingMinutes != 120 || preview.TransportMinutes != 30 || preview.BufferBeforeMinutes != 15 || preview.BufferAfterMinutes != 20 || len(preview.Conflicts) != 1 {
 		t.Fatalf("preflight timing/conflicts = %#v", preview)
+	}
+}
+
+func TestPreviewMutationUsesAuthoritativeTransportValidation(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		mode      string
+		confirmed bool
+		resources []AssignedResource
+		want      bool
+	}{
+		{name: "missing transport plan", mode: "none", want: false},
+		{name: "unconfirmed external transport", mode: "external", want: false},
+		{name: "confirmed external transport", mode: "external", confirmed: true, want: true},
+		{name: "internal transport without vehicle", mode: "internal", want: false},
+		{name: "internal transport with vehicle", mode: "internal", resources: []AssignedResource{{ID: "transport-1", Type: resource.TypeTransportVehicle, Purpose: PurposeTransport}}, want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			current := assignedAppointment(LifecycleProposal, 3)
+			current.JobType = "chipping_with_transport"
+			current.TransportMode = test.mode
+			current.ExternalTransportConfirmed = test.confirmed
+			current.Resources = append(current.Resources, test.resources...)
+			store := &fakeStore{current: current}
+			service, err := New(store, fakeAvailability{status: driver.StatusAvailable}, time.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			preview, err := service.PreviewMutation(t.Context(), testAdmin(), PreflightInput{AppointmentID: current.ID, Action: "fix", ExpectedVersion: current.Version})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, check := range preview.Checks {
+				if check.Key == "transport" {
+					if check.Passed != test.want {
+						t.Fatalf("transport check = %v, want %v", check.Passed, test.want)
+					}
+					return
+				}
+			}
+			t.Fatal("transport check missing")
+		})
 	}
 }
 

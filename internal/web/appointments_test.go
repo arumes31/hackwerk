@@ -192,6 +192,9 @@ func TestAppointmentErrorPresentationMapsStablePublicErrors(t *testing.T) {
 			if presentation.Status != test.status || presentation.Code != test.code {
 				t.Fatalf("presentation=%+v", presentation)
 			}
+			if test.err == appointment.ErrConflict && (!strings.Contains(presentation.Message, "erneut") || !strings.Contains(presentation.Message, "Slot")) {
+				t.Fatalf("conflict presentation lacks retry and slot guidance: %+v", presentation)
+			}
 		})
 	}
 }
@@ -364,6 +367,39 @@ func TestAppointmentAssignmentHasVersionedNoJavaScriptForm(t *testing.T) {
 	driverRouter.ServeHTTP(driverResponse, authenticatedCustomerRequest(t, http.MethodGet, "/calendar/appointments/"+testAppointmentID, nil, driverSession, driverCSRF))
 	if driverResponse.Code != http.StatusForbidden {
 		t.Fatalf("driver assignment page status = %d", driverResponse.Code)
+	}
+}
+
+func TestAppointmentAssignmentErrorPreservesAllSelectionsAndConfirmationActions(t *testing.T) {
+	current := appointment.Appointment{
+		ID: testAppointmentID, JobID: testJobID, JobNumber: "HW-2026-0001", JobType: "chipping_only", TransportMode: "none",
+		Lifecycle: appointment.LifecycleFixed, Confirmation: appointment.ConfirmationConfirmed,
+		StartsAt: time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC), EndsAt: time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC), Version: 4,
+		Drivers:   []appointment.DriverAssignment{{ID: operationDriverID, Name: "Anna Fahrerin", Primary: true}},
+		Resources: []appointment.AssignedResource{{ID: testAppointmentResourceID, Name: "Hacker 1", Type: resource.TypeChipper, Purpose: appointment.PurposeChipping, Exclusive: true}},
+	}
+	detail := appointment.Detail{CalendarEvent: appointment.CalendarEvent{Appointment: current, CustomerID: testCustomerID, CustomerName: "Franz Huber"}}
+	store := &appointmentHTTPStore{current: current, detail: detail, planningOptions: appointmentPlanningOptionsFixture(), assignErr: appointment.ErrConflict}
+	router, sessionToken, csrfToken := appointmentTestRouterWithNotifications(t, auth.RoleAdmin, store, &notificationHTTPStore{})
+	form := url.Values{
+		"csrf_token": {csrfToken}, "version": {"4"}, "driver_id": {operationDriverID},
+		"primary_driver_id": {operationDriverID}, "chipper_resource_id": {testAppointmentResourceID},
+		"other_resource_id": {testAppointmentOtherResourceID}, "override_reason": {"Einsatzleitung bestätigt"},
+	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/calendar/appointments/"+testAppointmentID+"/assign", form, sessionToken, csrfToken))
+	body := response.Body.String()
+	for _, expected := range []string{
+		`name="other_resource_id" value="` + testAppointmentOtherResourceID + `" checked`,
+		`name="override_reason"`, `Einsatzleitung bestätigt`,
+		"Kundenbestätigung verwalten", "/confirmation/reissue", "/confirmation/reset",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("assignment error page missing %q in %q", expected, body)
+		}
+	}
+	if response.Code != http.StatusConflict || store.assignCalls != 1 {
+		t.Fatalf("assignment error status/calls = %d/%d", response.Code, store.assignCalls)
 	}
 }
 

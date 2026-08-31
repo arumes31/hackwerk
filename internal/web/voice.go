@@ -456,9 +456,12 @@ func retryVoiceTranscription(service *voice.Service, logger *slog.Logger) http.H
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
 		version, err := parseVersion(request.Form.Get("version"))
-		if err == nil {
-			_, err = service.RetryTranscription(request.Context(), session.Actor, chi.URLParam(request, "draftID"), version)
+		if err != nil {
+			logger.WarnContext(request.Context(), "voice retranscription rejected", slog.String("error_code", "voice_retranscription_rejected"))
+			http.Error(response, "Die Neu-Transkription ist nicht mehr möglich. Bitte laden Sie den Entwurf neu.", http.StatusUnprocessableEntity)
+			return
 		}
+		_, err = service.RetryTranscription(request.Context(), session.Actor, chi.URLParam(request, "draftID"), version)
 		if err != nil {
 			status, _, _ := mapVoiceError(err)
 			if errors.Is(err, voice.ErrConflict) {

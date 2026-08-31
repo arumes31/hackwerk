@@ -361,6 +361,16 @@ func TestFailedVoiceDraftOffersOneNoJavaScriptRetranscription(t *testing.T) {
 	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "/voice/drafts/voice-draft/retranscribe") || !strings.Contains(page.Body.String(), `name="version" value="4"`) {
 		t.Fatalf("failed draft page = %d %s", page.Code, page.Body.String())
 	}
+	for _, form := range []url.Values{
+		{"csrf_token": {"csrf-token"}},
+		{"csrf_token": {"csrf-token"}, "version": {"not-a-version"}},
+	} {
+		invalid := httptest.NewRecorder()
+		router.ServeHTTP(invalid, authenticatedCustomerRequest(t, http.MethodPost, "/voice/drafts/voice-draft/retranscribe", form, "session-token", "csrf-token"))
+		if invalid.Code != http.StatusUnprocessableEntity || store.draft.Status != voice.StatusFailed || store.draft.ManualRetryCount != 0 {
+			t.Fatalf("invalid retry response/draft = %d/%#v", invalid.Code, store.draft)
+		}
+	}
 
 	retry := httptest.NewRecorder()
 	form := url.Values{"csrf_token": {"csrf-token"}, "version": {"4"}}

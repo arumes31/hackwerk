@@ -31,7 +31,7 @@ func registerAppointmentRoutes(router chi.Router, dependencies Dependencies, pag
 		BusinessName: dependencies.Config.Business.Name, BusinessAddress: dependencies.Config.Business.Address,
 		BusinessPhone: dependencies.Config.Business.Phone,
 	}, logger))
-	router.Post("/calendar/appointments/{appointmentID}/assign", assignAppointmentPage(service, page, csrfCookie, logger))
+	router.Post("/calendar/appointments/{appointmentID}/assign", assignAppointmentPage(service, page, csrfCookie, dependencies.Notifications != nil, logger))
 	if dependencies.Notifications != nil {
 		router.Post("/calendar/appointments/{appointmentID}/confirmation/reissue", confirmationAdminPageAction(dependencies.Notifications, false, logger))
 		router.Post("/calendar/appointments/{appointmentID}/confirmation/reset", confirmationAdminPageAction(dependencies.Notifications, true, logger))
@@ -369,7 +369,7 @@ func confirmationAdminPageAction(service *notification.AdminService, reset bool,
 	}
 }
 
-func assignAppointmentPage(service *appointment.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
+func assignAppointmentPage(service *appointment.Service, page templates.PageData, csrfCookie string, confirmationsEnabled bool, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Cache-Control", "no-store")
 		session, _ := sessionFromContext(request.Context())
@@ -398,11 +398,14 @@ func assignAppointmentPage(service *appointment.Service, page templates.PageData
 			CSRFToken: shellData.CSRFToken, Version: request.Form.Get("version"),
 			DriverIDs: request.Form["driver_id"], PrimaryDriverID: request.Form.Get("primary_driver_id"),
 			ChipperResourceID: request.Form.Get("chipper_resource_id"), TransportResourceID: request.Form.Get("transport_resource_id"),
-			TrailerResourceID: request.Form.Get("trailer_resource_id"), OverrideReason: request.Form.Get("override_reason"),
+			TrailerResourceID: request.Form.Get("trailer_resource_id"), OtherResourceIDs: append([]string(nil), request.Form["other_resource_id"]...),
+			OverrideReason: request.Form.Get("override_reason"),
 		}
 		render(response, request, templates.AppointmentDetailPage(templates.AppointmentDetailData{
 			Shell: shellData, Options: options, Detail: detail, Values: values,
-			Error: templates.PlanningFormError{Message: presentation.Message},
+			Error:                  templates.PlanningFormError{Message: presentation.Message},
+			CanReissueConfirmation: confirmationsEnabled && detail.Lifecycle == appointment.LifecycleFixed,
+			CanResetConfirmation:   confirmationsEnabled && detail.Lifecycle == appointment.LifecycleFixed && detail.Confirmation != appointment.ConfirmationPending && detail.Confirmation != appointment.ConfirmationNotRequested,
 		}), presentation.Status, logger)
 	}
 }
@@ -971,7 +974,7 @@ func appointmentErrorPresentation(err error) appointmentErrorView {
 	case errors.Is(err, appointment.ErrVersionConflict):
 		result = appointmentErrorView{Status: http.StatusConflict, Code: "appointment_version_conflict", Message: "Der Termin wurde zwischenzeitlich geändert. Bitte laden Sie den aktuellen Stand neu."}
 	case errors.Is(err, appointment.ErrConflict):
-		result = appointmentErrorView{Status: http.StatusConflict, Code: "reservation_conflict", Message: "Der Slot ist durch einen Fahrer oder eine Ressource belegt. Wählen Sie eine andere Belegung oder Zeit."}
+		result = appointmentErrorView{Status: http.StatusConflict, Code: "reservation_conflict", Message: "Der Slot konnte wegen einer gleichzeitigen Änderung nicht reserviert werden. Bitte versuchen Sie die Aktion erneut; bleibt der Slot belegt, wählen Sie eine andere Belegung oder Zeit."}
 	case errors.Is(err, appointment.ErrAvailability):
 		result.Code, result.Message = "driver_unavailable", "Mindestens ein Fahrer ist nicht verfügbar. Wählen Sie einen anderen Slot oder begründen Sie den Admin-Override."
 	case errors.Is(err, appointment.ErrNotification):
