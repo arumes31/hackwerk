@@ -192,7 +192,7 @@ func TestAppointmentErrorPresentationMapsStablePublicErrors(t *testing.T) {
 			if presentation.Status != test.status || presentation.Code != test.code {
 				t.Fatalf("presentation=%+v", presentation)
 			}
-			if test.err == appointment.ErrConflict && (!strings.Contains(presentation.Message, "erneut") || !strings.Contains(presentation.Message, "Slot")) {
+			if errors.Is(test.err, appointment.ErrConflict) && (!strings.Contains(presentation.Message, "erneut") || !strings.Contains(presentation.Message, "Slot")) {
 				t.Fatalf("conflict presentation lacks retry and slot guidance: %+v", presentation)
 			}
 		})
