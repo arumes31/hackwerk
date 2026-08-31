@@ -196,9 +196,12 @@ func (fixture profileTestFixture) request(t *testing.T, method, target string, f
 
 func TestProfileHandlersRenderAndMutate(t *testing.T) {
 	fixture := newProfileTestFixture(t)
+	fixture.store.profile.Passkeys = []auth.SecurityMethod{{EncodedID: "credential-safe-id", Name: "Dienstschlüssel", CreatedAt: fixture.now}}
 	pageResponse := httptest.NewRecorder()
 	profilePage(fixture.identity, fixture.dependencies, fixture.page).ServeHTTP(pageResponse, fixture.request(t, http.MethodGet, "https://example.test/profile?status=profile_saved", nil))
-	if pageResponse.Code != http.StatusOK || !strings.Contains(pageResponse.Body.String(), "Persönliche Daten gespeichert") {
+	if pageResponse.Code != http.StatusOK || !strings.Contains(pageResponse.Body.String(), "Persönliche Daten gespeichert") ||
+		!strings.Contains(pageResponse.Body.String(), `label class="visually-hidden" for="passkey-rename-credential-safe-id"`) ||
+		!strings.Contains(pageResponse.Body.String(), `id="passkey-rename-credential-safe-id" name="name"`) {
 		t.Fatalf("profile page = %d %q", pageResponse.Code, pageResponse.Body.String())
 	}
 
@@ -348,7 +351,10 @@ func TestProfilePasskeySessionAndMFAHandlers(t *testing.T) {
 	mfaRequest.AddCookie(&http.Cookie{Name: fixture.dependencies.Config.Auth.MFACookieName, Value: "challenge", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	response = httptest.NewRecorder()
 	mfaPage(fixture.identity, fixture.dependencies, fixture.page).ServeHTTP(response, mfaRequest)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Sicherheitsprüfung") {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Sicherheitsprüfung") ||
+		!strings.Contains(response.Body.String(), `href="/cookies"`) ||
+		!strings.Contains(response.Body.String(), `href="/cookies" data-privacy-notice-open`) ||
+		!strings.Contains(response.Body.String(), `data-privacy-notice`) {
 		t.Fatalf("MFA page = %d %q", response.Code, response.Body.String())
 	}
 

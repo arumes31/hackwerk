@@ -105,7 +105,8 @@ templ MFA(data MFAData) {
 					<a class="button button--quiet" href="/login">Zurück zur Anmeldung</a>
 				</section>
 			</main>
-			<footer class="login-meta" aria-label="Buildinformationen"><span>HWK-SYS // V { loginBuildVersion(data.Page.BuildVersion) } · ID: { loginBuildID(data.Page.BuildVersion) }</span><nav aria-label="Rechtliche Informationen"><a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a></nav></footer>
+			<footer class="login-meta" aria-label="Buildinformationen"><span>HWK-SYS // V { loginBuildVersion(data.Page.BuildVersion) } · ID: { loginBuildID(data.Page.BuildVersion) }</span><nav aria-label="Rechtliche Informationen"><a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a><a href="/cookies">Cookies</a><a href="/cookies" data-privacy-notice-open>Cookie-Hinweis</a></nav></footer>
+			@privacyNotice(data.Page)
 			<div class="visually-hidden" aria-live="polite" data-live-status></div>
 		</body>
 	</html>

@@ -55,6 +55,9 @@ func TestProductionComposeHealthAndProviderSecretContracts(t *testing.T) {
 		!strings.Contains(compose, "auth_security_keys: {file: ./secrets/auth_security_keys}") {
 		t.Fatal("auth credential keyring is not mounted into web and worker as a secret")
 	}
+	if strings.Contains(compose, "AUTH_SECURITY_KEYS:") {
+		t.Fatal("production compose forwards the auth credential keyring directly through the environment")
+	}
 	for _, secret := range []string{
 		"MAIL_SMTP_USERNAME_FILE: /run/secrets/mail_smtp_username",
 		"MAIL_SMTP_PASSWORD_FILE: /run/secrets/mail_smtp_password",

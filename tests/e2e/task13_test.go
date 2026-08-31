@@ -295,7 +295,7 @@ const mobileNavigationAuditScript = `(() => {
 	if (more) more.open=true;
 	const currentCount=navigation.querySelectorAll('[aria-current="page"]').length;
 	if (more) more.open=false;
-	return {CaptureMissing:!capture||!visible(capture),CurrentCount:currentCount};
+	return {CaptureMissing:!capture||!visible(capture)||capture.closest('.mobile-bottom-nav')!==navigation,CurrentCount:currentCount};
 })()`
 
 const pageAuditScript = `(() => {
@@ -351,11 +351,9 @@ const pageAuditScript = `(() => {
 		SmallControls:innerWidth<=760 ? touchControls.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<43.5||rect.height<43.5}).map(node=>{const rect=node.getBoundingClientRect();return describe(node)+'@'+Math.round(rect.width)+'x'+Math.round(rect.height)+'.'+node.className}) : [],
 		SmallCheckboxLabels:innerWidth<=760 ? checkboxLabels.filter(node=>node.getBoundingClientRect().height<43.5).map(describe) : [],
 		BadSelects:badSelects,
-		MobileCaptureMissing:mobileNavigationVisible&&(!mobileCaptureVisible||mobileCapture.closest('.mobile-bottom-nav')!==mobileNavigation),
 		MobileCaptureOverlaps:mobileCaptureOverlaps,
 		MobileStickyOverlaps:mobileStickyOverlaps,
 		MobileWorkflowNavShown:mobileNavigationVisible&&stickyControls.length>0,
-		MobileCurrentCount:mobileNavigationVisible?document.querySelectorAll('.mobile-bottom-nav > [aria-current="page"]').length:0,
 		CalendarAssetCount:[...document.querySelectorAll('link[href],script[src]')].filter(node=>(node.href||node.src).includes('fullcalendar')).length
 	};
 })()`
