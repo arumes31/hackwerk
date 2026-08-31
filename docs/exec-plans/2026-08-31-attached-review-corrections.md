@@ -57,7 +57,7 @@ Keine Migration. Es wird ausschließlich eine sqlc-Lesequery für vorhandene `pl
 - [x] Auth-/Config-Härtung korrigiert.
 - [x] UI-/Repositoryverträge korrigiert.
 - [x] Vollständige Prüfungen und Selbstreview abgeschlossen.
-- [ ] Dev-Deployment verifiziert.
+- [x] Dev-Deployment verifiziert.
 
 ## Entdeckungen und Entscheidungen während der Umsetzung
 
@@ -74,4 +74,9 @@ Keine Migration. Es wird ausschließlich eine sqlc-Lesequery für vorhandene `pl
 - Tests: `go test ./... -count=1` grün; Coverage 80,3 % bei 80,0 % Mindestwert; vollständige PostgreSQL-Integrationstests grün.
 - Browser: `TestTask13AllMainPagesDesktopAndMobileUsability` grün. Die zwei Fehler des vollständigen E2E-Laufs sind auf dem unveränderten Ausgangscommit reproduziert und damit als vorbestehend eingegrenzt.
 - Build: Binary mit Versions-, Commit- und Build-Time-ldflags erfolgreich gebaut.
-- Deploymentartefakt, Health-Gates und öffentlicher Smoke-Test werden nach dem finalen Commit ergänzt.
+- Dev-Deployment: Ziel `orderotto-dev`, Verzeichnis `/container/hackwerk`, Compose `/container/hackwerk/compose.yaml`; Image `hackwerk-dev:0.1.60-997984d6-20260831t101345z`, ID `sha256:e9a43c3a6f3f4211aee524a5db8688394cdba0f3521a0df0cd8b7a00623c2ba8`.
+- Backup: `hackwerk-20260831T101233Z.dump`, 184864 Byte, Modus 0600 und SHA-256 erfolgreich geprüft. Da keine Migration enthalten ist, war kein neuer Restore-Test erforderlich; der vorherige Restore-Nachweis vom 2026-08-30 bleibt maßgeblich.
+- Migration: expliziter Deploy-Schritt erfolgreich, Schema bereits aktuell. App und Worker wurden nacheinander mit `--no-deps` gerollt und verwenden exakt dieselbe neue Image-ID.
+- Health: interne App- und Worker-Healthchecks grün; öffentliche `/health/live`, `/health/ready`, `/health/worker` und `/login` liefern HTTP 200, die Loginseite weist Version 0.1.60 aus. Der generische Host-Loopback-Probe ist in diesem bestehenden Dev-Stack nicht anwendbar, weil bewusst kein Host-Port publiziert ist; der tatsächliche Reverse-Proxy-Pfad ist grün.
+- Härtung: App und Worker laufen als `65532:65532`, read-only, mit `no-new-privileges`, `cap_drop=ALL`, begrenztem `tmpfs`, read-only Secret-Mounts und ohne Host-Portbindungen. PostgreSQL blieb healthy und wurde einschließlich Datenmount nicht neu erstellt. Der aggregierte Fehler-/Warn-/Failed-/Dead-/Degraded-Zähler der ersten zehn Minuten blieb bei 0.
+- Aufräumen: Exakt die lokalen und entfernten Image-/Updater-Transferartefakte wurden entfernt; Backups, Secrets und Datenvolumes blieben erhalten.
