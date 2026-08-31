@@ -143,24 +143,28 @@ func (s *PlanningStore) ListRun(ctx context.Context, runID string) (planning.Run
 	if err != nil {
 		return planning.Run{}, planning.ErrNotFound
 	}
-	rows, err := s.queries.ListPlanningSuggestions(ctx, parsed)
+	run, err := s.queries.GetPlanningRun(ctx, parsed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return planning.Run{}, planning.ErrNotFound
 	}
 	if err != nil {
 		return planning.Run{}, err
 	}
-	if len(rows) == 0 {
-		return planning.Run{}, planning.ErrNotFound
+	rows, err := s.queries.ListPlanningSuggestions(ctx, parsed)
+	if err != nil {
+		return planning.Run{}, err
 	}
-	result := planning.Run{ID: runID, JobID: rows[0].RJobID, CreatedAt: rows[0].CreatedAt.Time.UTC(), ExpiresAt: rows[0].ExpiresAt.Time.UTC()}
+	result := planning.Run{
+		ID: runID, JobID: run.JobID, CreatedAt: run.CreatedAt.Time.UTC(), ExpiresAt: run.ExpiresAt.Time.UTC(),
+		Suggestions: make([]planning.Suggestion, 0, len(rows)),
+	}
 	var runSnapshot planning.RunSnapshot
-	if err := json.Unmarshal(rows[0].ConfigSnapshot, &runSnapshot); err != nil {
+	if err := json.Unmarshal(run.ConfigSnapshot, &runSnapshot); err != nil {
 		return planning.Run{}, errors.New("planning: invalid stored run snapshot")
 	}
 	// Runs created before the explanatory envelope stored Config directly.
 	if runSnapshot.Config.HorizonDays == 0 {
-		if err := json.Unmarshal(rows[0].ConfigSnapshot, &runSnapshot.Config); err != nil {
+		if err := json.Unmarshal(run.ConfigSnapshot, &runSnapshot.Config); err != nil {
 			return planning.Run{}, errors.New("planning: invalid stored config")
 		}
 	}

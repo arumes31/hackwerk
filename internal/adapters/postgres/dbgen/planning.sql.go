@@ -167,6 +167,33 @@ func (q *Queries) GetPlanningInput(ctx context.Context, jobID pgtype.UUID) (GetP
 	return i, err
 }
 
+const getPlanningRun = `-- name: GetPlanningRun :one
+SELECT id::text, job_id::text, created_at, expires_at, config_snapshot
+FROM planning_runs
+WHERE id=$1::uuid
+`
+
+type GetPlanningRunRow struct {
+	ID             string
+	JobID          string
+	CreatedAt      pgtype.Timestamptz
+	ExpiresAt      pgtype.Timestamptz
+	ConfigSnapshot []byte
+}
+
+func (q *Queries) GetPlanningRun(ctx context.Context, id pgtype.UUID) (GetPlanningRunRow, error) {
+	row := q.db.QueryRow(ctx, getPlanningRun, id)
+	var i GetPlanningRunRow
+	err := row.Scan(
+		&i.ID,
+		&i.JobID,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.ConfigSnapshot,
+	)
+	return i, err
+}
+
 const getPlanningSuggestionForUpdate = `-- name: GetPlanningSuggestionForUpdate :one
 SELECT s.id::text, s.run_id::text, s.starts_at, s.ends_at, s.driver_id::text,
        s.resource_ids::text[] AS resource_ids, s.resource_purposes, s.status,

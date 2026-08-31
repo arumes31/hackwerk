@@ -382,7 +382,7 @@ func GenerateWithDefaultStart(ctx context.Context, snapshot Snapshot, router Rou
 	return generate(ctx, snapshot, router, cfg, defaultStart, now)
 }
 
-func ExplainExclusions(snapshot Snapshot, suggestions []Suggestion, _, _ time.Time) []Exclusion {
+func ExplainExclusions(snapshot Snapshot, suggestions []Suggestion, from, to time.Time) []Exclusion {
 	usedDrivers, usedResources := make(map[string]bool), make(map[string]bool)
 	for _, suggestion := range suggestions {
 		usedDrivers[suggestion.DriverID] = true
@@ -395,12 +395,20 @@ func ExplainExclusions(snapshot Snapshot, suggestions []Suggestion, _, _ time.Ti
 		if usedDrivers[driver.ID] {
 			continue
 		}
-		result = append(result, Exclusion{Kind: "Fahrer", Name: driver.Name, Reason: "nicht in den drei bestbewerteten Vorschlägen enthalten"})
+		reason := "nicht in den drei bestbewerteten Vorschlägen enthalten"
+		if !available(driver.Availability, from, to) {
+			reason = "im Planungszeitraum nicht durchgehend verfügbar"
+		}
+		result = append(result, Exclusion{Kind: "Fahrer", Name: driver.Name, Reason: reason})
 	}
 	for _, resource := range snapshot.Resources {
 		relevant := resource.Type == "chipper" || (snapshot.Job.Type == "chipping_with_transport" && snapshot.Job.TransportMode == "internal" && resource.Type == "transport_vehicle")
 		if relevant && !usedResources[resource.ID] {
-			result = append(result, Exclusion{Kind: "Ressource", Name: resource.Name, Reason: "nicht in den drei bestbewerteten Vorschlägen enthalten"})
+			reason := "nicht in den drei bestbewerteten Vorschlägen enthalten"
+			if conflicts(snapshot.Reservations, from, to, "", []string{resource.ID}) {
+				reason = "im Planungszeitraum nicht durchgehend verfügbar"
+			}
+			result = append(result, Exclusion{Kind: "Ressource", Name: resource.Name, Reason: reason})
 		}
 	}
 	sort.Slice(result, func(i, j int) bool {

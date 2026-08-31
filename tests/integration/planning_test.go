@@ -76,6 +76,40 @@ func planningJob(t *testing.T, fixture calendarFixture, number string) string {
 	return jobID
 }
 
+func TestPlanningRunWithoutSuggestionsRemainsLoadable(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	now := time.Date(2026, 8, 31, 4, 0, 0, 0, time.UTC)
+	jobID := planningJob(t, fixture, "HW-PLAN-EMPTY")
+	from, to := now.Add(time.Hour), now.Add(24*time.Hour)
+	store := postgres.NewPlanningStore(fixture.pool)
+	snapshot, err := store.LoadSnapshot(fixture.ctx, jobID, from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	location, err := time.LoadLocation("Europe/Vienna")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := planning.DefaultConfig(location)
+	run, err := store.SaveRun(fixture.ctx, fixture.admin, snapshot, from, to, nil, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ID == "" || run.JobID != jobID || run.Suggestions == nil || len(run.Suggestions) != 0 || run.HorizonDays != cfg.HorizonDays {
+		t.Fatalf("saved empty run = %#v", run)
+	}
+	loaded, err := store.ListRun(fixture.ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ID != run.ID || loaded.JobID != jobID || loaded.Suggestions == nil || len(loaded.Suggestions) != 0 || loaded.HorizonDays != cfg.HorizonDays {
+		t.Fatalf("loaded empty run = %#v", loaded)
+	}
+	if _, err := store.ListRun(fixture.ctx, "00000000-0000-0000-0000-000000000001"); !errors.Is(err, planning.ErrNotFound) {
+		t.Fatalf("missing run error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestPlanningSuggestionAdoptionCreatesProposalWithoutOutbox(t *testing.T) {
 	fixture := newCalendarFixture(t)
 	now := time.Date(2026, 8, 31, 4, 0, 0, 0, time.UTC)

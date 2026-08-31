@@ -111,6 +111,11 @@ VALUES (sqlc.arg(run_id)::uuid, sqlc.arg(rank), sqlc.arg(starts_at)::timestamptz
         sqlc.narg(distance_meters)::integer, sqlc.narg(duration_seconds)::integer)
 RETURNING id::text;
 
+-- name: GetPlanningRun :one
+SELECT id::text, job_id::text, created_at, expires_at, config_snapshot
+FROM planning_runs
+WHERE id=sqlc.arg(id)::uuid;
+
 -- name: ListPlanningSuggestions :many
 SELECT s.id::text, s.run_id::text, s.rank, s.starts_at, s.ends_at,
        s.driver_id::text, d.display_name AS driver_name,

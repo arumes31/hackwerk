@@ -98,6 +98,7 @@ type Querier interface {
 	GetPendingEmailVerification(ctx context.Context, userID pgtype.UUID) (GetPendingEmailVerificationRow, error)
 	GetPlanningInput(ctx context.Context, jobID pgtype.UUID) (GetPlanningInputRow, error)
 	GetPlanningJob(ctx context.Context, id pgtype.UUID) (GetPlanningJobRow, error)
+	GetPlanningRun(ctx context.Context, id pgtype.UUID) (GetPlanningRunRow, error)
 	GetPlanningSuggestionForUpdate(ctx context.Context, id pgtype.UUID) (GetPlanningSuggestionForUpdateRow, error)
 	GetResourceForUpdate(ctx context.Context, id pgtype.UUID) (GetResourceForUpdateRow, error)
 	GetRouteDraft(ctx context.Context, id pgtype.UUID) (GetRouteDraftRow, error)
