@@ -21,3 +21,15 @@ select:focus-visible {
   outline: 3px solid var(--focus-ring, #6f4b12);
   outline-offset: 2px;
 }
+
+@media (forced-colors: active) {
+  select {
+    appearance: auto;
+    -webkit-appearance: auto;
+    border-color: ButtonText;
+    color: ButtonText;
+    background: Canvas;
+    background-image: none !important;
+    forced-color-adjust: auto;
+  }
+}

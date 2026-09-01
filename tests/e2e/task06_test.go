@@ -279,35 +279,41 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 	}
 
 	var mobileAudit struct {
-		Overflow, MenuOpen, FocusReturned       bool
-		H1Count, SmallTargets                   int
-		MissingNames, UnlabelledFields          int
-		MissingLandmarks                        bool
-		CaptureVisible, CaptureInsideNavigation bool
-		CaptureName, CaptureHref                string
-		CaptureWidth, CaptureHeight             float64
+		Overflow, MenuOpen, FocusReturned, AppBarVisible bool
+		H1Count, SmallTargets, TabCount                  int
+		MissingNames, UnlabelledFields                   int
+		MissingLandmarks                                 bool
+		CaptureVisible, CaptureInsideNavigation          bool
+		CaptureName, CaptureHref                         string
+		MobileTitle                                      string
+		CaptureWidth, CaptureHeight                      float64
 	}
 	if err := chromedp.Run(browserContext,
 		chromedp.EmulateViewport(360, 800), chromedp.WaitVisible(".mobile-bottom-nav", chromedp.ByQuery),
-		chromedp.Click("[data-mobile-menu] summary", chromedp.ByQuery),
+		chromedp.Click("[data-mobile-menu-open]", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-mobile-menu]", chromedp.ByQuery),
 		chromedp.KeyEvent("\x1b"),
 		chromedp.Evaluate(`(() => {
-			const summary=document.querySelector('[data-mobile-menu] summary');
+			const trigger=document.querySelector('[data-mobile-menu-open]');
+			const dialog=document.querySelector('[data-mobile-menu]');
 			const capture=document.querySelector('.mobile-primary-action');
+			const appBar=document.querySelector('.mobile-app-bar');
 			const captureRect=capture?capture.getBoundingClientRect():{width:0,height:0};
 			const navigation=document.querySelector('.mobile-bottom-nav');
 			const isVisible=node=>{const style=getComputedStyle(node),rect=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0};
-			const touchTargets=[...document.querySelectorAll('.mobile-bottom-nav a,.mobile-bottom-nav summary')].filter(isVisible);
+			const touchTargets=[...document.querySelectorAll('.mobile-bottom-nav a,.mobile-bottom-nav button,.mobile-bottom-nav summary')].filter(isVisible);
 			const controls=[...document.querySelectorAll('a,button,summary,input:not([type=hidden]),select,textarea')].filter(isVisible);
 			const named=node=>((node.getAttribute('aria-label')||node.getAttribute('title')||node.textContent||node.value||'').trim()!==''||
 				document.querySelector('label[for="'+CSS.escape(node.id)+'"]'));
-			return {Overflow:document.documentElement.scrollWidth>window.innerWidth,MenuOpen:summary.parentElement.open,
-				FocusReturned:document.activeElement===summary,H1Count:document.querySelectorAll('main h1').length,
+			return {Overflow:document.documentElement.scrollWidth>window.innerWidth,MenuOpen:dialog.open,
+				FocusReturned:document.activeElement===trigger,H1Count:document.querySelectorAll('main h1').length,
 				SmallTargets:touchTargets.filter(node=>{const r=node.getBoundingClientRect();return r.width<44||r.height<44}).length,
 				MissingNames:controls.filter(node=>!named(node)).length,
 				UnlabelledFields:controls.filter(node=>node.matches('input,select,textarea')&&!named(node)).length,
 				CaptureVisible:!!capture&&isVisible(capture),CaptureInsideNavigation:!!capture&&capture.closest('.mobile-bottom-nav')===navigation,
+				TabCount:navigation.querySelectorAll('[data-mobile-nav-item]').length,
 				CaptureName:capture?(capture.textContent||'').trim():'',CaptureHref:capture?capture.getAttribute('href')||'':'',
+				AppBarVisible:!!appBar&&isVisible(appBar),MobileTitle:(appBar?.querySelector('.mobile-app-bar__title')?.textContent||'').trim(),
 				CaptureWidth:captureRect.width,CaptureHeight:captureRect.height,
 				MissingLandmarks:!document.querySelector('.skip-link')||!document.querySelector('header')||!document.querySelector('main')||!document.querySelector('footer')||document.documentElement.lang!=='de-AT'};
 		})()`, &mobileAudit),
@@ -316,15 +322,139 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 	}
 	if mobileAudit.Overflow || mobileAudit.MenuOpen || !mobileAudit.FocusReturned || mobileAudit.H1Count != 1 || mobileAudit.SmallTargets != 0 ||
 		mobileAudit.MissingNames != 0 || mobileAudit.UnlabelledFields != 0 || mobileAudit.MissingLandmarks ||
-		!mobileAudit.CaptureVisible || !mobileAudit.CaptureInsideNavigation || mobileAudit.CaptureName != "Neuer Auftrag" ||
+		!mobileAudit.AppBarVisible || mobileAudit.MobileTitle != "Heute" || !mobileAudit.CaptureVisible || mobileAudit.CaptureInsideNavigation || mobileAudit.TabCount != 5 || mobileAudit.CaptureName != "Neuer Auftrag" ||
 		mobileAudit.CaptureHref != "/customers/new" || mobileAudit.CaptureWidth < 44 || mobileAudit.CaptureHeight < 44 {
 		t.Fatalf("mobile accessibility audit = %+v", mobileAudit)
+	}
+
+	var initialSheetFocusInside bool
+	var landscapeSheetAudit struct {
+		Open, TabFocusInside, FitsViewport bool
+		Top, Bottom, NavigationTop         float64
+	}
+	var backdropAudit struct {
+		Closed, FocusReturned bool
+	}
+	if err := chromedp.Run(browserContext,
+		chromedp.EmulateViewport(667, 375),
+		chromedp.Click("[data-mobile-menu-open]", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-mobile-menu]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const dialog=document.querySelector('[data-mobile-menu]');
+			const focusables=[...dialog.querySelectorAll('a,button,input:not([type="hidden"]),select,textarea')]
+				.filter(node=>!node.disabled&&getComputedStyle(node).display!=='none');
+			const initiallyInside=dialog.contains(document.activeElement);
+			focusables.at(-1)?.focus();
+			return initiallyInside;
+		})()`, &initialSheetFocusInside),
+		chromedp.KeyEvent("\t"),
+		chromedp.Evaluate(`(() => {
+			const dialog=document.querySelector('[data-mobile-menu]');
+			const navigation=document.querySelector('.mobile-bottom-nav');
+			const rect=dialog.getBoundingClientRect();
+			const navRect=navigation.getBoundingClientRect();
+			return {Open:dialog.open,TabFocusInside:dialog.contains(document.activeElement),FitsViewport:rect.top>=0&&rect.bottom<=navRect.top+.5,
+				Top:rect.top,Bottom:rect.bottom,NavigationTop:navRect.top};
+		})()`, &landscapeSheetAudit),
+		chromedp.MouseClickXY(4, 4),
+		chromedp.Poll(`!document.querySelector('[data-mobile-menu]').open`, nil),
+		chromedp.Evaluate(`(() => ({Closed:!document.querySelector('[data-mobile-menu]').open,
+			FocusReturned:document.activeElement===document.querySelector('[data-mobile-menu-open]')}))()`, &backdropAudit),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if !initialSheetFocusInside || !landscapeSheetAudit.Open || !landscapeSheetAudit.TabFocusInside || !landscapeSheetAudit.FitsViewport ||
+		!backdropAudit.Closed || !backdropAudit.FocusReturned {
+		t.Fatalf("mobile landscape More sheet audit = focus=%t sheet=%+v backdrop=%+v", initialSheetFocusInside, landscapeSheetAudit, backdropAudit)
+	}
+
+	var narrowActionAudit struct {
+		Overflow, WaitlistLabelFits bool
+		LabelWidth, ActionWidth     float64
+	}
+	if err := chromedp.Run(browserContext,
+		chromedp.EmulateViewport(320, 700),
+		chromedp.Evaluate(`(() => {
+			const action=document.querySelector('.mobile-primary-action');
+			const label=action.querySelector('span');
+			const waitlistLabel=document.querySelector('.mobile-bottom-nav a[href="/waitlist"] .mobile-nav-item__label');
+			return {Overflow:document.documentElement.scrollWidth>window.innerWidth,
+				WaitlistLabelFits:waitlistLabel.scrollWidth<=waitlistLabel.clientWidth+.5,
+				LabelWidth:label.getBoundingClientRect().width,ActionWidth:action.getBoundingClientRect().width};
+		})()`, &narrowActionAudit),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if narrowActionAudit.Overflow || !narrowActionAudit.WaitlistLabelFits || narrowActionAudit.LabelWidth <= 1 || narrowActionAudit.ActionWidth < 44 {
+		t.Fatalf("320px primary mobile action audit = %+v", narrowActionAudit)
 	}
 	mobileMetrics := metricAudit(360, 800)
 	if mobileMetrics.BodyOverflow || !mobileMetrics.RailOverflow || mobileMetrics.Count != 8 || mobileMetrics.Rows != 1 ||
 		mobileMetrics.SmallTargets != 0 || mobileMetrics.VisibleCards < 1 || mobileMetrics.IconCount != 0 || mobileMetrics.MaxCardHeight > 64 {
 		t.Fatalf("mobile dashboard metric audit = %+v", mobileMetrics)
 	}
+
+	var adminMobileTourAudit struct {
+		Overflow, TourVisible, GroupedHidden, DriverTourAbsent bool
+		Chronological, SpineVisible, ConnectorVisible          bool
+		StatusText                                             bool
+		PrimaryFullRow                                         bool
+		AppointmentCount, SmallTargets                         int
+		CalendarHref, DetailHref                               string
+	}
+	if err := chromedp.Run(browserContext,
+		chromedp.EmulateViewport(360, 800),
+		chromedp.WaitVisible(`[data-dashboard-projection="admin-tour"]`, chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const visible=node=>{if(!node)return false;const style=getComputedStyle(node),rect=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0};
+			const tour=document.querySelector('[data-dashboard-projection="admin-tour"]');
+			const grouped=document.querySelector('[data-dashboard-projection="resource-groups"]');
+			const list=tour.querySelector('.admin-tour__list');
+			const items=[...tour.querySelectorAll('[data-admin-tour-appointment]')];
+			const controls=[...tour.querySelectorAll('a,button,summary')].filter(visible);
+			const starts=items.map(item=>Date.parse(item.querySelector('time').dateTime));
+			const actions=tour.querySelector('.admin-tour__actions');
+			const primary=tour.querySelector('.admin-tour__appointment-link');
+			const actionRect=actions.getBoundingClientRect(),primaryRect=primary.getBoundingClientRect();
+			return {Overflow:document.documentElement.scrollWidth>window.innerWidth,
+				TourVisible:visible(tour),GroupedHidden:!visible(grouped),DriverTourAbsent:!document.querySelector('[data-dashboard-projection="driver-tour"]'),
+				Chronological:starts.every((value,index)=>index===0||starts[index-1]<=value),
+				SpineVisible:getComputedStyle(list,'::before').content!=='none'&&parseFloat(getComputedStyle(list,'::before').width)>=6,
+				ConnectorVisible:items.every(item=>getComputedStyle(item,'::before').content!=='none'&&parseFloat(getComputedStyle(item,'::before').width)>=12),
+				StatusText:items.every(item=>(item.querySelector('.appointment-badge')?.textContent||'').trim()!==''),PrimaryFullRow:Math.abs(primaryRect.left-actionRect.left)<1&&Math.abs(primaryRect.right-actionRect.right)<1,
+				AppointmentCount:items.length,SmallTargets:controls.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<44||rect.height<44}).length,
+				CalendarHref:tour.querySelector('.admin-tour__calendar')?.getAttribute('href')||'',DetailHref:tour.querySelector('.admin-tour__appointment-link')?.getAttribute('href')||''};
+		})()`, &adminMobileTourAudit),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if adminMobileTourAudit.Overflow || !adminMobileTourAudit.TourVisible || !adminMobileTourAudit.GroupedHidden || !adminMobileTourAudit.DriverTourAbsent ||
+		!adminMobileTourAudit.Chronological || !adminMobileTourAudit.SpineVisible || !adminMobileTourAudit.ConnectorVisible ||
+		!adminMobileTourAudit.StatusText || !adminMobileTourAudit.PrimaryFullRow || adminMobileTourAudit.AppointmentCount != 1 || adminMobileTourAudit.SmallTargets != 0 ||
+		adminMobileTourAudit.CalendarHref != "/calendar?date=2026-08-25" || !strings.HasPrefix(adminMobileTourAudit.DetailHref, "/calendar/appointments/") {
+		t.Fatalf("admin mobile Touren-Kamm audit = %+v", adminMobileTourAudit)
+	}
+
+	var adminDesktopProjectionAudit struct {
+		TourHidden, GroupedVisible bool
+		AppointmentColumns         string
+	}
+	if err := chromedp.Run(browserContext,
+		chromedp.EmulateViewport(1280, 720),
+		chromedp.Evaluate(`(() => {
+			const visible=node=>{const style=getComputedStyle(node),rect=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0};
+			const tour=document.querySelector('[data-dashboard-projection="admin-tour"]');
+			const grouped=document.querySelector('[data-dashboard-projection="resource-groups"]');
+			return {TourHidden:!visible(tour),GroupedVisible:visible(grouped),
+				AppointmentColumns:getComputedStyle(grouped.querySelector('.dashboard-appointment')).gridTemplateColumns};
+		})()`, &adminDesktopProjectionAudit),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if !adminDesktopProjectionAudit.TourHidden || !adminDesktopProjectionAudit.GroupedVisible || !strings.Contains(adminDesktopProjectionAudit.AppointmentColumns, " ") {
+		t.Fatalf("admin desktop projection changed = %+v", adminDesktopProjectionAudit)
+	}
+
 	var mobileDashboardScreenshot, desktopDashboardScreenshot []byte
 	if err := chromedp.Run(browserContext,
 		chromedp.EmulateViewport(360, 800),
@@ -371,6 +501,80 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 	for _, forbidden := range []string{"Versandprobleme", "Overrides", "Freie Hackkapazität", "Dringende Aufträge", "Fahrer heute"} {
 		if strings.Contains(driverText, forbidden) {
 			t.Fatalf("driver dashboard exposed admin-only %q: %s", forbidden, driverText)
+		}
+	}
+
+	var driverMobileTourAudit struct {
+		Overflow, TourVisible, GroupedHidden, Chronological bool
+		SpineVisible, ConnectorVisible, StatusText          bool
+		AppointmentCount, SmallTargets                      int
+		RouteHref                                           string
+		ScrollWidth, InnerWidth                             float64
+		Overflowing                                         string
+	}
+	var driverTourScreenshot []byte
+	if err := chromedp.Run(browserContext,
+		chromedp.EmulateViewport(360, 800),
+		chromedp.WaitVisible(`[data-dashboard-projection="driver-tour"]`, chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const visible=node=>{const style=getComputedStyle(node),rect=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0};
+			const tour=document.querySelector('[data-dashboard-projection="driver-tour"]');
+			const grouped=document.querySelector('[data-dashboard-projection="resource-groups"]');
+			const list=tour.querySelector('.driver-tour__list');
+			const items=[...tour.querySelectorAll('[data-driver-tour-appointment]')];
+			const controls=[...tour.querySelectorAll('a,button,summary')].filter(visible);
+			const starts=items.map(item=>Date.parse(item.querySelector('time').dateTime));
+			const overflowing=[...document.body.querySelectorAll('*')].filter(visible).filter(node=>{const rect=node.getBoundingClientRect();return rect.left<-.5||rect.right>window.innerWidth+.5}).slice(0,8).map(node=>node.tagName.toLowerCase()+'.'+String(node.className)+':'+node.getBoundingClientRect().left.toFixed(1)+'..'+node.getBoundingClientRect().right.toFixed(1));
+			return {Overflow:document.documentElement.scrollWidth>window.innerWidth,ScrollWidth:document.documentElement.scrollWidth,InnerWidth:window.innerWidth,Overflowing:overflowing.join('|'),
+				TourVisible:visible(tour),GroupedHidden:!visible(grouped),
+				Chronological:starts.every((value,index)=>index===0||starts[index-1]<=value),
+				SpineVisible:getComputedStyle(list,'::before').content!=='none'&&parseFloat(getComputedStyle(list,'::before').width)>=6,
+				ConnectorVisible:items.every(item=>getComputedStyle(item,'::before').content!=='none'&&parseFloat(getComputedStyle(item,'::before').width)>=12),
+				StatusText:items.every(item=>(item.querySelector('.appointment-badge')?.textContent||'').trim()!==''),
+				AppointmentCount:items.length,SmallTargets:controls.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<44||rect.height<44}).length,
+				RouteHref:tour.querySelector('.driver-tour__route')?.getAttribute('href')||''};
+		})()`, &driverMobileTourAudit),
+		chromedp.FullScreenshot(&driverTourScreenshot, 90),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if driverMobileTourAudit.Overflow || !driverMobileTourAudit.TourVisible || !driverMobileTourAudit.GroupedHidden ||
+		!driverMobileTourAudit.Chronological || !driverMobileTourAudit.SpineVisible || !driverMobileTourAudit.ConnectorVisible ||
+		!driverMobileTourAudit.StatusText || driverMobileTourAudit.AppointmentCount != 1 || driverMobileTourAudit.SmallTargets != 0 || driverMobileTourAudit.RouteHref != "/my-route?date=2026-08-25" {
+		t.Fatalf("driver mobile Touren-Kamm audit = %+v", driverMobileTourAudit)
+	}
+
+	var driverDesktopProjectionAudit struct {
+		TourHidden, GroupedVisible bool
+		AppointmentColumns         string
+	}
+	if err := chromedp.Run(browserContext,
+		chromedp.EmulateViewport(1280, 720),
+		chromedp.Evaluate(`(() => {
+			const visible=node=>{const style=getComputedStyle(node),rect=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0};
+			const tour=document.querySelector('[data-dashboard-projection="driver-tour"]');
+			const grouped=document.querySelector('[data-dashboard-projection="resource-groups"]');
+			return {TourHidden:!visible(tour),GroupedVisible:visible(grouped),
+				AppointmentColumns:getComputedStyle(grouped.querySelector('.dashboard-appointment')).gridTemplateColumns};
+		})()`, &driverDesktopProjectionAudit),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if !driverDesktopProjectionAudit.TourHidden || !driverDesktopProjectionAudit.GroupedVisible || !strings.Contains(driverDesktopProjectionAudit.AppointmentColumns, " ") {
+		t.Fatalf("driver desktop projection changed = %+v", driverDesktopProjectionAudit)
+	}
+
+	driverTourArtifact := filepath.Join(t.ArtifactDir(), "task06-driver-tour-mobile.png")
+	if err := os.WriteFile(driverTourArtifact, driverTourScreenshot, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("driver Touren-Kamm screenshot: %s", driverTourArtifact)
+	if screenshotDir := os.Getenv("E2E_SCREENSHOT_DIR"); screenshotDir != "" {
+		if err := os.MkdirAll(screenshotDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(screenshotDir, "task06-driver-tour-mobile.png"), driverTourScreenshot, 0o600); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

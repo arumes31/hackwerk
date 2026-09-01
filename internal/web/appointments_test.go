@@ -323,7 +323,14 @@ func TestAppointmentAssignmentHasVersionedNoJavaScriptForm(t *testing.T) {
 			{ID: testAppointmentOtherResourceID, Name: "Werkzeugkiste", Type: resource.TypeOther, Purpose: appointment.PurposeOther},
 		},
 	}
-	detail := appointment.Detail{CalendarEvent: appointment.CalendarEvent{Appointment: current, CustomerID: testCustomerID, CustomerName: "Franz Huber", Locality: "Grieskirchen", VolumeM3: "80.00"}}
+	detail := appointment.Detail{
+		CalendarEvent: appointment.CalendarEvent{
+			Appointment: current, CustomerID: testCustomerID, CustomerName: "Franz Huber",
+			Street: "Werkstraße 7", PostalCode: "4710", Locality: "Grieskirchen", VolumeM3: "80.00", MapsURL: "https://www.google.com/maps/dir/?api=1&destination=48.2,13.8",
+		},
+		Phone: "+43 660 123456", Email: "franz@example.test",
+		Notes: []appointment.Note{{AuthorName: "Dispo", Body: "Zufahrt über das Nordtor", CreatedAt: time.Date(2026, 8, 31, 8, 15, 0, 0, time.UTC)}},
+	}
 	store := &appointmentHTTPStore{current: current, detail: detail, planningOptions: options}
 	router, sessionToken, csrfToken := appointmentTestRouter(t, auth.RoleAdmin, store)
 
@@ -345,6 +352,9 @@ func TestAppointmentAssignmentHasVersionedNoJavaScriptForm(t *testing.T) {
 	if pageResponse.Code != http.StatusOK || pageResponse.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("assignment page status/cache = %d/%q", pageResponse.Code, pageResponse.Header().Get("Cache-Control"))
 	}
+	if store.planningOptionsCalls != 1 {
+		t.Fatalf("admin planning options calls = %d, want 1", store.planningOptionsCalls)
+	}
 
 	form := url.Values{
 		"csrf_token": {csrfToken}, "version": {"4"}, "driver_id": {operationDriverID},
@@ -365,8 +375,83 @@ func TestAppointmentAssignmentHasVersionedNoJavaScriptForm(t *testing.T) {
 	driverRouter, driverSession, driverCSRF := appointmentTestRouter(t, auth.RoleDriver, driverStore)
 	driverResponse := httptest.NewRecorder()
 	driverRouter.ServeHTTP(driverResponse, authenticatedCustomerRequest(t, http.MethodGet, "/calendar/appointments/"+testAppointmentID, nil, driverSession, driverCSRF))
-	if driverResponse.Code != http.StatusForbidden {
-		t.Fatalf("driver assignment page status = %d", driverResponse.Code)
+	driverBody := driverResponse.Body.String()
+	if driverResponse.Code != http.StatusOK || driverResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("driver detail page status/cache = %d/%q", driverResponse.Code, driverResponse.Header().Get("Cache-Control"))
+	}
+	for _, expected := range []string{
+		"Franz Huber", "Anna Fahrerin", "Hacker 1", "Planung nur durch Administration",
+		"Werkstraße 7", "4710 Grieskirchen", "+43 660 123456", "franz@example.test",
+		"Navigation starten", "Auftrag öffnen", "Bemerkung ergänzen", "Zufahrt über das Nordtor",
+	} {
+		if !strings.Contains(driverBody, expected) {
+			t.Errorf("driver detail page missing %q in %q", expected, driverBody)
+		}
+	}
+	for _, forbidden := range []string{`action="/calendar/appointments/` + testAppointmentID + `/assign"`, `name="driver_id"`, "Zuweisung speichern", "Nachricht vor Fixierung", "Kundenbestätigung verwalten"} {
+		if strings.Contains(driverBody, forbidden) {
+			t.Errorf("driver detail page exposed %q in %q", forbidden, driverBody)
+		}
+	}
+	if driverStore.planningOptionsCalls != 0 {
+		t.Fatalf("driver planning options calls = %d, want 0", driverStore.planningOptionsCalls)
+	}
+}
+
+func TestAppointmentDetailDriverCompletionCapabilityControlsFallback(t *testing.T) {
+	tests := []struct {
+		name          string
+		driverAllowed bool
+		wantAction    bool
+		wantPost      int
+	}{
+		{name: "assigned driver may complete started appointment", driverAllowed: true, wantAction: true, wantPost: http.StatusSeeOther},
+		{name: "driver without service capability stays read only", driverAllowed: false, wantAction: false, wantPost: http.StatusForbidden},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			current := appointment.Appointment{
+				ID: testAppointmentID, JobID: testJobID, JobNumber: "HW-2026-0001", Lifecycle: appointment.LifecycleFixed,
+				StartsAt: time.Date(2026, 8, 24, 6, 0, 0, 0, time.UTC), EndsAt: time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC), Version: 4,
+				Drivers: []appointment.DriverAssignment{{ID: operationDriverID, Name: "Anna Fahrerin", Primary: true}},
+			}
+			detail := appointment.Detail{CalendarEvent: appointment.CalendarEvent{Appointment: current, CustomerID: testCustomerID, CustomerName: "Franz Huber"}}
+			store := &appointmentHTTPStore{current: current, detail: detail, driverCanComplete: test.driverAllowed, driverCanCompleteSet: true}
+			router, session, csrf := appointmentTestRouter(t, auth.RoleDriver, store)
+
+			page := httptest.NewRecorder()
+			router.ServeHTTP(page, authenticatedCustomerRequest(t, http.MethodGet, "/calendar/appointments/"+testAppointmentID, nil, session, csrf))
+			completionAction := `action="/calendar/appointments/` + testAppointmentID + `/complete"`
+			if page.Code != http.StatusOK || strings.Contains(page.Body.String(), completionAction) != test.wantAction {
+				t.Fatalf("driver completion page status/action = %d/%v, want 200/%v; body=%q", page.Code, strings.Contains(page.Body.String(), completionAction), test.wantAction, page.Body.String())
+			}
+			if test.wantAction && (!strings.Contains(page.Body.String(), `name="csrf_token" value="`+csrf+`"`) ||
+				!strings.Contains(page.Body.String(), `name="version" value="4"`) ||
+				!strings.Contains(page.Body.String(), `data-confirm-message="Termin und Auftrag wirklich als erledigt markieren?`)) {
+				t.Fatalf("driver completion form lost CSRF/version: %q", page.Body.String())
+			}
+			if test.wantAction {
+				withoutCSRF := httptest.NewRecorder()
+				router.ServeHTTP(withoutCSRF, authenticatedCustomerRequest(t, http.MethodPost, "/calendar/appointments/"+testAppointmentID+"/complete", url.Values{"version": {"4"}}, session, csrf))
+				if withoutCSRF.Code != http.StatusForbidden || store.completeCalls != 0 {
+					t.Fatalf("driver completion without CSRF status/calls = %d/%d", withoutCSRF.Code, store.completeCalls)
+				}
+			}
+
+			form := url.Values{"csrf_token": {csrf}, "version": {"4"}}
+			post := httptest.NewRecorder()
+			router.ServeHTTP(post, authenticatedCustomerRequest(t, http.MethodPost, "/calendar/appointments/"+testAppointmentID+"/complete", form, session, csrf))
+			if post.Code != test.wantPost {
+				t.Fatalf("driver completion post status = %d, want %d; body=%q", post.Code, test.wantPost, post.Body.String())
+			}
+			if test.wantAction {
+				if post.Header().Get("Location") != "/calendar/appointments/"+testAppointmentID+"?completed=1" || store.completeCalls != 1 {
+					t.Fatalf("driver completion redirect/calls = %q/%d", post.Header().Get("Location"), store.completeCalls)
+				}
+			} else if store.completeCalls != 0 {
+				t.Fatalf("forbidden driver completion calls = %d", store.completeCalls)
+			}
+		})
 	}
 }
 
@@ -595,6 +680,7 @@ func TestCalendarTemplateShowsReadOnlyNoticeOnlyToDriver(t *testing.T) {
 					Actor: auth.Actor{Role: test.role},
 					Page:  templates.PageData{AppName: "HackWerk"},
 				},
+				Events:   []appointment.CalendarEvent{{Appointment: appointment.Appointment{ID: testAppointmentID, JobNumber: "HW-2026-0001", Lifecycle: appointment.LifecycleFixed}, CustomerID: testCustomerID, CustomerName: "Franz Huber"}},
 				Timezone: "Europe/Vienna",
 			}
 			if err := templates.Calendar(data).Render(t.Context(), &output); err != nil {
@@ -604,7 +690,34 @@ func TestCalendarTemplateShowsReadOnlyNoticeOnlyToDriver(t *testing.T) {
 			if hasNotice != test.wantNotice {
 				t.Fatalf("read-only notice present = %v, want %v", hasNotice, test.wantNotice)
 			}
+			linkLabel := "Termin verwalten"
+			if test.role == auth.RoleDriver {
+				linkLabel = "Termindetail öffnen"
+			}
+			if !strings.Contains(output.String(), `href="/calendar/appointments/`+testAppointmentID+`">`+linkLabel) {
+				t.Fatalf("calendar agenda does not expose the role-appropriate detail link %q", linkLabel)
+			}
 		})
+	}
+}
+
+func TestAppointmentDialogGroupsActionsByCapabilityArea(t *testing.T) {
+	var output bytes.Buffer
+	data := templates.CalendarData{
+		Shell: templates.ShellData{
+			Actor: auth.Actor{Role: auth.RoleAdmin},
+			Page:  templates.PageData{AppName: "HackWerk"},
+		},
+		Options:  appointmentPlanningOptionsFixture(),
+		Timezone: "Europe/Vienna",
+	}
+	if err := templates.Calendar(data).Render(t.Context(), &output); err != nil {
+		t.Fatal(err)
+	}
+	for _, group := range []string{"assignment", "time", "customer-communication", "primary", "danger"} {
+		if !strings.Contains(output.String(), `data-appointment-action-group="`+group+`"`) {
+			t.Errorf("appointment dialog missing %q action group", group)
+		}
 	}
 }
 
@@ -639,6 +752,11 @@ func TestAppointmentConfirmationAdminActionsHaveNoJavaScriptPath(t *testing.T) {
 	driverRouter.ServeHTTP(forbidden, authenticatedCustomerRequest(t, http.MethodPost, "/calendar/appointments/"+testAppointmentID+"/confirmation/reset", form, driverSession, driverCSRF))
 	if forbidden.Code != http.StatusSeeOther || driverStore.resetCalls != 0 || !strings.Contains(forbidden.Header().Get("Location"), "confirmation_error=forbidden") {
 		t.Fatalf("driver reset response/calls = %d/%d location=%q", forbidden.Code, driverStore.resetCalls, forbidden.Header().Get("Location"))
+	}
+	driverPage := httptest.NewRecorder()
+	driverRouter.ServeHTTP(driverPage, authenticatedCustomerRequest(t, http.MethodGet, "/calendar/appointments/"+testAppointmentID, nil, driverSession, driverCSRF))
+	if driverPage.Code != http.StatusOK || strings.Contains(driverPage.Body.String(), "Kundenbestätigung verwalten") || strings.Contains(driverPage.Body.String(), "/confirmation/reissue") || strings.Contains(driverPage.Body.String(), "/confirmation/reset") {
+		t.Fatalf("driver confirmation detail visibility = %d body=%q", driverPage.Code, driverPage.Body.String())
 	}
 }
 
@@ -715,22 +833,26 @@ func (appointmentHTTPAvailability) IsAvailable(context.Context, auth.Actor, stri
 }
 
 type appointmentHTTPStore struct {
-	current         appointment.Appointment
-	detail          appointment.Detail
-	events          []appointment.CalendarEvent
-	planningOptions appointment.PlanningOptions
-	createErr       error
-	assignErr       error
-	proposeErr      error
-	createCalls     int
-	assignCalls     int
-	proposeCalls    int
-	fixCalls        int
-	cancelCalls     int
-	rescheduleCalls int
-	reopenCalls     int
-	lastMove        appointment.MoveInput
-	lastReopen      appointment.ReopenInput
+	current              appointment.Appointment
+	detail               appointment.Detail
+	events               []appointment.CalendarEvent
+	planningOptions      appointment.PlanningOptions
+	createErr            error
+	assignErr            error
+	proposeErr           error
+	createCalls          int
+	assignCalls          int
+	proposeCalls         int
+	fixCalls             int
+	cancelCalls          int
+	rescheduleCalls      int
+	reopenCalls          int
+	completeCalls        int
+	planningOptionsCalls int
+	driverCanComplete    bool
+	driverCanCompleteSet bool
+	lastMove             appointment.MoveInput
+	lastReopen           appointment.ReopenInput
 }
 
 func (store *appointmentHTTPStore) Plan(ctx context.Context, actor auth.Actor, input appointment.PlanInput, overrideReason string) (appointment.Appointment, error) {
@@ -848,6 +970,9 @@ func (store *appointmentHTTPStore) Reopen(_ context.Context, _ auth.Actor, input
 	return value, nil
 }
 func (store *appointmentHTTPStore) Complete(context.Context, auth.Actor, appointment.CompleteInput) (appointment.Appointment, error) {
+	store.completeCalls++
+	store.current.Lifecycle = appointment.LifecycleCompleted
+	store.current.Version++
 	return store.current, nil
 }
 func (store *appointmentHTTPStore) Detail(context.Context, string) (appointment.Detail, error) {
@@ -857,12 +982,16 @@ func (store *appointmentHTTPStore) ListCalendar(context.Context, time.Time, time
 	return store.events, nil
 }
 func (store *appointmentHTTPStore) PlanningOptions(context.Context) (appointment.PlanningOptions, error) {
+	store.planningOptionsCalls++
 	return store.planningOptions, nil
 }
 func (store *appointmentHTTPStore) ListConflicts(context.Context, time.Time, time.Time, []string, []string, string) ([]appointment.Conflict, error) {
 	return nil, nil
 }
 func (store *appointmentHTTPStore) DriverCanComplete(context.Context, string, string) (bool, error) {
+	if store.driverCanCompleteSet {
+		return store.driverCanComplete, nil
+	}
 	return true, nil
 }
 func (store *appointmentHTTPStore) Swap(context.Context, auth.Actor, appointment.SwapInput) ([]appointment.Appointment, error) {

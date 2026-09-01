@@ -79,7 +79,7 @@ func TestRequestLimitsAndStrictCSP(t *testing.T) {
 	validResponse := httptest.NewRecorder()
 	handler.ServeHTTP(validResponse, valid)
 	csp := validResponse.Header().Get("Content-Security-Policy")
-	if strings.Contains(csp, "unsafe") || !strings.Contains(csp, "frame-ancestors 'none'") {
+	if strings.Contains(csp, "unsafe") || !strings.Contains(csp, "frame-ancestors 'none'") || !strings.Contains(csp, "media-src 'self' blob:") {
 		t.Fatalf("CSP=%q", csp)
 	}
 }

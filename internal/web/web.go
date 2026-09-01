@@ -39,7 +39,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-const contentSecurityPolicy = "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'"
+const contentSecurityPolicy = "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'"
 
 // DatabasePinger is the readiness boundary consumed by the HTTP layer.
 type DatabasePinger interface {
@@ -95,8 +95,10 @@ func NewRouter(dependencies Dependencies) (http.Handler, error) {
 		Version:                     dependencies.Build.Version,
 		BuildVersion:                dependencies.Build.DisplayVersion(),
 		CSSPath:                     assetPaths.CSS,
+		MobileCSSPath:               assetPaths.MobileCSS,
 		ControlFoundationCSSPath:    assetPaths.ControlFoundationCSS,
 		JSPath:                      assetPaths.JavaScript,
+		PresentationBootstrapJSPath: assetPaths.PresentationBootstrapJS,
 		RouteLocationsJSPath:        assetPaths.RouteLocationsJavaScript,
 		ManifestPath:                assetPaths.Manifest,
 		IconPath:                    assetPaths.Icon,

@@ -55,17 +55,171 @@ func TestLoadPathsReturnsContentVersionedURLs(t *testing.T) {
 	}
 	versioned := regexp.MustCompile(`^/assets/[^?]+\?v=[0-9a-f]{12}$`)
 	for name, assetPath := range map[string]string{
-		"application CSS":   paths.CSS,
-		"control CSS":       paths.ControlFoundationCSS,
-		"application JS":    paths.JavaScript,
-		"route location JS": paths.RouteLocationsJavaScript,
-		"calendar CSS":      paths.FullCalendarThemeCSS,
-		"calendar JS":       paths.FullCalendarJavaScript,
-		"login CSS":         paths.LoginCSS,
-		"login loader":      paths.LoginLoaderJavaScript,
+		"application CSS":        paths.CSS,
+		"mobile app CSS":         paths.MobileCSS,
+		"control CSS":            paths.ControlFoundationCSS,
+		"application JS":         paths.JavaScript,
+		"presentation bootstrap": paths.PresentationBootstrapJS,
+		"route location JS":      paths.RouteLocationsJavaScript,
+		"calendar CSS":           paths.FullCalendarThemeCSS,
+		"calendar JS":            paths.FullCalendarJavaScript,
+		"login CSS":              paths.LoginCSS,
+		"login loader":           paths.LoginLoaderJavaScript,
 	} {
 		if !versioned.MatchString(assetPath) {
 			t.Errorf("%s path = %q, want content version", name, assetPath)
+		}
+	}
+}
+
+func TestPresentationBootstrapAppliesSafePreferencesBeforeStyles(t *testing.T) {
+	t.Parallel()
+
+	script, err := Files.ReadFile("static/presentation-bootstrap.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(script)
+	for _, contract := range []string{"hackwerk:density", "density-comfortable", "hackwerk:outdoor", "outdoor-contrast", "display-mode: standalone"} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("presentation bootstrap is missing %q", contract)
+		}
+	}
+	for _, forbidden := range []string{"fetch(", "XMLHttpRequest", "document.cookie", "sessionStorage"} {
+		if strings.Contains(javascript, forbidden) {
+			t.Errorf("presentation bootstrap must not access %q", forbidden)
+		}
+	}
+}
+
+func TestManifestDefinesInstallableMobileEntryPoints(t *testing.T) {
+	t.Parallel()
+
+	manifest, err := Files.ReadFile("static/manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(manifest)
+	for _, contract := range []string{
+		`"id": "/dashboard"`,
+		`"start_url": "/dashboard"`,
+		`"display": "standalone"`,
+		`"url": "/calendar"`,
+		`"url": "/customers/new"`,
+		`"purpose": "any maskable"`,
+	} {
+		if !strings.Contains(content, contract) {
+			t.Errorf("mobile application manifest is missing %q", contract)
+		}
+	}
+}
+
+func TestMobileAppStylesDefineIndependentShellContracts(t *testing.T) {
+	t.Parallel()
+
+	stylesheet, err := Files.ReadFile("static/mobile-app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(stylesheet)
+	for name, contract := range map[string]string{
+		"mobile breakpoint":            "@media (max-width: 760px)",
+		"standalone display mode":      "@media (display-mode: standalone)",
+		"stable navigation":            ".mobile-bottom-nav",
+		"separate primary action":      ".mobile-primary-action",
+		"safe area":                    "env(safe-area-inset-bottom)",
+		"context actions":              ".mobile-context-actions",
+		"authenticated app canvas":     "body:has(.mobile-bottom-nav) .page",
+		"calendar app surface":         ".calendar-page .calendar-board",
+		"planning action sheet":        ".planning-page .planning-selection",
+		"route field cards":            ".route-page .route-stop-card",
+		"operations directory":         "[data-operation-page] .compact-list",
+		"profile app cards":            ".profile-page .profile-card",
+		"user directory":               ".users-page .user-card",
+		"voice workflow":               ".voice-capture",
+		"calendar feed management":     ".feed-layout",
+		"notification mobile records":  ".table-card .responsive-table",
+		"sticky action nav clearance":  "bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + .5625rem)",
+		"sticky action scroll reserve": "scroll-margin-block-end: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + .75rem)",
+		"narrow phone guard":           "@media (max-width: 360px)",
+	} {
+		if !strings.Contains(css, contract) {
+			t.Errorf("%s contract is missing from mobile app stylesheet", name)
+		}
+	}
+	if !regexp.MustCompile(`(?s)body:has\(\.mobile-bottom-nav\)\s*\{[^}]*overflow-x:\s*clip`).MatchString(css) {
+		t.Fatal("mobile app canvas does not guard narrow viewports against horizontal page overflow")
+	}
+	application, err := Files.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(application), "bottom: calc(var(--mobile-nav-height) + .5625rem + env(safe-area-inset-bottom))") {
+		t.Fatal("base responsive rules override the mobile sticky-action clearance")
+	}
+}
+
+func TestRoleSpecificTourProjectionsAreMobileOnlyAndCountdownTargetsTheVisibleSchedule(t *testing.T) {
+	t.Parallel()
+
+	stylesheet, err := Files.ReadFile("static/mobile-app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(stylesheet)
+	// The quoted role values are CSS selectors, not credentials.
+	//nolint:gosec
+	for name, contract := range map[string]string{
+		"hidden driver projection":  `.driver-tour`,
+		"hidden admin projection":   `.admin-tour`,
+		"driver role scope":         `[data-dashboard-role="driver"]`,
+		"admin role scope":          `[data-dashboard-role="admin"]`,
+		"driver chronological tour": `[data-dashboard-projection="driver-tour"]`,
+		"admin chronological tour":  `[data-dashboard-projection="admin-tour"]`,
+		"grouped desktop schedule":  `[data-dashboard-projection="resource-groups"]`,
+		"driver route spine":        `.driver-tour__list::before`,
+		"driver route tooth":        `.driver-tour__item::before`,
+		"admin route spine":         `.admin-tour__list::before`,
+		"admin route tooth":         `.admin-tour__item::before`,
+		"desktop moss token":        `var(--moss)`,
+		"desktop surface token":     `var(--surface)`,
+	} {
+		if !strings.Contains(css, contract) {
+			t.Errorf("%s contract is missing from mobile app stylesheet", name)
+		}
+	}
+	if !regexp.MustCompile(`(?s)\.driver-tour\s*,\s*\.admin-tour\s*\{[^}]*display:\s*none`).MatchString(css) {
+		t.Fatal("both role-specific tours must be hidden by default so desktop keeps its grouped schedule")
+	}
+	if !regexp.MustCompile(`(?s)@media \(max-width: 760px\).*\[data-dashboard-role="driver"\].*\[data-dashboard-projection="driver-tour"\][^{]*\{[^}]*display:\s*grid`).MatchString(css) {
+		t.Fatal("driver tour must only become visible in the phone breakpoint")
+	}
+	if !regexp.MustCompile(`(?s)@media \(max-width: 760px\).*\[data-dashboard-role="admin"\].*\[data-dashboard-projection="admin-tour"\][^{]*\{[^}]*display:\s*grid`).MatchString(css) {
+		t.Fatal("admin tour must only become visible in the phone breakpoint")
+	}
+	if !regexp.MustCompile(`(?s)\.admin-tour__appointment-link\s*\{[^}]*grid-column:\s*1\s*/\s*-1`).MatchString(css) {
+		t.Fatal("admin appointment management must remain the full-width primary card action")
+	}
+
+	application, err := Files.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(application), ".driver-tour") || strings.Contains(string(application), ".admin-tour") {
+		t.Fatal("mobile tour styling must not alter the desktop application stylesheet")
+	}
+
+	source, err := os.ReadFile("src/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(source)
+	for _, contract := range []string{
+		`node.getClientRects().length > 0`,
+		`window.addEventListener("resize", updateDashboardCountdown)`,
+	} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("dashboard countdown does not preserve visible-projection contract %q", contract)
 		}
 	}
 }
@@ -143,10 +297,21 @@ func TestInstallPromptIsHiddenUntilBrowserOffersInstallation(t *testing.T) {
 		`window.addEventListener("appinstalled"`,
 		`hideInstallPrompt();`,
 		`announce("HackWerk kann auf diesem Gerät installiert werden.")`,
+		`privacyNoticeVisible()`,
+		`window.addEventListener("hackwerk:privacy-notice"`,
+		`else offerInstallPrompt();`,
 	} {
 		if !strings.Contains(javascript, contract) {
 			t.Errorf("install prompt script does not preserve %q", contract)
 		}
+	}
+	dismissStart := strings.Index(javascript, `querySelector("[data-install-dismiss]")`)
+	installedStart := strings.Index(javascript, `window.addEventListener("appinstalled"`)
+	if dismissStart < 0 || installedStart <= dismissStart {
+		t.Fatal("install dismissal and installed-event handlers are missing")
+	}
+	if strings.Contains(javascript[dismissStart:installedStart], "installEvent = undefined") {
+		t.Fatal("dismissing the promotional install notice also disables the explicit profile installation")
 	}
 }
 
@@ -169,6 +334,32 @@ func TestTasteRefinementsPreserveFocusAndSafeAreas(t *testing.T) {
 	}
 }
 
+func TestAccessibilityFoundationSupportsForcedColorsAndTextSafeAccent(t *testing.T) {
+	t.Parallel()
+
+	foundation, err := Files.ReadFile("static/control-foundation.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`(?s)@media \(forced-colors: active\).*select\s*\{[^}]*appearance:\s*auto`).Match(foundation) {
+		t.Fatal("native select affordance is not restored in forced-colors mode")
+	}
+
+	application, err := Files.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(application)
+	for _, contract := range []string{"--ochre-text:", "color: var(--ochre-text)", "100dvh"} {
+		if !strings.Contains(css, contract) {
+			t.Errorf("application accessibility foundation is missing %q", contract)
+		}
+	}
+	if strings.Contains(css, ") .mobile-bottom-nav {\n    display: none;") {
+		t.Fatal("workflow pages must not remove the stable mobile navigation")
+	}
+}
+
 func TestLowPriorityUIContractsRemainAccessibleAndRaceSafe(t *testing.T) {
 	t.Parallel()
 
@@ -185,6 +376,9 @@ func TestLowPriorityUIContractsRemainAccessibleAndRaceSafe(t *testing.T) {
 		`data-confirmation-note-feedback`,
 		`searchController = new AbortController()`,
 		`if (sequence !== searchSequence) return;`,
+		`[data-user-directory]`,
+		`toLocaleLowerCase("de-AT")`,
+		`event.submitter?.dataset.confirmMessage || form.dataset.confirmMessage`,
 	} {
 		if !strings.Contains(javascript, contract) {
 			t.Errorf("application script does not preserve %q", contract)
@@ -198,6 +392,163 @@ func TestLowPriorityUIContractsRemainAccessibleAndRaceSafe(t *testing.T) {
 	for _, contract := range []string{`searchController = new AbortController()`, `signal: searchController.signal`, `sequence !== searchSequence`} {
 		if !strings.Contains(string(routeLocations), contract) {
 			t.Errorf("route location script does not preserve %q", contract)
+		}
+	}
+}
+
+func TestConfirmationSubmitUsesOnlyTheGlobalDuplicateGuard(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("src/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(source)
+	confirmationStart := strings.Index(javascript, `document.querySelectorAll("[data-confirmation-form]")`)
+	confirmationEnd := strings.Index(javascript, `document.querySelectorAll("[data-planning-results]")`)
+	if confirmationStart < 0 || confirmationEnd <= confirmationStart {
+		t.Fatal("confirmation submit handler boundaries are missing")
+	}
+	confirmationHandler := javascript[confirmationStart:confirmationEnd]
+	if strings.Contains(confirmationHandler, "dataset.submitting") {
+		t.Fatal("confirmation handler must not claim the shared duplicate-submit guard before the global handler runs")
+	}
+
+	for _, contract := range []string{`form.dataset.submitting === "true"`, `form.dataset.submitting = "true"`} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("global duplicate-submit handler does not preserve %q", contract)
+		}
+	}
+}
+
+func TestMobileMoreUsesNativeModalSheetContracts(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("src/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(source)
+	for _, contract := range []string{
+		`[data-mobile-menu-open]`,
+		`mobileMenu.showModal()`,
+		`event.target === mobileMenu`,
+		`mobileMenu.addEventListener("close"`,
+		`mobileMenuTrigger.focus()`,
+		`event.key !== "Tab"`,
+		`document.activeElement === last`,
+		`classList.add("mobile-menu-dialog-ready")`,
+	} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("mobile More modal script is missing %q", contract)
+		}
+	}
+
+	stylesheet, err := Files.ReadFile("static/mobile-app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(stylesheet)
+	for _, contract := range []string{
+		`.mobile-more__dialog::backdrop`,
+		`env(safe-area-inset-bottom) + .25rem`,
+		`calc(100dvh - var(--mobile-nav-height)`,
+		`calc(var(--visual-viewport-height, 100dvh) - var(--mobile-nav-height)`,
+	} {
+		if !strings.Contains(css, contract) {
+			t.Errorf("mobile More modal stylesheet is missing %q", contract)
+		}
+	}
+	if strings.Contains(css, `.mobile-primary-action > span`) {
+		t.Fatal("narrow-phone primary action must keep a visible text label")
+	}
+	application, err := Files.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(application), `.mobile-menu-dialog-ready`) {
+		t.Fatal("base application stylesheet does not progressively replace the no-JavaScript mobile More fallback")
+	}
+}
+
+func TestCommandSearchProgressivelyEnhancesAndNarrowNavigationLabelsFit(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("src/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(source), `classList.add("command-dialog-ready")`) {
+		t.Fatal("command dialog does not announce successful progressive enhancement")
+	}
+
+	application, err := Files.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(application)
+	for _, contract := range []string{`html:not(.command-dialog-ready) [data-command-open]`, `.command-dialog-ready .command-search-fallback`} {
+		if !strings.Contains(css, contract) {
+			t.Errorf("command search fallback stylesheet is missing %q", contract)
+		}
+	}
+
+	mobile, err := Files.ReadFile("static/mobile-app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mobileCSS := string(mobile)
+	for _, contract := range []string{
+		`.mobile-bottom-nav .mobile-nav-item__label`, `font-size: .66rem`, `text-overflow: clip`,
+		`.command-search-fallback--mobile .command-search-fallback__panel`, `position: fixed`,
+		`max(.5rem, env(safe-area-inset-left))`,
+	} {
+		if !strings.Contains(mobileCSS, contract) {
+			t.Errorf("narrow mobile fallback contract is missing %q", contract)
+		}
+	}
+}
+
+func TestListSortControlsRemainVisibleAcrossBreakpoints(t *testing.T) {
+	t.Parallel()
+
+	application, err := Files.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(application)
+	if !regexp.MustCompile(`(?s)\.list-sort-controls\s*\{[^}]*display:\s*flex`).MatchString(css) {
+		t.Fatal("desktop list sorting controls are not visible")
+	}
+	if regexp.MustCompile(`(?s)\.list-sort-controls\s*\{[^}]*display:\s*none`).MatchString(css) {
+		t.Fatal("list sorting controls are hidden at a breakpoint")
+	}
+
+	mobile, err := Files.ReadFile("static/mobile-app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mobile), `.customer-list-toolbar > .list-sort-controls`) {
+		t.Fatal("tablet mobile-app layout does not allocate a row for list sorting")
+	}
+}
+
+func TestRouteReorderingMarksTheFormDirtyAndRevealsPersistenceState(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("src/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(source)
+	for _, contract := range []string{
+		`dirtyForms.add(order)`,
+		`order.dataset.routeOrderDirty = "true"`,
+		`[data-route-order-save-button]`,
+		`[data-route-order-save-status]`,
+	} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("route reordering script is missing %q", contract)
 		}
 	}
 }

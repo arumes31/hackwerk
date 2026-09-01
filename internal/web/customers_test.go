@@ -393,7 +393,7 @@ func TestCustomerHTTPFiltersSortAndPaginationStayInPOSTBody(t *testing.T) {
 		t.Fatalf("archived list status/filter/body=%d/%#v/%q", response.Code, store.listFilter, body)
 	}
 	for _, required := range []string{
-		`class="customer-sort-button is-active"`, `aria-sort="descending"`,
+		`class="list-sort-controls"`, `value="jobs:desc" selected`, `aria-sort="descending"`,
 		`href="/customers/` + testCustomerID + `"`, `Kundenakte öffnen`,
 		`Kundenliste mit Kontaktstatus`, `Keine Benachrichtigung`, `Kontaktdaten fehlen`,
 		`name="missing_contact" value="1"`, `name="incomplete_address" value="1"`,
@@ -475,6 +475,80 @@ func TestCustomerHTTPDetailProvidesSafeContactActions(t *testing.T) {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("customer detail is missing compact overview %q: %s", expected, body)
 		}
+	}
+}
+
+func TestCustomerHTTPDetailConfirmsArchiveAndKeepsCopyOutsideSummary(t *testing.T) {
+	t.Parallel()
+
+	store := &customerHTTPStore{detail: customers.CustomerDetail{
+		Customer: customers.Customer{
+			ID: testCustomerID, FirstName: "Maria", LastName: "Maier", CountryCode: "AT",
+			NotificationPreference: customers.NotifyNone, Version: 1,
+		},
+		Jobs: []customers.Job{{
+			ID: testJobID, JobNumber: "HW-2026-0042", JobType: customers.JobTypeChippingOnly,
+			VolumeM3: "80.00", EstimatedHackMinutes: 180, TransportMode: customers.TransportNone,
+			Urgency: customers.UrgencyNormal, Source: customers.SourcePhone, WorkflowStatus: "waitlist", Version: 1,
+		}},
+		Notes: map[string][]customers.Note{},
+	}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleAdmin, store)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodGet, "/customers/"+testCustomerID, nil, sessionToken, csrfToken))
+	body := response.Body.String()
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", response.Code, body)
+	}
+	if !strings.Contains(body, `data-confirm-message="Maria Maier archivieren?`) {
+		t.Fatalf("customer archive confirmation is missing: %s", body)
+	}
+	summaryStart := strings.Index(body, `<details class="compact-job-row"`)
+	summaryEnd := strings.Index(body[summaryStart:], `</summary>`)
+	if summaryStart < 0 || summaryEnd < 0 {
+		t.Fatalf("job summary is missing: %s", body)
+	}
+	if strings.Contains(body[summaryStart:summaryStart+summaryEnd], `data-copy-value`) {
+		t.Fatal("copy control must not be nested inside the interactive job summary")
+	}
+	if !strings.Contains(body[summaryStart+summaryEnd:], `data-copy-value="HW-2026-0042"`) {
+		t.Fatal("job number copy control is missing from the expanded actions")
+	}
+}
+
+func TestCustomerHTTPInvalidPileCoordinatesDescribeBothInputs(t *testing.T) {
+	t.Parallel()
+
+	store := &customerHTTPStore{detail: customers.CustomerDetail{Customer: customers.Customer{
+		ID: testCustomerID, FirstName: "Stefan", LastName: "Fischer", CountryCode: "AT",
+		NotificationPreference: customers.NotifyNone, Version: 1,
+	}}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	form := validCustomerHTTPForm(csrfToken)
+	form.Set("pile_latitude", "48.2")
+	form.Set("pile_location_source", "coordinates")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/customers/"+testCustomerID+"/jobs", form, sessionToken, csrfToken))
+	body := response.Body.String()
+
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, body = %q", response.Code, body)
+	}
+	errorID := "new-customer-job-pile-coordinate-error"
+	for _, inputID := range []string{"new-customer-job-pile-latitude", "new-customer-job-pile-longitude"} {
+		contract := `id="` + inputID + `"`
+		position := strings.Index(body, contract)
+		if position < 0 {
+			t.Fatalf("coordinate input %q is missing", inputID)
+		}
+		fragment := body[position:min(position+500, len(body))]
+		if !strings.Contains(fragment, `aria-invalid="true"`) || !strings.Contains(fragment, `aria-describedby="`+errorID+`"`) {
+			t.Fatalf("coordinate input %q does not reference shared error: %s", inputID, fragment)
+		}
+	}
+	if strings.Count(body, `id="`+errorID+`"`) != 1 {
+		t.Fatalf("shared coordinate error must render exactly once: %s", body)
 	}
 }
 
@@ -717,7 +791,7 @@ func TestCustomerHTTPWaitlistSearchUsesPOSTWithoutURLLeaks(t *testing.T) {
 	}
 	for _, required := range []string{
 		`id="waitlist-list-controls"`, `id="waitlist-search"`, `1 von 4 Aufträgen`,
-		`class="customer-sort-button is-active"`, `aria-sort="descending"`,
+		`class="list-sort-controls"`, `value="volume" selected`, `aria-sort="descending"`,
 		`name="clear" value="region"`, `Warteliste mit Auftrag, Kunde`,
 	} {
 		if !strings.Contains(body, required) {

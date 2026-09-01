@@ -137,6 +137,18 @@ func TestTask09VoiceReviewMobileJourney(t *testing.T) {
 	if !nativeFallbackConfigured {
 		t.Fatal("native multipart fallback is not fully configured")
 	}
+	var inferredDuration string
+	if err = runBrowserStep(browser, "prefill selected audio duration from metadata",
+		chromedp.SetUploadFiles("[data-voice-file]", []string{audioPath}, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('[data-voice-duration]')?.value==='3'`, nil),
+		chromedp.Value("[data-voice-duration]", &inferredDuration, chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('[data-voice-upload]').reset()`, nil),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if inferredDuration != "3" {
+		t.Fatalf("selected WAV duration = %q, want 3 seconds", inferredDuration)
+	}
 	uploadRequests := make(chan observedVoiceUploadRequest, 8)
 	chromedp.ListenTarget(browser, func(event any) {
 		requestEvent, ok := event.(*network.EventRequestWillBeSent)
@@ -344,8 +356,8 @@ const mediaRecorderFixtureScript = `(async () => {
 	transfer.items.add(file);
 	const form = document.querySelector("[data-voice-upload]");
 	form.elements.audio.files = transfer.files;
-	form.elements.duration_seconds.value = "2";
 	form.elements.audio.dispatchEvent(new Event("change", {bubbles: true}));
+	form.elements.duration_seconds.value = "2";
 	form.elements.duration_seconds.dispatchEvent(new Event("input", {bubbles: true}));
 	return {...capabilities, supported: true, mimeType: file.type, size: file.size, fileCount: form.elements.audio.files.length};
 })()`

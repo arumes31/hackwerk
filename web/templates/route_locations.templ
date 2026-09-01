@@ -66,9 +66,23 @@ templ RouteLocationsSettings(data RouteLocationsSettingsData) {
 							<div class="empty-state"><h2>Noch kein Routenort</h2><p>Legen Sie zuerst mindestens einen geprüften Ort an. Ohne Standard bleibt die individuelle Auswahl in der Routenplanung verfügbar.</p></div>
 						}
 						for _, location := range data.Locations {
-							<article class="route-location-card">
+							<details class="route-location-card">
+								<summary class="route-location-card__summary">
+									<span><strong>{ location.Name }</strong><small>{ location.Address }</small></span>
+									<span class="route-location-card__badges">
+										if location.DefaultStart {
+											<span class="status-badge">Standard-Start</span>
+										}
+										if location.DefaultEnd {
+											<span class="status-badge">Standard-Ende</span>
+										}
+										if !location.Active {
+											<span class="status-badge">Deaktiviert</span>
+										}
+									</span>
+								</summary>
 								if !location.Active {
-									<div><h2>{ location.Name }</h2><p>{ location.Address }</p><div class="route-location-card__facts"><span>{ location.Latitude }, { location.Longitude }</span><span>Deaktiviert</span><span>Version { strconv.Itoa(int(location.Version)) }</span></div></div>
+									<div class="route-location-card__body"><div class="route-location-card__facts"><span>{ location.Latitude }, { location.Longitude }</span><span>Nur noch in der Historie sichtbar</span></div></div>
 								} else {
 									<form method="post" action={ "/settings/route-locations/" + location.ID } class="form-grid" data-route-location-editor>
 										<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
@@ -81,7 +95,6 @@ templ RouteLocationsSettings(data RouteLocationsSettingsData) {
 										<label class="check-label"><input type="checkbox" name="default_start" value="true" checked?={ location.DefaultStart }/>Standard-Start</label>
 										<label class="check-label"><input type="checkbox" name="default_end" value="true" checked?={ location.DefaultEnd }/>Standard-Ende</label>
 										<label class="check-label route-location-native-confirm"><input type="checkbox" name="confirmed_native" value="true" data-route-location-native-confirmed checked/> Adresse und Koordinaten geprüft</label>
-										<div class="route-location-card__facts"><span>Version { strconv.Itoa(int(location.Version)) }</span></div>
 										<div class="route-location-custom__confirm"><button class="button button--quiet" type="button" data-route-location-confirm>Geänderten Standort übernehmen</button><span class="form-hint" data-route-location-message aria-live="polite">Gespeicherter Standort ist bestätigt.</span></div>
 										<p class="form-alert route-location-picker__error" data-route-location-error role="alert" hidden></p>
 										<button class="button" type="submit">Speichern</button>
@@ -92,10 +105,10 @@ templ RouteLocationsSettings(data RouteLocationsSettingsData) {
 										if location.DefaultStart || location.DefaultEnd {
 											<label class="check-label"><input type="checkbox" name="confirm_without_default" value="true" required/>Ohne diesen Standard fortfahren</label>
 										}
-										<button class="button button--quiet" type="submit">Deaktivieren</button>
+										<button class="button button--quiet" type="submit" data-confirm-message={ location.Name + " deaktivieren? Der Ort wird aus neuen Routenwahlen entfernt. Bestehende Historie bleibt erhalten; Start- oder Endstandards werden aufgehoben." }>Deaktivieren</button>
 									</form>
 								}
-							</article>
+							</details>
 						}
 					</div>
 				</section>

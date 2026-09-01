@@ -43,3 +43,39 @@ func TestConfirmationNoteHasLiveFeedbackAndFieldRelationship(t *testing.T) {
 		}
 	}
 }
+
+func TestConfirmationRequiresExplicitChoiceBeforeSingleSubmit(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	// #nosec G101 -- opaque request-only test values, not credentials.
+	data := ConfirmationData{
+		Page: PageData{AppName: "HackWerk"}, Token: "opaque-token",
+		Value: notification.Confirmation{CustomerName: "Maria Muster", FormNonce: "nonce"},
+	}
+	if err := ConfirmationPage(data).Render(context.Background(), &output); err != nil {
+		t.Fatal(err)
+	}
+	markup := output.String()
+	for _, action := range []string{"confirmed", "declined", "callback_requested"} {
+		contract := `type="radio" name="action" value="` + action + `"`
+		if !strings.Contains(markup, contract) {
+			t.Errorf("confirmation choice does not preserve %q", contract)
+		}
+	}
+	if got := strings.Count(markup, `type="submit"`); got != 1 {
+		t.Fatalf("confirmation submit controls = %d, want 1", got)
+	}
+	for _, contract := range []string{
+		`class="skip-link" href="#hauptinhalt"`,
+		`id="hauptinhalt"`,
+		`data-confirmation-submit`,
+		`Antwort verbindlich speichern`,
+		`href="/datenschutz"`,
+		`href="/impressum"`,
+	} {
+		if !strings.Contains(markup, contract) {
+			t.Errorf("confirmation page does not preserve %q", contract)
+		}
+	}
+}

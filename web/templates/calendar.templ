@@ -55,16 +55,19 @@ type AppointmentAssignmentValues struct {
 }
 
 type AppointmentDetailData struct {
-	Shell                   ShellData
-	Options                 appointment.PlanningOptions
-	Detail                  appointment.Detail
-	Values                  AppointmentAssignmentValues
-	Error                   PlanningFormError
-	Notice                  string
-	ConfirmationActionError string
-	CanReissueConfirmation  bool
-	CanResetConfirmation    bool
-	MessagePreview          *notification.TemplatePreview
+	Shell                    ShellData
+	Options                  appointment.PlanningOptions
+	Detail                   appointment.Detail
+	Values                   AppointmentAssignmentValues
+	Error                    PlanningFormError
+	Notice                   string
+	ConfirmationActionError  string
+	CanAssign                bool
+	CanComplete              bool
+	CompleteRequiresOverride bool
+	CanReissueConfirmation   bool
+	CanResetConfirmation     bool
+	MessagePreview           *notification.TemplatePreview
 }
 
 templ Calendar(data CalendarData) {
@@ -319,53 +322,72 @@ templ appointmentDialog(csrf string, admin bool, options appointment.PlanningOpt
 		<div class="appointment-actions" data-appointment-actions>
 			<div class="form-alert" role="alert" tabindex="-1" hidden data-appointment-error></div>
 			if admin {
-				<fieldset data-appointment-assignment hidden>
-					<legend>Fahrer und Ressourcen zuweisen</legend>
-					@appointmentAssignmentFields(options, AppointmentAssignmentValues{}, "appointment-dialog-")
-					<button class="button button--quiet" type="button" data-appointment-assign>Zuweisung speichern</button>
-					<p class="form-hint">Die aktuelle Terminversion, Verfügbarkeit und exklusive Belegungen werden serverseitig erneut geprüft.</p>
-				</fieldset>
-				<fieldset data-appointment-reschedule hidden>
-					<legend>Terminzeit ändern</legend>
-					<div class="form-grid">
-						<label>Beginn (Europe/Vienna)<input type="datetime-local" data-appointment-start required/></label>
-						<label>Dauer in Minuten<input type="number" min="15" max="10080" step="15" data-appointment-duration required/></label>
-					</div>
-					<div class="duration-shortcuts" aria-label="Dauer schnell ändern">
-						<button class="button button--quiet" type="button" data-appointment-duration-adjust="-30">−30 Min.</button>
-						<button class="button button--quiet" type="button" data-appointment-duration-adjust="-15">−15 Min.</button>
-						<button class="button button--quiet" type="button" data-appointment-duration-adjust="15">+15 Min.</button>
-						<button class="button button--quiet" type="button" data-appointment-duration-adjust="30">+30 Min.</button>
-					</div>
-					<label>Begründung für Verfügbarkeits-Override (nur falls nötig)<textarea data-appointment-move-override maxlength="1000" rows="2"></textarea></label>
-					<button class="button button--quiet" type="button" data-appointment-reschedule-submit>Zeit und Dauer speichern</button>
-					<p class="form-hint">Verschieben und Dauer ändern sind hier ohne Drag-and-drop und vollständig per Tastatur möglich.</p>
-				</fieldset>
-				<fieldset data-appointment-swap-panel hidden>
-					<legend>Zeitfenster tauschen</legend>
-					<div class="form-grid"><label>Datum mit Vorschlägen<input type="date" data-appointment-swap-date/></label><button class="button button--quiet" type="button" data-appointment-swap-search>Vorschläge laden</button></div>
-					<label>Mit Vorschlag tauschen<select data-appointment-swap-target><option value="">Bitte wählen</option></select></label>
-					<button class="button button--quiet" type="button" data-appointment-swap>Zeitfenster tauschen</button>
-					<p class="form-hint">Nur Entwürfe und Vorschläge können getauscht werden. Beide Versionsstände und Belegungen werden atomisch geprüft.</p>
-				</fieldset>
-				<label data-without-notification hidden>Begründung für Fixierung oder Verschiebung ohne Nachricht<textarea data-without-notification-reason maxlength="1000" rows="3"></textarea></label>
-				<button class="button" type="button" data-appointment-fix>Termin fixieren</button>
-				<div data-confirmation-admin hidden><label>Begründung für Bestätigungsaktion<textarea data-confirmation-admin-reason maxlength="500" rows="3"></textarea></label><div class="action-row"><button class="button button--quiet" type="button" data-confirmation-reissue>Neuen Link senden</button><button class="button button--quiet" type="button" data-confirmation-reset>Antwort zurücksetzen</button></div></div>
-				<label>Absagegrund<input data-appointment-cancel-reason maxlength="1000"/></label><button class="button button--danger" type="button" data-appointment-cancel>Termin absagen</button>
-				<fieldset data-appointment-reopen-panel hidden>
-					<legend>Abgesagten Termin wieder öffnen</legend>
-					<label>Begründung<textarea data-appointment-reopen-reason maxlength="1000" rows="2" required></textarea></label>
-					<label>Begründung für Verfügbarkeits-Override (nur falls nötig)<textarea data-appointment-reopen-override maxlength="1000" rows="2"></textarea></label>
-					<button class="button button--quiet" type="button" data-appointment-reopen>Als Vorschlag wieder öffnen</button>
-					<p class="form-hint">Der Termin wird nicht fixiert und es wird keine Nachricht versendet.</p>
-				</fieldset>
+				<section class="form-card appointment-action-group" data-appointment-action-group="assignment" hidden>
+					<h3>Zuweisung</h3>
+					<fieldset data-appointment-assignment hidden>
+						<legend>Fahrer und Ressourcen zuweisen</legend>
+						@appointmentAssignmentFields(options, AppointmentAssignmentValues{}, "appointment-dialog-")
+						<button class="button button--quiet" type="button" data-appointment-assign>Zuweisung speichern</button>
+						<p class="form-hint">Die aktuelle Terminversion, Verfügbarkeit und exklusive Belegungen werden serverseitig erneut geprüft.</p>
+					</fieldset>
+				</section>
+				<section class="form-card appointment-action-group" data-appointment-action-group="time" hidden>
+					<h3>Zeit</h3>
+					<fieldset data-appointment-reschedule hidden>
+						<legend>Terminzeit ändern</legend>
+						<div class="form-grid">
+							<label>Beginn (Europe/Vienna)<input type="datetime-local" data-appointment-start required/></label>
+							<label>Dauer in Minuten<input type="number" min="15" max="10080" step="15" data-appointment-duration required/></label>
+						</div>
+						<div class="duration-shortcuts" aria-label="Dauer schnell ändern">
+							<button class="button button--quiet" type="button" data-appointment-duration-adjust="-30">−30 Min.</button>
+							<button class="button button--quiet" type="button" data-appointment-duration-adjust="-15">−15 Min.</button>
+							<button class="button button--quiet" type="button" data-appointment-duration-adjust="15">+15 Min.</button>
+							<button class="button button--quiet" type="button" data-appointment-duration-adjust="30">+30 Min.</button>
+						</div>
+						<label>Begründung für Verfügbarkeits-Override (nur falls nötig)<textarea data-appointment-move-override maxlength="1000" rows="2"></textarea></label>
+						<button class="button button--quiet" type="button" data-appointment-reschedule-submit>Zeit und Dauer speichern</button>
+						<p class="form-hint">Verschieben und Dauer ändern sind hier ohne Drag-and-drop und vollständig per Tastatur möglich.</p>
+					</fieldset>
+					<fieldset data-appointment-swap-panel hidden>
+						<legend>Zeitfenster tauschen</legend>
+						<div class="form-grid"><label>Datum mit Vorschlägen<input type="date" data-appointment-swap-date/></label><button class="button button--quiet" type="button" data-appointment-swap-search>Vorschläge laden</button></div>
+						<label>Mit Vorschlag tauschen<select data-appointment-swap-target><option value="">Bitte wählen</option></select></label>
+						<button class="button button--quiet" type="button" data-appointment-swap>Zeitfenster tauschen</button>
+						<p class="form-hint">Nur Entwürfe und Vorschläge können getauscht werden. Beide Versionsstände und Belegungen werden atomisch geprüft.</p>
+					</fieldset>
+				</section>
+				<section class="form-card appointment-action-group" data-appointment-action-group="customer-communication" hidden>
+					<h3>Kundenkommunikation</h3>
+					<label data-without-notification hidden>Begründung für Fixierung oder Verschiebung ohne Nachricht<textarea data-without-notification-reason maxlength="1000" rows="3"></textarea></label>
+					<div data-confirmation-admin hidden><label>Begründung für Bestätigungsaktion<textarea data-confirmation-admin-reason maxlength="500" rows="3"></textarea></label><div class="action-row"><button class="button button--quiet" type="button" data-confirmation-reissue>Neuen Link senden</button><button class="button button--quiet" type="button" data-confirmation-reset>Antwort zurücksetzen</button></div></div>
+				</section>
 			}
-			<fieldset data-appointment-complete-panel hidden>
-				<legend>Auftrag abschließen</legend>
-				<label data-appointment-complete-override hidden>Begründung für vorzeitigen Abschluss<textarea data-appointment-complete-override-reason maxlength="1000" rows="2"></textarea></label>
-				<button class="button" type="button" data-appointment-complete>Termin und Auftrag erledigen</button>
-				<p class="form-hint">Der Abschluss ist endgültig. Fahrer benötigen die Zuweisung, das Abschlussrecht und einen bereits begonnenen Termin.</p>
-			</fieldset>
+			<section class="form-card appointment-action-group" data-appointment-action-group="primary" hidden>
+				<h3>Primäre Aktion</h3>
+				if admin {
+					<button class="button" type="button" data-appointment-fix>Termin fixieren</button>
+				}
+				<fieldset data-appointment-complete-panel hidden>
+					<legend>Auftrag abschließen</legend>
+					<label data-appointment-complete-override hidden>Begründung für vorzeitigen Abschluss<textarea data-appointment-complete-override-reason maxlength="1000" rows="2"></textarea></label>
+					<button class="button" type="button" data-appointment-complete>Termin und Auftrag erledigen</button>
+					<p class="form-hint">Der Abschluss ist endgültig. Fahrer benötigen die Zuweisung, das Abschlussrecht und einen bereits begonnenen Termin.</p>
+				</fieldset>
+			</section>
+			if admin {
+				<section class="form-card appointment-action-group" data-appointment-action-group="danger" hidden>
+					<h3>Gefahrenbereich</h3>
+					<label>Absagegrund<input data-appointment-cancel-reason maxlength="1000"/></label><button class="button button--danger" type="button" data-appointment-cancel>Termin absagen</button>
+					<fieldset data-appointment-reopen-panel hidden>
+						<legend>Abgesagten Termin wieder öffnen</legend>
+						<label>Begründung<textarea data-appointment-reopen-reason maxlength="1000" rows="2" required></textarea></label>
+						<label>Begründung für Verfügbarkeits-Override (nur falls nötig)<textarea data-appointment-reopen-override maxlength="1000" rows="2"></textarea></label>
+						<button class="button button--quiet" type="button" data-appointment-reopen>Als Vorschlag wieder öffnen</button>
+						<p class="form-hint">Der Termin wird nicht fixiert und es wird keine Nachricht versendet.</p>
+					</fieldset>
+				</section>
+			}
 		</div>
 		<input type="hidden" value={ csrf } data-appointment-csrf/>
 	</dialog>
@@ -379,6 +401,8 @@ templ agendaCard(event appointment.CalendarEvent, admin bool) {
 			<a class="button button--quiet" href={ "/customers/" + event.CustomerID }>Auftrag öffnen</a>
 			if admin {
 				<a class="button button--quiet" href={ "/calendar/appointments/" + event.ID }>Termin verwalten</a>
+			} else {
+				<a class="button button--quiet" href={ "/calendar/appointments/" + event.ID }>Termindetail öffnen</a>
 			}
 		</div>
 	</article>
@@ -387,26 +411,76 @@ templ agendaCard(event appointment.CalendarEvent, admin bool) {
 templ AppointmentDetailPage(data AppointmentDetailData) {
 	<!DOCTYPE html>
 	<html lang="de-AT">
-		@documentHead(data.Shell.Page, "Termin verwalten – "+data.Shell.Page.AppName)
+		@documentHead(data.Shell.Page, "Termindetail – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page">
+			<main id="hauptinhalt" class="page" data-appointment-detail-page>
 				<div class="page-heading"><div><p class="eyebrow">Termindetail</p><h1>{ data.Detail.CustomerName } · { data.Detail.JobNumber }</h1><p>{ calendarLocalDateTime(data.Detail.StartsAt) }–{ calendarLocalTime(data.Detail.EndsAt) } · { AppointmentStatusLabel(data.Detail.Lifecycle, data.Detail.Confirmation) }</p></div><a class="button button--quiet" href="/calendar">Zurück zum Kalender</a></div>
 				if data.Notice != "" {
 					<div class="form-alert form-alert--success" role="status">{ data.Notice }</div>
 				}
+				<section class="form-card" aria-labelledby="appointment-overview-title">
+					<h2 id="appointment-overview-title">Termin und Auftrag</h2>
+					<dl class="appointment-detail-list">
+						<div><dt>Status</dt><dd>{ AppointmentStatusLabel(data.Detail.Lifecycle, data.Detail.Confirmation) }</dd></div>
+						<div><dt>Zeit</dt><dd>{ calendarLocalDateTime(data.Detail.StartsAt) }–{ calendarLocalTime(data.Detail.EndsAt) }</dd></div>
+						<div><dt>Ort</dt><dd>{ appointmentAddress(data.Detail) }</dd></div>
+						<div><dt>Menge</dt><dd>{ data.Detail.VolumeM3 } m³</dd></div>
+						<div><dt>Telefon</dt><dd>{ fallback(data.Detail.Phone) }</dd></div>
+						<div><dt>E-Mail</dt><dd>{ fallback(data.Detail.Email) }</dd></div>
+					</dl>
+					<div class="action-row">
+						if data.Detail.MapsURL != "" {
+							<a class="button" href={ data.Detail.MapsURL } target="_blank" rel="noopener noreferrer">Navigation starten</a>
+						}
+						<a class="button button--quiet" href={ "/customers/" + data.Detail.CustomerID + "#job-" + data.Detail.JobID }>Auftrag öffnen</a>
+						<a class="button button--quiet" href={ "/customers/" + data.Detail.CustomerID + "#notes-" + data.Detail.JobID }>Bemerkung ergänzen</a>
+					</div>
+					if len(data.Detail.Notes) > 0 {
+						<details class="appointment-notes">
+							<summary>{ fmt.Sprint(len(data.Detail.Notes)) } interne Bemerkung(en)</summary>
+							<ul class="compact-list">
+								for _, note := range data.Detail.Notes {
+									<li><strong>{ note.AuthorName }</strong><small>{ calendarLocalDateTime(note.CreatedAt) }</small><p>{ note.Body }</p></li>
+								}
+							</ul>
+						</details>
+					}
+				</section>
 				<section class="form-card" aria-labelledby="appointment-assignment-title">
 					<h2 id="appointment-assignment-title">Fahrer und Ressourcen</h2>
-					<p>Änderungen werden gegen Terminversion, Verfügbarkeit und Reservierungen geprüft.</p>
-					<dl class="appointment-detail-list"><div><dt>Arbeitszeit</dt><dd>{ fmt.Sprint(data.Detail.EstimatedHackMinutes) } Minuten</dd></div><div><dt>Transportzeit</dt><dd>{ fmt.Sprint(data.Detail.EstimatedTransportMinutes) } Minuten</dd></div><div><dt>Puffer</dt><dd>{ fmt.Sprint(data.Detail.BufferBeforeMinutes) } Minuten davor · { fmt.Sprint(data.Detail.BufferAfterMinutes) } Minuten danach</dd></div></dl>
-					<form method="post" action={ "/calendar/appointments/" + data.Detail.ID + "/assign" } class="form-stack">
-						if data.Error.Message != "" {
-							<div id="appointment-assignment-error" class="form-alert" role="alert" tabindex="-1" autofocus><strong>Zuweisung konnte nicht gespeichert werden.</strong><p>{ data.Error.Message }</p></div>
+					<dl class="appointment-detail-list"><div><dt>Fahrer</dt><dd>{ namesDrivers(data.Detail.Drivers) }</dd></div><div><dt>Ressourcen</dt><dd>{ namesResources(data.Detail.Resources) }</dd></div><div><dt>Arbeitszeit</dt><dd>{ fmt.Sprint(data.Detail.EstimatedHackMinutes) } Minuten</dd></div><div><dt>Transportzeit</dt><dd>{ fmt.Sprint(data.Detail.EstimatedTransportMinutes) } Minuten</dd></div><div><dt>Puffer</dt><dd>{ fmt.Sprint(data.Detail.BufferBeforeMinutes) } Minuten davor · { fmt.Sprint(data.Detail.BufferAfterMinutes) } Minuten danach</dd></div></dl>
+					if data.CanAssign {
+						<p>Änderungen werden gegen Terminversion, Verfügbarkeit und Reservierungen geprüft.</p>
+						<form method="post" action={ "/calendar/appointments/" + data.Detail.ID + "/assign" } class="form-stack">
+							if data.Error.Message != "" {
+								<div id="appointment-assignment-error" class="form-alert" role="alert" tabindex="-1" autofocus><strong>Zuweisung konnte nicht gespeichert werden.</strong><p>{ data.Error.Message }</p></div>
+							}
+							@appointmentAssignmentFields(data.Options, data.Values, "appointment-page-")
+							<div class="form-actions"><button class="button" type="submit">Zuweisung speichern</button><a class="button button--quiet" href="/calendar">Abbrechen</a></div>
+						</form>
+					} else {
+						if data.Shell.Actor.Role == auth.RoleAdmin {
+							<p class="form-hint" data-appointment-read-only>In diesem Terminstatus sind die Zuweisungsdaten schreibgeschützt.</p>
+						} else {
+							<p class="form-hint" data-appointment-read-only>Planung nur durch Administration. Die Termin- und Zuweisungsdaten sind schreibgeschützt.</p>
 						}
-						@appointmentAssignmentFields(data.Options, data.Values, "appointment-page-")
-						<div class="form-actions"><button class="button" type="submit">Zuweisung speichern</button><a class="button button--quiet" href="/calendar">Abbrechen</a></div>
-					</form>
+					}
 				</section>
+				if data.CanComplete {
+					<section class="form-card" aria-labelledby="appointment-complete-title" data-appointment-complete-page>
+						<h2 id="appointment-complete-title">Auftrag abschließen</h2>
+						<p>Der Abschluss ist endgültig und wird serverseitig erneut gegen Zuweisung, Abschlussrecht und Terminbeginn geprüft.</p>
+						<form method="post" action={ "/calendar/appointments/" + data.Detail.ID + "/complete" } class="form-stack">
+							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
+							<input type="hidden" name="version" value={ fmt.Sprint(data.Detail.Version) }/>
+							if data.CompleteRequiresOverride {
+								<label>Begründung für vorzeitigen Abschluss<textarea name="override_reason" maxlength="1000" rows="2" required></textarea></label>
+							}
+							<button class="button" type="submit" data-confirm-message="Termin und Auftrag wirklich als erledigt markieren? Dieser Abschluss ist endgültig.">Termin und Auftrag erledigen</button>
+						</form>
+					</section>
+				}
 				if data.MessagePreview != nil {
 					<section class="form-card" aria-labelledby="appointment-message-preview-title"><p class="eyebrow">Nebenwirkungsfreie Vorschau</p><h2 id="appointment-message-preview-title">Nachricht vor Fixierung oder erneutem Link prüfen</h2><p>Es wird nichts versendet. Der echte Bestätigungslink wird erst im Worker rekonstruiert.</p><div class="form-grid"><div><h3>E-Mail</h3><p><strong>Betreff:</strong> { data.MessagePreview.Subject }</p><pre>{ data.MessagePreview.Text }</pre></div><div><h3>SMS</h3><p>{ fmt.Sprintf("%d Segment(e) · %s", data.MessagePreview.SMSSegments, data.MessagePreview.SMSEncoding) }</p><pre>{ data.MessagePreview.SMS }</pre></div></div></section>
 				}
@@ -537,6 +611,20 @@ func AppointmentStatusLabel(lifecycle appointment.Lifecycle, confirmation appoin
 	default:
 		return "Fixiert – Antwort offen"
 	}
+}
+
+func appointmentAddress(detail appointment.Detail) string {
+	parts := make([]string, 0, 3)
+	if street := strings.TrimSpace(detail.Street); street != "" {
+		parts = append(parts, street)
+	}
+	if locality := strings.TrimSpace(strings.TrimSpace(detail.PostalCode) + " " + strings.TrimSpace(detail.Locality)); locality != "" {
+		parts = append(parts, locality)
+	}
+	if len(parts) == 0 {
+		return "Nicht hinterlegt"
+	}
+	return strings.Join(parts, ", ")
 }
 
 func calendarLocalDateTime(value time.Time) string {

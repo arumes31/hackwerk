@@ -199,7 +199,8 @@ func TestTask03BrowserJourney(t *testing.T) {
 		chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelectorAll(".shell-tools a[href='/availability']").length`, &desktopAvailabilityLinks),
 		chromedp.EmulateViewport(360, 800),
-		chromedp.Click("[data-mobile-menu] summary", chromedp.ByQuery),
+		chromedp.Click("[data-mobile-menu-open]", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-mobile-menu]", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelectorAll(".mobile-more__panel a[href='/availability']").length`, &mobileAvailabilityLinks),
 		chromedp.Navigate(server.URL+"/availability"),
 		chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery),
@@ -229,7 +230,7 @@ func TestTask03BrowserJourney(t *testing.T) {
 
 	var horizontalOverflow bool
 	var screenshot []byte
-	if err := runBrowserStep(browserContext, "mobile resource creation", chromedp.EmulateViewport(360, 800), chromedp.Navigate(server.URL+"/admin/resources"), chromedp.WaitVisible("form[action='/admin/resources']", chromedp.ByQuery), chromedp.SetValue("form[action='/admin/resources'] [name='name']", "Hackmaschine 2", chromedp.ByQuery), chromedp.SetValue("form[action='/admin/resources'] [name='volume_m3']", "180", chromedp.ByQuery), chromedp.Click("form[action='/admin/resources'] button[type='submit']", chromedp.ByQuery), chromedp.WaitVisible("article.operation-card", chromedp.ByQuery), chromedp.Evaluate(`document.documentElement.scrollWidth > window.innerWidth`, &horizontalOverflow), chromedp.FullScreenshot(&screenshot, 90)); err != nil {
+	if err := runBrowserStep(browserContext, "mobile resource creation", chromedp.EmulateViewport(360, 800), chromedp.Navigate(server.URL+"/admin/resources"), chromedp.Click("details.compact-create-panel > summary", chromedp.ByQuery), chromedp.WaitVisible("form[action='/admin/resources']", chromedp.ByQuery), chromedp.SetValue("form[action='/admin/resources'] [name='name']", "Hackmaschine 2", chromedp.ByQuery), chromedp.SetValue("form[action='/admin/resources'] [name='volume_m3']", "180", chromedp.ByQuery), chromedp.Click("form[action='/admin/resources'] button[type='submit']", chromedp.ByQuery), chromedp.WaitVisible(".resource-compact-row", chromedp.ByQuery), chromedp.Evaluate(`document.documentElement.scrollWidth > window.innerWidth`, &horizontalOverflow), chromedp.FullScreenshot(&screenshot, 90)); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
 	if horizontalOverflow {

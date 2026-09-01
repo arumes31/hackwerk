@@ -131,14 +131,28 @@ func TestRouteHTTPDriverCanReorderOnlyOwnAssignedRoute(t *testing.T) {
 	router, session, csrf := routeTestRouter(t, auth.RoleDriver, "driver-1", store)
 	page := httptest.NewRecorder()
 	router.ServeHTTP(page, authenticatedCustomerRequest(t, http.MethodGet, "/my-route?date=2026-08-27", nil, session, csrf))
-	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Meine Route") || !strings.Contains(page.Body.String(), "Nur Fahrreihenfolge") ||
-		!strings.Contains(page.Body.String(), "4 Routenpunkte") ||
-		!strings.Contains(page.Body.String(), `data-route-own="true"`) || !strings.Contains(page.Body.String(), `type="submit" name="move_up" value="stop-2"`) ||
-		!strings.Contains(page.Body.String(), `data-route-start-label="Betriebshof" data-route-start-latitude="48.200000"`) ||
-		!strings.Contains(page.Body.String(), `data-route-end-label="Betriebshof" data-route-end-latitude="48.200000"`) ||
-		!strings.Contains(page.Body.String(), "data-wake-lock") ||
-		!strings.Contains(page.Body.String(), "data-route-navigation") || !strings.Contains(page.Body.String(), "data-route-call") {
-		t.Fatalf("own route page=%d %s", page.Code, page.Body.String())
+	body := page.Body.String()
+	if page.Code != http.StatusOK || !strings.Contains(body, "Meine Route") || !strings.Contains(body, "Nur Fahrreihenfolge") ||
+		!strings.Contains(body, "4 Routenpunkte") ||
+		!strings.Contains(body, `data-route-own="true"`) || !strings.Contains(body, `type="submit" name="move_up" value="stop-2"`) ||
+		!strings.Contains(body, `data-route-start-label="Betriebshof" data-route-start-latitude="48.200000"`) ||
+		!strings.Contains(body, `data-route-end-label="Betriebshof" data-route-end-latitude="48.200000"`) ||
+		!strings.Contains(body, "data-wake-lock") ||
+		!strings.Contains(body, "data-route-navigation") || !strings.Contains(body, "data-route-call") {
+		t.Fatalf("own route page=%d %s", page.Code, body)
+	}
+	nextStop := strings.Index(body, `class="route-stop-card route-next-stop"`)
+	stopList := strings.Index(body, `class="route-summary route-stop-section"`)
+	routeMap := strings.Index(body, `class="route-map-panel route-own-map"`)
+	if nextStop < 0 || stopList <= nextStop || routeMap <= stopList {
+		t.Fatalf("own route regions are not ordered next stop, stop list, map: next=%d stops=%d map=%d", nextStop, stopList, routeMap)
+	}
+	if !strings.Contains(body, `<details class="route-secondary-metrics">`) ||
+		!strings.Contains(body, `<details class="route-stop-reorder">`) ||
+		!strings.Contains(body, `<div class="route-reorder-panel" data-route-order-save>`) ||
+		!strings.Contains(body, `data-route-order-save-button`) ||
+		!strings.Contains(body, `method="post" action="/my-route/route-1/reorder"`) {
+		t.Fatalf("own route must keep native no-JavaScript moves and an always-visible save action: %s", body)
 	}
 	form := url.Values{"csrf_token": {csrf}, "version": {"1"}, "stop_id": {"stop-1", "stop-2"}, "move_up": {"stop-2"}}
 	response := httptest.NewRecorder()

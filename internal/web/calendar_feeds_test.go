@@ -270,6 +270,48 @@ func TestCalendarFeedHTMLHandlersRenderAndMapMutations(t *testing.T) {
 	}
 }
 
+func TestCalendarFeedPagePrioritizesPrivateFeedAndKeepsInternalVersionHidden(t *testing.T) {
+	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	feed := calendarfeed.Feed{
+		ID: "feed-1", OwnerUserID: "driver", Name: "Meine Termine", Scope: calendarfeed.ScopeOwn,
+		Detail: calendarfeed.DetailMinimal, TokenVersion: 7, Version: 3, Active: true, OwnerActive: true,
+		CreatedAt: now,
+	}
+	service := calendarFeedHTTPService(t, &calendarFeedHTTPStore{feed: feed}, now)
+	response := httptest.NewRecorder()
+	calendarFeedPage(
+		service,
+		templates.PageData{AppName: "HackWerk", Version: "test"},
+		"csrf",
+		slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
+		nil,
+	).ServeHTTP(response, calendarFeedHTTPRequest(t, http.MethodGet, "/calendar/feeds", nil))
+	body := response.Body.String()
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, body)
+	}
+	privateAt := strings.Index(body, "Privaten Feed anlegen")
+	exportAt := strings.Index(body, "Einmaliger Export")
+	if privateAt < 0 || exportAt < 0 || privateAt > exportAt {
+		t.Fatalf("private feed must precede one-off export: private=%d export=%d body=%s", privateAt, exportAt, body)
+	}
+	for _, wanted := range []string{
+		`<details class="form-card">`,
+		`<summary><strong>Einmaliger Export</strong></summary>`,
+		`<dl class="feed-metadata">`,
+		"<dt>Termine</dt>",
+		"<dt>Detailstufe</dt>",
+		`type="hidden" name="version" value="3"`,
+	} {
+		if !strings.Contains(body, wanted) {
+			t.Fatalf("calendar feed page missing %q: %s", wanted, body)
+		}
+	}
+	if strings.Contains(body, "Tokenversion") {
+		t.Fatalf("calendar feed page exposes internal token version: %s", body)
+	}
+}
+
 func TestCalendarExportAndPublicFeedErrors(t *testing.T) {
 	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))

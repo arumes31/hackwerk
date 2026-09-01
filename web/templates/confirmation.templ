@@ -16,6 +16,7 @@ type ConfirmationData struct {
 	Result            string
 	ResponseNote      string
 	ResponseNoteError string
+	ResponseAction    notification.Response
 }
 
 templ ConfirmationPage(data ConfirmationData) {
@@ -30,7 +31,12 @@ templ ConfirmationPage(data ConfirmationData) {
 			<script type="module" src={ data.Page.JSPath } defer></script>
 		</head>
 		<body>
-			<main class="page confirmation-page">
+			<a class="skip-link" href="#hauptinhalt">Zum Inhalt springen</a>
+			<header class="confirmation-public-header">
+				<a class="wordmark" href="/" aria-label={ data.Page.AppName + " Startseite" }><span class="wordmark__mark" aria-hidden="true">H</span><span>{ data.Page.AppName }</span></a>
+				<span class="confirmation-public-header__trust">Sichere Terminantwort</span>
+			</header>
+			<main id="hauptinhalt" class="page confirmation-page">
 				<section class="confirmation-card" aria-labelledby="confirmation-title" data-confirmation-card>
 					<p class="eyebrow">{ data.Page.Legal.OperatorName }</p>
 					<address class="confirmation-contact">
@@ -78,21 +84,39 @@ templ ConfirmationPage(data ConfirmationData) {
 						<p>Bitte wählen Sie genau eine Rückmeldung. Sie können den Termin hier nicht verschieben oder stornieren.</p>
 						<form method="post" action={ "/termin/" + data.Token + "/antwort" } class="confirmation-actions" data-confirmation-form>
 							<input type="hidden" name="form_nonce" value={ data.Value.FormNonce }/>
+							<fieldset class="confirmation-choice-group">
+								<legend>Ihre Rückmeldung</legend>
+								<div class="confirmation-choice-grid">
+									<label class="confirmation-choice">
+										<input type="radio" name="action" value="confirmed" required data-response-label="Sie bestätigen den angezeigten Termin." checked?={ data.ResponseAction == notification.ResponseConfirmed }/>
+										<span><strong>Termin bestätigen</strong><small>Der angezeigte Termin passt für mich.</small></span>
+									</label>
+									<label class="confirmation-choice">
+										<input type="radio" name="action" value="declined" required data-response-label="Sie lehnen den angezeigten Termin ab." checked?={ data.ResponseAction == notification.ResponseDeclined }/>
+										<span><strong>Termin ablehnen</strong><small>Der Betrieb sieht die Ablehnung und stimmt das weitere Vorgehen ab.</small></span>
+									</label>
+									if !data.CallbackStored {
+										<label class="confirmation-choice">
+											<input type="radio" name="action" value="callback_requested" required data-response-label="Sie bitten den Betrieb um einen Rückruf." checked?={ data.ResponseAction == notification.ResponseCallback }/>
+											<span><strong>Rückruf wünschen</strong><small>Der Termin bleibt offen, bis Sie ihn bestätigen oder ablehnen.</small></span>
+										</label>
+									}
+								</div>
+							</fieldset>
 							<label for="confirmation-response-note">Optionale Rückrufnotiz</label><textarea id="confirmation-response-note" name="response_note" maxlength="500" rows="3" placeholder="z. B. Bitte vormittags zurückrufen" aria-invalid={ confirmationNoteInvalid(data.ResponseNoteError) } aria-describedby={ confirmationNoteDescription(data.ResponseNoteError) }>{ data.ResponseNote }</textarea><small id="confirmation-note-help">Maximal 500 Zeichen; zusammen mit „Termin ablehnen“ oder „Rückruf wünschen“.</small>
 							if data.ResponseNoteError != "" {
 								<small id="confirmation-note-error" class="field-error" role="alert">{ data.ResponseNoteError }</small>
 							}
 							<small id="confirmation-note-feedback" data-confirmation-note-feedback role="status" aria-live="polite">Die Notiz wird nur bei einer Ablehnung oder einem Rückrufwunsch übermittelt.</small>
-							<p class="form-hint" data-confirmation-summary>Die gewählte Antwort wird unmittelbar und einmalig gespeichert.</p>
-							<button class="button" type="submit" name="action" value="confirmed" data-response-label="Sie bestätigen den angezeigten Termin.">Termin bestätigen</button>
-							<button class="button button--quiet" type="submit" name="action" value="declined" data-response-label="Sie lehnen den angezeigten Termin ab.">Termin ablehnen</button>
-							if !data.CallbackStored {
-								<button class="button button--quiet" type="submit" name="action" value="callback_requested" data-response-label="Sie bitten den Betrieb um einen Rückruf.">Rückruf wünschen</button>
-							}
+							<p class="form-hint" data-confirmation-summary>Wählen Sie eine Antwort. Gespeichert wird erst mit dem folgenden Button.</p>
+							<button class="button confirmation-submit" type="submit" data-confirmation-submit>Antwort verbindlich speichern</button>
 						</form>
 					}
 				</section>
 			</main>
+			<footer class="confirmation-public-footer">
+				<nav aria-label="Rechtliche Informationen"><a href="/datenschutz">Datenschutz</a><a href="/impressum">Impressum</a></nav>
+			</footer>
 		</body>
 	</html>
 }

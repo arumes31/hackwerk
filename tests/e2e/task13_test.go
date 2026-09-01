@@ -25,29 +25,32 @@ import (
 	"example.invalid/hackplan/internal/planning"
 	"example.invalid/hackplan/internal/voice"
 	"example.invalid/hackplan/internal/web"
+	"github.com/chromedp/cdproto/emulation"
 	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
 type e2ePageAudit struct {
-	Path                   string
-	TitleMissing           bool
-	ErrorPage              bool
-	Overflow               bool
-	MissingLandmarks       bool
-	H1Count                int
-	DuplicateIDs           []string
-	MissingLabels          []string
-	SmallControls          []string
-	SmallCheckboxLabels    []string
-	BadSelects             []string
-	CalendarAssetCount     int
-	CalendarAssetsExpected bool
-	MobileCaptureMissing   bool
-	MobileCaptureOverlaps  []string
-	MobileStickyOverlaps   []string
-	MobileWorkflowNavShown bool
-	MobileCurrentCount     int
+	Path                     string
+	TitleMissing             bool
+	ErrorPage                bool
+	Overflow                 bool
+	MissingLandmarks         bool
+	H1Count                  int
+	DuplicateIDs             []string
+	MissingLabels            []string
+	SmallControls            []string
+	SmallCheckboxLabels      []string
+	BadSelects               []string
+	HiddenSortControls       []string
+	CalendarAssetCount       int
+	CalendarAssetsExpected   bool
+	MobileCaptureMissing     bool
+	MobileCaptureOverlaps    []string
+	MobileStickyOverlaps     []string
+	MobileWorkflowNavMissing bool
+	MobileCurrentCount       int
+	MobileTabCount           int
 }
 
 func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
@@ -55,7 +58,7 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 	if databaseURL == "" {
 		t.Fatal("TEST_DATABASE_URL is required for browser tests")
 	}
-	pool, identity, drivers, resources, appointments, _, _, jobID, _, adminPassword, driverPassword := task04Application(t, databaseURL)
+	pool, identity, drivers, resources, appointments, driverID, _, jobID, _, adminPassword, driverPassword := task04Application(t, databaseURL)
 	routeLocations, routeLocationStore := e2eRouteLocations(t, pool)
 	customerService, err := app.CustomerService(pool)
 	if err != nil {
@@ -186,8 +189,9 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 	adminPages := []string{
 		"/dashboard", "/calendar?date=2026-08-25", "/calendar/feeds", "/waitlist", "/customers",
 		"/customers/new", "/customers/" + customerID, "/customers/" + customerID + "/jobs/new",
-		"/admin/drivers", "/admin/resources", "/planning", "/planning/routes",
-		"/admin/notifications", "/admin/users", "/profile", "/password", "/voice",
+		"/calendar/plan?job_id=" + jobID, "/admin/drivers", "/admin/drivers/" + driverID + "/availability", "/admin/resources",
+		"/planning", "/planning/routes", "/settings/route-locations", "/admin/notifications", "/admin/voice-recordings",
+		"/admin/users", "/profile", "/password", "/voice", "/hilfe/erste-schritte",
 	}
 	viewports := []struct {
 		name          string
@@ -195,9 +199,11 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 	}{
 		{name: "desktop-720p", width: 1280, height: 720},
 		{name: "desktop-1080p", width: 1920, height: 1080},
+		{name: "mobile-320", width: 320, height: 720},
 		{name: "mobile-360", width: 360, height: 800},
 		{name: "mobile-390", width: 390, height: 844},
 		{name: "mobile-412", width: 412, height: 915},
+		{name: "tablet-768", width: 768, height: 1024},
 	}
 	for _, viewport := range viewports {
 		auditPagesAtViewport(t, browser, server.URL, "admin-"+viewport.name, viewport.width, viewport.height, adminPages)
@@ -205,6 +211,7 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 	auditPagesAtViewport(t, browser, server.URL, "admin-short-landscape", 667, 375, []string{
 		"/customers/new", "/customers/" + customerID, "/planning", "/planning/routes",
 	})
+	auditNoJavaScriptMobileSearch(t, browser, server.URL)
 
 	if err := runBrowserStep(browser, "logout admin",
 		chromedp.Evaluate(`document.querySelector("header form[action='/logout']").requestSubmit()`, nil),
@@ -218,7 +225,7 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 	driverPages := []string{
 		"/dashboard", "/calendar?date=2026-08-25", "/calendar/feeds", "/waitlist", "/customers",
 		"/customers/new", "/customers/" + customerID, "/customers/" + customerID + "/jobs/new",
-		"/availability", "/my-route?date=2026-08-25", "/profile", "/password", "/voice",
+		"/availability", "/my-route?date=2026-08-25", "/profile", "/password", "/voice", "/hilfe/erste-schritte",
 	}
 	for _, viewport := range viewports {
 		auditPagesAtViewport(t, browser, server.URL, "driver-"+viewport.name, viewport.width, viewport.height, driverPages)
@@ -231,6 +238,35 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 	defer exceptionLock.Unlock()
 	if len(exceptions) > 0 {
 		t.Fatalf("uncaught JavaScript exceptions: %v", exceptions)
+	}
+}
+
+func auditNoJavaScriptMobileSearch(t *testing.T, ctx context.Context, baseURL string) {
+	t.Helper()
+	var geometry struct {
+		Left       float64
+		Right      float64
+		InnerWidth float64
+	}
+	var location string
+	if err := runBrowserStep(ctx, "mobile search fallback without JavaScript",
+		chromedp.EmulateViewport(320, 720),
+		chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetScriptExecutionDisabled(true).Do(ctx) }),
+		chromedp.Navigate(baseURL+"/dashboard"),
+		chromedp.WaitVisible(".command-search-fallback--mobile > summary", chromedp.ByQuery),
+		chromedp.Click(".command-search-fallback--mobile > summary", chromedp.ByQuery),
+		chromedp.WaitVisible(".command-search-fallback--mobile .command-search-fallback__panel", chromedp.ByQuery),
+		chromedp.Evaluate(`(()=>{const rect=document.querySelector('.command-search-fallback--mobile .command-search-fallback__panel').getBoundingClientRect();return {Left:rect.left,Right:rect.right,InnerWidth:innerWidth}})()`, &geometry),
+		chromedp.SetValue(".command-search-fallback--mobile input[name='q']", "Franz", chromedp.ByQuery),
+		chromedp.Click(".command-search-fallback--mobile button[type='submit']", chromedp.ByQuery),
+		chromedp.WaitVisible("main .search-results", chromedp.ByQuery),
+		chromedp.Location(&location),
+		chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetScriptExecutionDisabled(false).Do(ctx) }),
+	); err != nil {
+		t.Fatal(browserDiagnostics(ctx, err))
+	}
+	if geometry.Left < 0 || geometry.Right > geometry.InnerWidth || location != baseURL+"/search" {
+		t.Fatalf("mobile no-JavaScript search fallback geometry/location=%+v/%q", geometry, location)
 	}
 }
 
@@ -260,6 +296,7 @@ func auditPagesAtViewport(t *testing.T, ctx context.Context, baseURL, name strin
 		var navigationAudit struct {
 			CaptureMissing bool
 			CurrentCount   int
+			TabCount       int
 		}
 		if err := runBrowserStep(ctx, name+" "+path,
 			chromedp.Navigate(baseURL+path),
@@ -273,13 +310,15 @@ func auditPagesAtViewport(t *testing.T, ctx context.Context, baseURL, name strin
 		}
 		audit.MobileCaptureMissing = navigationAudit.CaptureMissing
 		audit.MobileCurrentCount = navigationAudit.CurrentCount
+		audit.MobileTabCount = navigationAudit.TabCount
 		expectedPath := strings.SplitN(path, "?", 2)[0]
 		calendarExpected := strings.HasPrefix(path, "/calendar?")
 		audit.CalendarAssetsExpected = calendarExpected
 		if audit.Path != expectedPath || audit.TitleMissing || audit.ErrorPage || audit.Overflow || audit.MissingLandmarks || audit.H1Count != 1 ||
 			len(audit.DuplicateIDs) > 0 || len(audit.MissingLabels) > 0 || len(audit.SmallControls) > 0 ||
-			len(audit.SmallCheckboxLabels) > 0 || len(audit.BadSelects) > 0 || audit.MobileCaptureMissing ||
-			len(audit.MobileCaptureOverlaps) > 0 || len(audit.MobileStickyOverlaps) > 0 || audit.MobileWorkflowNavShown || audit.MobileCurrentCount > 1 ||
+			len(audit.SmallCheckboxLabels) > 0 || len(audit.BadSelects) > 0 || len(audit.HiddenSortControls) > 0 || audit.MobileCaptureMissing ||
+			len(audit.MobileCaptureOverlaps) > 0 || len(audit.MobileStickyOverlaps) > 0 || audit.MobileWorkflowNavMissing || audit.MobileCurrentCount > 1 ||
+			(width <= 1050 && audit.MobileTabCount != 5) ||
 			(calendarExpected && audit.CalendarAssetCount != 5) || (!calendarExpected && audit.CalendarAssetCount != 0) {
 			t.Errorf("%s %s usability audit: %+v", name, path, audit)
 		}
@@ -289,13 +328,11 @@ func auditPagesAtViewport(t *testing.T, ctx context.Context, baseURL, name strin
 const mobileNavigationAuditScript = `(() => {
 	const visible=node=>{const style=getComputedStyle(node),rect=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0&&(!node.checkVisibility||node.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))};
 	const navigation=document.querySelector('.mobile-bottom-nav');
-	if (!navigation||!visible(navigation)) return {CaptureMissing:false,CurrentCount:0};
-	const capture=navigation.querySelector('.mobile-primary-action');
-	const more=navigation.querySelector('.mobile-more');
-	if (more) more.open=true;
-	const currentCount=navigation.querySelectorAll('[aria-current="page"]').length;
-	if (more) more.open=false;
-	return {CaptureMissing:!capture||!visible(capture)||capture.closest('.mobile-bottom-nav')!==navigation,CurrentCount:currentCount};
+	if (!navigation||!visible(navigation)) return {CaptureMissing:false,CurrentCount:0,TabCount:0};
+	const capture=document.querySelector('.mobile-primary-action');
+	const currentCount=[...navigation.querySelectorAll('[aria-current="page"]')].filter(visible).length;
+	const tabCount=navigation.querySelectorAll('[data-mobile-nav-item]').length;
+	return {CaptureMissing:!capture||!visible(capture)||capture.closest('.mobile-bottom-nav')===navigation,CurrentCount:currentCount,TabCount:tabCount};
 })()`
 
 const pageAuditScript = `(() => {
@@ -327,18 +364,20 @@ const pageAuditScript = `(() => {
 	const mobileCapture=document.querySelector('.mobile-primary-action');
 	const mobileCaptureVisible=Boolean(mobileCapture&&visible(mobileCapture));
 	const overlaps=(first,second)=>first.left<second.right&&first.right>second.left&&first.top<second.bottom&&first.bottom>second.top;
-	const mobileCaptureRect=mobileCaptureVisible?mobileCapture.getBoundingClientRect():null;
+	const violatesNavigationClearance=(node,navigation)=>node.left<navigation.right&&node.right>navigation.left&&node.top<navigation.bottom&&node.bottom>navigation.top-7.5;
+	const rectOf=node=>{const rect=node.getBoundingClientRect();return {left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom,width:rect.width,height:rect.height}};
 	const stickyControls=[...document.querySelectorAll('.planning-selection,form[data-sticky-actions] > .form-actions,form[data-sticky-actions] > * > .form-actions:last-child,.route-sticky-navigation')].filter(visible);
-	const navigationRect=mobileNavigationVisible?mobileNavigation.getBoundingClientRect():null;
 	const geometry=node=>{const rect=node.getBoundingClientRect(),style=getComputedStyle(node),details=node.closest('details');return describe(node)+'@'+Math.round(rect.top)+'-'+Math.round(rect.bottom)+' position='+style.position+' bottom='+style.bottom+' details='+(details?details.className+'/'+details.open:'none')};
 	const mobileCaptureOverlaps=[];
 	const mobileStickyOverlaps=[];
 	if (mobileNavigationVisible) {
 		for (const node of stickyControls) {
 			node.scrollIntoView({block:'end'});
-			const rect=node.getBoundingClientRect();
-			if (mobileCaptureVisible&&overlaps(mobileCaptureRect,rect)) mobileCaptureOverlaps.push(geometry(node));
-			if (overlaps(navigationRect,rect)) mobileStickyOverlaps.push(geometry(node));
+			const rect=rectOf(node);
+			const mobileCaptureRect=mobileCaptureVisible?rectOf(mobileCapture):null;
+			const navigationRect=rectOf(mobileNavigation);
+			if (mobileCaptureRect&&overlaps(mobileCaptureRect,rect)) mobileCaptureOverlaps.push(geometry(node));
+			if (violatesNavigationClearance(rect,navigationRect)) mobileStickyOverlaps.push(geometry(node));
 		}
 		window.scrollTo(0,0);
 	}
@@ -351,9 +390,10 @@ const pageAuditScript = `(() => {
 		SmallControls:innerWidth<=760 ? touchControls.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<43.5||rect.height<43.5}).map(node=>{const rect=node.getBoundingClientRect();return describe(node)+'@'+Math.round(rect.width)+'x'+Math.round(rect.height)+'.'+node.className}) : [],
 		SmallCheckboxLabels:innerWidth<=760 ? checkboxLabels.filter(node=>node.getBoundingClientRect().height<43.5).map(describe) : [],
 		BadSelects:badSelects,
+		HiddenSortControls:[...document.querySelectorAll('.list-sort-controls')].filter(node=>!visible(node)).map(describe),
 		MobileCaptureOverlaps:mobileCaptureOverlaps,
 		MobileStickyOverlaps:mobileStickyOverlaps,
-		MobileWorkflowNavShown:mobileNavigationVisible&&stickyControls.length>0,
+		MobileWorkflowNavMissing:innerWidth<=1050&&!mobileNavigationVisible&&stickyControls.length>0,
 		CalendarAssetCount:[...document.querySelectorAll('link[href],script[src]')].filter(node=>(node.href||node.src).includes('fullcalendar')).length
 	};
 })()`

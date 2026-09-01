@@ -81,10 +81,13 @@ func (store *driverHTTPStore) DeleteException(context.Context, auth.Actor, strin
 }
 
 type resourceHTTPStore struct {
-	created resource.Input
+	created   resource.Input
+	resources []resource.Resource
 }
 
-func (store *resourceHTTPStore) List(context.Context) ([]resource.Resource, error) { return nil, nil }
+func (store *resourceHTTPStore) List(context.Context) ([]resource.Resource, error) {
+	return append([]resource.Resource(nil), store.resources...), nil
+}
 func (store *resourceHTTPStore) Create(_ context.Context, _ auth.Actor, input resource.Input, _ string) (string, error) {
 	store.created = input
 	return "resource-id", nil
@@ -191,6 +194,53 @@ func TestResourcesHTTPAdminCreatesTypedResource(t *testing.T) {
 
 	if response.Code != http.StatusSeeOther || resourceStore.created.Type != resource.TypeChipper || resourceStore.created.Capacity.VolumeM3 == nil || *resourceStore.created.Capacity.VolumeM3 != 180.5 {
 		t.Fatalf("status/input = %d/%#v", response.Code, resourceStore.created)
+	}
+}
+
+func TestResourcesHTTPUsesCompactDirectory(t *testing.T) {
+	driverStore := defaultDriverHTTPStore()
+	resourceStore := &resourceHTTPStore{resources: []resource.Resource{{
+		ID: "resource-1", Type: resource.TypeChipper, Name: "Hackmaschine 1", IsExclusive: true, IsActive: true, Version: 2,
+	}}}
+	router, sessionToken, csrfToken := operationsTestRouter(t, auth.RoleAdmin, "", driverStore, resourceStore)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodGet, "/admin/resources", nil, sessionToken, csrfToken))
+	body := response.Body.String()
+	if response.Code != http.StatusOK ||
+		!strings.Contains(body, `class="compact-list resource-compact-list"`) ||
+		!strings.Contains(body, `resource-compact-row`) ||
+		!strings.Contains(body, `<summary>+ Ressource anlegen</summary>`) ||
+		!strings.Contains(body, `method="post" action="/admin/resources/resource-1"`) {
+		t.Fatalf("resources are not rendered as a compact, natively expandable directory: %d %s", response.Code, body)
+	}
+}
+
+func TestAvailabilityHTTPClearDayActionsBelongToTheirWeekdays(t *testing.T) {
+	store := defaultDriverHTTPStore()
+	store.schedule.Rules = []driver.Rule{
+		{ID: "rule-monday", DriverID: operationDriverID, Weekday: 1, StartMinute: 8 * 60, EndMinute: 12 * 60, ValidFrom: "2026-01-01", Status: driver.RuleAvailable, Version: 2},
+		{ID: "rule-tuesday", DriverID: operationDriverID, Weekday: 2, StartMinute: 9 * 60, EndMinute: 17 * 60, ValidFrom: "2026-01-01", Status: driver.RuleAvailable, Version: 3},
+	}
+	router, sessionToken, csrfToken := operationsTestRouter(t, auth.RoleDriver, operationDriverID, store, &resourceHTTPStore{})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodGet, "/availability", nil, sessionToken, csrfToken))
+	body := response.Body.String()
+	for weekday, ruleID := range map[string]string{"1": "rule-monday", "2": "rule-tuesday"} {
+		start := strings.Index(body, `data-availability-weekday="`+weekday+`"`)
+		if start < 0 {
+			t.Fatalf("weekday %s group missing: %s", weekday, body)
+		}
+		endOffset := strings.Index(body[start:], "</section>")
+		if endOffset < 0 {
+			t.Fatalf("weekday %s group is not a section", weekday)
+		}
+		group := body[start : start+endOffset]
+		if !strings.Contains(group, `value="`+ruleID+`"`) || !strings.Contains(group, `data-clear-availability-day`) {
+			t.Fatalf("weekday %s does not contain its rule and clear action: %s", weekday, group)
+		}
+	}
+	if count := strings.Count(body, `data-clear-availability-day`); count != 2 {
+		t.Fatalf("clear-day action count = %d, want one per populated weekday", count)
 	}
 }
 

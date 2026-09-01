@@ -502,21 +502,31 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	if cleanAppointmentConfirmCalls != 0 {
 		t.Fatalf("clean reopened appointment dialog prompted %d times", cleanAppointmentConfirmCalls)
 	}
-	var preflightShown, preflightFocusVisible bool
+	var preflightShown, preflightActive bool
+	var preflightOutlineStyle, preflightOutlineColor string
+	var preflightOutlineWidth float64
+	var visibleAppointmentActionGroups []string
 	if err := runBrowserStep(browserContext, "extend duration from appointment dialog",
 		clickCurrent(appointmentEventSelector),
 		chromedp.WaitVisible("[data-appointment-reschedule]", chromedp.ByQuery),
+		chromedp.Evaluate(`Array.from(document.querySelectorAll('[data-appointment-action-group]')).filter(group=>!group.hidden).map(group=>group.dataset.appointmentActionGroup).sort()`, &visibleAppointmentActionGroups),
 		chromedp.Click("[data-appointment-duration-adjust='15']", chromedp.ByQuery),
-		chromedp.Evaluate(`window.confirm=()=>{const preview=document.querySelector('[data-appointment-preflight]'),style=preview?getComputedStyle(preview):null;window.__preflightShown=Boolean(preview&&!preview.hidden&&preview.querySelectorAll('.preflight-check').length>=8);window.__preflightFocusVisible=Boolean(preview&&document.activeElement===preview&&style.outlineStyle!=='none'&&parseFloat(style.outlineWidth)>=3&&style.outlineColor==='rgb(111, 75, 18)');return true}`, nil),
+		chromedp.Evaluate(`window.confirm=()=>{const preview=document.querySelector('[data-appointment-preflight]'),style=preview?getComputedStyle(preview):null;window.__preflightShown=Boolean(preview&&!preview.hidden&&preview.querySelectorAll('.preflight-check').length>=8);window.__preflightActive=Boolean(preview&&document.activeElement===preview);window.__preflightOutlineStyle=style?.outlineStyle||'';window.__preflightOutlineWidth=parseFloat(style?.outlineWidth||'0');window.__preflightOutlineColor=style?.outlineColor||'';return true}`, nil),
 		chromedp.Click("[data-appointment-reschedule-submit]", chromedp.ByQuery),
 		chromedp.WaitNotVisible("[data-appointment-dialog]", chromedp.ByQuery),
 		chromedp.Evaluate(`window.__preflightShown===true`, &preflightShown),
-		chromedp.Evaluate(`window.__preflightFocusVisible===true`, &preflightFocusVisible),
+		chromedp.Evaluate(`window.__preflightActive===true`, &preflightActive),
+		chromedp.Evaluate(`window.__preflightOutlineStyle||''`, &preflightOutlineStyle),
+		chromedp.Evaluate(`window.__preflightOutlineWidth||0`, &preflightOutlineWidth),
+		chromedp.Evaluate(`window.__preflightOutlineColor||''`, &preflightOutlineColor),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
-	if !preflightShown || !preflightFocusVisible {
-		t.Fatalf("appointment preflight shown/focus-visible = %v/%v", preflightShown, preflightFocusVisible)
+	if !preflightShown || !preflightActive || preflightOutlineStyle == "none" || preflightOutlineWidth < 3 || preflightOutlineColor == "" || preflightOutlineColor == "rgba(0, 0, 0, 0)" {
+		t.Fatalf("appointment preflight shown/active/outline-style/outline-width/outline-color = %v/%v/%q/%.1f/%q", preflightShown, preflightActive, preflightOutlineStyle, preflightOutlineWidth, preflightOutlineColor)
+	}
+	if strings.Join(visibleAppointmentActionGroups, ",") != "assignment,danger,primary,time" {
+		t.Fatalf("visible proposal action groups = %v", visibleAppointmentActionGroups)
 	}
 	var extendedStart, extendedEnd time.Time
 	var extendedVersion int32

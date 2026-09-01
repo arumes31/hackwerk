@@ -15,6 +15,13 @@ type onboardingStep struct {
 	Action string
 }
 
+type onboardingPhase struct {
+	ID          string
+	Title       string
+	Description string
+	Steps       []onboardingStep
+}
+
 templ Onboarding(data OnboardingData) {
 	<!DOCTYPE html>
 	<html lang="de-AT">
@@ -57,7 +64,7 @@ templ Onboarding(data OnboardingData) {
 						"Für Administratoren",
 						"Einrichten, planen und freigeben",
 						"Arbeiten Sie die Schritte bei einer neuen Instanz der Reihe nach durch. Danach kann das Team Aufträge erfassen, während verbindliche Terminentscheidungen bei den Administratoren bleiben.",
-						adminOnboardingSteps(),
+						adminOnboardingPhases(),
 					)
 				}
 				@onboardingGuide(
@@ -65,7 +72,7 @@ templ Onboarding(data OnboardingData) {
 					"Für Fahrer",
 					"Erfassen, orientieren und durchführen",
 					"Diese Anleitung gilt für jeden Fahrerzugang. Administratoren können sie bei der Einschulung gemeinsam mit dem Fahrer durchgehen.",
-					driverOnboardingSteps(),
+					driverOnboardingPhases(),
 				)
 			</main>
 			@appFooter(data.Shell.Page)
@@ -73,29 +80,68 @@ templ Onboarding(data OnboardingData) {
 	</html>
 }
 
-templ onboardingGuide(id string, audience string, title string, intro string, steps []onboardingStep) {
+templ onboardingGuide(id string, audience string, title string, intro string, phases []onboardingPhase) {
 	<section id={ id } class="onboarding-guide" tabindex="-1">
 		<header class="onboarding-guide__heading">
 			<p class="eyebrow">{ audience }</p>
 			<h2>{ title }</h2>
 			<p>{ intro }</p>
+			<p class="form-hint">Der Leitfaden dient zur Orientierung; es wird kein persönlicher Fortschritt gespeichert.</p>
 		</header>
-		<ol class="onboarding-steps">
-			for _, step := range steps {
-				<li class="onboarding-step">
-					<span class="onboarding-step__number" aria-hidden="true">{ step.Number }</span>
-					<div class="onboarding-step__content">
-						<h3>{ step.Title }</h3>
-						<p>{ step.Body }</p>
-						if step.Note != "" {
-							<p class="onboarding-step__note"><strong>Wichtig:</strong> { step.Note }</p>
+		<div class="onboarding-phases">
+			for index, phase := range phases {
+				<section class="onboarding-phase" data-onboarding-phase aria-labelledby={ id + "-phase-" + phase.ID }>
+					<header class="onboarding-phase__heading">
+						<p class="eyebrow">Phase { phase.ID }</p>
+						<h3 id={ id + "-phase-" + phase.ID }>{ phase.Title }</h3>
+						<p>{ phase.Description }</p>
+					</header>
+					<ol class="onboarding-steps" start={ onboardingPhaseStart(phases, index) }>
+						for _, step := range phase.Steps {
+							<li class="onboarding-step">
+								<span class="onboarding-step__number" aria-hidden="true">{ step.Number }</span>
+								<div class="onboarding-step__content">
+									<h4>{ step.Title }</h4>
+									<p>{ step.Body }</p>
+									if step.Note != "" {
+										<p class="onboarding-step__note"><strong>Wichtig:</strong> { step.Note }</p>
+									}
+									<a class="button button--quiet onboarding-step__action" href={ templ.SafeURL(step.Path) }>{ step.Action } <span aria-hidden="true">→</span></a>
+								</div>
+							</li>
 						}
-						<a class="button button--quiet onboarding-step__action" href={ templ.SafeURL(step.Path) }>{ step.Action } <span aria-hidden="true">→</span></a>
-					</div>
-				</li>
+					</ol>
+				</section>
 			}
-		</ol>
+		</div>
 	</section>
+}
+
+func onboardingPhaseStart(phases []onboardingPhase, index int) int {
+	start := 1
+	for position := 0; position < index; position++ {
+		start += len(phases[position].Steps)
+	}
+	return start
+}
+
+func adminOnboardingPhases() []onboardingPhase {
+	steps := adminOnboardingSteps()
+	return []onboardingPhase{
+		{ID: "1", Title: "Zugänge absichern", Description: "Persönliche Konten und getrennte Fahrerprofile bilden die sichere Grundlage.", Steps: steps[:3]},
+		{ID: "2", Title: "Betrieb vorbereiten", Description: "Ressourcen, Routenorte und Verfügbarkeiten werden vor der ersten Planung geprüft.", Steps: steps[3:6]},
+		{ID: "3", Title: "Vom Auftrag zum Termin", Description: "Aufträge bleiben bis zur ausdrücklichen Admin-Fixierung nachvollziehbare Entwürfe und Vorschläge.", Steps: steps[6:10]},
+		{ID: "4", Title: "Betrieb begleiten", Description: "Versand, Sprachentwürfe und Einschulung bleiben kontrollierbare Aufgaben.", Steps: steps[10:]},
+	}
+}
+
+func driverOnboardingPhases() []onboardingPhase {
+	steps := driverOnboardingSteps()
+	return []onboardingPhase{
+		{ID: "1", Title: "Sicher starten", Description: "Zugang, Kalender und eigene Verfügbarkeit zuerst kennenlernen.", Steps: steps[:3]},
+		{ID: "2", Title: "Arbeit vorbereiten", Description: "Kunden, Aufträge und Warteliste bewusst und nachvollziehbar pflegen.", Steps: steps[3:5]},
+		{ID: "3", Title: "Einsatz durchführen", Description: "Route prüfen, Entwürfe kontrollieren und erledigte Arbeit sauber abschließen.", Steps: steps[5:]},
+	}
 }
 
 func adminOnboardingSteps() []onboardingStep {

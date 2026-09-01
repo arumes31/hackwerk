@@ -32,6 +32,7 @@ func registerAppointmentRoutes(router chi.Router, dependencies Dependencies, pag
 		BusinessPhone: dependencies.Config.Business.Phone,
 	}, logger))
 	router.Post("/calendar/appointments/{appointmentID}/assign", assignAppointmentPage(service, page, csrfCookie, dependencies.Notifications != nil, logger))
+	router.Post("/calendar/appointments/{appointmentID}/complete", completeAppointmentPage(service, page, logger))
 	if dependencies.Notifications != nil {
 		router.Post("/calendar/appointments/{appointmentID}/confirmation/reissue", confirmationAdminPageAction(dependencies.Notifications, false, logger))
 		router.Post("/calendar/appointments/{appointmentID}/confirmation/reset", confirmationAdminPageAction(dependencies.Notifications, true, logger))
@@ -289,10 +290,14 @@ func appointmentDetailPage(service *appointment.Service, page templates.PageData
 			calendarPlanPageError(response, request, page, logger, err)
 			return
 		}
-		options, err := service.PlanningOptions(request.Context(), session.Actor)
-		if err != nil {
-			calendarPlanPageError(response, request, page, logger, err)
-			return
+		canAssign := session.Actor.Role == auth.RoleAdmin && detail.Lifecycle.Editable()
+		options := appointment.PlanningOptions{}
+		if canAssign {
+			options, err = service.PlanningOptions(request.Context(), session.Actor)
+			if err != nil {
+				calendarPlanPageError(response, request, page, logger, err)
+				return
+			}
 		}
 		shellData := shell(request, page, csrfCookie)
 		var messagePreview *notification.TemplatePreview
@@ -310,6 +315,8 @@ func appointmentDetailPage(service *appointment.Service, page templates.PageData
 		notice := ""
 		if request.URL.Query().Get("assigned") == "1" {
 			notice = "Fahrer und Ressourcen wurden gespeichert."
+		} else if request.URL.Query().Get("completed") == "1" {
+			notice = "Termin und Auftrag wurden als erledigt markiert."
 		}
 		switch request.URL.Query().Get("confirmation_action") {
 		case "reissued":
@@ -330,9 +337,38 @@ func appointmentDetailPage(service *appointment.Service, page templates.PageData
 			Shell: shellData, Options: options, Detail: detail,
 			MessagePreview: messagePreview,
 			Values:         appointmentAssignmentValues(detail, shellData.CSRFToken), Notice: notice, ConfirmationActionError: actionError,
-			CanReissueConfirmation: confirmationsEnabled && detail.Lifecycle == appointment.LifecycleFixed,
-			CanResetConfirmation:   confirmationsEnabled && detail.Lifecycle == appointment.LifecycleFixed && detail.Confirmation != appointment.ConfirmationPending && detail.Confirmation != appointment.ConfirmationNotRequested,
+			CanAssign:                canAssign,
+			CanComplete:              detail.CanComplete,
+			CompleteRequiresOverride: detail.CompleteRequiresOverride,
+			CanReissueConfirmation:   session.Actor.Role == auth.RoleAdmin && confirmationsEnabled && detail.Lifecycle == appointment.LifecycleFixed,
+			CanResetConfirmation:     session.Actor.Role == auth.RoleAdmin && confirmationsEnabled && detail.Lifecycle == appointment.LifecycleFixed && detail.Confirmation != appointment.ConfirmationPending && detail.Confirmation != appointment.ConfirmationNotRequested,
 		}), http.StatusOK, logger)
+	}
+}
+
+func completeAppointmentPage(service *appointment.Service, page templates.PageData, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Cache-Control", "no-store")
+		session, _ := sessionFromContext(request.Context())
+		appointmentID := chi.URLParam(request, "appointmentID")
+		version, err := parseVersion(request.Form.Get("version"))
+		if err == nil {
+			_, err = service.CompleteAppointment(request.Context(), session.Actor, appointment.CompleteInput{
+				MutateInput: appointment.MutateInput{
+					ID:              appointmentID,
+					ExpectedVersion: version,
+					RequestID:       middleware.GetReqID(request.Context()),
+				},
+				OverrideReason: request.Form.Get("override_reason"),
+			})
+		}
+		if err != nil {
+			presentation := appointmentErrorPresentation(err)
+			logger.WarnContext(request.Context(), "appointment completion page rejected", slog.String("error_code", presentation.Code))
+			render(response, request, templates.Error(page, presentation.Status, "Terminabschluss nicht möglich", presentation.Message), presentation.Status, logger)
+			return
+		}
+		http.Redirect(response, request, "/calendar/appointments/"+url.PathEscape(appointmentID)+"?completed=1", http.StatusSeeOther)
 	}
 }
 
@@ -403,9 +439,12 @@ func assignAppointmentPage(service *appointment.Service, page templates.PageData
 		}
 		render(response, request, templates.AppointmentDetailPage(templates.AppointmentDetailData{
 			Shell: shellData, Options: options, Detail: detail, Values: values,
-			Error:                  templates.PlanningFormError{Message: presentation.Message},
-			CanReissueConfirmation: confirmationsEnabled && detail.Lifecycle == appointment.LifecycleFixed,
-			CanResetConfirmation:   confirmationsEnabled && detail.Lifecycle == appointment.LifecycleFixed && detail.Confirmation != appointment.ConfirmationPending && detail.Confirmation != appointment.ConfirmationNotRequested,
+			Error:                    templates.PlanningFormError{Message: presentation.Message},
+			CanAssign:                session.Actor.Role == auth.RoleAdmin && detail.Lifecycle.Editable(),
+			CanComplete:              detail.CanComplete,
+			CompleteRequiresOverride: detail.CompleteRequiresOverride,
+			CanReissueConfirmation:   session.Actor.Role == auth.RoleAdmin && confirmationsEnabled && detail.Lifecycle == appointment.LifecycleFixed,
+			CanResetConfirmation:     session.Actor.Role == auth.RoleAdmin && confirmationsEnabled && detail.Lifecycle == appointment.LifecycleFixed && detail.Confirmation != appointment.ConfirmationPending && detail.Confirmation != appointment.ConfirmationNotRequested,
 		}), presentation.Status, logger)
 	}
 }

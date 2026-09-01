@@ -39,21 +39,18 @@ templ Planning(data PlanningData) {
 					<div class="form-alert" role="alert"><strong>Planung nicht möglich</strong><p>{ data.Error }</p><ul><li>Pflichtdaten und Haufenstandort prüfen</li><li>Fahrer-Verfügbarkeit und Ressourcen im Suchzeitraum prüfen</li><li>Transportmodus beziehungsweise externe Bestätigung prüfen</li></ul></div>
 				}
 				<nav class="planning-mode-tabs" aria-label="Planungsmodus"><a class="button" href="/planning" aria-current="page">Einzelauftrag</a><a class="button button--quiet" href="/planning/routes">Tagesroute</a><a class="button button--quiet" href="/availability">Kapazität</a></nav>
-				<ol class="planning-progress" aria-label="Planungsfortschritt">
-					if data.Run == nil {
-						<li class="is-active"><a href="#planung-auftrag" data-planning-step="1" aria-current="step"><span class="planning-progress__number">1</span><span>Auftrag</span></a></li>
-					} else {
-						<li><a href="#planung-auftrag" data-planning-step="1"><span class="planning-progress__number">1</span><span>Auftrag</span></a></li>
-					}
-					<li><a href="#planung-rahmen" data-planning-step="2"><span class="planning-progress__number">2</span><span>Rahmen</span></a></li>
-					if data.Run != nil && len(data.Run.Suggestions) > 0 {
-						<li class="is-active"><a href="#planung-vorschlaege" data-planning-step="3" aria-current="step"><span class="planning-progress__number">3</span><span>Vorschläge</span></a></li>
-						<li><a href="#planung-uebernahme" data-planning-step="4"><span class="planning-progress__number">4</span><span>Übernahme</span></a></li>
-					} else {
-						<li class="is-disabled"><span data-planning-step="3" aria-disabled="true" title="Zuerst einen Auftrag und seinen Rahmen bestätigen"><span class="planning-progress__number">3</span><span>Vorschläge</span></span></li>
-						<li class="is-disabled"><span data-planning-step="4" aria-disabled="true" title="Zuerst Vorschläge berechnen"><span class="planning-progress__number">4</span><span>Übernahme</span></span></li>
-					}
-				</ol>
+				<nav aria-label="Abschnitte der Planungswerkbank">
+					<ol class="planning-progress">
+						<li><a href="#planung-auftrag" data-planning-step="1"><span class="planning-progress__number" aria-hidden="true">1</span><span>Aufträge</span></a></li>
+						<li><a href="#planung-rahmen" data-planning-step="2"><span class="planning-progress__number" aria-hidden="true">2</span><span>Rahmen</span></a></li>
+						if data.Run != nil {
+							<li><a href="#planung-vorschlaege" data-planning-step="3"><span class="planning-progress__number" aria-hidden="true">3</span><span>Ergebnisse</span></a></li>
+						}
+						if data.Run != nil && len(data.Run.Suggestions) > 0 {
+							<li><a href="#planung-uebernahme" data-planning-step="4"><span class="planning-progress__number" aria-hidden="true">4</span><span>Übernahme</span></a></li>
+						}
+					</ol>
+				</nav>
 				<form id="planning-route-selection" method="get" action="/planning/routes"></form>
 				<section id="planung-auftrag" class="planning-workspace route-workspace" data-route-context tabindex="-1">
 					<div class="planning-orders form-card">
@@ -104,7 +101,7 @@ templ Planning(data PlanningData) {
 						<div class="route-map planning-map" role="region" aria-label="Interaktive Karte der Planungsaufträge" data-route-map><div class="map-fallback" data-map-fallback>Die Karte wird geladen. Die Auftragsliste bleibt vollständig bedienbar.</div></div>
 					</div>
 					<aside id="planung-rahmen" class="planning-selection form-card" aria-live="polite" tabindex="-1">
-						<div class="section-heading"><div><p class="eyebrow">Schritt 2 · Rahmen</p><h2 data-planning-selection-title>Noch nichts gewählt</h2></div></div>
+						<div class="section-heading"><div><p class="eyebrow">Rahmen</p><h2 data-planning-selection-title>Noch nichts gewählt</h2></div></div>
 						<dl class="planning-selection-metrics"><div><dt>Aufträge</dt><dd data-planning-count>0</dd></div><div><dt>Menge</dt><dd data-planning-volume>0 m³</dd></div><div><dt>Arbeit</dt><dd data-planning-duration>0 Min.</dd></div></dl>
 						<div class="planning-detail-panel" data-planning-detail-panel><p>Wählen Sie einen Auftrag für die kompakte Zusammenfassung.</p></div>
 						<form method="post" action="/planning/suggestions" class="form-stack planning-single-form" data-planning-single-form>
@@ -157,39 +154,48 @@ templ Planning(data PlanningData) {
 							</details>
 						}
 						<details class="compact-filter-panel" id="planung-kriterien"><summary>Planungskriterien und Standardgewichtungen</summary><p>Berücksichtigt werden Wunschzeitraum, Fahrweg, Fahrer, Ressourcen, Tagesauslastung, Dringlichkeit und Region. Wunschzeitraum, Verfügbarkeit und Konfliktfreiheit wirken vorrangig; die Punktzahl ist eine Entscheidungshilfe, keine Garantie.</p><button class="button button--quiet" type="button" data-planning-reset-weights>Standardbeschreibung wiederherstellen</button></details>
-						<div class="planning-result-tools"><label>Sortieren<select data-suggestion-sort><option value="rank">Bewertung</option><option value="travel">Fahrzeit</option><option value="start">Startzeit</option><option value="duration">Gesamtdauer</option></select></label><button class="button button--quiet" type="button" data-print-page>Vorschläge drucken</button><span class="form-hint">Bis zu zwei Optionen für den Direktvergleich markieren.</span></div>
-						<div class="planning-comparison" data-suggestion-comparison hidden aria-live="polite"></div>
-						<div id="planung-uebernahme" class="planning-adoption-intro" tabindex="-1"><div><p class="eyebrow">Schritt 4 · Übernahme</p><h3>Option prüfen und übernehmen</h3></div><p>Die Übernahme revalidiert den aktuellen Datenstand und erzeugt ausschließlich einen unverbindlichen Terminvorschlag.</p></div>
-						<div class="suggestion-grid">
-							for _, item := range data.Run.Suggestions {
-								<article class="suggestion-card" data-suggestion-rank={ fmt.Sprint(item.Rank) } data-suggestion-start={ item.StartsAt.Format(time.RFC3339) } data-suggestion-travel={ fmt.Sprint(item.DurationSeconds) } data-suggestion-duration={ fmt.Sprint(int(item.EndsAt.Sub(item.StartsAt) / time.Minute)) } data-suggestion-summary={ planningLocal(item.StartsAt) + "–" + planningLocalTime(item.EndsAt) + "; Fahrer " + item.DriverName + "; Ressourcen " + planningList(item.ResourceNames) }>
-									<div class="job-card__heading"><div><p class="eyebrow">Option { fmt.Sprint(item.Rank) }</p><h3>{ planningLocal(item.StartsAt) }–{ planningLocalTime(item.EndsAt) }</h3></div><span class="status-badge">{ fmt.Sprintf("%.1f / 100", item.Score) }</span></div>
-									if item.Rank == 1 {
-										<p class="best-option"><span aria-hidden="true">★</span> Beste berechnete Option – keine Garantie</p>
-									}
-									<label class="check-label"><input type="checkbox" data-suggestion-compare/> Option vergleichen</label>
-									<dl class="suggestion-facts"><div><dt>Dauer</dt><dd>{ planningDuration(item.StartsAt,item.EndsAt) }</dd></div><div><dt>Fahrer</dt><dd>{ item.DriverName }</dd></div><div><dt>Ressourcen</dt><dd>{ planningList(item.ResourceNames) }</dd></div><div><dt>Transport</dt><dd>{ planningTransport(item.ResourcePurposes) }</dd></div><div><dt>Distanzquelle</dt><dd>{ planningSource(item.RoutingSource) }</dd></div></dl>
-									<p class="preference-fit" data-fit={ planningPreferenceClass(item.Components.Preference) }><strong>Wunschzeitraum:</strong> { planningPreferenceLabel(item.Components.Preference) }</p>
-									<h4>Warum diese Option?</h4>
-									<ul>
-										for _, reason := range item.Reasons {
-											<li>{ reason }</li>
+						if len(data.Run.Suggestions) == 0 {
+							<div class="empty-state" role="status">
+								<p class="eyebrow">Berechnung abgeschlossen</p>
+								<h3>Keine konfliktfreien Vorschläge gefunden</h3>
+								<p>Im geprüften Zeitraum passt derzeit keine Kombination aus Zeit, Fahrer und Ressourcen. Prüfen Sie die Ausschlussgründe sowie die Auftragsdaten und berechnen Sie anschließend neu.</p>
+							</div>
+						} else {
+							<div class="planning-result-tools"><label>Sortieren<select data-suggestion-sort><option value="rank">Heuristische Bewertung</option><option value="travel">Fahrzeit</option><option value="start">Startzeit</option><option value="duration">Gesamtdauer</option></select></label><button class="button button--quiet" type="button" data-print-page>Vorschläge drucken</button><span class="form-hint">Bis zu zwei Optionen für den Direktvergleich markieren.</span></div>
+							<div class="planning-comparison" data-suggestion-comparison hidden aria-live="polite"></div>
+							<div id="planung-uebernahme" class="planning-adoption-intro" tabindex="-1"><div><p class="eyebrow">Übernahme</p><h3>Option prüfen und übernehmen</h3></div><p>Die Übernahme revalidiert den aktuellen Datenstand und erzeugt ausschließlich einen unverbindlichen Terminvorschlag.</p></div>
+							<div class="suggestion-grid">
+								for _, item := range data.Run.Suggestions {
+									<article class="suggestion-card" data-suggestion-rank={ fmt.Sprint(item.Rank) } data-suggestion-start={ item.StartsAt.Format(time.RFC3339) } data-suggestion-travel={ fmt.Sprint(item.DurationSeconds) } data-suggestion-duration={ fmt.Sprint(int(item.EndsAt.Sub(item.StartsAt) / time.Minute)) } data-suggestion-summary={ planningLocal(item.StartsAt) + "–" + planningLocalTime(item.EndsAt) + "; Fahrer " + item.DriverName + "; Ressourcen " + planningList(item.ResourceNames) }>
+										<div class="job-card__heading"><div><p class="eyebrow">Option { fmt.Sprint(item.Rank) }</p><h3>{ planningLocal(item.StartsAt) }–{ planningLocalTime(item.EndsAt) }</h3></div></div>
+										if item.Rank == 1 {
+											<p class="best-option"><span aria-hidden="true">★</span> Beste berechnete Option – keine Garantie</p>
 										}
-									</ul>
-									if len(item.Warnings) > 0 {
-										<div class="planning-warning" role="note">
-											<strong>Hinweis</strong>
-											<ul>
-												for _, warning := range item.Warnings {
-													<li>{ warning }</li>
-												}
-											</ul>
-										</div>
-									}
-									<div class="action-row"><form method="post" action={ "/planning/suggestions/" + item.ID + "/adopt" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="return_to" value={ data.ReturnTo }/><input type="hidden" name="run_id" value={ data.Run.ID }/><input type="hidden" name="job_id" value={ data.Run.JobID }/><button class="button" type="submit" data-suggestion-adopt disabled?={ item.Status != "pending" || data.Run.Stale }>Vorschlag übernehmen</button></form><button class="button button--quiet" type="button" data-copy-suggestion>Erklärung kopieren</button><a class="button button--quiet" href={ "/calendar?date=" + item.StartsAt.In(viennaLocation()).Format(time.DateOnly) }>Im Kalender ansehen</a></div><small>Status: { planningStatus(item.Status) } · gültig bis { planningLocal(item.ExpiresAt) }</small>
-								</article>
-							}
-						</div>
+										<label class="check-label"><input type="checkbox" data-suggestion-compare/> Option vergleichen</label>
+										<dl class="suggestion-facts"><div><dt>Dauer</dt><dd>{ planningDuration(item.StartsAt,item.EndsAt) }</dd></div><div><dt>Fahrer</dt><dd>{ item.DriverName }</dd></div><div><dt>Ressourcen</dt><dd>{ planningList(item.ResourceNames) }</dd></div><div><dt>Transport</dt><dd>{ planningTransport(item.ResourcePurposes) }</dd></div><div><dt>Distanzquelle</dt><dd>{ planningSource(item.RoutingSource) }</dd></div></dl>
+										<p class="preference-fit" data-fit={ planningPreferenceClass(item.Components.Preference) }><strong>Wunschzeitraum:</strong> { planningPreferenceLabel(item.Components.Preference) }</p>
+										<h4>Warum diese Option?</h4>
+										<ul>
+											for _, reason := range item.Reasons {
+												<li>{ reason }</li>
+											}
+										</ul>
+										if len(item.Warnings) > 0 {
+											<div class="planning-warning" role="note">
+												<strong>Hinweis</strong>
+												<ul>
+													for _, warning := range item.Warnings {
+														<li>{ warning }</li>
+													}
+												</ul>
+											</div>
+										}
+										<p class="form-hint"><strong>Heuristische Bewertung:</strong> <span class="status-badge">{ fmt.Sprintf("%.1f / 100", item.Score) }</span> Die Gründe und Warnungen bleiben für die Entscheidung maßgeblich.</p>
+										<div class="action-row"><form method="post" action={ "/planning/suggestions/" + item.ID + "/adopt" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="return_to" value={ data.ReturnTo }/><input type="hidden" name="run_id" value={ data.Run.ID }/><input type="hidden" name="job_id" value={ data.Run.JobID }/><button class="button" type="submit" data-suggestion-adopt disabled?={ item.Status != "pending" || data.Run.Stale }>Vorschlag übernehmen</button></form><button class="button button--quiet" type="button" data-copy-suggestion>Erklärung kopieren</button><a class="button button--quiet" href={ "/calendar?date=" + item.StartsAt.In(viennaLocation()).Format(time.DateOnly) }>Im Kalender ansehen</a></div><small>Status: { planningStatus(item.Status) } · gültig bis { planningLocal(item.ExpiresAt) }</small>
+									</article>
+								}
+							</div>
+						}
 					</section>
 				}
 			</main>

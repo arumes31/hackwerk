@@ -34,8 +34,12 @@ templ CalendarFeeds(data CalendarFeedsData) {
 					</section>
 				}
 				<div class="feed-layout">
-					<section class="form-card"><h2>Einmaliger Export</h2><form method="get" action="/calendar/export.ics" class="form-stack"><label>Von<input name="from" type="date" required/></label><label>Bis einschließlich<input name="to" type="date" required/></label><label>Detailstufe<select name="detail"><option value="internal">Intern</option><option value="minimal">Minimal</option></select></label><button class="button" type="submit">ICS herunterladen</button></form></section>
 					<section class="form-card"><h2>Privaten Feed anlegen</h2><form method="post" action="/calendar/feeds" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label>Name<input name="name" maxlength="100" placeholder="Mein HackWerk-Kalender" required/></label><label>Termine<select name="scope"><option value="all">Alle Termine (Standard)</option><option value="own">Nur eigene Fahrerzuweisungen</option></select></label><label>Detailstufe<select name="detail"><option value="internal">Intern: Kunde und Adresse</option><option value="minimal">Minimal: ohne Kunde und Adresse</option></select></label><fieldset><legend>Ressourcentypen (leer = alle)</legend><label class="check-label"><input type="checkbox" name="resource_type" value="chipper"/> Hackmaschinen</label><label class="check-label"><input type="checkbox" name="resource_type" value="transport_vehicle"/> Transportfahrzeuge</label><label class="check-label"><input type="checkbox" name="resource_type" value="trailer"/> Anhänger</label></fieldset><button class="button" type="submit">Feed erstellen</button></form></section>
+					<details class="form-card">
+						<summary><strong>Einmaliger Export</strong></summary>
+						<p>Eine begrenzte ICS-Datei für die einmalige Weitergabe oder Ablage herunterladen.</p>
+						<form method="get" action="/calendar/export.ics" class="form-stack"><label>Von<input name="from" type="date" required/></label><label>Bis einschließlich<input name="to" type="date" required/></label><label>Detailstufe<select name="detail"><option value="internal">Intern</option><option value="minimal">Minimal</option></select></label><button class="button" type="submit">ICS herunterladen</button></form>
+					</details>
 				</div>
 				<section class="module-card">
 					<div class="section-heading"><h2>Meine Feeds</h2><span class="status-badge">{ fmt.Sprint(len(data.Feeds)) }</span></div>
@@ -45,7 +49,16 @@ templ CalendarFeeds(data CalendarFeedsData) {
 					<div class="feed-list">
 						for _, feed := range data.Feeds {
 							<article class="feed-card">
-								<div><h3>{ feed.Name }</h3><p><code>••••••••••••</code> · Tokenversion { fmt.Sprint(feed.TokenVersion) } · { feedScopeLabel(feed.Scope) } · { feedDetailLabel(feed.Detail) }</p><small>Erstellt { feed.CreatedAt.In(viennaLocation()).Format("02.01.2006") } · { feedLastUsed(feed.LastUsedAt) }</small></div><span class="status-badge">{ feedActiveLabel(feed.Active) }</span>
+								<div>
+									<h3>{ feed.Name }</h3>
+									<dl class="feed-metadata">
+										<div><dt>Privater Link</dt><dd><code>••••••••••••</code></dd></div>
+										<div><dt>Termine</dt><dd>{ feedScopeLabel(feed.Scope) }</dd></div>
+										<div><dt>Detailstufe</dt><dd>{ feedDetailLabel(feed.Detail) }</dd></div>
+										<div><dt>Erstellt</dt><dd>{ feed.CreatedAt.In(viennaLocation()).Format("02.01.2006") }</dd></div>
+										<div><dt>Nutzung</dt><dd>{ feedLastUsed(feed.LastUsedAt) }</dd></div>
+									</dl>
+								</div><span class="status-badge">{ feedActiveLabel(feed.Active) }</span>
 								if feed.Active {
 									<div class="action-row"><form method="post" action={ "/calendar/feeds/" + feed.ID + "/rotate" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(feed.Version) }/><button class="button button--quiet" type="submit" data-confirm-message="Privaten Link wirklich rotieren? Der bisherige Link funktioniert danach nicht mehr.">Link rotieren</button></form><form method="post" action={ "/calendar/feeds/" + feed.ID + "/revoke" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(feed.Version) }/><button class="button button--danger" type="submit" data-confirm-message="Privaten Kalenderfeed wirklich widerrufen? Der Link kann danach nicht wieder aktiviert werden.">Widerrufen</button></form></div>
 								}

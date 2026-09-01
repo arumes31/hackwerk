@@ -401,6 +401,88 @@ func TestVoicePageRendersFreshUploadIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestVoicePageKeepsManualDurationFallbackAndExposesMetadataHooks(t *testing.T) {
+	store := &webVoiceStore{}
+	router, _ := voiceHTTPRouter(t, store)
+	page := httptest.NewRecorder()
+
+	router.ServeHTTP(page, authenticatedCustomerRequest(t, http.MethodGet, "/voice", nil, "session-token", "csrf-token"))
+
+	markup := page.Body.String()
+	for _, contract := range []string{
+		`name="audio"`,
+		`data-voice-file`,
+		`name="duration_seconds"`,
+		`type="number"`,
+		`data-voice-duration`,
+		`required`,
+	} {
+		if !strings.Contains(markup, contract) {
+			t.Errorf("voice upload fallback is missing %q", contract)
+		}
+	}
+}
+
+func TestVoiceReviewLinksMissingAndLowConfidenceFieldsAndRetainsCorrections(t *testing.T) {
+	high := func(value string) voice.Field {
+		return voice.Field{Value: value, Source: "transcript", Confidence: .96}
+	}
+	store := &webVoiceStore{draft: voice.Draft{
+		ID: "voice-draft", OwnerUserID: "voice-user", Status: voice.StatusNeedsReview, Version: 2,
+		ExpiresAt: time.Date(2026, 8, 25, 11, 0, 0, 0, time.UTC),
+		Fields: voice.Fields{
+			FirstName:            high("Franz"),
+			LastName:             voice.Field{Value: "Huber", Source: "transcript", Confidence: .52},
+			CompanyName:          high("HackWerk GmbH"),
+			AddressFreeform:      high("Unterneukirchen 15"),
+			PhoneRaw:             voice.Field{},
+			Email:                high("franz@example.test"),
+			VolumeM3:             voice.Field{},
+			EstimatedHackMinutes: high("180"),
+			PreferredStartDate:   high("2026-09-01"),
+			PreferredEndDate:     high("2026-09-30"),
+			PreferenceText:       high("Anfang September"),
+		},
+	}}
+	router, _ := voiceHTTPRouter(t, store)
+	page := httptest.NewRecorder()
+
+	router.ServeHTTP(page, authenticatedCustomerRequest(t, http.MethodGet, "/voice/drafts/voice-draft", nil, "session-token", "csrf-token"))
+
+	markup := page.Body.String()
+	for _, contract := range []string{
+		`>Zu prüfen<`,
+		`href="#voice-field-last-name"`,
+		`id="voice-field-last-name"`,
+		`52 % Erkennungssicherheit`,
+		`href="#voice-field-volume"`,
+		`id="voice-field-volume"`,
+		`Angabe fehlt`,
+	} {
+		if !strings.Contains(markup, contract) {
+			t.Errorf("voice review summary is missing %q", contract)
+		}
+	}
+	if strings.Contains(markup, `href="#voice-field-first-name"`) {
+		t.Fatal("high-confidence first name is incorrectly listed for review")
+	}
+	if strings.Contains(markup, `href="#voice-field-phone"`) {
+		t.Fatal("an empty optional phone field is incorrectly listed as a blocking review issue")
+	}
+
+	invalid := url.Values{
+		"csrf_token": {"csrf-token"}, "version": {"2"},
+		"first_name": {"Franz-Korrigiert"}, "last_name": {"Huber"},
+		"job_type": {"chipping_only"}, "volume_m3": {"80"}, "hack_duration": {""},
+		"transport_mode": {"none"}, "urgency": {"normal"}, "notification": {"none"},
+	}
+	failedCommit := httptest.NewRecorder()
+	router.ServeHTTP(failedCommit, authenticatedCustomerRequest(t, http.MethodPost, "/voice/drafts/voice-draft/commit", invalid, "session-token", "csrf-token"))
+	if failedCommit.Code != http.StatusUnprocessableEntity || !strings.Contains(failedCommit.Body.String(), `name="first_name" value="Franz-Korrigiert"`) {
+		t.Fatalf("failed voice correction was not retained: status=%d body=%s", failedCommit.Code, failedCommit.Body.String())
+	}
+}
+
 func voiceHTTPRouter(t *testing.T, store *webVoiceStore) (http.Handler, string) {
 	return voiceHTTPRouterWithTranscriber(t, store, voice.FakeTranscriber{Text: "Franz Huber, 80 m³, drei Stunden"})
 }

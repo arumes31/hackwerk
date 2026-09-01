@@ -33,14 +33,14 @@ templ NotificationFailures(data NotificationFailuresData) {
 					</nav>
 					if len(data.Notifications) > 0 {
 						<div class="table-scroll">
-							<table>
+							<table class="responsive-table">
 								<caption class="visually-hidden">Offene Versandprobleme</caption>
-								<thead><tr><th>Kanal/Ziel</th><th>Status/Zeit</th><th>Fehler und Handlung</th><th>Referenz</th><th>Prüfung</th><th>Aktion</th></tr></thead>
+								<thead><tr><th scope="col">Kanal/Ziel</th><th scope="col">Status/Zeit</th><th scope="col">Fehler und Handlung</th><th scope="col">Referenz</th><th scope="col">Prüfung</th><th scope="col">Aktion</th></tr></thead>
 								<tbody>
 									for _, value := range data.Notifications {
 										<tr>
-											<td><strong>{ notificationChannelLabel(value.Channel) }</strong><br/><span>{ value.Recipient }</span></td>
-											<td>
+											<td data-label="Kanal/Ziel"><strong>{ notificationChannelLabel(value.Channel) }</strong><br/><span>{ value.Recipient }</span></td>
+											<td data-label="Status/Zeit">
 												<span class={ "status-badge status-badge--" + notificationStatusClass(value.State) }>{ notificationStateLabel(value.State) }</span>
 												<br/>
 												<small>{ notificationAge(value.CreatedAt) } · Versuch { fmt.Sprintf("%d/%d", value.AttemptCount, value.MaxAttempts) }</small>
@@ -49,8 +49,8 @@ templ NotificationFailures(data NotificationFailuresData) {
 													<small>Nächster Versuch: { notificationLocalTime(value.AvailableAt) }</small>
 												}
 											</td>
-											<td><code>{ value.ErrorCode }</code><br/><strong>{ value.ErrorSummary }</strong><br/><small>{ value.SuggestedAction }</small></td>
-											<td>
+											<td data-label="Fehler und Handlung"><code>{ value.ErrorCode }</code><br/><strong>{ value.ErrorSummary }</strong><br/><small>{ value.SuggestedAction }</small></td>
+											<td data-label="Referenz">
 												if value.ProviderReference == "" {
 													<span>Keine</span>
 												} else {
@@ -59,7 +59,7 @@ templ NotificationFailures(data NotificationFailuresData) {
 													<button class="button button--quiet" type="button" data-copy-value={ value.ProviderReference }>Referenz kopieren</button>
 												}
 											</td>
-											<td>
+											<td data-label="Prüfung">
 												if value.Reviewed {
 													<span class="status-badge">Geprüft</span>
 													<br/>
@@ -68,7 +68,7 @@ templ NotificationFailures(data NotificationFailuresData) {
 													<form method="post" action={ "/admin/notifications/" + value.ID + "/review" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Als geprüft markieren</button></form>
 												}
 											</td>
-											<td><a class="button button--quiet" href={ "/calendar?appointment=" + url.QueryEscape(value.AppointmentID) }>Termin</a><form method="post" action={ "/admin/notifications/" + value.ID + "/retry" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Erneut senden</button></form></td>
+											<td data-label="Aktion"><a class="button button--quiet" href={ "/calendar?appointment=" + url.QueryEscape(value.AppointmentID) }>Termin</a><form method="post" action={ "/admin/notifications/" + value.ID + "/retry" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Erneut senden</button></form></td>
 										</tr>
 									}
 								</tbody>
@@ -82,11 +82,11 @@ templ NotificationFailures(data NotificationFailuresData) {
 					<div class="section-heading"><div><h2 id="callback-table-title">Offene Rückrufwünsche</h2><p>Nur aktive Kundenantworten; Telefonnummern bleiben maskiert.</p></div><span class="status-badge">{ fmt.Sprint(len(data.Callbacks)) } offen</span></div>
 					if len(data.Callbacks) > 0 {
 						<div class="table-scroll">
-							<table>
-								<caption class="visually-hidden">Offene Rückrufwünsche</caption><thead><tr><th>Auftrag</th><th>Kunde/Ort</th><th>Telefon</th><th>Rückrufnotiz</th><th>Antwort</th><th>Link gültig bis</th><th>Aktion</th></tr></thead>
+							<table class="responsive-table">
+								<caption class="visually-hidden">Offene Rückrufwünsche</caption><thead><tr><th scope="col">Auftrag</th><th scope="col">Kunde/Ort</th><th scope="col">Telefon</th><th scope="col">Rückrufnotiz</th><th scope="col">Antwort</th><th scope="col">Link gültig bis</th><th scope="col">Aktion</th></tr></thead>
 								<tbody>
 									for _, value := range data.Callbacks {
-										<tr><td>{ value.JobNumber }</td><td><strong>{ value.CustomerName }</strong><br/>{ value.Locality }</td><td>{ value.Phone }</td><td class="callback-note">{ value.ResponseNote }</td><td>{ notificationLocalTime(value.RespondedAt) }</td><td>{ notificationLocalTime(value.ExpiresAt) }</td><td><a class="button button--quiet" href={ "/calendar?appointment=" + url.QueryEscape(value.AppointmentID) }>Termin öffnen</a></td></tr>
+										<tr><td data-label="Auftrag">{ value.JobNumber }</td><td data-label="Kunde/Ort"><strong>{ value.CustomerName }</strong><br/>{ value.Locality }</td><td data-label="Telefon">{ value.Phone }</td><td class="callback-note" data-label="Rückrufnotiz">{ value.ResponseNote }</td><td data-label="Antwort">{ notificationLocalTime(value.RespondedAt) }</td><td data-label="Link gültig bis">{ notificationLocalTime(value.ExpiresAt) }</td><td data-label="Aktion"><a class="button button--quiet" href={ "/calendar?appointment=" + url.QueryEscape(value.AppointmentID) }>Termin öffnen</a></td></tr>
 									}
 								</tbody>
 							</table>
@@ -97,8 +97,11 @@ templ NotificationFailures(data NotificationFailuresData) {
 				</section>
 				<section class="table-card" aria-labelledby="template-preview-title">
 					<div class="section-heading"><div><p class="eyebrow">Synthetische Beispieldaten</p><h2 id="template-preview-title">Nachrichtenvorschau</h2><p>Diese Vorschau verwendet keine Kunden-, Termin- oder Providerdaten und löst keinen Versand aus.</p></div></div>
-					<div class="form-grid"><div><h3>E-Mail</h3><p><strong>Betreff:</strong> { data.Preview.Subject }</p><pre>{ data.Preview.Text }</pre></div><div><h3>SMS</h3><p><span class="status-badge">{ fmt.Sprintf("%d Segment(e) · %s", data.Preview.SMSSegments, data.Preview.SMSEncoding) }</span></p><pre>{ data.Preview.SMS }</pre></div></div>
-					<div class="form-alert form-alert--info"><strong>Kanalprüfung vor Fixierung</strong><p>HackWerk zeigt den konfigurierten Kanal und das maskierte Ziel. Fehlen Wunschkanal oder Kontaktdaten, wird der konkrete Grund genannt. Ein anderer vorhandener Kanal wird nur vorgeschlagen und niemals automatisch entgegen der Kundenpräferenz verwendet. Bei Präferenz „Keine“ bleibt eine begründete Adminausnahme erforderlich.</p></div>
+					<details class="compact-filter-panel">
+						<summary>Nachrichtenvorschau anzeigen</summary>
+						<div class="form-grid"><div><h3>E-Mail</h3><p><strong>Betreff:</strong> { data.Preview.Subject }</p><pre>{ data.Preview.Text }</pre></div><div><h3>SMS</h3><p><span class="status-badge">{ fmt.Sprintf("%d Segment(e) · %s", data.Preview.SMSSegments, data.Preview.SMSEncoding) }</span></p><pre>{ data.Preview.SMS }</pre></div></div>
+						<div class="form-alert form-alert--info"><strong>Kanalprüfung vor Fixierung</strong><p>HackWerk zeigt den konfigurierten Kanal und das maskierte Ziel. Fehlen Wunschkanal oder Kontaktdaten, wird der konkrete Grund genannt. Ein anderer vorhandener Kanal wird nur vorgeschlagen und niemals automatisch entgegen der Kundenpräferenz verwendet. Bei Präferenz „Keine“ bleibt eine begründete Adminausnahme erforderlich.</p></div>
+					</details>
 				</section>
 			</main>@appFooter(data.Shell.Page)
 		</body>

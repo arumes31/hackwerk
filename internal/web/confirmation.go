@@ -66,6 +66,7 @@ func confirmationResponse(service *notification.ConfirmationService, limiter *co
 				}
 				render(response, request, templates.ConfirmationPage(templates.ConfirmationData{
 					Page: page, Token: token, Value: current, ResponseNote: responseNote, CallbackStored: current.Response == notification.ResponseCallback,
+					ResponseAction:    notification.Response(request.Form.Get("action")),
 					ResponseNoteError: "Die Rückrufnotiz kann nur mit einer Ablehnung oder einem Rückrufwunsch gesendet werden. Bitte leeren Sie die Notiz oder wählen Sie die passende Antwort.",
 				}), http.StatusUnprocessableEntity, logger)
 			case errors.Is(err, notification.ErrConfirmationExpired), errors.Is(err, notification.ErrConfirmationRevoked), errors.Is(err, notification.ErrConfirmationUnavailable):

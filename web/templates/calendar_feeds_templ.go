@@ -100,27 +100,27 @@ func CalendarFeeds(data CalendarFeedsData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"feed-layout\"><section class=\"form-card\"><h2>Einmaliger Export</h2><form method=\"get\" action=\"/calendar/export.ics\" class=\"form-stack\"><label>Von<input name=\"from\" type=\"date\" required></label><label>Bis einschließlich<input name=\"to\" type=\"date\" required></label><label>Detailstufe<select name=\"detail\"><option value=\"internal\">Intern</option><option value=\"minimal\">Minimal</option></select></label><button class=\"button\" type=\"submit\">ICS herunterladen</button></form></section><section class=\"form-card\"><h2>Privaten Feed anlegen</h2><form method=\"post\" action=\"/calendar/feeds\" class=\"form-stack\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"feed-layout\"><section class=\"form-card\"><h2>Privaten Feed anlegen</h2><form method=\"post\" action=\"/calendar/feeds\" class=\"form-stack\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 38, Col: 193}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 37, Col: 193}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\"><label>Name<input name=\"name\" maxlength=\"100\" placeholder=\"Mein HackWerk-Kalender\" required></label><label>Termine<select name=\"scope\"><option value=\"all\">Alle Termine (Standard)</option><option value=\"own\">Nur eigene Fahrerzuweisungen</option></select></label><label>Detailstufe<select name=\"detail\"><option value=\"internal\">Intern: Kunde und Adresse</option><option value=\"minimal\">Minimal: ohne Kunde und Adresse</option></select></label><fieldset><legend>Ressourcentypen (leer = alle)</legend><label class=\"check-label\"><input type=\"checkbox\" name=\"resource_type\" value=\"chipper\"> Hackmaschinen</label><label class=\"check-label\"><input type=\"checkbox\" name=\"resource_type\" value=\"transport_vehicle\"> Transportfahrzeuge</label><label class=\"check-label\"><input type=\"checkbox\" name=\"resource_type\" value=\"trailer\"> Anhänger</label></fieldset><button class=\"button\" type=\"submit\">Feed erstellen</button></form></section></div><section class=\"module-card\"><div class=\"section-heading\"><h2>Meine Feeds</h2><span class=\"status-badge\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\"><label>Name<input name=\"name\" maxlength=\"100\" placeholder=\"Mein HackWerk-Kalender\" required></label><label>Termine<select name=\"scope\"><option value=\"all\">Alle Termine (Standard)</option><option value=\"own\">Nur eigene Fahrerzuweisungen</option></select></label><label>Detailstufe<select name=\"detail\"><option value=\"internal\">Intern: Kunde und Adresse</option><option value=\"minimal\">Minimal: ohne Kunde und Adresse</option></select></label><fieldset><legend>Ressourcentypen (leer = alle)</legend><label class=\"check-label\"><input type=\"checkbox\" name=\"resource_type\" value=\"chipper\"> Hackmaschinen</label><label class=\"check-label\"><input type=\"checkbox\" name=\"resource_type\" value=\"transport_vehicle\"> Transportfahrzeuge</label><label class=\"check-label\"><input type=\"checkbox\" name=\"resource_type\" value=\"trailer\"> Anhänger</label></fieldset><button class=\"button\" type=\"submit\">Feed erstellen</button></form></section><details class=\"form-card\"><summary><strong>Einmaliger Export</strong></summary><p>Eine begrenzte ICS-Datei für die einmalige Weitergabe oder Ablage herunterladen.</p><form method=\"get\" action=\"/calendar/export.ics\" class=\"form-stack\"><label>Von<input name=\"from\" type=\"date\" required></label><label>Bis einschließlich<input name=\"to\" type=\"date\" required></label><label>Detailstufe<select name=\"detail\"><option value=\"internal\">Intern</option><option value=\"minimal\">Minimal</option></select></label><button class=\"button\" type=\"submit\">ICS herunterladen</button></form></details></div><section class=\"module-card\"><div class=\"section-heading\"><h2>Meine Feeds</h2><span class=\"status-badge\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(len(data.Feeds)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 41, Col: 110}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 45, Col: 110}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
@@ -148,184 +148,171 @@ func CalendarFeeds(data CalendarFeedsData) templ.Component {
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(feed.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 48, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 53, Col: 24}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</h3><p><code>••••••••••••</code> · Tokenversion ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</h3><dl class=\"feed-metadata\"><div><dt>Privater Link</dt><dd><code>••••••••••••</code></dd></div><div><dt>Termine</dt><dd>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var7 string
-			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(feed.TokenVersion))
+			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(feedScopeLabel(feed.Scope))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 48, Col: 135}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 56, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, " · ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</dd></div><div><dt>Detailstufe</dt><dd>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var8 string
-			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(feedScopeLabel(feed.Scope))
+			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(feedDetailLabel(feed.Detail))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 48, Col: 169}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 57, Col: 69}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, " · ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</dd></div><div><dt>Erstellt</dt><dd>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var9 string
-			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(feedDetailLabel(feed.Detail))
+			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(feed.CreatedAt.In(viennaLocation()).Format("02.01.2006"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 48, Col: 205}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 58, Col: 94}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</p><small>Erstellt ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</dd></div><div><dt>Nutzung</dt><dd>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var10 string
-			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(feed.CreatedAt.In(viennaLocation()).Format("02.01.2006"))
+			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(feedLastUsed(feed.LastUsedAt))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 48, Col: 285}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 59, Col: 66}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, " · ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</dd></div></dl></div><span class=\"status-badge\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var11 string
-			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(feedLastUsed(feed.LastUsedAt))
+			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(feedActiveLabel(feed.Active))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 48, Col: 322}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 61, Col: 71}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</small></div><span class=\"status-badge\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var12 string
-			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(feedActiveLabel(feed.Active))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 48, Col: 395}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</span> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</span> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if feed.Active {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<div class=\"action-row\"><form method=\"post\" action=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<div class=\"action-row\"><form method=\"post\" action=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var13 templ.SafeURL
-				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinURLErrs("/calendar/feeds/" + feed.ID + "/rotate")
+				var templ_7745c5c3_Var12 templ.SafeURL
+				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinURLErrs("/calendar/feeds/" + feed.ID + "/rotate")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 50, Col: 102}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 63, Col: 102}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var13 string
+				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 63, Col: 172}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\"><input type=\"hidden\" name=\"version\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var14 string
-				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
+				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(feed.Version))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 50, Col: 172}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 63, Col: 244}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\"><input type=\"hidden\" name=\"version\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\"><button class=\"button button--quiet\" type=\"submit\" data-confirm-message=\"Privaten Link wirklich rotieren? Der bisherige Link funktioniert danach nicht mehr.\">Link rotieren</button></form><form method=\"post\" action=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var15 string
-				templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(feed.Version))
+				var templ_7745c5c3_Var15 templ.SafeURL
+				templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinURLErrs("/calendar/feeds/" + feed.ID + "/revoke")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 50, Col: 244}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 63, Col: 504}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\"><button class=\"button button--quiet\" type=\"submit\" data-confirm-message=\"Privaten Link wirklich rotieren? Der bisherige Link funktioniert danach nicht mehr.\">Link rotieren</button></form><form method=\"post\" action=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var16 templ.SafeURL
-				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinURLErrs("/calendar/feeds/" + feed.ID + "/revoke")
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 50, Col: 504}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+				var templ_7745c5c3_Var16 string
+				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 63, Col: 574}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\"><input type=\"hidden\" name=\"version\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var17 string
-				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
+				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(feed.Version))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 50, Col: 574}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 63, Col: 646}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\"><input type=\"hidden\" name=\"version\" value=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var18 string
-				templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(feed.Version))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/calendar_feeds.templ`, Line: 50, Col: 646}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\"><button class=\"button button--danger\" type=\"submit\" data-confirm-message=\"Privaten Kalenderfeed wirklich widerrufen? Der Link kann danach nicht wieder aktiviert werden.\">Widerrufen</button></form></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\"><button class=\"button button--danger\" type=\"submit\" data-confirm-message=\"Privaten Kalenderfeed wirklich widerrufen? Der Link kann danach nicht wieder aktiviert werden.\">Widerrufen</button></form></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</article>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</article>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "</div></section><section class=\"module-card\"><h2>Einrichtung</h2><div class=\"instruction-grid\"><article><h3>Apple Kalender</h3><p>„Neues Kalenderabonnement“ wählen und den privaten Link einsetzen.</p></article><article><h3>Outlook</h3><p>„Kalender hinzufügen“ und „Aus dem Internet abonnieren“ wählen.</p></article><article><h3>Google Kalender</h3><p>Unter „Weitere Kalender“ den Punkt „Per URL“ verwenden.</p></article></div><p class=\"form-hint\">HackWerk veröffentlicht nur lesend. Änderungen in externen Kalendern kommen nicht zurück. Aktualisierungsintervalle bestimmt der jeweilige Anbieter.</p></section></main>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</div></section><section class=\"module-card\"><h2>Einrichtung</h2><div class=\"instruction-grid\"><article><h3>Apple Kalender</h3><p>„Neues Kalenderabonnement“ wählen und den privaten Link einsetzen.</p></article><article><h3>Outlook</h3><p>„Kalender hinzufügen“ und „Aus dem Internet abonnieren“ wählen.</p></article><article><h3>Google Kalender</h3><p>Unter „Weitere Kalender“ den Punkt „Per URL“ verwenden.</p></article></div><p class=\"form-hint\">HackWerk veröffentlicht nur lesend. Änderungen in externen Kalendern kommen nicht zurück. Aktualisierungsintervalle bestimmt der jeweilige Anbieter.</p></section></main>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -333,7 +320,7 @@ func CalendarFeeds(data CalendarFeedsData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "</body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -113,33 +113,45 @@ templ Resources(data ResourcesData) {
 		@documentHead(data.Shell.Page, "Ressourcen – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page" data-operation-page>
+			<main id="hauptinhalt" class="page compact-page" data-operation-page>
 				<div class="page-heading"><div><p class="eyebrow">Administration</p><h1>Ressourcen</h1><p>Maschinen, Fahrzeuge und Anhänger werden als einzelne, planbare Datensätze geführt.</p></div><span class="status-badge">{ fmt.Sprint(len(data.Resources)) } Ressourcen</span></div>
-				<section class="admin-layout">
-					<div class="card-list">
-						for _, item := range data.Resources {
-							<article class="record-card operation-card">
-								<div class="operation-card__main"><p class="eyebrow">{ resourceTypeLabel(item.Type) } · { activeLabel(item.IsActive) }</p><h2>{ item.Name }</h2><p>{ exclusivityLabel(item.IsExclusive) } · { capacityLabel(item.Capacity) }</p></div>
+				<details class="compact-create-panel">
+					<summary>+ Ressource anlegen</summary>
+					<form method="post" action="/admin/resources" class="form-grid compact-form">
+						<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@resourceFields(resource.Resource{Type: resource.TypeChipper, IsExclusive: true}, "new")
+						<button class="button" type="submit">Ressource anlegen</button>
+					</form>
+				</details>
+				<section class="compact-list resource-compact-list" aria-label="Ressourcen">
+					<div class="compact-list__head" aria-hidden="true"><span>Ressource</span><span>Art</span><span>Kapazität</span><span>Planung</span><span>Status</span><span>Aktion</span></div>
+					if len(data.Resources) == 0 {
+						<div class="empty-state"><h2>Noch keine Ressourcen</h2><p>Legen Sie die erste Maschine, das erste Fahrzeug oder einen Anhänger als eigenen planbaren Datensatz an.</p></div>
+					}
+					for _, item := range data.Resources {
+						<details class="compact-row driver-compact-row resource-compact-row">
+							<summary>
+								<span class="compact-row__primary"><strong>{ item.Name }</strong><small>{ activeLabel(item.IsActive) }</small></span>
+								<span data-label="Art">{ resourceTypeLabel(item.Type) }</span>
+								<span data-label="Kapazität">{ capacityLabel(item.Capacity) }</span>
+								<span data-label="Planung">{ exclusivityLabel(item.IsExclusive) }</span>
+								<span data-label="Status">{ activeLabel(item.IsActive) }</span>
+								<span class="compact-row__action">Öffnen</span>
+							</summary>
+							<div class="compact-row__details">
 								if item.IsActive {
-									<details class="edit-card operation-card__edit">
-										<summary>Ressource bearbeiten</summary>
+									<div class="resource-compact-row__forms">
 										<form method="post" action={ "/admin/resources/" + item.ID } class="form-stack">
 											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.Version) }/>@resourceFields(item, item.ID)
 											<button class="button" type="submit">Ressource speichern</button>
 										</form>
-										<form method="post" action={ "/admin/resources/" + item.ID + "/deactivate" } class="action-row"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.Version) }/><button class="button button--danger" type="submit" data-confirm-message="Ressource wirklich deaktivieren? Sie steht danach nicht mehr für neue Planungen zur Verfügung.">Deaktivieren</button></form>
-									</details>
+										<form method="post" action={ "/admin/resources/" + item.ID + "/deactivate" } class="compact-danger"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.Version) }/><button class="button button--danger" type="submit" data-confirm-message="Ressource wirklich deaktivieren? Sie steht danach nicht mehr für neue Planungen zur Verfügung.">Ressource deaktivieren</button></form>
+									</div>
+								} else {
+									<p class="form-hint">Diese Ressource ist deaktiviert und steht für neue Planungen nicht zur Verfügung.</p>
 								}
-							</article>
-						}
-					</div>
-					<aside class="form-card">
-						<h2>Ressource anlegen</h2>
-						<form method="post" action="/admin/resources" class="form-stack">
-							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@resourceFields(resource.Resource{Type: resource.TypeChipper, IsExclusive: true}, "new")
-							<button class="button" type="submit">Ressource anlegen</button>
-						</form>
-					</aside>
+							</div>
+						</details>
+					}
 				</section>
 			</main>@appFooter(data.Shell.Page)
 		</body>
@@ -184,33 +196,52 @@ templ Availability(data AvailabilityData) {
 				<div class="operations-grid">
 					<section>
 						<h2>Wochenregeln</h2>
-						<div class="card-list">
-							for _, rule := range data.Data.Rules {
-								<details class="edit-card" data-availability-rule data-weekday={ fmt.Sprint(rule.Weekday) } data-local-start={ driver.FormatLocalTime(rule.StartMinute) } data-local-end={ driver.FormatLocalTime(rule.EndMinute) } data-valid-from={ rule.ValidFrom } data-valid-until={ rule.ValidUntil }>
-									<summary>{ weekdayLabel(rule.Weekday) }, { driver.FormatLocalTime(rule.StartMinute) }–{ driver.FormatLocalTime(rule.EndMinute) } · { ruleStatusLabel(rule.Status) }</summary>
-									<form method="post" action={ data.BasePath + "/rules/" + rule.ID } class="form-stack">
-										<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(rule.Version) }/>@ruleFields(rule)
-										<button class="button" type="submit">Regel speichern</button>
-									</form>
-									<form method="post" action={ data.BasePath + "/rules/" + rule.ID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(rule.Version) }/><button class="button button--danger" type="submit" data-confirm-message="Diese Wochenregel wirklich löschen?">Regel löschen</button></form>
-									<form method="post" action={ data.BasePath + "/rules/" + rule.ID + "/duplicate" } class="action-row">
-										<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
-										<label>
-											Für Tag
-											<select name="weekday">
-												for value := 1; value <= 7; value++ {
-													<option value={ fmt.Sprint(value) } selected?={ value == duplicateWeekday(rule.Weekday) }>{ weekdayLabel(value) }</option>
+						if len(data.Data.Rules) == 0 {
+							<div class="empty-state"><p>Noch keine Wochenregel. Der Fahrer gilt derzeit als nicht verfügbar.</p></div>
+						} else {
+							<div class="availability-weekday-list">
+								for weekday := 1; weekday <= 7; weekday++ {
+									if rules := rulesForWeekday(data.Data.Rules, weekday); len(rules) > 0 {
+										<section class="availability-weekday" data-availability-weekday={ fmt.Sprint(weekday) } aria-labelledby={ "availability-weekday-" + fmt.Sprint(weekday) }>
+											<div class="section-heading">
+												<div><p class="eyebrow">Wiederkehrend</p><h3 id={ "availability-weekday-" + fmt.Sprint(weekday) }>{ weekdayLabel(weekday) }</h3></div>
+												<form method="post" action={ data.BasePath + "/rules/clear-day" } class="action-row" data-clear-availability-day>
+													<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="weekday" value={ fmt.Sprint(weekday) }/>
+													for _, rule := range rules {
+														<input type="hidden" name="rule_id" value={ rule.ID }/><input type="hidden" name="rule_version" value={ fmt.Sprint(rule.Version) }/>
+													}
+													<button class="button button--danger" type="submit" data-confirm-message={ weekdayLabel(weekday) + " wirklich vollständig leeren?" }>Tag leeren</button>
+												</form>
+											</div>
+											<div class="card-list">
+												for _, rule := range rules {
+													<details class="edit-card" data-availability-rule data-weekday={ fmt.Sprint(rule.Weekday) } data-local-start={ driver.FormatLocalTime(rule.StartMinute) } data-local-end={ driver.FormatLocalTime(rule.EndMinute) } data-valid-from={ rule.ValidFrom } data-valid-until={ rule.ValidUntil }>
+														<summary>{ driver.FormatLocalTime(rule.StartMinute) }–{ driver.FormatLocalTime(rule.EndMinute) } · { ruleStatusLabel(rule.Status) }</summary>
+														<form method="post" action={ data.BasePath + "/rules/" + rule.ID } class="form-stack">
+															<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(rule.Version) }/>@ruleFields(rule)
+															<button class="button" type="submit">Regel speichern</button>
+														</form>
+														<form method="post" action={ data.BasePath + "/rules/" + rule.ID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(rule.Version) }/><button class="button button--danger" type="submit" data-confirm-message="Diese Wochenregel wirklich löschen?">Regel löschen</button></form>
+														<form method="post" action={ data.BasePath + "/rules/" + rule.ID + "/duplicate" } class="action-row">
+															<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
+															<label>
+																Für Tag
+																<select name="weekday">
+																	for value := 1; value <= 7; value++ {
+																		<option value={ fmt.Sprint(value) } selected?={ value == duplicateWeekday(rule.Weekday) }>{ weekdayLabel(value) }</option>
+																	}
+																</select>
+															</label>
+															<button class="button button--quiet" type="submit">Regel duplizieren</button>
+														</form>
+													</details>
 												}
-											</select>
-										</label>
-										<button class="button button--quiet" type="submit">Regel duplizieren</button>
-									</form>
-								</details>
-							}
-							if len(data.Data.Rules) == 0 {
-								<div class="empty-state"><p>Noch keine Wochenregel. Der Fahrer gilt derzeit als nicht verfügbar.</p></div>
-							}
-						</div>
+											</div>
+										</section>
+									}
+								}
+							</div>
+						}
 						<details class="compact-create-panel operation-create">
 							<summary>+ Wochenregel anlegen</summary>
 							<form method="post" action={ data.BasePath + "/rules" } class="form-stack" data-availability-rule-form>
@@ -220,17 +251,6 @@ templ Availability(data AvailabilityData) {
 								<button class="button" type="submit">Regel anlegen</button>
 							</form>
 						</details>
-						for weekday := 1; weekday <= 7; weekday++ {
-							if rules := rulesForWeekday(data.Data.Rules, weekday); len(rules) > 0 {
-								<form method="post" action={ data.BasePath + "/rules/clear-day" } class="action-row" data-clear-availability-day>
-									<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="weekday" value={ fmt.Sprint(weekday) }/>
-									for _, rule := range rules {
-										<input type="hidden" name="rule_id" value={ rule.ID }/><input type="hidden" name="rule_version" value={ fmt.Sprint(rule.Version) }/>
-									}
-									<button class="button button--danger" type="submit" data-confirm-message={ weekdayLabel(weekday) + " wirklich vollständig leeren?" }>{ weekdayLabel(weekday) } vollständig leeren</button>
-								</form>
-							}
-						}
 					</section>
 					<section>
 						<h2>Ausnahmen</h2>

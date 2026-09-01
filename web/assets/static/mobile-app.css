@@ -1,0 +1,1188 @@
+/* HackWerk's mobile presentation layer. Domain routes, forms and permissions stay
+   shared with the desktop application; this file only changes the app shell. */
+.mobile-app-bar,
+.mobile-primary-action,
+.driver-tour,
+.admin-tour {
+  display: none;
+}
+
+@media (max-width: 1050px) {
+  :root {
+    --mobile-app-bar-height: 60px;
+    --mobile-nav-height: 68px;
+  }
+
+  body:has(.mobile-bottom-nav) {
+    padding-bottom: calc(var(--mobile-nav-height) + .75rem + env(safe-area-inset-bottom));
+  }
+
+  body:has(.mobile-bottom-nav) .site-header {
+    position: sticky;
+    z-index: 20;
+    top: 0;
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .site-header__inner--desktop {
+    display: none;
+  }
+
+  .mobile-app-bar {
+    width: min(100%, 70rem);
+    min-height: var(--mobile-app-bar-height);
+    margin-inline: auto;
+    padding-inline: max(.65rem, env(safe-area-inset-left)) max(.65rem, env(safe-area-inset-right));
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: .5rem;
+  }
+
+  .mobile-app-bar__brand {
+    min-width: 44px;
+    min-height: 44px;
+    display: grid;
+    place-items: center;
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .mobile-app-bar__brand .wordmark__mark {
+    width: 2.15rem;
+    height: 2.15rem;
+    font-family: Georgia, "Times New Roman", serif;
+    font-weight: 800;
+  }
+
+  .mobile-app-bar__title {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--ink);
+    font-size: .95rem;
+    font-weight: 800;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-context-actions {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+  }
+
+  .mobile-context-action,
+  .mobile-primary-action {
+    min-width: 44px;
+    min-height: 44px;
+    margin: 0;
+    border-radius: var(--radius-control);
+  }
+
+  .mobile-context-action {
+    display: inline-grid;
+    padding: .55rem;
+    place-items: center;
+    border: 1px solid var(--line);
+    color: var(--moss);
+    background: var(--surface);
+    cursor: pointer;
+  }
+
+  .mobile-context-action svg,
+  .mobile-primary-action svg,
+  .mobile-nav-item__icon {
+    width: 1.25rem;
+    height: 1.25rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+  }
+
+  .mobile-primary-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: .3rem;
+    padding: .55rem .7rem;
+    border: 1px solid var(--moss);
+    color: white;
+    background: var(--moss);
+    font-size: .78rem;
+    font-weight: 850;
+    line-height: 1.1;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .mobile-primary-action:hover,
+  .mobile-primary-action:focus-visible,
+  .mobile-primary-action[aria-current="page"] {
+    color: white;
+    background: #173f2d;
+  }
+
+  .mobile-bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .mobile-bottom-nav > a,
+  .mobile-bottom-nav > button,
+  .mobile-more--fallback > summary {
+    gap: .2rem;
+    align-content: center;
+    line-height: 1.15;
+  }
+
+  .mobile-nav-item__icon {
+    display: block;
+  }
+
+  .mobile-nav-item__label {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .customer-list-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .customer-list-toolbar > .list-sort-controls {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  }
+
+  body:has(.planning-page, .route-planner-page, .customer-job-form-page, details[open] form[data-sticky-actions]) {
+    padding-bottom: calc(var(--mobile-nav-height) + .75rem + env(safe-area-inset-bottom));
+  }
+
+  body:has(.planning-page, .route-planner-page, .customer-job-form-page, details[open] form[data-sticky-actions]) .mobile-bottom-nav {
+    display: grid;
+  }
+
+  body:has(.mobile-bottom-nav) .planning-selection,
+  body:has(.mobile-bottom-nav) form[data-sticky-actions] > .form-actions,
+  body:has(.mobile-bottom-nav) form[data-sticky-actions] > * > .form-actions:last-child,
+  body:has(.mobile-bottom-nav) .route-sticky-navigation {
+		bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + .5625rem);
+		scroll-margin-block-end: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + .75rem);
+  }
+}
+
+@media (max-width: 760px) {
+	.list-sort-controls {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		align-items: end;
+		gap: .5rem;
+		padding: .65rem;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-surface);
+		background: var(--surface);
+	}
+
+	.list-sort-controls label { min-width: 0; display: grid; gap: .25rem; }
+	.list-sort-controls .button { width: 100%; margin: 0; }
+	.customer-list-toolbar > .list-sort-controls { grid-column: 1 / -1; }
+	.profile-section-nav { top: calc(var(--mobile-app-bar-height) + env(safe-area-inset-top) + .25rem); margin-inline: -.25rem; border-radius: .5rem; }
+	.profile-card[id] { scroll-margin-top: calc(var(--mobile-app-bar-height) + 4.5rem); }
+	.users-heading { align-items: stretch; flex-direction: column; gap: .75rem; }
+	.users-heading__actions { align-items: stretch; flex-wrap: wrap; }
+	.user-directory-search { width: 100%; flex: 1 1 100%; }
+	.route-location-card { gap: 0; padding: 0; overflow: hidden; }
+	.route-location-card__summary { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .75rem; cursor: pointer; }
+	.route-location-card__summary > span:first-child { min-width: 0; display: grid; gap: .15rem; }
+	.route-location-card__summary small { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+	.route-location-card__badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .25rem; }
+	.route-location-card[open] > .route-location-card__summary { border-bottom: 1px solid var(--line); background: var(--moss-light); }
+	.route-location-card__body,
+	.route-location-card > .form-grid { padding: .75rem; }
+
+  .mobile-app-bar {
+    gap: .35rem;
+  }
+
+  .command-search-fallback--mobile .command-search-fallback__panel {
+    position: fixed;
+    inset: calc(var(--mobile-app-bar-height) + env(safe-area-inset-top) + .25rem) max(.5rem, env(safe-area-inset-right)) auto max(.5rem, env(safe-area-inset-left));
+    width: auto;
+    max-width: none;
+    max-height: calc(var(--visual-viewport-height, 100dvh) - var(--mobile-app-bar-height) - var(--mobile-nav-height) - 1rem);
+    overflow: auto;
+  }
+
+  .mobile-more-trigger {
+    position: relative;
+  }
+
+  .mobile-more-trigger[aria-expanded="true"] {
+    z-index: calc(var(--z-popover) + 2);
+    background: var(--moss-light);
+  }
+
+  .mobile-more__dialog::backdrop {
+    background: var(--overlay-backdrop);
+  }
+
+  .mobile-more__dialog {
+    position: fixed;
+    z-index: calc(var(--z-popover) + 1);
+    inset: auto max(.5rem, env(safe-area-inset-right)) calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + .25rem) max(.5rem, env(safe-area-inset-left));
+    width: auto;
+    max-width: none;
+    max-height: min(72dvh, calc(100dvh - var(--mobile-nav-height) - env(safe-area-inset-bottom) - 1.25rem), calc(var(--visual-viewport-height, 100dvh) - var(--mobile-nav-height) - env(safe-area-inset-bottom) - 1.25rem));
+    margin: 0;
+    padding: 0;
+    border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+  }
+
+  .mobile-more__panel {
+    max-height: inherit;
+    padding: .75rem;
+    overscroll-behavior: contain;
+  }
+
+  .mobile-more__panel--fallback {
+    max-height: min(72dvh, calc(100dvh - var(--mobile-nav-height) - env(safe-area-inset-bottom) - 1rem));
+  }
+
+  .mobile-more__panel::before {
+    width: 2.75rem;
+    height: .25rem;
+    margin: 0 auto .45rem;
+    border-radius: 999px;
+    background: var(--line);
+    content: "";
+  }
+
+  .command-palette,
+  .shortcut-help {
+    width: 100vw;
+    max-width: none;
+    max-height: min(92dvh, var(--visual-viewport-height, 92dvh));
+    margin: auto 0 0;
+    padding: .9rem max(.8rem, env(safe-area-inset-right)) max(.9rem, env(safe-area-inset-bottom)) max(.8rem, env(safe-area-inset-left));
+    border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+  }
+
+  .install-prompt {
+    position: fixed;
+    z-index: var(--z-banner);
+    inset: auto max(.5rem, env(safe-area-inset-right)) calc(var(--mobile-nav-height) + .5rem + env(safe-area-inset-bottom)) max(.5rem, env(safe-area-inset-left));
+    width: auto;
+    max-height: min(60dvh, var(--visual-viewport-height, 28rem));
+    margin: 0;
+    overflow: auto;
+    box-shadow: var(--overlay-shadow);
+  }
+}
+
+/* Authenticated pages become a deliberate phone application below this point.
+   The desktop layout remains owned by app.css; these rules only reshape its
+   existing semantic regions for touch, safe areas and narrow viewports. */
+@media (max-width: 760px) {
+  :root {
+    --mobile-gutter: .7rem;
+    --mobile-section-gap: .75rem;
+    --mobile-card-radius: .9rem;
+    --mobile-sticky-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));
+  }
+
+  html {
+    scroll-padding-top: calc(var(--mobile-app-bar-height) + env(safe-area-inset-top) + .5rem);
+  }
+
+  body:has(.mobile-bottom-nav) {
+    overflow-x: clip;
+    background: var(--paper);
+  }
+
+  body:has(.mobile-bottom-nav) .page {
+    width: calc(100% - (2 * var(--mobile-gutter)));
+    max-width: none;
+    min-width: 0;
+    padding-block: .7rem 1.25rem;
+  }
+
+  body:has(.mobile-bottom-nav) .page > *,
+  body:has(.mobile-bottom-nav) :where(form, fieldset, details, section, article, table, dl) {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  body:has(.mobile-bottom-nav) :where(img, svg, video, canvas) {
+    max-width: 100%;
+  }
+
+  body:has(.mobile-bottom-nav) :where(h1, h2, h3, h4, p, dd, td, code, a, button) {
+    overflow-wrap: anywhere;
+  }
+
+  body:has(.mobile-bottom-nav) .page-heading,
+  body:has(.mobile-bottom-nav) .dashboard-intro {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: .55rem;
+    margin-bottom: .75rem;
+  }
+
+  body:has(.mobile-bottom-nav) .page-heading h1,
+  body:has(.mobile-bottom-nav) .dashboard-intro h1,
+  .profile-hero h1 {
+    margin-block: .1rem .25rem;
+    font-size: clamp(1.75rem, 8vw, 2.35rem);
+    line-height: 1.04;
+  }
+
+  body:has(.mobile-bottom-nav) .page-heading p:not(.eyebrow),
+  body:has(.mobile-bottom-nav) .dashboard-intro p:not(.eyebrow) {
+    margin-block: .25rem 0;
+    font-size: .92rem;
+    line-height: 1.45;
+  }
+
+  body:has(.mobile-bottom-nav) .page-heading > .button,
+  body:has(.mobile-bottom-nav) .page-heading > .action-row,
+  body:has(.mobile-bottom-nav) .page-heading > form {
+    width: 100%;
+  }
+
+  body:has(.mobile-bottom-nav) .page-heading > .button {
+    margin: 0;
+  }
+
+  body:has(.mobile-bottom-nav) :where(.form-card, .module-card, .record-card, .job-card, .waitlist-card, .table-card, .profile-card, .user-card, .voice-capture, .transcript-card, .privacy-notice, .duplicate-review, .calendar-waitlist, .calendar-board, .calendar-agenda, .route-map-panel, .route-next-stop) {
+    border-radius: var(--mobile-card-radius);
+    box-shadow: 0 .35rem 1rem rgb(29 40 31 / 6%);
+  }
+
+  body:has(.mobile-bottom-nav) :where(.form-card, .module-card, .profile-card, .voice-capture, .transcript-card, .privacy-notice, .duplicate-review) {
+    width: 100%;
+    padding: .85rem;
+  }
+
+  body:has(.mobile-bottom-nav) :where(.filter-bar, .filter-grid, .compact-filter-panel, .compact-create-panel) {
+    margin-bottom: var(--mobile-section-gap);
+    padding: .7rem;
+    border-radius: var(--mobile-card-radius);
+  }
+
+  body:has(.mobile-bottom-nav) :where(.filter-grid, .form-grid, .exception-create) {
+    grid-template-columns: minmax(0, 1fr);
+    gap: .65rem;
+  }
+
+  body:has(.mobile-bottom-nav) .span-2 {
+    grid-column: auto;
+  }
+
+  body:has(.mobile-bottom-nav) :where(.form-actions, .filter-bar .action-row, .filter-grid .action-row, .compact-filter-panel .action-row) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: .45rem;
+  }
+
+  body:has(.mobile-bottom-nav) :where(.form-actions, .filter-bar, .filter-grid, .compact-filter-panel) .button,
+  body:has(.mobile-bottom-nav) .form-actions > form {
+    width: 100%;
+    margin: 0;
+  }
+
+  body:has(.mobile-bottom-nav) :where(.edit-card, .compact-create-panel, .route-secondary-metrics, .route-stop-reorder, .route-reorder-panel) > summary {
+    min-height: 48px;
+    padding-block: .55rem;
+    touch-action: manipulation;
+  }
+
+	body:has(.mobile-bottom-nav) :where(.planning-selection, form[data-sticky-actions] > .form-actions, form[data-sticky-actions] > * > .form-actions:last-child, .route-sticky-navigation) {
+		scroll-margin-block-end: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + .75rem);
+	}
+
+  .toast-region,
+  .toast-stack {
+    inset: calc(var(--mobile-app-bar-height) + env(safe-area-inset-top) + .5rem) var(--mobile-gutter) auto;
+    width: auto;
+  }
+
+  .scroll-top {
+    inset-inline-end: var(--mobile-gutter);
+    inset-block-end: calc(var(--mobile-sticky-bottom) + .65rem);
+  }
+
+  /* Dashboard: glanceable metrics followed by one-column field cards. */
+  .dashboard-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .5rem;
+  }
+
+  .metric-card {
+    min-height: 3.75rem;
+    padding: .45rem .65rem;
+    border-radius: .75rem;
+  }
+
+  .dashboard-columns {
+    gap: var(--mobile-section-gap);
+  }
+
+  .dashboard-side {
+    position: static;
+  }
+
+  .dashboard-panel {
+    padding: .8rem;
+    border-radius: var(--mobile-card-radius);
+  }
+
+  .dashboard-appointment {
+    padding: .7rem 0;
+  }
+
+  .dashboard-appointment .action-row,
+  .dashboard-attention .action-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Concept 88, Touren-Kamm: role-specific chronological phone projections. */
+  .dashboard-page[data-dashboard-role="driver"] [data-dashboard-projection="resource-groups"] {
+    display: none;
+  }
+
+  .dashboard-page[data-dashboard-role="driver"] [data-dashboard-projection="driver-tour"] {
+    display: grid;
+    gap: .65rem;
+    min-width: 0;
+  }
+
+  .dashboard-page[data-dashboard-role="admin"] [data-dashboard-projection="resource-groups"] {
+    display: none;
+  }
+
+  .dashboard-page[data-dashboard-role="admin"] [data-dashboard-projection="admin-tour"] {
+    display: grid;
+    gap: .65rem;
+    min-width: 0;
+  }
+
+  .driver-tour__heading,
+  .admin-tour__heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: .65rem;
+    margin-bottom: 0;
+  }
+
+  .driver-tour__heading h2,
+  .driver-tour__heading p,
+  .admin-tour__heading h2,
+  .admin-tour__heading p {
+    margin: 0;
+  }
+
+  .driver-tour__heading p:last-child,
+  .admin-tour__heading p:last-child {
+    margin-top: .2rem;
+    color: var(--muted);
+    font-size: .82rem;
+    line-height: 1.35;
+  }
+
+  .driver-tour__route,
+  .admin-tour__calendar {
+    min-width: 44px;
+    min-height: 44px;
+    margin: 0;
+    justify-content: center;
+    white-space: nowrap;
+  }
+
+  .driver-tour__list,
+  .admin-tour__list {
+    position: relative;
+    isolation: isolate;
+    display: grid;
+    gap: .65rem;
+    min-width: 0;
+    margin: 0;
+    padding: .2rem 0 .2rem 2.4rem;
+    list-style: none;
+  }
+
+  .driver-tour__list::before,
+  .admin-tour__list::before {
+    position: absolute;
+    z-index: 0;
+    inset-block: .3rem;
+    inset-inline-start: .65rem;
+    width: .5rem;
+    border-radius: 999px;
+    background: var(--moss);
+    content: "";
+  }
+
+  .driver-tour__item,
+  .admin-tour__item {
+    position: relative;
+    z-index: 1;
+    min-width: 0;
+  }
+
+  .driver-tour__item::before,
+  .admin-tour__item::before {
+    position: absolute;
+    z-index: -1;
+    top: 1.45rem;
+    inset-inline-end: 100%;
+    width: 1.25rem;
+    height: .28rem;
+    background: var(--moss);
+    content: "";
+  }
+
+  .driver-tour__appointment,
+  .admin-tour__appointment {
+    display: grid;
+    grid-template-columns: 4.25rem minmax(0, 1fr);
+    gap: .6rem;
+    min-width: 0;
+    min-height: 58px;
+    padding: .72rem;
+    border: 1px solid var(--line);
+    border-inline-start: 0;
+    border-radius: 0 var(--mobile-card-radius) var(--mobile-card-radius) 0;
+    background: var(--surface);
+    box-shadow: 0 .35rem 1rem rgb(29 40 31 / 6%);
+  }
+
+  .driver-tour__appointment:has(.dashboard-countdown),
+  .admin-tour__appointment:has(.dashboard-countdown) {
+    border-color: var(--ochre);
+    box-shadow: 0 0 0 2px var(--ochre), 0 .35rem 1rem rgb(29 40 31 / 8%);
+  }
+
+  .driver-tour__time,
+  .admin-tour__time {
+    display: grid;
+    align-content: start;
+    justify-items: start;
+    gap: .12rem;
+    min-width: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .driver-tour__stop,
+  .admin-tour__stop {
+    min-width: 1.5rem;
+    min-height: 1.5rem;
+    display: inline-grid;
+    margin-bottom: .18rem;
+    place-items: center;
+    border-radius: 999px;
+    color: var(--moss);
+    background: var(--moss-light);
+    font-size: .72rem;
+    font-weight: 900;
+  }
+
+  .driver-tour__time time,
+  .admin-tour__time time {
+    color: var(--ink);
+    font: 800 1.18rem/1 Georgia, "Times New Roman", serif;
+  }
+
+  .driver-tour__time small,
+  .admin-tour__time small {
+    color: var(--muted);
+    font-size: .7rem;
+    line-height: 1.25;
+  }
+
+  .driver-tour__body,
+  .admin-tour__body {
+    min-width: 0;
+  }
+
+  .driver-tour__body h3,
+  .admin-tour__body h3 {
+    margin: .38rem 0 .22rem;
+    font-size: 1.08rem;
+    line-height: 1.15;
+  }
+
+  .driver-tour__body p,
+  .admin-tour__body p {
+    margin: .25rem 0;
+    font-size: .86rem;
+    line-height: 1.35;
+  }
+
+  .driver-tour__crew,
+  .admin-tour__assignment {
+    display: grid;
+    gap: .08rem;
+    color: var(--muted);
+  }
+
+  .driver-tour__crew strong,
+  .admin-tour__assignment strong {
+    color: var(--ink);
+    font-weight: 750;
+  }
+
+  .admin-tour__job-number {
+    color: var(--muted);
+    font-size: .7rem;
+    font-weight: 800;
+  }
+
+  .admin-tour__appointment:has(.warning-copy) {
+    border-color: var(--ochre);
+  }
+
+  .driver-tour__actions,
+  .admin-tour__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .42rem;
+    margin-top: .6rem;
+  }
+
+  .driver-tour__actions .button,
+  .admin-tour__actions .button {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    margin: 0;
+    padding: .5rem;
+    justify-content: center;
+    font-size: .79rem;
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  .driver-tour__navigate {
+    grid-column: 1 / -1;
+  }
+
+  .admin-tour__appointment-link {
+    grid-column: 1 / -1;
+  }
+
+  .admin-tour__note {
+    grid-column: 1 / -1;
+  }
+
+  /* Calendar: controls remain reachable while the board becomes a phone card. */
+  .calendar-page .calendar-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--mobile-section-gap);
+  }
+
+  .calendar-page .calendar-waitlist {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .calendar-page .calendar-board,
+  .calendar-page .calendar-agenda {
+    padding: .55rem;
+  }
+
+  .calendar-quick-controls {
+    grid-template-columns: minmax(0, 1fr);
+    padding: .55rem;
+  }
+
+  .calendar-control-group,
+  .calendar-control-group--date,
+  .calendar-control-group--utilities {
+    width: 100%;
+    grid-column: auto;
+    justify-content: stretch;
+  }
+
+  .calendar-control-group--date {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+  }
+
+  .calendar-control-group--utilities {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .calendar-page [data-calendar] {
+    min-height: 28rem;
+  }
+
+  .calendar-page .fc .fc-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: .4rem;
+  }
+
+  .calendar-page .fc .fc-toolbar-chunk {
+    display: flex;
+    justify-content: center;
+  }
+
+  .calendar-page .fc .fc-button {
+    min-height: 44px;
+  }
+
+  .agenda-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: .55rem;
+    padding: .8rem;
+  }
+
+  .planning-dialog,
+  dialog.modal {
+    width: 100vw;
+    max-width: none;
+    max-height: min(92dvh, var(--visual-viewport-height, 92dvh));
+    margin: auto 0 0;
+    padding: .9rem var(--mobile-gutter) calc(.9rem + env(safe-area-inset-bottom));
+    border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+  }
+
+  /* Planning: progressive steps, full-width map, bottom action sheet. */
+  .planning-progress {
+    display: flex;
+    gap: .4rem;
+    padding-bottom: .3rem;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+  }
+
+  .planning-progress > li {
+    flex: 0 0 min(12rem, 78vw);
+    scroll-snap-align: start;
+  }
+
+  .planning-page .planning-orders,
+  .planning-page .planning-map-panel,
+  .planning-page .planning-selection {
+    width: 100%;
+    border-radius: var(--mobile-card-radius);
+  }
+
+  .planning-page .planning-order-list {
+    max-height: min(42dvh, 22rem);
+  }
+
+  .planning-page .planning-map {
+    min-height: 18rem;
+  }
+
+  .planning-page .planning-selection {
+    bottom: var(--mobile-sticky-bottom);
+    max-height: min(50dvh, 28rem);
+    padding: .8rem;
+    border-radius: 1rem 1rem 0 0;
+    overscroll-behavior: contain;
+  }
+
+  .planning-selection-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .planning-mode-tabs,
+  .planning-result-tools {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .planning-mode-tabs .button,
+  .planning-result-tools .button {
+    width: 100%;
+    margin: 0;
+  }
+
+  /* Routes: next stop, ordered stops and map read as separate app surfaces. */
+  .route-page .route-day-filter {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .route-page .route-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--mobile-section-gap);
+  }
+
+  .route-page .route-map-panel {
+    position: static;
+    padding: .7rem;
+  }
+
+  .route-page .route-map-panel [data-route-map] {
+    min-height: 18rem;
+  }
+
+  .route-page .route-next-stop,
+  .route-page .route-stop-card {
+    padding: .8rem;
+    border-radius: var(--mobile-card-radius);
+    background: var(--surface);
+  }
+
+  .route-page .route-next-stop {
+    border-width: 2px;
+    border-color: var(--moss);
+  }
+
+  .route-page .route-summary {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .route-page .route-summary .suggestion-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .route-page .route-map-toolbar,
+  .route-page .route-order-actions,
+  .route-page .route-stop-pagination {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .route-page .route-map-toolbar .button,
+  .route-page .route-order-actions .button,
+  .route-page .route-stop-pagination .button {
+    width: 100%;
+    margin: 0;
+  }
+
+  .route-page .route-map-toolbar .status-badge {
+    grid-column: 1 / -1;
+    margin-left: 0;
+  }
+
+  .route-page .route-sticky-navigation {
+    bottom: calc(var(--mobile-sticky-bottom) + .35rem);
+  }
+
+  .route-location-picker,
+  .route-location-custom {
+    padding: .75rem;
+  }
+
+  /* Operations: directory rows and weekdays become compact native lists. */
+  [data-operation-page] .compact-list {
+    border-radius: var(--mobile-card-radius);
+    box-shadow: 0 .35rem 1rem rgb(29 40 31 / 6%);
+  }
+
+  [data-operation-page] .compact-row > summary {
+    min-height: 58px;
+    gap: .4rem .65rem;
+    padding: .65rem;
+  }
+
+  [data-operation-page] .compact-row__details {
+    padding: .7rem;
+  }
+
+  [data-operation-page] .availability-weekday {
+    margin-bottom: .7rem;
+    padding: .7rem;
+    border: 1px solid var(--line);
+    border-radius: var(--mobile-card-radius);
+    background: var(--surface);
+  }
+
+  [data-operation-page] .availability-weekday > .section-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  [data-operation-page] .availability-weekday > .section-heading form,
+  [data-operation-page] .availability-weekday > .section-heading .button {
+    width: 100%;
+    margin: 0;
+  }
+
+  [data-operation-page] .interval-list {
+    gap: .45rem;
+  }
+
+  /* Profile and users: one-column account cards with local sticky navigation. */
+  .profile-page .profile-hero {
+    gap: .7rem;
+    margin-bottom: .7rem;
+    padding: .85rem;
+    border-radius: var(--mobile-card-radius);
+  }
+
+  .profile-page .profile-section-nav {
+    top: calc(var(--mobile-app-bar-height) + env(safe-area-inset-top));
+    margin-inline: calc(-1 * var(--mobile-gutter));
+    padding-inline: var(--mobile-gutter);
+    border-inline: 0;
+    border-radius: 0;
+  }
+
+  .profile-page .profile-grid,
+  .profile-page .security-checklist,
+  .profile-page .security-columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: .7rem;
+  }
+
+  .profile-page .profile-card {
+    padding: .85rem;
+  }
+
+  .profile-page .profile-card > header,
+  .profile-page .session-row,
+  .profile-page .totp-setup {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .profile-page .profile-list > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: .2rem;
+  }
+
+  .users-page .users-heading,
+  .users-page .user-card__header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: .65rem;
+  }
+
+  .users-page .user-card__header {
+    min-height: 0;
+    padding: .85rem;
+  }
+
+  .users-page .user-card__badges {
+    justify-content: flex-start;
+  }
+
+  .users-page .user-manage > summary,
+  .users-page .user-manage__grid {
+    padding-inline: .8rem;
+  }
+
+  .users-page .user-manage__grid,
+  .users-page .user-manage__details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .users-page .create-user-card {
+    position: static;
+  }
+
+  /* Voice, feeds and notification failures use short, reachable card flows. */
+  .voice-capture {
+    gap: .7rem;
+  }
+
+  .voice-controls,
+  .voice-preview .action-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .voice-controls .button,
+  .voice-preview .button {
+    width: 100%;
+  }
+
+  .voice-level {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .voice-level meter {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .voice-info__body {
+    padding: 0 .8rem .8rem;
+  }
+
+  .feed-layout,
+  .instruction-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: .7rem;
+  }
+
+  .feed-card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: .55rem;
+    padding: .8rem 0;
+  }
+
+  .feed-card .action-row,
+  .feed-card .action-row form {
+    width: 100%;
+  }
+
+  .feed-card .action-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .feed-card .button {
+    width: 100%;
+    margin: 0;
+  }
+
+  .table-card:has(.responsive-table) {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  .table-card .responsive-table {
+    min-width: 0;
+  }
+
+  .table-card .responsive-table tr {
+    margin-bottom: .65rem;
+    padding: .55rem .7rem;
+    border: 1px solid var(--line);
+    border-radius: var(--mobile-card-radius);
+    background: var(--surface);
+    box-shadow: 0 .25rem .75rem rgb(29 40 31 / 5%);
+  }
+
+  .table-card .responsive-table td {
+    grid-template-columns: minmax(6.5rem, 38%) minmax(0, 1fr);
+  }
+
+  /* Remaining authenticated work lists inherit the same phone rhythm. */
+  .customer-list-toolbar {
+    position: static;
+    grid-template-columns: minmax(0, 1fr);
+    padding: .55rem;
+  }
+
+  .customer-list-toolbar > *,
+  .customer-list-toolbar .button,
+  .waitlist-filter-chips .button,
+  .waitlist-regions .button,
+  .waitlist-favorites .button {
+    max-width: 100%;
+  }
+
+  .appointment-action-group,
+  .appointment-detail-list,
+  .onboarding-phase {
+    border-radius: var(--mobile-card-radius);
+  }
+
+  .onboarding-phase {
+    margin-top: .8rem;
+    padding: .75rem;
+    border: 1px solid var(--line);
+    background: color-mix(in srgb, var(--surface) 88%, var(--paper));
+  }
+}
+
+@media (max-width: 520px) {
+	.list-sort-controls { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 360px) {
+  :root {
+    --mobile-gutter: .5rem;
+  }
+
+  .mobile-app-bar__title {
+    font-size: .86rem;
+  }
+
+  .mobile-primary-action {
+    width: auto;
+    padding: .5rem .55rem;
+    font-size: .72rem;
+  }
+
+  .mobile-bottom-nav .mobile-nav-item__label {
+    overflow: visible;
+    font-size: .66rem;
+    text-overflow: clip;
+  }
+
+  .dashboard-metrics,
+  .planning-mode-tabs,
+  .planning-result-tools,
+  .voice-controls,
+  .voice-preview .action-row,
+  .route-page .route-map-toolbar,
+  .route-page .route-order-actions,
+  .route-page .route-stop-pagination,
+  .calendar-control-group--utilities {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .planning-selection-metrics,
+  .route-page .route-summary .suggestion-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .table-card .responsive-table td {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-height: 500px) and (orientation: landscape) {
+  .mobile-more__dialog {
+    max-height: min(calc(100dvh - var(--mobile-nav-height) - env(safe-area-inset-bottom) - 1.25rem), calc(var(--visual-viewport-height, 100dvh) - var(--mobile-nav-height) - env(safe-area-inset-bottom) - 1.25rem));
+  }
+
+  .command-palette,
+  .shortcut-help {
+    max-height: min(88dvh, var(--visual-viewport-height, 88dvh));
+  }
+}
+
+@media (display-mode: standalone) {
+  @media (max-width: 1050px) {
+    body:has(.mobile-bottom-nav) .site-header {
+      padding-top: max(env(safe-area-inset-top), .25rem);
+    }
+
+    .mobile-bottom-nav {
+      padding-bottom: max(env(safe-area-inset-bottom), .25rem);
+    }
+  }
+}
+
+@media print {
+  .mobile-app-bar,
+  .mobile-bottom-nav,
+  .mobile-primary-action,
+  .driver-tour,
+  .admin-tour {
+    display: none !important;
+  }
+
+  .dashboard-today--grouped {
+    display: block !important;
+  }
+}

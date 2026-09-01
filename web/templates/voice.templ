@@ -23,6 +23,52 @@ type VoiceReviewData struct {
 	Error      string
 }
 
+type voiceReviewIssue struct {
+	Target string
+	Label  string
+	Reason string
+}
+
+func voiceReviewIssues(fields voice.Fields) []voiceReviewIssue {
+	candidates := []struct {
+		target   string
+		label    string
+		field    voice.Field
+		required bool
+	}{
+		{"voice-field-first-name", "Vorname", fields.FirstName, false},
+		{"voice-field-last-name", "Nachname", fields.LastName, false},
+		{"voice-field-company-name", "Firma", fields.CompanyName, false},
+		{"voice-field-address", "Freie Adresse", fields.AddressFreeform, false},
+		{"voice-field-phone", "Telefon", fields.PhoneRaw, false},
+		{"voice-field-email", "E-Mail", fields.Email, false},
+		{"voice-field-volume", "Menge", fields.VolumeM3, true},
+		{"voice-field-hack-duration", "Hackdauer", fields.EstimatedHackMinutes, true},
+		{"voice-field-preferred-start", "Frühestes Datum", fields.PreferredStartDate, false},
+		{"voice-field-preferred-end", "Spätestes Datum", fields.PreferredEndDate, false},
+		{"voice-field-preference", "Wunsch", fields.PreferenceText, false},
+	}
+	issues := make([]voiceReviewIssue, 0, len(candidates))
+	if fields.FirstName.Value == "" && fields.LastName.Value == "" && fields.CompanyName.Value == "" {
+		issues = append(issues, voiceReviewIssue{Target: "voice-field-first-name", Label: "Name oder Firma", Reason: "Angabe fehlt"})
+	}
+	for _, candidate := range candidates {
+		reason := ""
+		switch {
+		case candidate.field.Value == "" && candidate.required:
+			reason = "Angabe fehlt"
+		case candidate.field.Value != "" && candidate.field.Confidence < .75:
+			reason = fmt.Sprintf("%.0f %% Erkennungssicherheit", candidate.field.Confidence*100)
+		case len(candidate.field.Warnings) > 0:
+			reason = "Erkennungshinweis vorhanden"
+		}
+		if reason != "" {
+			issues = append(issues, voiceReviewIssue{Target: candidate.target, Label: candidate.label, Reason: reason})
+		}
+	}
+	return issues
+}
+
 templ VoiceCapture(data VoiceCaptureData) {
 	<!DOCTYPE html>
 	<html lang="de-AT">
@@ -79,8 +125,8 @@ templ VoiceCapture(data VoiceCaptureData) {
 						<form method="post" action="/voice/upload" enctype="multipart/form-data" data-voice-upload>
 							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
 							<input type="hidden" name="idempotency_key" value={ data.UploadKey } data-voice-idempotency-key/>
-							<label>Oder vorhandene Audiodatei prüfen und hochladen<input type="file" name="audio" accept="audio/webm,audio/ogg,audio/wav,video/webm" required/></label>
-							<label>Dauer in Sekunden<input name="duration_seconds" type="number" min="1" max={ fmt.Sprint(data.MaxSeconds) } required/></label>
+							<label>Oder vorhandene Audiodatei prüfen und hochladen<input type="file" name="audio" accept="audio/webm,audio/ogg,audio/wav,video/webm" required data-voice-file/></label>
+							<label>Dauer in Sekunden<input name="duration_seconds" type="number" min="1" max={ fmt.Sprint(data.MaxSeconds) } required data-voice-duration/></label>
 							<button class="button button--quiet" type="submit">Datei als Entwurf verarbeiten</button>
 						</form>
 					</section>
@@ -126,6 +172,17 @@ templ VoiceReview(data VoiceReviewData) {
 					if data.Error != "" {
 						<div class="form-alert" role="alert">{ data.Error }</div>
 					}
+					if issues := voiceReviewIssues(data.Draft.Fields); len(issues) > 0 {
+						<section class="form-alert form-alert--warning" aria-labelledby="voice-review-issues-title">
+							<h2 id="voice-review-issues-title">Zu prüfen</h2>
+							<p>Diese erkannten Angaben fehlen oder sind unsicher. Springen Sie direkt zum Feld und prüfen Sie den Wert vor der bewussten Übernahme.</p>
+							<ul>
+								for _, issue := range issues {
+									<li><a href={ "#" + issue.Target }>{ issue.Label }</a>: { issue.Reason }</li>
+								}
+							</ul>
+						</section>
+					}
 					<div class="voice-review-grid">
 						<aside class="transcript-card">
 							<h2>Transkript</h2>
@@ -142,29 +199,29 @@ templ VoiceReview(data VoiceReviewData) {
 								<div class="form-grid">
 									<label>
 										<span>Vorname</span> @confidence(data.Draft.Fields.FirstName)
-										<input name="first_name" value={ data.Values.FirstName }/>
+										<input id="voice-field-first-name" name="first_name" value={ data.Values.FirstName }/>
 									</label>
 									<label>
 										<span>Nachname</span> @confidence(data.Draft.Fields.LastName)
-										<input name="last_name" value={ data.Values.LastName }/>
+										<input id="voice-field-last-name" name="last_name" value={ data.Values.LastName }/>
 									</label>
 									<label class="span-2">
 										<span>Firma</span> @confidence(data.Draft.Fields.CompanyName)
-										<input name="company_name" value={ data.Values.CompanyName }/>
+										<input id="voice-field-company-name" name="company_name" value={ data.Values.CompanyName }/>
 									</label>
 									<label class="span-2">
 										<span>Freie Adresse</span> @confidence(data.Draft.Fields.AddressFreeform)
-										<textarea name="address_freeform">{ data.Values.AddressFreeform }</textarea>
+										<textarea id="voice-field-address" name="address_freeform">{ data.Values.AddressFreeform }</textarea>
 									</label>
 									<input type="hidden" name="street"/><input type="hidden" name="postal_code"/><input type="hidden" name="locality"/>
 									<label>Region<input name="region" value={ data.Values.Region }/></label>
 									<label>
 										<span>Telefon</span> @confidence(data.Draft.Fields.PhoneRaw)
-										<input name="phone" type="tel" value={ data.Values.Phone }/>
+										<input id="voice-field-phone" name="phone" type="tel" value={ data.Values.Phone }/>
 									</label>
 									<label>
 										<span>E-Mail</span> @confidence(data.Draft.Fields.Email)
-										<input name="email" type="email" value={ data.Values.Email }/>
+										<input id="voice-field-email" name="email" type="email" value={ data.Values.Email }/>
 									</label>
 								</div>
 							</fieldset>
@@ -174,11 +231,11 @@ templ VoiceReview(data VoiceReviewData) {
 									<label>Auftragstyp – ausdrücklich prüfen<select name="job_type" required data-job-type><option value="chipping_only" selected?={ data.Values.JobType == "chipping_only" }>Nur Hackmaschine</option><option value="chipping_with_transport" selected?={ data.Values.JobType == "chipping_with_transport" }>Mit Transport</option></select></label>
 									<label>
 										<span>Menge m³</span> @confidence(data.Draft.Fields.VolumeM3)
-										<input name="volume_m3" value={ data.Values.Volume } required/>
+										<input id="voice-field-volume" name="volume_m3" value={ data.Values.Volume } required/>
 									</label>
 									<label>
 										<span>Hackdauer in Minuten</span> @confidence(data.Draft.Fields.EstimatedHackMinutes)
-										<input name="hack_duration" value={ data.Values.HackDuration } required/>
+										<input id="voice-field-hack-duration" name="hack_duration" value={ data.Values.HackDuration } required/>
 									</label>
 									<label data-transport-field>Transportdauer Minuten<input name="transport_duration" value={ data.Values.TransportDuration } data-transport-control/></label>
 									<label data-transport-field>Fahrten<input name="transport_trips" value={ data.Values.Trips } type="number" min="0" data-transport-control/></label>
@@ -186,16 +243,16 @@ templ VoiceReview(data VoiceReviewData) {
 									<label class="check-label" data-external-confirmation><input name="external_confirmed" type="checkbox" value="true"/> externer Transport bestätigt</label>
 									<label>
 										<span>Frühestes Datum</span> @confidence(data.Draft.Fields.PreferredStartDate)
-										<input name="preferred_start" type="date" value={ data.Values.PreferredStart }/>
+										<input id="voice-field-preferred-start" name="preferred_start" type="date" value={ data.Values.PreferredStart }/>
 									</label>
 									<label>
 										<span>Spätestes Datum</span> @confidence(data.Draft.Fields.PreferredEndDate)
-										<input name="preferred_end" type="date" value={ data.Values.PreferredEnd }/>
+										<input id="voice-field-preferred-end" name="preferred_end" type="date" value={ data.Values.PreferredEnd }/>
 									</label>
 									<label>Dringlichkeit<select name="urgency"><option value="normal" selected?={ data.Values.Urgency == "normal" }>Normal</option><option value="low" selected?={ data.Values.Urgency == "low" }>Niedrig</option><option value="high" selected?={ data.Values.Urgency == "high" }>Hoch</option><option value="urgent" selected?={ data.Values.Urgency == "urgent" }>Dringend</option></select></label>
 									<label class="span-2">
 										<span>Wunsch</span> @confidence(data.Draft.Fields.PreferenceText)
-										<textarea name="preference_text">{ data.Values.PreferenceText }</textarea>
+										<textarea id="voice-field-preference" name="preference_text">{ data.Values.PreferenceText }</textarea>
 									</label>
 									<label class="span-2">Interne Bemerkung<textarea name="note">{ data.Values.Note }</textarea></label>
 								</div>

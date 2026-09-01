@@ -178,10 +178,12 @@ templ jobLocationEditor(page PageData, prefix string, values IntakeValues, custo
 		<p class="form-hint" id={ prefix + "-pile-map-hint" }>Position auf der Karte anklicken oder die Koordinaten darunter eingeben. Beide Wege erfordern anschließend „Standort übernehmen“.</p>
 		<div id={ prefix + "-pile-map" } class="job-location-map" data-map-canvas role="region" aria-labelledby={ prefix + "-pile-map-heading" } aria-describedby={ prefix + "-pile-map-hint" }><div class="map-fallback" data-map-fallback>Die Straßenkarte wird geladen. Koordinaten können jederzeit direkt eingegeben werden.</div></div>
 		<div class="coordinate-grid">
-			<label for={ prefix + "-pile-latitude" }>Breitengrad<input id={ prefix + "-pile-latitude" } data-location-latitude inputmode="decimal" value={ values.PileLatitude } aria-invalid={ formFieldInvalid(fieldErrors, "pile_latitude") } aria-describedby={ formFieldDescription(fieldErrors, "pile_latitude") }/></label>
-			<label for={ prefix + "-pile-longitude" }>Längengrad<input id={ prefix + "-pile-longitude" } data-location-longitude inputmode="decimal" value={ values.PileLongitude }/></label>
+			<label for={ prefix + "-pile-latitude" }>Breitengrad<input id={ prefix + "-pile-latitude" } data-location-latitude inputmode="decimal" value={ values.PileLatitude } aria-invalid={ coordinateFieldInvalid(fieldErrors) } aria-describedby={ coordinateFieldDescription(prefix, fieldErrors) }/></label>
+			<label for={ prefix + "-pile-longitude" }>Längengrad<input id={ prefix + "-pile-longitude" } data-location-longitude inputmode="decimal" value={ values.PileLongitude } aria-invalid={ coordinateFieldInvalid(fieldErrors) } aria-describedby={ coordinateFieldDescription(prefix, fieldErrors) }/></label>
 		</div>
-		@formFieldMessage(fieldErrors, "pile_latitude")
+		if coordinateFieldError(fieldErrors) != "" {
+			<small id={ prefix + "-pile-coordinate-error" } class="field-error">{ coordinateFieldError(fieldErrors) }</small>
+		}
 		<input type="hidden" name="pile_latitude" value={ values.PileLatitude } data-location-committed-latitude/>
 		<input type="hidden" name="pile_longitude" value={ values.PileLongitude } data-location-committed-longitude/>
 		<input type="hidden" name="pile_location_source" value={ values.PileLocationSource } data-location-committed-source/>
@@ -193,6 +195,24 @@ templ jobLocationEditor(page PageData, prefix string, values IntakeValues, custo
 		</div>
 		<p class="form-hint" data-location-message aria-live="polite">{ locationMessage(values) }</p>
 	</section>
+}
+
+func coordinateFieldError(fieldErrors []FormFieldError) string {
+	if message := formFieldError(fieldErrors, "pile_latitude"); message != "" {
+		return message
+	}
+	return formFieldError(fieldErrors, "pile_longitude")
+}
+
+func coordinateFieldInvalid(fieldErrors []FormFieldError) string {
+	return strconv.FormatBool(coordinateFieldError(fieldErrors) != "")
+}
+
+func coordinateFieldDescription(prefix string, fieldErrors []FormFieldError) string {
+	if coordinateFieldError(fieldErrors) == "" {
+		return ""
+	}
+	return prefix + "-pile-coordinate-error"
 }
 
 func locationBadge(values IntakeValues) string {
@@ -463,11 +483,9 @@ templ Customers(data CustomerListData) {
 						<button class="button button--quiet" type="submit">Suchen</button>
 						<a class="button button--quiet" href="/customers">Zurücksetzen</a>
 					</div>
-					<div class="customer-sort-controls" role="group" aria-label="Kunden sortieren">
-						<button class={ customerSortClass(data.Page.CustomerFilter, "recent") } type="submit" name="order" value={ customerSortOrder(data.Page.CustomerFilter, "recent") } aria-pressed={ strconv.FormatBool(data.Page.CustomerFilter.Sort == "recent") }>Zuletzt { customerSortMark(data.Page.CustomerFilter, "recent") }</button>
-						<button class={ customerSortClass(data.Page.CustomerFilter, "name") } type="submit" name="order" value={ customerSortOrder(data.Page.CustomerFilter, "name") } aria-pressed={ strconv.FormatBool(data.Page.CustomerFilter.Sort == "name") }>Name { customerSortMark(data.Page.CustomerFilter, "name") }</button>
-						<button class={ customerSortClass(data.Page.CustomerFilter, "locality") } type="submit" name="order" value={ customerSortOrder(data.Page.CustomerFilter, "locality") } aria-pressed={ strconv.FormatBool(data.Page.CustomerFilter.Sort == "locality") }>Ort { customerSortMark(data.Page.CustomerFilter, "locality") }</button>
-						<button class={ customerSortClass(data.Page.CustomerFilter, "jobs") } type="submit" name="order" value={ customerSortOrder(data.Page.CustomerFilter, "jobs") } aria-pressed={ strconv.FormatBool(data.Page.CustomerFilter.Sort == "jobs") }>Aufträge { customerSortMark(data.Page.CustomerFilter, "jobs") }</button>
+					<div class="list-sort-controls" role="group" aria-label="Kunden sortieren">
+						<label>Sortierung<select name="order"><option value="recent:desc" selected?={ data.Page.CustomerFilter.Sort == "recent" && data.Page.CustomerFilter.Direction == "desc" }>Zuletzt geändert</option><option value="recent:asc" selected?={ data.Page.CustomerFilter.Sort == "recent" && data.Page.CustomerFilter.Direction == "asc" }>Älteste Änderung</option><option value="name:asc" selected?={ data.Page.CustomerFilter.Sort == "name" && data.Page.CustomerFilter.Direction == "asc" }>Name A–Z</option><option value="name:desc" selected?={ data.Page.CustomerFilter.Sort == "name" && data.Page.CustomerFilter.Direction == "desc" }>Name Z–A</option><option value="locality:asc" selected?={ data.Page.CustomerFilter.Sort == "locality" && data.Page.CustomerFilter.Direction == "asc" }>Ort A–Z</option><option value="locality:desc" selected?={ data.Page.CustomerFilter.Sort == "locality" && data.Page.CustomerFilter.Direction == "desc" }>Ort Z–A</option><option value="jobs:desc" selected?={ data.Page.CustomerFilter.Sort == "jobs" && data.Page.CustomerFilter.Direction == "desc" }>Meiste Aufträge</option><option value="jobs:asc" selected?={ data.Page.CustomerFilter.Sort == "jobs" && data.Page.CustomerFilter.Direction == "asc" }>Wenigste Aufträge</option></select></label>
+						<button class="button button--quiet" type="submit">Sortieren</button>
 					</div>
 					<details class="customer-filter-menu" open?={ customerFilterCount(data.Page.CustomerFilter) > 0 }>
 						<summary>Filter <span class="customer-filter-count">{ fmt.Sprint(customerFilterCount(data.Page.CustomerFilter)) }</span></summary>
@@ -549,7 +567,11 @@ templ Customers(data CustomerListData) {
 						</table>
 					</div>
 				} else {
-					<div class="empty-state"><h2>Keine Kunden gefunden</h2><p>Ändern Sie die Suche oder erfassen Sie einen neuen Auftrag.</p></div>
+					if data.Search != "" || customerFilterCount(data.Page.CustomerFilter) > 0 {
+						<div class="empty-state"><h2>Keine passenden Kunden</h2><p>Suche oder Filter liefern keine Treffer.</p><a class="button button--quiet" href="/customers">Suche und Filter zurücksetzen</a></div>
+					} else {
+						<div class="empty-state"><h2>Noch keine Kunden</h2><p>Erfassen Sie den ersten Auftrag; dabei entsteht die Kundenakte.</p><a class="button" href="/customers/new">Ersten Auftrag erfassen</a></div>
+					}
 				}
 				@customerPagination(data)
 			</main>@appFooter(data.Shell.Page)
@@ -624,7 +646,7 @@ templ CustomerDetail(data CustomerDetailData) {
 							<a class="button button--quiet" href={ data.Detail.MapsURL } target="_blank" rel="noopener noreferrer">In Google Maps öffnen</a>
 						}
 						if data.Shell.Actor.Role == auth.RoleAdmin && data.Detail.Customer.ArchivedAt == nil {
-							<form method="post" action={ "/customers/" + data.Detail.Customer.ID + "/archive" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(data.Detail.Customer.Version) }/><button class="button button--danger" type="submit">Kunde archivieren</button></form>
+							<form method="post" action={ "/customers/" + data.Detail.Customer.ID + "/archive" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(data.Detail.Customer.Version) }/><button class="button button--danger" type="submit" data-confirm-message={ customerName(data.Detail.Customer.FirstName, data.Detail.Customer.LastName, data.Detail.Customer.CompanyName) + " archivieren? Der Kunde verschwindet aus aktiven Ansichten; Aufträge und Historie bleiben erhalten. Aktive Planungsabläufe verhindern die Archivierung." }>Kunde archivieren</button></form>
 						}
 					</div>
 				</div>
@@ -703,7 +725,7 @@ templ CustomerDetail(data CustomerDetailData) {
 						for _, job := range data.Detail.Jobs {
 							<details class="compact-job-row" id={ "job-" + job.ID } data-record-id={ job.ID } open?={ data.JobEditID == job.ID }>
 								<summary>
-									<span class="compact-row__primary"><strong>{ job.JobNumber }</strong><button class="button button--quiet" type="button" data-copy-value={ job.JobNumber }>Nummer kopieren</button><small>{ fallback(job.Region) }</small></span>
+									<span class="compact-row__primary"><strong>{ job.JobNumber }</strong><small>{ fallback(job.Region) }</small></span>
 									<span data-label="Leistung"><strong>{ job.VolumeM3 } m³</strong><small>{ jobTypeLabel(job.JobType) }</small></span>
 									<span data-label="Dauer">{ durationLabel(job.EstimatedHackMinutes) }</span>
 									<span data-label="Wunsch">{ preferredRangeLabel(job.PreferredStartDate, job.PreferredEndDate) }<small>{ urgencyLabel(job.Urgency) }</small></span>
@@ -712,6 +734,7 @@ templ CustomerDetail(data CustomerDetailData) {
 								</summary>
 								<div class="compact-job-row__body">
 									<div class="action-row job-primary-actions">
+										<button class="button button--quiet" type="button" data-copy-value={ job.JobNumber }>Nummer kopieren</button>
 										<form method="post" action="/waitlist/search"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="q" value={ job.JobNumber }/><button class="button button--quiet" type="submit">In Warteliste fokussieren</button></form>
 										if job.ActiveAppointmentID != "" {
 											<a class="button button--quiet" href={ "/calendar?appointment=" + url.QueryEscape(job.ActiveAppointmentID) }>Blockierenden Termin öffnen</a>
@@ -990,12 +1013,10 @@ templ Waitlist(data WaitlistData) {
 						<button class="button button--quiet" type="submit">Suchen</button>
 						<a class="button button--quiet" href="/waitlist">Zurücksetzen</a>
 					</div>
-					<div class="customer-sort-controls waitlist-sort-controls" role="group" aria-label="Warteliste sortieren">
-						<button class={ waitlistSortClass(data.Filter, "entered") } type="submit" name="order" value={ waitlistSortOrder(data.Filter, "entered") } aria-pressed={ strconv.FormatBool(data.Filter.Sort == "entered") }>Eingang { waitlistSortMark(data.Filter, "entered") }</button>
-						<button class={ waitlistSortClass(data.Filter, "preferred") } type="submit" name="order" value={ waitlistSortOrder(data.Filter, "preferred") } aria-pressed={ strconv.FormatBool(data.Filter.Sort == "preferred") }>Wunsch { waitlistSortMark(data.Filter, "preferred") }</button>
-						<button class={ waitlistSortClass(data.Filter, "urgency") } type="submit" name="order" value={ waitlistSortOrder(data.Filter, "urgency") } aria-pressed={ strconv.FormatBool(data.Filter.Sort == "urgency") }>Dringlichkeit { waitlistSortMark(data.Filter, "urgency") }</button>
-						<button class={ waitlistSortClass(data.Filter, "volume") } type="submit" name="order" value={ waitlistSortOrder(data.Filter, "volume") } aria-pressed={ strconv.FormatBool(data.Filter.Sort == "volume") }>Menge { waitlistSortMark(data.Filter, "volume") }</button>
-						<button class={ waitlistSortClass(data.Filter, "region") } type="submit" name="order" value={ waitlistSortOrder(data.Filter, "region") } aria-pressed={ strconv.FormatBool(data.Filter.Sort == "region") }>Region { waitlistSortMark(data.Filter, "region") }</button>
+					<div class="list-sort-controls" role="group" aria-label="Warteliste sortieren">
+						<label>Sortieren nach<select name="sort_choice"><option value="entered" selected?={ data.Filter.Sort == "entered" }>Eingang</option><option value="preferred" selected?={ data.Filter.Sort == "preferred" }>Wunschzeitraum</option><option value="urgency" selected?={ data.Filter.Sort == "urgency" }>Dringlichkeit</option><option value="volume" selected?={ data.Filter.Sort == "volume" }>Holzmenge</option><option value="duration" selected?={ data.Filter.Sort == "duration" }>Gesamtdauer</option><option value="region" selected?={ data.Filter.Sort == "region" }>Region</option><option value="customer" selected?={ data.Filter.Sort == "customer" }>Kunde</option><option value="workflow" selected?={ data.Filter.Sort == "workflow" }>Planungsstand</option><option value="updated" selected?={ data.Filter.Sort == "updated" }>Zuletzt geändert</option></select></label>
+						<label>Richtung<select name="direction_choice"><option value="asc" selected?={ data.Filter.Direction == "asc" }>Aufsteigend</option><option value="desc" selected?={ data.Filter.Direction == "desc" }>Absteigend</option></select></label>
+						<button class="button button--quiet" type="submit">Sortieren</button>
 					</div>
 					<details class="customer-filter-menu waitlist-filter-menu" open?={ waitlistFilterCount(data.Filter) > 0 }>
 						<summary>Filter <span class="customer-filter-count">{ fmt.Sprint(waitlistFilterCount(data.Filter)) }</span></summary>
@@ -1007,8 +1028,6 @@ templ Waitlist(data WaitlistData) {
 								<label>Planungsstand<select name="workflow"><option value="">Alle</option><option value="unplanned" selected?={ data.Filter.Workflow == "unplanned" }>Ungeplant</option><option value="proposal" selected?={ data.Filter.Workflow == "proposal" }>Vorschlag</option><option value="scheduled" selected?={ data.Filter.Workflow == "scheduled" }>Eingeplant</option></select></label>
 								<label>Wunschmonat<input name="month" type="month" value={ data.Filter.PreferredMonth }/></label>
 								<label>Dauergruppe<select name="duration_group"><option value="">Alle</option><option value="short" selected?={ data.Filter.DurationGroup == "short" }>bis 2 Stunden</option><option value="medium" selected?={ data.Filter.DurationGroup == "medium" }>2–6 Stunden</option><option value="long" selected?={ data.Filter.DurationGroup == "long" }>über 6 Stunden</option></select></label>
-								<label>Weitere Sortierung<select name="sort_choice"><option value="entered" selected?={ data.Filter.Sort == "entered" }>Eingang</option><option value="preferred" selected?={ data.Filter.Sort == "preferred" }>Wunschzeitraum</option><option value="urgency" selected?={ data.Filter.Sort == "urgency" }>Dringlichkeit</option><option value="volume" selected?={ data.Filter.Sort == "volume" }>Holzmenge</option><option value="duration" selected?={ data.Filter.Sort == "duration" }>Gesamtdauer</option><option value="region" selected?={ data.Filter.Sort == "region" }>Region</option><option value="customer" selected?={ data.Filter.Sort == "customer" }>Kunde</option><option value="workflow" selected?={ data.Filter.Sort == "workflow" }>Planungsstand</option><option value="updated" selected?={ data.Filter.Sort == "updated" }>Zuletzt geändert</option></select></label>
-								<label>Richtung<select name="direction_choice"><option value="asc" selected?={ data.Filter.Direction == "asc" }>Aufsteigend</option><option value="desc" selected?={ data.Filter.Direction == "desc" }>Absteigend</option></select></label>
 								<label class="customer-filter-chip"><input name="incomplete" type="checkbox" value="1" checked?={ data.Filter.Incomplete }/> Prüfwarteschlange: unvollständig</label>
 								<label class="customer-filter-chip"><input name="missing_location" type="checkbox" value="1" checked?={ data.Filter.MissingLocation }/> Haufenstandort fehlt</label>
 								<label class="customer-filter-chip"><input name="duration_issue" type="checkbox" value="1" checked?={ data.Filter.DurationIssue }/> Dauer prüfen</label>
@@ -1180,7 +1199,11 @@ templ Waitlist(data WaitlistData) {
 						</table>
 					</div>
 				} else {
-					<div class="empty-state"><h2>Warteliste ist leer</h2><p>Neue Aufträge erscheinen nach der Erfassung hier.</p></div>
+					if waitlistHasFilters(data.Filter) {
+						<div class="empty-state"><h2>Keine passenden Aufträge</h2><p>Die aktive Suche oder Filterkombination liefert keine Treffer.</p><a class="button button--quiet" href="/waitlist">Suche und Filter zurücksetzen</a></div>
+					} else {
+						<div class="empty-state"><h2>Warteliste ist leer</h2><p>Neue Aufträge erscheinen nach der Erfassung hier.</p><a class="button" href="/customers/new">Neuen Auftrag erfassen</a></div>
+					}
 				}
 				@waitlistPagination(data)
 			</main>@appFooter(data.Shell.Page)

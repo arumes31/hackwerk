@@ -280,7 +280,7 @@ func TestProfileEmailVerificationTOTPAndRecoveryHandlers(t *testing.T) {
 	}
 	response = httptest.NewRecorder()
 	confirmTOTPEnrollment(fixture.identity, fixture.dependencies, fixture.page).ServeHTTP(response, fixture.request(t, http.MethodPost, "https://example.test/profile/totp/confirm", url.Values{"code": {code}}))
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Recovery-Codes") {
+	if response.Code != http.StatusOK || !containsAll(response.Body.String(), "Recovery-Codes", "Profilbereiche", `href="#personal"`, `href="#security"`, `href="#sessions"`, "Codes kopieren", "Codes drucken") {
 		t.Fatalf("confirm TOTP = %d %q", response.Code, response.Body.String())
 	}
 	enabled := fixture.now

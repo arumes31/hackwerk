@@ -85,6 +85,60 @@ func TestNotificationFailuresRendersSafeOperationalDetails(t *testing.T) {
 	}
 }
 
+func TestNotificationFailuresRenderAsResponsiveCardsWithCollapsedPreview(t *testing.T) {
+	now := time.Now().UTC()
+	store := &notificationHTTPStore{
+		statuses: []notification.Status{{
+			ID: "notification", AppointmentID: "appointment", Channel: "email", State: "failed",
+			Recipient: "m***@example.test", ErrorCode: "provider_temporary", ErrorSummary: "Provider nicht erreichbar",
+		}},
+		callbacks: []notification.CallbackRequest{{
+			AppointmentID: "appointment", JobNumber: "HW-1", CustomerName: "Maria Muster", Locality: "Musterort",
+			Phone: "***567", ResponseNote: "Bitte nach 16 Uhr", RespondedAt: now, ExpiresAt: now.Add(24 * time.Hour),
+		}},
+	}
+	service, err := notification.NewAdminService(store, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	notificationFailures(
+		service,
+		templates.PageData{AppName: "HackWerk", Version: "test"},
+		"csrf",
+		slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
+	).ServeHTTP(response, notificationAdminRequest(t, http.MethodGet, "/admin/notifications"))
+	body := response.Body.String()
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", response.Code, body)
+	}
+	if count := strings.Count(body, `<table class="responsive-table">`); count != 2 {
+		t.Fatalf("responsive tables = %d, want 2: %s", count, body)
+	}
+	for _, label := range []string{
+		`data-label="Kanal/Ziel"`,
+		`data-label="Status/Zeit"`,
+		`data-label="Fehler und Handlung"`,
+		`data-label="Referenz"`,
+		`data-label="Prüfung"`,
+		`data-label="Aktion"`,
+		`data-label="Auftrag"`,
+		`data-label="Kunde/Ort"`,
+		`data-label="Telefon"`,
+		`data-label="Rückrufnotiz"`,
+		`data-label="Antwort"`,
+		`data-label="Link gültig bis"`,
+	} {
+		if !strings.Contains(body, label) {
+			t.Fatalf("responsive table missing %q: %s", label, body)
+		}
+	}
+	if !strings.Contains(body, `<details class="compact-filter-panel">`) ||
+		!strings.Contains(body, `<summary>Nachrichtenvorschau anzeigen</summary>`) {
+		t.Fatalf("message preview is not a native collapsed disclosure: %s", body)
+	}
+}
+
 func TestNotificationReportAndReview(t *testing.T) {
 	now := time.Now().UTC()
 	store := &notificationHTTPStore{statuses: []notification.Status{{

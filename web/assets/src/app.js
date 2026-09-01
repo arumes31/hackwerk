@@ -49,6 +49,11 @@ function safePreferenceRemove(key) {
   try { window.localStorage.removeItem(key); } catch { /* Privacy notice remains usable without storage. */ }
 }
 
+const privacyNoticeVisible = () => {
+  const notice = document.querySelector("[data-privacy-notice]");
+  return Boolean(notice && !notice.hidden);
+};
+
 function initializePrivacyNotice() {
   const notice = document.querySelector("[data-privacy-notice]");
   if (!notice) return;
@@ -59,12 +64,14 @@ function initializePrivacyNotice() {
   const preferenceKey = "hackwerk:privacy-notice:v1";
   const open = ({ reset = false, focus = false } = {}) => {
     if (reset) safePreferenceRemove(preferenceKey);
-    notice.hidden = false;
+		notice.hidden = false;
+		window.dispatchEvent(new CustomEvent("hackwerk:privacy-notice", { detail: { open: true } }));
     if (focus) window.requestAnimationFrame(() => notice.focus({ preventScroll: true }));
   };
   const dismiss = () => {
     safePreferenceSet(preferenceKey, "read");
-    notice.hidden = true;
+		notice.hidden = true;
+		window.dispatchEvent(new CustomEvent("hackwerk:privacy-notice", { detail: { open: false } }));
     announce("Cookie-Hinweis geschlossen. Er kann im Footer erneut geöffnet werden.");
   };
   document.querySelectorAll("[data-privacy-notice-open]").forEach((button) => {
@@ -279,6 +286,15 @@ const updateInstallState = () => {
   if (profileInstallStatus) profileInstallStatus.textContent = installed ? "Installiert" : installEvent ? "Installation unterstützt" : "In diesem Browser nicht verfügbar";
   if (profileInstallButton) profileInstallButton.hidden = installed || !installEvent;
 };
+const offerInstallPrompt = () => {
+  const dismissed = safePreferenceGet("hackwerk:install-dismissed") === "true";
+  if (!installEvent || dismissed || isStandalone() || !installPrompt || privacyNoticeVisible()) {
+    hideInstallPrompt();
+    return;
+  }
+  installPrompt.hidden = false;
+  announce("HackWerk kann auf diesem Gerät installiert werden.");
+};
 const promptForInstall = async () => {
   if (!installEvent) {
     hideInstallPrompt();
@@ -302,21 +318,22 @@ updateInstallState();
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   if (typeof event.prompt !== "function") return;
-  installEvent = event;
-  updateInstallState();
-  if (safePreferenceGet("hackwerk:install-dismissed") !== "true" && !isStandalone() && installPrompt) {
-    installPrompt.hidden = false;
-    announce("HackWerk kann auf diesem Gerät installiert werden.");
-  }
+	installEvent = event;
+	updateInstallState();
+	offerInstallPrompt();
+});
+window.addEventListener("hackwerk:privacy-notice", (event) => {
+	if (event.detail?.open) hideInstallPrompt();
+	else offerInstallPrompt();
 });
 installPrompt?.querySelector("[data-install-accept]")?.addEventListener("click", async () => {
   await promptForInstall();
 });
 profileInstallButton?.addEventListener("click", promptForInstall);
 installPrompt?.querySelector("[data-install-dismiss]")?.addEventListener("click", () => {
-  safePreferenceSet("hackwerk:install-dismissed", "true");
-  installEvent = undefined;
-  hideInstallPrompt();
+	safePreferenceSet("hackwerk:install-dismissed", "true");
+	hideInstallPrompt();
+	updateInstallState();
 });
 window.addEventListener("appinstalled", () => {
   installEvent = undefined;
@@ -443,7 +460,26 @@ document.querySelectorAll("[data-logout-form]").forEach((form) => {
   });
 });
 
-document.querySelectorAll("[data-mobile-menu] a").forEach((link) => link.addEventListener("click", () => { link.closest("details")?.removeAttribute("open"); }));
+document.querySelectorAll("[data-user-directory]").forEach((directory) => {
+  const filter = document.querySelector("[data-user-filter]");
+  const cards = Array.from(directory.querySelectorAll("[data-user-card]"));
+  const status = directory.querySelector("[data-user-filter-status]");
+  if (!filter) return;
+  const apply = () => {
+    const query = filter.value.trim().toLocaleLowerCase("de-AT");
+    let visibleCount = 0;
+    cards.forEach((card) => {
+      const visible = query === "" || card.dataset.userSearch.includes(query);
+      card.hidden = !visible;
+      if (visible) visibleCount += 1;
+    });
+    if (status) {
+      status.hidden = visibleCount !== 0;
+      status.textContent = visibleCount === 0 ? "Kein Zugang passt zum Filter." : `${visibleCount} Zugänge sichtbar.`;
+    }
+  };
+  filter.addEventListener("input", apply);
+});
 if (window.visualViewport) {
   const updateViewport = () => document.documentElement.style.setProperty("--visual-viewport-height", `${window.visualViewport.height}px`);
   window.visualViewport.addEventListener("resize", updateViewport); updateViewport();
@@ -460,28 +496,32 @@ document.querySelectorAll("[data-confirmation-form]").forEach((form) => {
   const summary = form.querySelector("[data-confirmation-summary]");
   const note = form.elements.namedItem("response_note");
   const noteFeedback = form.querySelector("[data-confirmation-note-feedback]");
+  const choices = Array.from(form.querySelectorAll("input[name='action']"));
+  const selectedChoice = () => choices.find((choice) => choice.checked);
   const updateNoteFeedback = () => {
     if (!note || !noteFeedback) return;
     note.removeAttribute("aria-invalid");
     const length = note.value.length;
-    noteFeedback.textContent = length === 0 ? "Die Notiz wird nur bei einer Ablehnung übermittelt." : `${length} von 500 Zeichen. Die Notiz wird nur bei einer Ablehnung übermittelt.`;
+    noteFeedback.textContent = length === 0 ? "Die Notiz wird nur bei einer Ablehnung oder einem Rückrufwunsch übermittelt." : `${length} von 500 Zeichen. Die Notiz wird nur bei einer Ablehnung oder einem Rückrufwunsch übermittelt.`;
   };
   note?.addEventListener("input", updateNoteFeedback);
   updateNoteFeedback();
-  form.querySelectorAll("button[name='action']").forEach((button) => {
-    button.addEventListener("focus", () => { if (summary) summary.textContent = button.dataset.responseLabel; });
+  choices.forEach((choice) => {
+    const updateSummary = () => { if (summary && choice.checked) summary.textContent = `${choice.dataset.responseLabel} Gespeichert wird erst mit „Antwort verbindlich speichern“.`; };
+    choice.addEventListener("change", updateSummary);
+    choice.addEventListener("focus", updateSummary);
   });
   form.addEventListener("submit", (event) => {
-    const button = event.submitter;
-    if (note?.value.trim() && button?.value !== "declined") {
+    const choice = selectedChoice();
+    const actionAllowsNote = choice?.value === "declined" || choice?.value === "callback_requested";
+    if (note?.value.trim() && !actionAllowsNote) {
       event.preventDefault(); note.focus();
       note.setAttribute("aria-invalid", "true");
-      if (noteFeedback) noteFeedback.textContent = "Die Rückrufnotiz kann nur mit einer Ablehnung gesendet werden.";
-      if (summary) summary.textContent = "Die Rückrufnotiz kann nur mit einer Ablehnung gesendet werden. Bitte Notiz leeren oder „Termin ablehnen“ wählen.";
+      if (noteFeedback) noteFeedback.textContent = "Die Rückrufnotiz kann nur mit einer Ablehnung oder einem Rückrufwunsch gesendet werden.";
+      if (summary) summary.textContent = "Bitte leeren Sie die Notiz oder wählen Sie „Termin ablehnen“ beziehungsweise „Rückruf wünschen“.";
       return;
     }
-    if (summary && button?.dataset.responseLabel) summary.textContent = `${button.dataset.responseLabel} Jetzt wird die Antwort einmalig gespeichert.`;
-    form.querySelectorAll("button").forEach((control) => { control.setAttribute("aria-disabled", "true"); });
+    if (summary && choice?.dataset.responseLabel) summary.textContent = `${choice.dataset.responseLabel} Jetzt wird die Antwort einmalig gespeichert.`;
   });
 });
 
@@ -538,7 +578,7 @@ async function operationFailureMessage(response) {
 document.addEventListener("submit", async (event) => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement) || !form.closest("[data-operation-page]") || String(form.method).toLowerCase() === "get") return;
-  const confirmationMessage = event.submitter?.dataset.confirmMessage;
+  const confirmationMessage = event.submitter?.dataset.confirmMessage || form.dataset.confirmMessage;
   if (confirmationMessage && !window.confirm(confirmationMessage)) {
     event.preventDefault();
     announce("Aktion abgebrochen.");
@@ -659,7 +699,7 @@ document.addEventListener("submit", (event) => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement) || String(form.method).toLowerCase() === "get" || form.dataset.allowMultipleSubmit === "true") return;
   if (event.defaultPrevented) return;
-  const confirmationMessage = event.submitter?.dataset.confirmMessage;
+  const confirmationMessage = event.submitter?.dataset.confirmMessage || form.dataset.confirmMessage;
   if (confirmationMessage && !window.confirm(confirmationMessage)) {
     event.preventDefault();
     announce("Aktion abgebrochen.");
@@ -958,7 +998,7 @@ function showAppointmentFailure(failure) {
 
 function renderAppointmentPreflight(preview) {
   const target = document.querySelector("[data-appointment-preflight]");
-  if (!target) return;
+  if (!target) return null;
   target.replaceChildren();
   const heading = document.createElement("h3");
   heading.textContent = "Prüfung vor der Änderung";
@@ -991,7 +1031,7 @@ function renderAppointmentPreflight(preview) {
   }
   target.hidden = false;
   target.tabIndex = -1;
-  target.focus();
+  return target;
 }
 
 async function previewAppointmentMutation(appointmentID, version, action, extra, csrf) {
@@ -1002,7 +1042,11 @@ async function previewAppointmentMutation(appointmentID, version, action, extra,
     else form.set(key, value);
   });
   const preview = await calendarRequest(`/api/v1/appointments/${encodeURIComponent(appointmentID)}/preview`, form, csrf);
-  renderAppointmentPreflight(preview);
+  const target = renderAppointmentPreflight(preview);
+  if (target) {
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+    if (target.isConnected && !target.hidden) target.focus({ preventScroll: false });
+  }
   return preview;
 }
 
@@ -1168,6 +1212,7 @@ document.querySelectorAll("[data-shortcuts-open]").forEach((button) => button.ad
 document.querySelectorAll("[data-shortcuts-close]").forEach((button) => button.addEventListener("click", () => shortcutDialog?.close()));
 commandPalette?.addEventListener("close", () => commandTrigger?.focus?.());
 shortcutDialog?.addEventListener("close", () => shortcutTrigger?.focus?.());
+if (commandPalette instanceof HTMLDialogElement) document.documentElement.classList.add("command-dialog-ready");
 
 document.addEventListener("keydown", (event) => {
   const active = document.activeElement;
@@ -1326,6 +1371,11 @@ function notificationStateLabel(value) {
   return ({ queued: "Eingereiht", sending: "Wird gesendet", retry_wait: "Wartet auf Wiederholung", sent: "Gesendet", failed: "Fehlgeschlagen" })[value] || value;
 }
 
+function setAppointmentActionGroupVisibility(dialog, name, visible) {
+  const group = dialog.querySelector(`[data-appointment-action-group="${name}"]`);
+  if (group) group.hidden = !visible;
+}
+
 async function appointmentDetail(event, loadedProps) {
   const dialog = document.querySelector("[data-appointment-dialog]");
   if (!dialog) return;
@@ -1362,7 +1412,7 @@ async function appointmentDetail(event, loadedProps) {
     "[data-appointment-complete-override-reason]",
   ].join(",")).forEach((field) => { field.value = ""; });
   const withoutNotification = dialog.querySelector("[data-without-notification]");
-  if (withoutNotification) withoutNotification.hidden = (props.notification_channels || []).length > 0;
+  if (withoutNotification) withoutNotification.hidden = true;
   dialog.querySelector("[data-appointment-title]").textContent = props.title;
   const detail = dialog.querySelector("[data-appointment-detail]");
   detail.replaceChildren();
@@ -1464,10 +1514,20 @@ async function appointmentDetail(event, loadedProps) {
 	const reopenPanel = dialog.querySelector("[data-appointment-reopen-panel]");
   const completePanel = dialog.querySelector("[data-appointment-complete-panel]");
   const completeOverride = dialog.querySelector("[data-appointment-complete-override]");
-  if (fix) fix.hidden = !props.can_fix;
-  if (cancel) cancel.hidden = !props.can_cancel;
+  const canAssign = Boolean(props.can_assign);
+  const canReschedule = Boolean(props.can_reschedule);
+  const canSwap = Boolean(props.can_swap);
+  const canFix = Boolean(props.can_fix);
+  const canComplete = Boolean(props.can_complete);
+  const canCancel = Boolean(props.can_cancel);
+  const canReopen = Boolean(props.can_reopen);
+  const canReissue = Boolean(props.can_reissue);
+  const canResetConfirmation = Boolean(props.can_reset_confirmation);
+  const needsWithoutNotificationReason = (canFix || canReschedule) && (props.notification_channels || []).length === 0;
+  if (fix) fix.hidden = !canFix;
+  if (cancel) cancel.hidden = !canCancel;
   if (assignment) {
-    assignment.hidden = !props.can_assign;
+    assignment.hidden = !canAssign;
     const selectedDrivers = new Set((props.drivers || []).map((item) => item.ID));
     assignment.querySelectorAll("[data-appointment-driver]").forEach((input) => {
       input.checked = selectedDrivers.has(input.value);
@@ -1489,8 +1549,8 @@ async function appointmentDetail(event, loadedProps) {
     const assignmentVersion = assignment.querySelector("[data-appointment-assignment-version]");
     if (assignmentVersion) assignmentVersion.value = props.version;
   }
-  if (reschedule) reschedule.hidden = !props.can_reschedule;
-	if (swapPanel) swapPanel.hidden = !props.can_swap;
+  if (reschedule) reschedule.hidden = !canReschedule;
+	if (swapPanel) swapPanel.hidden = !canSwap;
 	const swapTarget = dialog.querySelector("[data-appointment-swap-target]");
 	if (swapTarget) {
 	  swapTarget.replaceChildren(new Option("Bitte wählen", ""));
@@ -1507,13 +1567,19 @@ async function appointmentDetail(event, loadedProps) {
   dialog.dataset.originalDuration = durationMinutes;
   if (startInput) startInput.value = localStart;
   if (durationInput) durationInput.value = durationMinutes;
-  if (confirmationAdmin) confirmationAdmin.hidden = !props.can_reissue;
-  if (reissue) reissue.hidden = !props.can_reissue;
-  if (resetConfirmation) resetConfirmation.hidden = !props.can_reset_confirmation;
-	if (reopenPanel) reopenPanel.hidden = !props.can_reopen;
-  if (completePanel) completePanel.hidden = !props.can_complete;
+  if (withoutNotification) withoutNotification.hidden = !needsWithoutNotificationReason;
+  if (confirmationAdmin) confirmationAdmin.hidden = !(canReissue || canResetConfirmation);
+  if (reissue) reissue.hidden = !canReissue;
+  if (resetConfirmation) resetConfirmation.hidden = !canResetConfirmation;
+	if (reopenPanel) reopenPanel.hidden = !canReopen;
+  if (completePanel) completePanel.hidden = !canComplete;
   if (completeOverride) completeOverride.hidden = !props.complete_requires_override;
   dialog.dataset.completeRequiresOverride = props.complete_requires_override ? "true" : "false";
+  setAppointmentActionGroupVisibility(dialog, "assignment", canAssign);
+  setAppointmentActionGroupVisibility(dialog, "time", canReschedule || canSwap);
+  setAppointmentActionGroupVisibility(dialog, "customer-communication", needsWithoutNotificationReason || canReissue || canResetConfirmation);
+  setAppointmentActionGroupVisibility(dialog, "primary", canFix || canComplete);
+  setAppointmentActionGroupVisibility(dialog, "danger", canCancel || canReopen);
   dialog.showModal();
 }
 
@@ -1956,7 +2022,47 @@ if (calendarElement && window.FullCalendar) {
   }
 }
 
-const popoverMenus = Array.from(document.querySelectorAll("[data-mobile-menu], [data-popover-menu]"));
+const mobileMenu = document.querySelector("[data-mobile-menu]");
+const mobileMenuTrigger = document.querySelector("[data-mobile-menu-open]");
+const closeMobileMenu = () => {
+  if (mobileMenu instanceof HTMLDialogElement && mobileMenu.open) mobileMenu.close();
+};
+if (mobileMenu instanceof HTMLDialogElement && mobileMenuTrigger instanceof HTMLElement) {
+	const focusableMobileMenuControls = () => Array.from(mobileMenu.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])'))
+		.filter((control) => control instanceof HTMLElement && control.getClientRects().length > 0);
+  mobileMenuTrigger.addEventListener("click", () => {
+    if (mobileMenu.open) return;
+    mobileMenu.showModal();
+    mobileMenuTrigger.setAttribute("aria-expanded", "true");
+    mobileMenu.querySelector("[data-mobile-menu-close]")?.focus();
+  });
+  mobileMenu.querySelector("[data-mobile-menu-close]")?.addEventListener("click", closeMobileMenu);
+  mobileMenu.querySelectorAll("a").forEach((link) => link.addEventListener("click", closeMobileMenu));
+  mobileMenu.addEventListener("click", (event) => {
+    if (event.target === mobileMenu) closeMobileMenu();
+  });
+	mobileMenu.addEventListener("keydown", (event) => {
+		if (event.key !== "Tab") return;
+		const controls = focusableMobileMenuControls();
+		if (controls.length === 0) return;
+		const first = controls[0];
+		const last = controls[controls.length - 1];
+		if (event.shiftKey && document.activeElement === first) {
+			event.preventDefault();
+			last.focus();
+		} else if (!event.shiftKey && document.activeElement === last) {
+			event.preventDefault();
+			first.focus();
+		}
+	});
+  mobileMenu.addEventListener("close", () => {
+    mobileMenuTrigger.setAttribute("aria-expanded", "false");
+    mobileMenuTrigger.focus();
+  });
+  document.documentElement.classList.add("mobile-menu-dialog-ready");
+}
+
+const popoverMenus = Array.from(document.querySelectorAll("[data-popover-menu]"));
 popoverMenus.forEach((menu) => {
   const summary = menu.querySelector("summary");
   menu.addEventListener("toggle", () => {
@@ -1981,6 +2087,7 @@ function updateDashboardCountdown() {
   document.querySelectorAll("[data-dashboard-countdown]").forEach((node) => node.remove());
   const now = Date.now();
   const next = dashboardStarts
+    .filter((node) => node.getClientRects().length > 0 && getComputedStyle(node).visibility !== "hidden")
     .map((node) => ({ node, startsAt: Date.parse(node.dataset.dashboardStart) }))
     .filter((item) => Number.isFinite(item.startsAt) && item.startsAt > now)
     .sort((left, right) => left.startsAt - right.startsAt)[0];
@@ -1995,6 +2102,7 @@ function updateDashboardCountdown() {
 updateDashboardCountdown();
 window.setInterval(updateDashboardCountdown, 30000);
 document.addEventListener("visibilitychange", updateDashboardCountdown);
+window.addEventListener("resize", updateDashboardCountdown);
 
 document.querySelectorAll("[data-copy-source]").forEach((button) => {
   button.addEventListener("click", async () => {
@@ -2407,6 +2515,8 @@ if (voiceCapture) {
   const timer = voiceCapture.querySelector("[data-voice-timer]");
   const status = voiceCapture.querySelector("[data-voice-status]");
   const uploadForm = voiceCapture.querySelector("[data-voice-upload]");
+  const fileInput = voiceCapture.querySelector("[data-voice-file]");
+  const durationInput = voiceCapture.querySelector("[data-voice-duration]");
   const idempotencyInput = voiceCapture.querySelector("[data-voice-idempotency-key]");
   const preview = voiceCapture.querySelector("[data-voice-preview]");
   const previewAudio = voiceCapture.querySelector("[data-voice-audio]");
@@ -2431,6 +2541,72 @@ if (voiceCapture) {
   let pendingDurationMs = 0;
   let previewURL = "";
   let pendingUploadKey = idempotencyInput?.value || "";
+  let cancelDurationProbe = () => {};
+  let settingDuration = false;
+
+  const setDurationValue = (seconds, source) => {
+    if (!durationInput || !Number.isFinite(seconds) || seconds <= 0) return;
+    settingDuration = true;
+    durationInput.value = String(Math.max(1, Math.ceil(seconds)));
+    durationInput.dataset.durationSource = source;
+    durationInput.dispatchEvent(new Event("input", { bubbles: true }));
+    settingDuration = false;
+  };
+  const prefillAudioDuration = (blob, fallbackSeconds = 0) => {
+    if (!durationInput || !blob) return;
+    cancelDurationProbe();
+    if (fallbackSeconds > 0) {
+      setDurationValue(fallbackSeconds, "recording");
+    } else {
+      settingDuration = true;
+      durationInput.value = "";
+      delete durationInput.dataset.durationSource;
+      settingDuration = false;
+    }
+    const probe = document.createElement("audio");
+    const objectURL = URL.createObjectURL(blob);
+    let timeout;
+    let settled = false;
+    let attemptedSeek = false;
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      probe.removeAttribute("src");
+      probe.load();
+      URL.revokeObjectURL(objectURL);
+      if (cancelDurationProbe === cleanup) cancelDurationProbe = () => {};
+    };
+    const readDuration = () => {
+      if (settled) return;
+      const seconds = probe.duration;
+      if (Number.isFinite(seconds) && seconds > 0) {
+        if (durationInput.dataset.durationSource !== "manual") setDurationValue(seconds, "metadata");
+        cleanup();
+        return;
+      }
+      if (seconds === Infinity && !attemptedSeek) {
+        attemptedSeek = true;
+        try { probe.currentTime = 1e101; } catch { cleanup(); }
+      }
+    };
+    cancelDurationProbe = cleanup;
+    probe.preload = "metadata";
+    probe.addEventListener("loadedmetadata", readDuration);
+    probe.addEventListener("durationchange", readDuration);
+    probe.addEventListener("timeupdate", readDuration);
+    probe.addEventListener("error", cleanup, { once: true });
+    timeout = window.setTimeout(cleanup, 5000);
+    probe.src = objectURL;
+    probe.load();
+  };
+  durationInput?.addEventListener("input", () => {
+    if (!settingDuration) durationInput.dataset.durationSource = "manual";
+  });
+  fileInput?.addEventListener("change", () => {
+    const audio = fileInput.files?.[0];
+    if (audio) prefillAudioDuration(audio);
+  });
 
   const newUploadKey = () => {
     if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -2569,6 +2745,7 @@ if (voiceCapture) {
           if (cancelled) return;
           pendingAudio = blob;
           pendingDurationMs = durationMs;
+          prefillAudioDuration(blob, durationMs / 1000);
           if (previewURL) URL.revokeObjectURL(previewURL);
           previewURL = URL.createObjectURL(blob);
           previewAudio.src = previewURL;
@@ -3914,6 +4091,12 @@ function initializeRouteOrder(order) {
     const stopIDs = updated
       .map((item) => item.querySelector('input[type="hidden"][name="stop_id"]')?.value)
       .filter(Boolean);
+    dirtyForms.add(order);
+    order.dataset.routeOrderDirty = "true";
+    const saveButton = order.querySelector("[data-route-order-save-button]");
+    const saveStatus = order.querySelector("[data-route-order-save-status]");
+    if (saveButton) saveButton.textContent = "Geänderte Fahrreihenfolge speichern";
+    if (saveStatus) saveStatus.textContent = "Die Reihenfolge ist nur in dieser Ansicht geändert. Speichern Sie sie, bevor Sie die Seite verlassen.";
     order.dispatchEvent(new CustomEvent("routeorderchange", { bubbles: true, detail: { stopIDs } }));
     const movedButton = stop.querySelector(`[data-route-move="${button.dataset.routeMove}"]`);
     const alternateDirection = button.dataset.routeMove === "up" ? "down" : "up";

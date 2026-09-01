@@ -83,6 +83,12 @@ func TestOnboardingContentByRole(t *testing.T) {
 					t.Errorf("body unexpectedly contains %q", unexpected)
 				}
 			}
+			if !strings.Contains(body, `class="onboarding-phase"`) || !strings.Contains(body, `data-onboarding-phase`) {
+				t.Errorf("onboarding guide is not grouped into semantic phases")
+			}
+			if strings.Contains(body, `type="checkbox"`) || strings.Contains(body, `data-onboarding-checklist`) {
+				t.Errorf("onboarding unexpectedly renders a persistent checklist")
+			}
 		})
 	}
 }
@@ -96,8 +102,8 @@ func TestOnboardingIsLinkedFromDesktopAndMobileNavigation(t *testing.T) {
 
 	router.ServeHTTP(response, request)
 
-	want := `href="/hilfe/erste-schritte" class="nav-link nav-link--active" aria-current="page">Erste Schritte`
-	if count := strings.Count(response.Body.String(), want); count != 2 {
-		t.Fatalf("active onboarding navigation link count = %d, want 2", count)
+	want := `href="/hilfe/erste-schritte" class="nav-link nav-link--active"`
+	if count := strings.Count(response.Body.String(), want); count != 3 {
+		t.Fatalf("active onboarding navigation link count = %d, want desktop, modal-mobile, and no-JavaScript fallback links", count)
 	}
 }
