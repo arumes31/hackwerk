@@ -136,7 +136,8 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		RangeHeight, WarningHeight, LegendHeight, MessageHeight            float64
 		MinimumButtonGap, TallestWaitlistCard                              float64
 		SmallTargets, ControlRows                                          int
-		Overlap, PageOverflow                                              bool
+		Overlap, PageOverflow, OptionsOpen, SummaryHidden                  bool
+		FirstControlFocused                                                bool
 	}
 	if err := chromedp.Run(browserContext,
 		chromedp.EmulateViewport(1440, 900),
@@ -144,7 +145,11 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		chromedp.Evaluate(`(() => {
 		const page=document.querySelector('.calendar-page');
 		const heading=page.querySelector('.page-heading');
+		const options=page.querySelector('.calendar-options');
+		const summary=options.querySelector('summary');
 		const controls=page.querySelector('[data-calendar-controls]');
+		const firstControl=controls.querySelector('button');
+		firstControl.focus();
 		const groups=[...controls.querySelectorAll('.calendar-control-group')];
 		const targets=[...controls.querySelectorAll('button,input[type=date],label.check-label')];
 		const gaps=groups.flatMap(group=>{
@@ -173,14 +178,18 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 				return rows;
 			},[]).length,
 			Overlap:overlap,
-			PageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth
+			PageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth,
+			OptionsOpen:options.open,
+			SummaryHidden:getComputedStyle(summary).display==='none',
+			FirstControlFocused:document.activeElement===firstControl
 		};
 	})()`, &compactCalendarAudit)); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
 	if compactCalendarAudit.PageWidth < 1380 || compactCalendarAudit.HeadingHeight > 115 || compactCalendarAudit.ControlsHeight > 76 ||
 		compactCalendarAudit.CalendarOffset > 255 || compactCalendarAudit.MinimumButtonGap < 6 || compactCalendarAudit.TallestWaitlistCard > 140 ||
-		compactCalendarAudit.SmallTargets != 0 || compactCalendarAudit.ControlRows != 1 || compactCalendarAudit.Overlap || compactCalendarAudit.PageOverflow {
+		compactCalendarAudit.SmallTargets != 0 || compactCalendarAudit.ControlRows != 1 || compactCalendarAudit.Overlap || compactCalendarAudit.PageOverflow ||
+		!compactCalendarAudit.OptionsOpen || !compactCalendarAudit.SummaryHidden || !compactCalendarAudit.FirstControlFocused {
 		t.Fatalf("compact calendar desktop audit = %+v", compactCalendarAudit)
 	}
 	var calendarLoadMessage string
@@ -212,33 +221,51 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		t.Fatalf("external drag opened job %q, want %q", draggedJob, dragJobID)
 	}
 	var mobileCalendarAudit struct {
-		ControlRows, SmallTargets int
-		Overlap, PageOverflow     bool
+		HeadingHeight, OptionsHeight, CalendarTop, NavigationTop float64
+		SmallTargets                                             int
+		OptionsCollapsed, DragHintHidden, Overlap, PageOverflow  bool
 	}
 	if err := runBrowserStep(browserContext, "open mobile proposal form",
 		chromedp.Evaluate(`localStorage.setItem('hackwerk:install-dismissed','true');document.querySelector('[data-install-prompt]').hidden=true`, nil),
 		chromedp.EmulateViewport(360, 820),
 		chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetTimezoneOverride("UTC").Do(ctx) }),
-		chromedp.Evaluate(`window.dispatchEvent(new Event('resize'))`, nil),
-		chromedp.Poll(`window.hackWerkCalendar.view.type==='listWeek'`, nil),
+		chromedp.Navigate(server.URL+"/calendar?date=2026-08-25"),
+		chromedp.WaitVisible("[data-calendar]", chromedp.ByQuery),
+		chromedp.Poll(`window.hackWerkCalendar.view.type==='timeGridDay'`, nil),
 		chromedp.Evaluate(`(() => {
+			const visible=node=>{const style=getComputedStyle(node),rect=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0};
+			const options=document.querySelector('.calendar-options');
+			const summary=options.querySelector('summary');
 			const controls=document.querySelector('[data-calendar-controls]');
+			const optionsCollapsed=!options.open&&!visible(controls);
+			const calendarTop=document.querySelector('[data-calendar]').getBoundingClientRect().top;
+			options.open=true;
 			const groups=[...controls.querySelectorAll('.calendar-control-group')];
 			const rects=groups.map(node=>node.getBoundingClientRect());
-			const targets=[...controls.querySelectorAll('button,input[type=date],label.check-label')];
-			return {
-				ControlRows:new Set(rects.map(rect=>Math.round(rect.top))).size,
+			const targets=[...controls.querySelectorAll('button,input[type=date],label.check-label')].filter(visible);
+			const result={
+				HeadingHeight:document.querySelector('.calendar-page .page-heading').getBoundingClientRect().height,
+				OptionsHeight:summary.getBoundingClientRect().height,
+				CalendarTop:calendarTop,
+				NavigationTop:document.querySelector('.mobile-bottom-nav').getBoundingClientRect().top,
 				SmallTargets:targets.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<44||rect.height<44}).length,
+				OptionsCollapsed:optionsCollapsed,
+				DragHintHidden:!visible(document.querySelector('.calendar-edit-hint')),
 				Overlap:rects.some((left,index)=>rects.slice(index+1).some(right=>left.left<right.right&&left.right>right.left&&left.top<right.bottom&&left.bottom>right.top)),
 				PageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth
 			};
+			options.open=false;
+			return result;
 		})()`, &mobileCalendarAudit),
 		chromedp.Evaluate(fmt.Sprintf(`document.querySelector('[data-plan-job=%q]').click()`, jobID), nil),
 		chromedp.WaitVisible("[data-planning-dialog]", chromedp.ByQuery),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
-	if mobileCalendarAudit.ControlRows != 3 || mobileCalendarAudit.SmallTargets != 0 || mobileCalendarAudit.Overlap || mobileCalendarAudit.PageOverflow {
+	if mobileCalendarAudit.HeadingHeight > 96 || mobileCalendarAudit.OptionsHeight < 44 || mobileCalendarAudit.OptionsHeight > 56 ||
+		mobileCalendarAudit.CalendarTop > 640 || mobileCalendarAudit.CalendarTop > mobileCalendarAudit.NavigationTop-120 ||
+		mobileCalendarAudit.SmallTargets != 0 || !mobileCalendarAudit.OptionsCollapsed || !mobileCalendarAudit.DragHintHidden ||
+		mobileCalendarAudit.Overlap || mobileCalendarAudit.PageOverflow {
 		t.Fatalf("compact calendar mobile audit = %+v", mobileCalendarAudit)
 	}
 	var defaultPlanningStart string
@@ -646,6 +673,14 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("mobile calendar screenshot: %s", artifact)
+	if screenshotDir := os.Getenv("E2E_SCREENSHOT_DIR"); screenshotDir != "" {
+		if err := os.MkdirAll(screenshotDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(screenshotDir, "task04-mobile-calendar.png"), screenshot, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	var confirmation, workflow string
 	var outbox int
@@ -883,18 +918,20 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	var planningControls int
 	var forbiddenStatus int
 	var driverReadOnlyNotice string
+	var driverReadOnlyLabel string
 	var driverHorizontalOverflow bool
 	expression := fmt.Sprintf(`fetch(%q,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf_token:document.querySelector('[data-calendar]').dataset.csrf,version:'4',starts_at:'2026-09-02T06:00:00Z',ends_at:'2026-09-02T09:00:00Z'})}).then(r=>r.status)`, "/api/v1/appointments/"+appointmentID+"/move")
 	if err := chromedp.Run(browserContext,
 		chromedp.Evaluate(`document.querySelectorAll('[data-calendar-waitlist],[data-planning-dialog],[data-appointment-fix]').length`, &planningControls),
 		chromedp.Text("[data-calendar-read-only]", &driverReadOnlyNotice, chromedp.ByQuery),
+		chromedp.AttributeValue("[data-calendar-read-only]", "aria-label", &driverReadOnlyLabel, nil, chromedp.ByQuery),
 		chromedp.Evaluate(`document.documentElement.scrollWidth > window.innerWidth`, &driverHorizontalOverflow),
 		chromedp.Evaluate(expression, &forbiddenStatus, awaitPromise),
 	); err != nil {
 		t.Fatal(err)
 	}
-	if planningControls != 0 || forbiddenStatus != 403 || driverReadOnlyNotice != "Nur lesen – Planung nur durch Administration" || driverHorizontalOverflow {
-		t.Fatalf("driver planning controls/direct status/read-only/overflow = %d/%d/%q/%v", planningControls, forbiddenStatus, driverReadOnlyNotice, driverHorizontalOverflow)
+	if planningControls != 0 || forbiddenStatus != 403 || !strings.Contains(driverReadOnlyNotice, "Nur lesen") || driverReadOnlyLabel != "Nur lesen – Planung nur durch Administration" || driverHorizontalOverflow {
+		t.Fatalf("driver planning controls/direct status/read-only/label/overflow = %d/%d/%q/%q/%v", planningControls, forbiddenStatus, driverReadOnlyNotice, driverReadOnlyLabel, driverHorizontalOverflow)
 	}
 	if err := runBrowserStep(browserContext, "assigned driver completes started appointment",
 		clickCurrent(appointmentEventSelector),

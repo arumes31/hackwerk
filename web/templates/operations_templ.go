@@ -77,7 +77,7 @@ func Drivers(data DriversData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<main id=\"hauptinhalt\" class=\"page compact-page\" data-operation-page><div class=\"page-heading\"><div><p class=\"eyebrow\">Administration</p><h1>Fahrerprofile</h1><p>Kontaktdaten, Login, Rechte und Verfügbarkeit kompakt verwalten.</p></div><span class=\"status-badge\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<main id=\"hauptinhalt\" class=\"page compact-page drivers-page admin-work-page\" data-operation-page><div class=\"page-heading\"><div><p class=\"eyebrow\">Administration</p><h1>Fahrerprofile</h1><p>Kontaktdaten, Login, Rechte und Verfügbarkeit kompakt verwalten.</p></div><span class=\"status-badge\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -791,7 +791,7 @@ func Resources(data ResourcesData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "<main id=\"hauptinhalt\" class=\"page compact-page\" data-operation-page><div class=\"page-heading\"><div><p class=\"eyebrow\">Administration</p><h1>Ressourcen</h1><p>Maschinen, Fahrzeuge und Anhänger werden als einzelne, planbare Datensätze geführt.</p></div><span class=\"status-badge\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "<main id=\"hauptinhalt\" class=\"page compact-page resources-page admin-work-page\" data-operation-page><div class=\"page-heading\"><div><p class=\"eyebrow\">Administration</p><h1>Ressourcen</h1><p>Maschinen, Fahrzeuge und Anhänger werden als einzelne, planbare Datensätze geführt.</p></div><span class=\"status-badge\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1295,7 +1295,7 @@ func Availability(data AvailabilityData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 116, "<main id=\"hauptinhalt\" class=\"page compact-page\" data-operation-page><div class=\"page-heading\"><div><p class=\"eyebrow\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 116, "<main id=\"hauptinhalt\" class=\"page compact-page availability-page admin-work-page\" data-operation-page><div class=\"page-heading\"><div><p class=\"eyebrow\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

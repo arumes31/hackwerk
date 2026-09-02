@@ -1838,10 +1838,18 @@ async function calendarMutation(info, action, csrf) {
   });
 }
 
+const calendarOptions = document.querySelector(".calendar-options");
+const calendarCompactMedia = window.matchMedia("(max-width: 1050px)");
+if (calendarOptions) {
+  const syncCalendarOptions = () => { calendarOptions.open = !calendarCompactMedia.matches; };
+  syncCalendarOptions();
+  calendarCompactMedia.addEventListener("change", syncCalendarOptions);
+}
+
 const calendarElement = document.querySelector("[data-calendar]");
 if (calendarElement && window.FullCalendar) {
   const editable = calendarElement.dataset.editable === "true";
-  const compact = window.matchMedia("(max-width: 680px)").matches;
+  const compact = calendarCompactMedia.matches;
   const calendarParameters = new URLSearchParams(window.location.search);
   const requestedAppointment = calendarParameters.get("appointment");
   const requestedViewName = calendarParameters.get("view");
@@ -1849,7 +1857,9 @@ if (calendarElement && window.FullCalendar) {
     || (compact ? "timeGridDay" : "timeGridWeek");
   const requestedWeekends = calendarParameters.get("weekends") !== "false";
   const viewParameter = (view) => ({ timeGridDay: "day", timeGridWeek: "week", dayGridMonth: "month", listWeek: "agenda" }[view] || "week");
-  const toolbarForWidth = (narrow) => ({ start: "prev,next today", center: "title", end: narrow ? "timeGridDay,dayGridMonth,listWeek" : "timeGridDay,timeGridWeek,dayGridMonth,listWeek" });
+  const toolbarForWidth = (narrow) => narrow
+    ? { start: "prev,next", center: "title", end: "today,timeGridDay,dayGridMonth,listWeek" }
+    : { start: "prev,next today", center: "title", end: "timeGridDay,timeGridWeek,dayGridMonth,listWeek" };
   const calendar = new FullCalendar.Calendar(calendarElement, {
     themeSystem: "classic",
     locale: "de-AT",
@@ -1964,7 +1974,7 @@ if (calendarElement && window.FullCalendar) {
   calendar.render();
   let calendarNarrow = compact;
   window.addEventListener("resize", () => {
-    const narrow = window.matchMedia("(max-width: 680px)").matches;
+    const narrow = window.matchMedia("(max-width: 1050px)").matches;
     if (narrow === calendarNarrow) return;
     calendarNarrow = narrow;
     calendar.setOption("headerToolbar", toolbarForWidth(narrow));

@@ -106,7 +106,7 @@ func Routes(data RoutePageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<main id=\"hauptinhalt\" class=\"page route-page compact-page route-planner-page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<main id=\"hauptinhalt\" class=\"page route-page compact-page route-planner-page admin-work-page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -239,7 +239,7 @@ func adminRoutePlanner(data RoutePageData) templ.Component {
 			templ_7745c5c3_Var7 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<section class=\"route-workspace\" data-route-context data-route-admin=\"true\"><form method=\"post\" action=\"/planning/routes\" class=\"route-builder form-card\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<section class=\"route-workspace\" data-route-context data-route-admin=\"true\"><form method=\"post\" action=\"/planning/routes\" class=\"route-builder form-card\" data-sticky-actions><input type=\"hidden\" name=\"csrf_token\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -707,7 +707,7 @@ func adminRoutePlanner(data RoutePageData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "> Reihenfolge nach Fahrzeit optimieren</label><div class=\"action-row\" data-route-date-presets><button type=\"button\" class=\"button button--quiet\" data-route-date-preset=\"today\">Heute</button><button type=\"button\" class=\"button button--quiet\" data-route-date-preset=\"tomorrow\">Morgen</button><button type=\"button\" class=\"button button--quiet\" data-route-date-preset=\"business-day\">Nächster Werktag</button></div><p class=\"form-hint\">Die Berechnung erzeugt einen Entwurf, keine Termine. Gespeicherte Orte werden beim Absenden serverseitig erneut geprüft.</p><button class=\"button\" type=\"submit\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "> Reihenfolge nach Fahrzeit optimieren</label><div class=\"action-row\" data-route-date-presets><button type=\"button\" class=\"button button--quiet\" data-route-date-preset=\"today\">Heute</button><button type=\"button\" class=\"button button--quiet\" data-route-date-preset=\"tomorrow\">Morgen</button><button type=\"button\" class=\"button button--quiet\" data-route-date-preset=\"business-day\">Nächster Werktag</button></div><p class=\"form-hint\">Die Berechnung erzeugt einen Entwurf, keine Termine. Gespeicherte Orte werden beim Absenden serverseitig erneut geprüft.</p><div class=\"form-actions\"><button class=\"button\" type=\"submit\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -717,7 +717,7 @@ func adminRoutePlanner(data RoutePageData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, ">Route berechnen</button></form><div class=\"route-map-panel\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, ">Route berechnen</button></div></form><div class=\"route-map-panel\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

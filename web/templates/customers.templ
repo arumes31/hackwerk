@@ -473,7 +473,7 @@ templ Customers(data CustomerListData) {
 		<body>
 			@appHeader(data.Shell)
 			<main id="hauptinhalt" class="page compact-page customer-page">
-				<div class="page-heading"><div><p class="eyebrow">Kundenakten</p><h1>Kunden &amp; Aufträge</h1><p>Kompakte Übersicht über Kontakte und Auftragsbestand.</p></div><div class="action-row"><a class="button button--quiet" href="/voice">Sprachentwurf</a><a class="button" href="/customers/new">Neuer Auftrag</a></div></div>
+				<div class="page-heading"><div><p class="eyebrow">Kundenakten</p><h1>Kunden &amp; Aufträge</h1><p>Kompakte Übersicht über Kontakte und Auftragsbestand.</p></div><div class="action-row"><a class="button button--quiet" href="/voice">Sprachentwurf</a><a class="button mobile-redundant-primary-action" href="/customers/new">Neuer Auftrag</a></div></div>
 				<form id="customer-list-controls" method="post" action="/customers/search" class="customer-list-toolbar">
 					<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="sort" value={ data.Page.CustomerFilter.Sort }/><input type="hidden" name="direction" value={ data.Page.CustomerFilter.Direction }/>
 					<div class="customer-list-toolbar__search">
@@ -1000,7 +1000,7 @@ templ Waitlist(data WaitlistData) {
 		<body>
 			@appHeader(data.Shell)
 			<main id="hauptinhalt" class="page compact-page waitlist-page">
-				<div class="page-heading"><div><p class="eyebrow">Arbeitsvorrat</p><h1>Warteliste</h1><p>Kompakte Dispositionsansicht. Die Position bleibt relativ zu Filtern, Priorität und Sortierung.</p></div><a class="button" href="/customers/new">Neuen Auftrag erfassen</a></div>
+				<div class="page-heading"><div><p class="eyebrow">Arbeitsvorrat</p><h1>Warteliste</h1><p>Kompakte Dispositionsansicht. Die Position bleibt relativ zu Filtern, Priorität und Sortierung.</p></div><a class="button mobile-redundant-primary-action" href="/customers/new">Neuen Auftrag erfassen</a></div>
 				if data.Error != "" {
 					<div class="form-alert" role="alert">{ data.Error }</div>
 				}

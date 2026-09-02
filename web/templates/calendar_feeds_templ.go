@@ -58,7 +58,7 @@ func CalendarFeeds(data CalendarFeedsData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<main id=\"hauptinhalt\" class=\"page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">Read-only Synchronisierung</p><h1>Kalender exportieren</h1><p>Termine für Apple Kalender, Outlook, Google Kalender und andere ICS-Clients.</p></div><span class=\"status-badge\">Nur lesen</span></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<main id=\"hauptinhalt\" class=\"page calendar-feeds-page admin-work-page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">Read-only Synchronisierung</p><h1>Kalender exportieren</h1><p>Termine für Apple Kalender, Outlook, Google Kalender und andere ICS-Clients.</p></div><span class=\"status-badge\">Nur lesen</span></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

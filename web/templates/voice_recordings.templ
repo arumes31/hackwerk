@@ -20,7 +20,7 @@ templ VoiceRecordings(data VoiceRecordingsData) {
 		@documentHead(data.Shell.Page, "Sprachaufnahmen – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page compact-page voice-recordings-page">
+			<main id="hauptinhalt" class="page compact-page voice-recordings-page admin-work-page">
 				<div class="page-heading">
 					<div><p class="eyebrow">Administration · Datenschutz</p><h1>Originale Sprachaufnahmen</h1><p>Nur Administratoren können diese Aufnahmen anhören. Jede Aufnahme wird spätestens 30 Tage nach dem Upload automatisch gelöscht.</p></div>
 					<span class="status-badge">{ fmt.Sprint(len(data.Recordings)) } auf dieser Seite</span>

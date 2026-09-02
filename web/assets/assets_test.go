@@ -123,12 +123,13 @@ func TestMobileAppStylesDefineIndependentShellContracts(t *testing.T) {
 	}
 	css := string(stylesheet)
 	for name, contract := range map[string]string{
-		"mobile breakpoint":            "@media (max-width: 760px)",
+		"mobile breakpoint":            "@media (max-width: 1050px)",
 		"standalone display mode":      "@media (display-mode: standalone)",
 		"stable navigation":            ".mobile-bottom-nav",
 		"separate primary action":      ".mobile-primary-action",
 		"safe area":                    "env(safe-area-inset-bottom)",
 		"context actions":              ".mobile-context-actions",
+		"admin role-scoped workspaces": `body:has(.site-header[data-actor-role="admin"])`,
 		"authenticated app canvas":     "body:has(.mobile-bottom-nav) .page",
 		"calendar app surface":         ".calendar-page .calendar-board",
 		"planning action sheet":        ".planning-page .planning-selection",
@@ -139,6 +140,10 @@ func TestMobileAppStylesDefineIndependentShellContracts(t *testing.T) {
 		"voice workflow":               ".voice-capture",
 		"calendar feed management":     ".feed-layout",
 		"notification mobile records":  ".table-card .responsive-table",
+		"admin calendar first":         ".calendar-page .calendar-board",
+		"admin saved locations first":  ".route-location-list",
+		"admin notification actions":   `.notifications-page .responsive-table td[data-label="Aktion"]`,
+		"admin appointment actions":    ".appointment-detail-page > .form-card:first-of-type > .action-row",
 		"sticky action nav clearance":  "bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + .5625rem)",
 		"sticky action scroll reserve": "scroll-margin-block-end: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + .75rem)",
 		"narrow phone guard":           "@media (max-width: 360px)",
@@ -149,6 +154,38 @@ func TestMobileAppStylesDefineIndependentShellContracts(t *testing.T) {
 	}
 	if !regexp.MustCompile(`(?s)body:has\(\.mobile-bottom-nav\)\s*\{[^}]*overflow-x:\s*clip`).MatchString(css) {
 		t.Fatal("mobile app canvas does not guard narrow viewports against horizontal page overflow")
+	}
+	if strings.Contains(css, ".mobile-admin-nav") {
+		t.Fatal("mobile stylesheet must not define a second admin navigation")
+	}
+	if strings.Contains(css, ".mobile-app-bar__title") {
+		t.Fatal("mobile stylesheet must not keep a second visible page-title treatment in the utility bar")
+	}
+	for name, contract := range map[string]string{
+		"compact app bar":             `--mobile-app-bar-height: 54px`,
+		"compact section rhythm":      `--mobile-section-gap: .5rem`,
+		"combined dashboard commands": `.admin-tour__commands`,
+		"compact search placement":    `.customer-list-toolbar__search > input`,
+		"unpadded disclosure shell":   `body:has(.mobile-bottom-nav) .compact-filter-panel`,
+	} {
+		if !strings.Contains(css, contract) {
+			t.Errorf("%s contract is missing from mobile app stylesheet", name)
+		}
+	}
+	if !regexp.MustCompile(`(?s)\.calendar-control-group--date\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto`).MatchString(css) {
+		t.Fatal("mobile calendar date and weekend controls must use the available width instead of a three-column arrow layout")
+	}
+	if !regexp.MustCompile(`(?s)\.calendar-control-group--utilities\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)`).MatchString(css) {
+		t.Fatal("mobile calendar utility actions must stay in one compact three-button row")
+	}
+	if !regexp.MustCompile(`(?s)\.calendar-page \.calendar-toolbar-button\s*,\s*\.calendar-page \.fc \.fc-button\s*\{[^}]*min-width:\s*44px[^}]*min-height:\s*44px`).MatchString(css) {
+		t.Fatal("calendar library toolbar buttons must retain 44px touch targets across the full mobile shell")
+	}
+	if !regexp.MustCompile(`(?s)\.customer-page \.customer-name-link\s*\{[^}]*min-width:\s*44px[^}]*min-height:\s*44px`).MatchString(css) {
+		t.Fatal("customer names must remain 44px touch targets even when their labels are short")
+	}
+	if !regexp.MustCompile(`(?s)\.notifications-page\s+\.notification-actions\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)`).MatchString(css) {
+		t.Fatal("mobile notification actions must stack as full-width controls")
 	}
 	application, err := Files.ReadFile("static/app.css")
 	if err != nil {
@@ -191,14 +228,23 @@ func TestRoleSpecificTourProjectionsAreMobileOnlyAndCountdownTargetsTheVisibleSc
 	if !regexp.MustCompile(`(?s)\.driver-tour\s*,\s*\.admin-tour\s*\{[^}]*display:\s*none`).MatchString(css) {
 		t.Fatal("both role-specific tours must be hidden by default so desktop keeps its grouped schedule")
 	}
-	if !regexp.MustCompile(`(?s)@media \(max-width: 760px\).*\[data-dashboard-role="driver"\].*\[data-dashboard-projection="driver-tour"\][^{]*\{[^}]*display:\s*grid`).MatchString(css) {
-		t.Fatal("driver tour must only become visible in the phone breakpoint")
+	if !regexp.MustCompile(`(?s)@media \(max-width: 1050px\).*\[data-dashboard-role="driver"\].*\[data-dashboard-projection="driver-tour"\][^{]*\{[^}]*display:\s*grid`).MatchString(css) {
+		t.Fatal("driver tour must only become visible with the mobile shell")
 	}
-	if !regexp.MustCompile(`(?s)@media \(max-width: 760px\).*\[data-dashboard-role="admin"\].*\[data-dashboard-projection="admin-tour"\][^{]*\{[^}]*display:\s*grid`).MatchString(css) {
-		t.Fatal("admin tour must only become visible in the phone breakpoint")
+	if !regexp.MustCompile(`(?s)@media \(max-width: 1050px\).*\[data-dashboard-role="admin"\].*\[data-dashboard-projection="admin-tour"\][^{]*\{[^}]*display:\s*grid`).MatchString(css) {
+		t.Fatal("admin tour must only become visible with the mobile shell")
+	}
+	if !regexp.MustCompile(`(?s)@media \(max-width: 1050px\).*\.dashboard-page\[data-dashboard-role="admin"\]:has\(> \.admin-tour\)\s*>\s*\.dashboard-intro\s*\{[^}]*display:\s*contents`).MatchString(css) {
+		t.Fatal("admin phone dashboard must keep its accessible h1 while replacing the desktop introduction with the tour")
+	}
+	if !regexp.MustCompile(`(?s)\.dashboard-page\[data-dashboard-role="admin"\]:has\(> \.admin-tour\).*\.dashboard-control-bar\s*\{[^}]*display:\s*none`).MatchString(css) {
+		t.Fatal("admin phone dashboard must hide desktop controls only when its mobile tour exists")
 	}
 	if !regexp.MustCompile(`(?s)\.admin-tour__appointment-link\s*\{[^}]*grid-column:\s*1\s*/\s*-1`).MatchString(css) {
 		t.Fatal("admin appointment management must remain the full-width primary card action")
+	}
+	if !regexp.MustCompile(`(?s)@media print.*\.dashboard-page\[data-dashboard-role="admin"\]\s*>\s*\.dashboard-intro h1\s*\{[^}]*position:\s*static[^}]*clip:\s*auto`).MatchString(css) {
+		t.Fatal("printing from a narrow viewport must restore the dashboard title hidden by the mobile projection")
 	}
 
 	application, err := Files.ReadFile("static/app.css")

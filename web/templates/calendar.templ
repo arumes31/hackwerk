@@ -76,15 +76,15 @@ templ Calendar(data CalendarData) {
 		@calendarDocumentHead(data.Shell.Page, "Kalender – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page calendar-page">
+			<main id="hauptinhalt" class="page calendar-page admin-work-page">
 				<div class="page-heading">
 					<div><p class="eyebrow">Zentrale Einsatzplanung</p><h1>Kalender</h1><p>Alle Fahrer sehen denselben Plan. Zeiten werden in Europe/Vienna angezeigt.</p></div>
 					<div class="badge-row calendar-heading-actions">
 						<a class="button button--quiet calendar-feed-button" href="/calendar/feeds">Kalender-Abo</a>
 						if data.Shell.Actor.Role == auth.RoleDriver {
-							<span class="status-badge" data-calendar-read-only>Nur lesen – Planung nur durch Administration</span>
+							<span class="status-badge" data-calendar-read-only aria-label="Nur lesen – Planung nur durch Administration"><span class="calendar-read-only-full">Nur lesen – Planung nur durch Administration</span><span class="calendar-read-only-compact" aria-hidden="true">Nur lesen · Admin plant</span></span>
 						}
-						<span class="status-badge">{ data.Timezone }</span>
+						<span class="status-badge calendar-timezone-badge">{ data.Timezone }</span>
 					</div>
 				</div>
 				if data.Notice != "" {
@@ -109,22 +109,25 @@ templ Calendar(data CalendarData) {
 						</aside>
 					}
 					<section class="calendar-board" aria-label="Terminplan">
-						<div class="calendar-quick-controls" data-calendar-controls aria-label="Kalender schnell steuern">
-							<div class="calendar-control-group" role="group" aria-label="Schnell zu einem Zeitraum wechseln">
-								<button class="button button--quiet" type="button" data-calendar-jump="today">Heute</button>
-								<button class="button button--quiet" type="button" data-calendar-jump="tomorrow">Morgen</button>
-								<button class="button button--quiet" type="button" data-calendar-jump="next-week">Nächste Woche</button>
+						<details class="calendar-options" open>
+							<summary>Datum &amp; Optionen</summary>
+							<div class="calendar-quick-controls" data-calendar-controls aria-label="Kalender schnell steuern">
+								<div class="calendar-control-group" role="group" aria-label="Schnell zu einem Zeitraum wechseln">
+									<button class="button button--quiet" type="button" data-calendar-jump="today">Heute</button>
+									<button class="button button--quiet" type="button" data-calendar-jump="tomorrow">Morgen</button>
+									<button class="button button--quiet" type="button" data-calendar-jump="next-week">Nächste Woche</button>
+								</div>
+								<div class="calendar-control-group calendar-control-group--date" role="group" aria-label="Datum und Wochenenden">
+									<label>Datum <input type="date" data-calendar-date aria-label="Kalenderdatum wählen"/></label>
+									<label class="check-label"><input type="checkbox" data-calendar-weekends checked/> Wochenende</label>
+								</div>
+								<div class="calendar-control-group calendar-control-group--utilities" role="group" aria-label="Kalenderansicht verwenden">
+									<button class="button button--quiet" type="button" data-calendar-reload>Neu laden</button>
+									<button class="button button--quiet" type="button" data-calendar-share>Ansicht kopieren</button>
+									<button class="button button--quiet" type="button" data-print-page>Drucken</button>
+								</div>
 							</div>
-							<div class="calendar-control-group calendar-control-group--date" role="group" aria-label="Datum und Wochenenden">
-								<label>Datum <input type="date" data-calendar-date aria-label="Kalenderdatum wählen"/></label>
-								<label class="check-label"><input type="checkbox" data-calendar-weekends checked/> Wochenende</label>
-							</div>
-							<div class="calendar-control-group calendar-control-group--utilities" role="group" aria-label="Kalenderansicht verwenden">
-								<button class="button button--quiet" type="button" data-calendar-reload>Neu laden</button>
-								<button class="button button--quiet" type="button" data-calendar-share>Ansicht kopieren</button>
-								<button class="button button--quiet" type="button" data-print-page>Drucken</button>
-							</div>
-						</div>
+						</details>
 						<div class="calendar-range-summary"><strong data-calendar-range>Datumsbereich wird geladen</strong><span data-calendar-freshness></span><span data-calendar-timezone>Anzeige: Europe/Vienna</span></div>
 						<div class="form-alert form-alert--warning" data-calendar-timezone-warning hidden></div>
 						<div class="calendar-legend" aria-label="Kalenderlegende">
@@ -177,7 +180,7 @@ templ CalendarPlan(data CalendarPlanData) {
 		@documentHead(data.Shell.Page, "Auftrag einplanen – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page">
+			<main id="hauptinhalt" class="page calendar-plan-page admin-work-page">
 				<div class="page-heading">
 					<div><p class="eyebrow">Unverbindlicher Vorschlag</p><h1>Auftrag einplanen</h1><p>Vollständig ohne Drag-and-drop bedienbar.</p></div>
 					<a class="button button--quiet" href="/calendar">Zurück zum Kalender</a>
@@ -185,7 +188,7 @@ templ CalendarPlan(data CalendarPlanData) {
 				<section class="form-card" aria-labelledby="calendar-plan-job-title">
 					<h2 id="calendar-plan-job-title">{ data.Job.CustomerName } · { data.Job.JobNumber }</h2>
 					<p>{ data.Job.VolumeM3 } m³ · { data.Job.Locality } · { calendarJobTypeLabel(data.Job.JobType) }</p>
-					<form method="post" action="/calendar/plan" class="form-stack" aria-describedby="planning-safety-note">
+					<form method="post" action="/calendar/plan" class="form-stack" aria-describedby="planning-safety-note" data-sticky-actions>
 						@planningFormFields(data.Options, data.Values, data.Error, true)
 						<div class="form-actions"><button class="button" type="submit">Vorschlag speichern</button><a class="button button--quiet" href="/calendar">Abbrechen</a></div>
 						<p id="planning-safety-note" class="form-hint">Der Termin wird nicht fixiert und es wird keine Nachricht versendet. Es entsteht ausschließlich ein Vorschlag.</p>
@@ -414,7 +417,7 @@ templ AppointmentDetailPage(data AppointmentDetailData) {
 		@documentHead(data.Shell.Page, "Termindetail – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page" data-appointment-detail-page>
+			<main id="hauptinhalt" class="page appointment-detail-page admin-work-page" data-appointment-detail-page>
 				<div class="page-heading"><div><p class="eyebrow">Termindetail</p><h1>{ data.Detail.CustomerName } · { data.Detail.JobNumber }</h1><p>{ calendarLocalDateTime(data.Detail.StartsAt) }–{ calendarLocalTime(data.Detail.EndsAt) } · { AppointmentStatusLabel(data.Detail.Lifecycle, data.Detail.Confirmation) }</p></div><a class="button button--quiet" href="/calendar">Zurück zum Kalender</a></div>
 				if data.Notice != "" {
 					<div class="form-alert form-alert--success" role="status">{ data.Notice }</div>
@@ -452,7 +455,7 @@ templ AppointmentDetailPage(data AppointmentDetailData) {
 					<dl class="appointment-detail-list"><div><dt>Fahrer</dt><dd>{ namesDrivers(data.Detail.Drivers) }</dd></div><div><dt>Ressourcen</dt><dd>{ namesResources(data.Detail.Resources) }</dd></div><div><dt>Arbeitszeit</dt><dd>{ fmt.Sprint(data.Detail.EstimatedHackMinutes) } Minuten</dd></div><div><dt>Transportzeit</dt><dd>{ fmt.Sprint(data.Detail.EstimatedTransportMinutes) } Minuten</dd></div><div><dt>Puffer</dt><dd>{ fmt.Sprint(data.Detail.BufferBeforeMinutes) } Minuten davor · { fmt.Sprint(data.Detail.BufferAfterMinutes) } Minuten danach</dd></div></dl>
 					if data.CanAssign {
 						<p>Änderungen werden gegen Terminversion, Verfügbarkeit und Reservierungen geprüft.</p>
-						<form method="post" action={ "/calendar/appointments/" + data.Detail.ID + "/assign" } class="form-stack">
+						<form method="post" action={ "/calendar/appointments/" + data.Detail.ID + "/assign" } class="form-stack" data-sticky-actions>
 							if data.Error.Message != "" {
 								<div id="appointment-assignment-error" class="form-alert" role="alert" tabindex="-1" autofocus><strong>Zuweisung konnte nicht gespeichert werden.</strong><p>{ data.Error.Message }</p></div>
 							}

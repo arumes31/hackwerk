@@ -22,7 +22,7 @@ templ NotificationFailures(data NotificationFailuresData) {
 		@documentHead(data.Shell.Page, "Versandfehler – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page">
+			<main id="hauptinhalt" class="page notifications-page admin-work-page">
 				<div class="page-heading"><div><p class="eyebrow">Administration</p><h1>Benachrichtigungen</h1><p>Fehlgeschlagene oder wartende Versandaufträge mit maskierten Zielen und sicheren Providerhinweisen.</p></div><span class="status-badge">{ fmt.Sprint(len(data.Notifications)) } offen</span></div>
 				<section class="table-card" aria-labelledby="notification-table-title">
 					<div class="section-heading"><div><h2 id="notification-table-title">Versandfehler</h2><p>„Geprüft“ dokumentiert die interne Sichtung, ändert aber weder Versandstatus noch Wiederholungslogik.</p></div><a class="button button--quiet" href={ notificationCSVURL(data.Filter) }>CSV exportieren</a></div>
@@ -68,7 +68,7 @@ templ NotificationFailures(data NotificationFailuresData) {
 													<form method="post" action={ "/admin/notifications/" + value.ID + "/review" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Als geprüft markieren</button></form>
 												}
 											</td>
-											<td data-label="Aktion"><a class="button button--quiet" href={ "/calendar?appointment=" + url.QueryEscape(value.AppointmentID) }>Termin</a><form method="post" action={ "/admin/notifications/" + value.ID + "/retry" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Erneut senden</button></form></td>
+											<td data-label="Aktion"><div class="notification-actions"><a class="button button--quiet" href={ "/calendar?appointment=" + url.QueryEscape(value.AppointmentID) }>Termin</a><form method="post" action={ "/admin/notifications/" + value.ID + "/retry" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Erneut senden</button></form></div></td>
 										</tr>
 									}
 								</tbody>
@@ -86,7 +86,7 @@ templ NotificationFailures(data NotificationFailuresData) {
 								<caption class="visually-hidden">Offene Rückrufwünsche</caption><thead><tr><th scope="col">Auftrag</th><th scope="col">Kunde/Ort</th><th scope="col">Telefon</th><th scope="col">Rückrufnotiz</th><th scope="col">Antwort</th><th scope="col">Link gültig bis</th><th scope="col">Aktion</th></tr></thead>
 								<tbody>
 									for _, value := range data.Callbacks {
-										<tr><td data-label="Auftrag">{ value.JobNumber }</td><td data-label="Kunde/Ort"><strong>{ value.CustomerName }</strong><br/>{ value.Locality }</td><td data-label="Telefon">{ value.Phone }</td><td class="callback-note" data-label="Rückrufnotiz">{ value.ResponseNote }</td><td data-label="Antwort">{ notificationLocalTime(value.RespondedAt) }</td><td data-label="Link gültig bis">{ notificationLocalTime(value.ExpiresAt) }</td><td data-label="Aktion"><a class="button button--quiet" href={ "/calendar?appointment=" + url.QueryEscape(value.AppointmentID) }>Termin öffnen</a></td></tr>
+										<tr><td data-label="Auftrag">{ value.JobNumber }</td><td data-label="Kunde/Ort"><strong>{ value.CustomerName }</strong><br/>{ value.Locality }</td><td data-label="Telefon">{ value.Phone }</td><td class="callback-note" data-label="Rückrufnotiz">{ value.ResponseNote }</td><td data-label="Antwort">{ notificationLocalTime(value.RespondedAt) }</td><td data-label="Link gültig bis">{ notificationLocalTime(value.ExpiresAt) }</td><td data-label="Aktion"><div class="notification-actions"><a class="button button--quiet" href={ "/calendar?appointment=" + url.QueryEscape(value.AppointmentID) }>Termin öffnen</a></div></td></tr>
 									}
 								</tbody>
 							</table>

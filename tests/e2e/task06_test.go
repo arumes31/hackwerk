@@ -280,13 +280,13 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 
 	var mobileAudit struct {
 		Overflow, MenuOpen, FocusReturned, AppBarVisible bool
+		AppBarTitlePresent                               bool
 		H1Count, SmallTargets, TabCount                  int
 		MissingNames, UnlabelledFields                   int
 		MissingLandmarks                                 bool
 		CaptureVisible, CaptureInsideNavigation          bool
 		CaptureName, CaptureHref                         string
-		MobileTitle                                      string
-		CaptureWidth, CaptureHeight                      float64
+		CaptureWidth, CaptureHeight, AppBarHeight        float64
 	}
 	if err := chromedp.Run(browserContext,
 		chromedp.EmulateViewport(360, 800), chromedp.WaitVisible(".mobile-bottom-nav", chromedp.ByQuery),
@@ -313,8 +313,8 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 				CaptureVisible:!!capture&&isVisible(capture),CaptureInsideNavigation:!!capture&&capture.closest('.mobile-bottom-nav')===navigation,
 				TabCount:navigation.querySelectorAll('[data-mobile-nav-item]').length,
 				CaptureName:capture?(capture.textContent||'').trim():'',CaptureHref:capture?capture.getAttribute('href')||'':'',
-				AppBarVisible:!!appBar&&isVisible(appBar),MobileTitle:(appBar?.querySelector('.mobile-app-bar__title')?.textContent||'').trim(),
-				CaptureWidth:captureRect.width,CaptureHeight:captureRect.height,
+				AppBarVisible:!!appBar&&isVisible(appBar),AppBarTitlePresent:Boolean(appBar?.querySelector('.mobile-app-bar__title')),
+				CaptureWidth:captureRect.width,CaptureHeight:captureRect.height,AppBarHeight:appBar?.getBoundingClientRect().height||0,
 				MissingLandmarks:!document.querySelector('.skip-link')||!document.querySelector('header')||!document.querySelector('main')||!document.querySelector('footer')||document.documentElement.lang!=='de-AT'};
 		})()`, &mobileAudit),
 	); err != nil {
@@ -322,7 +322,7 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 	}
 	if mobileAudit.Overflow || mobileAudit.MenuOpen || !mobileAudit.FocusReturned || mobileAudit.H1Count != 1 || mobileAudit.SmallTargets != 0 ||
 		mobileAudit.MissingNames != 0 || mobileAudit.UnlabelledFields != 0 || mobileAudit.MissingLandmarks ||
-		!mobileAudit.AppBarVisible || mobileAudit.MobileTitle != "Heute" || !mobileAudit.CaptureVisible || mobileAudit.CaptureInsideNavigation || mobileAudit.TabCount != 5 || mobileAudit.CaptureName != "Neuer Auftrag" ||
+		!mobileAudit.AppBarVisible || mobileAudit.AppBarTitlePresent || mobileAudit.AppBarHeight > 56 || !mobileAudit.CaptureVisible || mobileAudit.CaptureInsideNavigation || mobileAudit.TabCount != 5 || mobileAudit.CaptureName != "Neuer Auftrag" ||
 		mobileAudit.CaptureHref != "/customers/new" || mobileAudit.CaptureWidth < 44 || mobileAudit.CaptureHeight < 44 {
 		t.Fatalf("mobile accessibility audit = %+v", mobileAudit)
 	}
@@ -395,20 +395,27 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 	}
 
 	var adminMobileTourAudit struct {
-		Overflow, TourVisible, GroupedHidden, DriverTourAbsent bool
-		Chronological, SpineVisible, ConnectorVisible          bool
-		StatusText                                             bool
-		PrimaryFullRow                                         bool
-		AppointmentCount, SmallTargets                         int
-		CalendarHref, DetailHref                               string
+		Overflow, TourVisible, GroupedHidden, DriverTourAbsent                 bool
+		Chronological, SpineVisible, ConnectorVisible                          bool
+		StatusText, PrimaryFullRow                                             bool
+		FirstWorkSurface, IntroHidden, DesktopControlsHidden, TourAboveMetrics bool
+		AccessibleH1                                                           bool
+		FirstAppointmentInViewport, BottomNavigationVisible                    bool
+		AdminNavigationAbsent                                                  bool
+		AppointmentCount, SmallTargets                                         int
+		CalendarHref, DetailHref                                               string
 	}
 	if err := chromedp.Run(browserContext,
-		chromedp.EmulateViewport(360, 800),
+		chromedp.EmulateViewport(459, 790),
 		chromedp.WaitVisible(`[data-dashboard-projection="admin-tour"]`, chromedp.ByQuery),
 		chromedp.Evaluate(`(() => {
 			const visible=node=>{if(!node)return false;const style=getComputedStyle(node),rect=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0};
 			const tour=document.querySelector('[data-dashboard-projection="admin-tour"]');
 			const grouped=document.querySelector('[data-dashboard-projection="resource-groups"]');
+			const intro=document.querySelector('.dashboard-intro');
+			const desktopControls=document.querySelector('.dashboard-control-bar');
+			const metrics=document.querySelector('.dashboard-metrics');
+			const main=document.querySelector('main.dashboard-page');
 			const list=tour.querySelector('.admin-tour__list');
 			const items=[...tour.querySelectorAll('[data-admin-tour-appointment]')];
 			const controls=[...tour.querySelectorAll('a,button,summary')].filter(visible);
@@ -416,12 +423,20 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 			const actions=tour.querySelector('.admin-tour__actions');
 			const primary=tour.querySelector('.admin-tour__appointment-link');
 			const actionRect=actions.getBoundingClientRect(),primaryRect=primary.getBoundingClientRect();
+			const firstVisibleChild=[...main.children].find(visible);
+			const firstAppointmentRect=items[0]?.getBoundingClientRect();
+			const bottomNavigationRect=document.querySelector('.mobile-bottom-nav').getBoundingClientRect();
+			const pageHeading=main.querySelector('h1');
 			return {Overflow:document.documentElement.scrollWidth>window.innerWidth,
 				TourVisible:visible(tour),GroupedHidden:!visible(grouped),DriverTourAbsent:!document.querySelector('[data-dashboard-projection="driver-tour"]'),
 				Chronological:starts.every((value,index)=>index===0||starts[index-1]<=value),
 				SpineVisible:getComputedStyle(list,'::before').content!=='none'&&parseFloat(getComputedStyle(list,'::before').width)>=6,
 				ConnectorVisible:items.every(item=>getComputedStyle(item,'::before').content!=='none'&&parseFloat(getComputedStyle(item,'::before').width)>=12),
 				StatusText:items.every(item=>(item.querySelector('.appointment-badge')?.textContent||'').trim()!==''),PrimaryFullRow:Math.abs(primaryRect.left-actionRect.left)<1&&Math.abs(primaryRect.right-actionRect.right)<1,
+				FirstWorkSurface:firstVisibleChild===tour,IntroHidden:!visible(intro),DesktopControlsHidden:!visible(desktopControls),TourAboveMetrics:tour.getBoundingClientRect().top<metrics.getBoundingClientRect().top,
+				AccessibleH1:Boolean(pageHeading&&getComputedStyle(pageHeading).display!=='none'&&pageHeading.getClientRects().length),
+				FirstAppointmentInViewport:Boolean(firstAppointmentRect&&firstAppointmentRect.top<bottomNavigationRect.top),BottomNavigationVisible:visible(document.querySelector('.mobile-bottom-nav')),
+				AdminNavigationAbsent:!document.querySelector('.mobile-admin-nav'),
 				AppointmentCount:items.length,SmallTargets:controls.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<44||rect.height<44}).length,
 				CalendarHref:tour.querySelector('.admin-tour__calendar')?.getAttribute('href')||'',DetailHref:tour.querySelector('.admin-tour__appointment-link')?.getAttribute('href')||''};
 		})()`, &adminMobileTourAudit),
@@ -431,13 +446,16 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 	if adminMobileTourAudit.Overflow || !adminMobileTourAudit.TourVisible || !adminMobileTourAudit.GroupedHidden || !adminMobileTourAudit.DriverTourAbsent ||
 		!adminMobileTourAudit.Chronological || !adminMobileTourAudit.SpineVisible || !adminMobileTourAudit.ConnectorVisible ||
 		!adminMobileTourAudit.StatusText || !adminMobileTourAudit.PrimaryFullRow || adminMobileTourAudit.AppointmentCount != 1 || adminMobileTourAudit.SmallTargets != 0 ||
+		!adminMobileTourAudit.FirstWorkSurface || !adminMobileTourAudit.IntroHidden || !adminMobileTourAudit.DesktopControlsHidden || !adminMobileTourAudit.TourAboveMetrics ||
+		!adminMobileTourAudit.AccessibleH1 ||
+		!adminMobileTourAudit.FirstAppointmentInViewport || !adminMobileTourAudit.BottomNavigationVisible || !adminMobileTourAudit.AdminNavigationAbsent ||
 		adminMobileTourAudit.CalendarHref != "/calendar?date=2026-08-25" || !strings.HasPrefix(adminMobileTourAudit.DetailHref, "/calendar/appointments/") {
 		t.Fatalf("admin mobile Touren-Kamm audit = %+v", adminMobileTourAudit)
 	}
 
 	var adminDesktopProjectionAudit struct {
-		TourHidden, GroupedVisible bool
-		AppointmentColumns         string
+		TourHidden, GroupedVisible, AdminNavigationAbsent bool
+		AppointmentColumns                                string
 	}
 	if err := chromedp.Run(browserContext,
 		chromedp.EmulateViewport(1280, 720),
@@ -445,19 +463,19 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 			const visible=node=>{const style=getComputedStyle(node),rect=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0};
 			const tour=document.querySelector('[data-dashboard-projection="admin-tour"]');
 			const grouped=document.querySelector('[data-dashboard-projection="resource-groups"]');
-			return {TourHidden:!visible(tour),GroupedVisible:visible(grouped),
+			return {TourHidden:!visible(tour),GroupedVisible:visible(grouped),AdminNavigationAbsent:!document.querySelector('.mobile-admin-nav'),
 				AppointmentColumns:getComputedStyle(grouped.querySelector('.dashboard-appointment')).gridTemplateColumns};
 		})()`, &adminDesktopProjectionAudit),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
-	if !adminDesktopProjectionAudit.TourHidden || !adminDesktopProjectionAudit.GroupedVisible || !strings.Contains(adminDesktopProjectionAudit.AppointmentColumns, " ") {
+	if !adminDesktopProjectionAudit.TourHidden || !adminDesktopProjectionAudit.GroupedVisible || !adminDesktopProjectionAudit.AdminNavigationAbsent || !strings.Contains(adminDesktopProjectionAudit.AppointmentColumns, " ") {
 		t.Fatalf("admin desktop projection changed = %+v", adminDesktopProjectionAudit)
 	}
 
 	var mobileDashboardScreenshot, desktopDashboardScreenshot []byte
 	if err := chromedp.Run(browserContext,
-		chromedp.EmulateViewport(360, 800),
+		chromedp.EmulateViewport(459, 790),
 		chromedp.FullScreenshot(&mobileDashboardScreenshot, 90),
 		chromedp.EmulateViewport(1280, 720),
 		chromedp.FullScreenshot(&desktopDashboardScreenshot, 90),

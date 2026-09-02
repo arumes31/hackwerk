@@ -19,7 +19,7 @@ templ CalendarFeeds(data CalendarFeedsData) {
 		@documentHead(data.Shell.Page, "Kalender exportieren – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page">
+			<main id="hauptinhalt" class="page calendar-feeds-page admin-work-page">
 				<div class="page-heading"><div><p class="eyebrow">Read-only Synchronisierung</p><h1>Kalender exportieren</h1><p>Termine für Apple Kalender, Outlook, Google Kalender und andere ICS-Clients.</p></div><span class="status-badge">Nur lesen</span></div>
 				if data.Error != "" {
 					<div class="form-alert" role="alert">{ data.Error }</div>

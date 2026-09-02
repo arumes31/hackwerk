@@ -188,11 +188,12 @@ func TestTask08PlanningSuggestionsMobileJourney(t *testing.T) {
 	if err := runBrowserStep(browser, "open planning", chromedp.Navigate(server.URL+"/waitlist"), chromedp.WaitVisible("tr[data-job-id='"+jobID+"'] .row-actions > summary", chromedp.ByQuery), chromedp.Click("tr[data-job-id='"+jobID+"'] .row-actions > summary", chromedp.ByQuery), chromedp.WaitVisible(planningLink, chromedp.ByQuery), chromedp.Click(planningLink, chromedp.ByQuery), chromedp.WaitVisible("form[action='/planning/suggestions']", chromedp.ByQuery)); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
-	if err := runBrowserStep(browser, "calculate suggestions", chromedp.Click("form[action='/planning/suggestions'] button[type='submit']", chromedp.ByQuery), chromedp.WaitVisible(".suggestion-card", chromedp.ByQuery), chromedp.Text("main", &text, chromedp.ByQuery), chromedp.Evaluate(`document.documentElement.scrollWidth>window.innerWidth`, &overflow), chromedp.Evaluate(`Array.from(document.querySelectorAll('.suggestion-card .button')).some(e=>e.getBoundingClientRect().height<44||e.getBoundingClientRect().width<44)`, &smallTarget)); err != nil {
+	var overflowSources []string
+	if err := runBrowserStep(browser, "calculate suggestions", chromedp.Click("form[action='/planning/suggestions'] button[type='submit']", chromedp.ByQuery), chromedp.WaitVisible(".suggestion-card", chromedp.ByQuery), chromedp.Text("main", &text, chromedp.ByQuery), chromedp.Evaluate(`document.documentElement.scrollWidth>window.innerWidth`, &overflow), chromedp.Evaluate(`Array.from(document.querySelectorAll('.suggestion-card .button')).some(e=>e.getBoundingClientRect().height<44||e.getBoundingClientRect().width<44)`, &smallTarget), chromedp.Evaluate(`(()=>{const width=document.documentElement.clientWidth;return [...document.querySelectorAll('body *')].filter(node=>{const style=getComputedStyle(node),rect=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0&&(rect.left<-.5||rect.right>width+.5)}).slice(0,20).map(node=>{const rect=node.getBoundingClientRect();return node.tagName.toLowerCase()+'.'+String(node.className||'').replace(/\s+/g,'.')+'@'+Math.round(rect.left)+'-'+Math.round(rect.right)})})()`, &overflowSources)); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
 	if overflow || smallTarget || !strings.Contains(text, "Beste berechnete Option") || !strings.Contains(text, "Fahrer") || !strings.Contains(text, "Ressourcen") || !strings.Contains(text, "Luftlinie / Schätzung") {
-		t.Fatalf("planning mobile overflow/small=%v/%v text=%s", overflow, smallTarget, text)
+		t.Fatalf("planning mobile overflow/small=%v/%v sources=%v text=%s", overflow, smallTarget, overflowSources, text)
 	}
 	if _, err := pool.Exec(t.Context(), "UPDATE jobs SET version=version+1 WHERE id=$1", jobID); err != nil {
 		t.Fatal(err)
@@ -202,6 +203,7 @@ func TestTask08PlanningSuggestionsMobileJourney(t *testing.T) {
 	if err := runBrowserStep(
 		browser,
 		"reject stale proposal",
+		chromedp.Evaluate(`window.confirm=()=>true`, nil),
 		chromedp.Click(".suggestion-card:first-child form[action$='/adopt'] button", chromedp.ByQuery),
 		chromedp.WaitVisible(".form-alert", chromedp.ByQuery),
 		chromedp.Text("main", &staleText, chromedp.ByQuery),

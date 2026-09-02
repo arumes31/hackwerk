@@ -33,7 +33,7 @@ templ Planning(data PlanningData) {
 		@documentHead(data.Shell.Page, "Planungsvorschläge – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page compact-page planning-page" data-planning-workbench data-planning-radius-latitude={ data.RadiusLatitude } data-planning-radius-longitude={ data.RadiusLongitude }>
+			<main id="hauptinhalt" class="page compact-page planning-page admin-work-page" data-planning-workbench data-planning-radius-latitude={ data.RadiusLatitude } data-planning-radius-longitude={ data.RadiusLongitude }>
 				<div class="page-heading"><div><p class="eyebrow">Disposition</p><h1>Planungswerkbank</h1><p>Aufträge auswählen, prüfen und als Einzelvorschlag oder Tagesroute bearbeiten. Jede Übernahme bleibt unverbindlich.</p></div><div class="action-row"><a class="button button--quiet" href={ data.ReturnTo }>Zurück zur Warteliste</a><span class="status-badge">Keine automatische Fixierung</span></div></div>
 				if data.Error != "" {
 					<div class="form-alert" role="alert"><strong>Planung nicht möglich</strong><p>{ data.Error }</p><ul><li>Pflichtdaten und Haufenstandort prüfen</li><li>Fahrer-Verfügbarkeit und Ressourcen im Suchzeitraum prüfen</li><li>Transportmodus beziehungsweise externe Bestätigung prüfen</li></ul></div>

@@ -67,7 +67,7 @@ templ Routes(data RoutePageData) {
 		@documentHead(data.Shell.Page, routePageTitle(data))
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page route-page compact-page route-planner-page">
+			<main id="hauptinhalt" class="page route-page compact-page route-planner-page admin-work-page">
 				<div class="page-heading">
 					<div>
 						<p class="eyebrow">{ routeEyebrow(data) }</p>
@@ -95,7 +95,7 @@ templ Routes(data RoutePageData) {
 
 templ adminRoutePlanner(data RoutePageData) {
 	<section class="route-workspace" data-route-context data-route-admin="true">
-		<form method="post" action="/planning/routes" class="route-builder form-card">
+		<form method="post" action="/planning/routes" class="route-builder form-card" data-sticky-actions>
 			<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
 			<div class="section-heading"><div><p class="eyebrow">Schritt 1</p><h2>Start und Ende festlegen</h2></div><a class="button button--quiet" href="/settings/route-locations">Orte verwalten</a></div>
 			<p class="form-hint">Wählen Sie einen gespeicherten Ort oder bestätigen Sie einen anderen Ort ausdrücklich. Die Route verwendet keinen stillen Ersatzstandort.</p>
@@ -158,7 +158,7 @@ templ adminRoutePlanner(data RoutePageData) {
 			<label class="check-label"><input type="checkbox" name="optimize" value="true" checked?={ !data.Form.Submitted || data.Form.Optimize }/> Reihenfolge nach Fahrzeit optimieren</label>
 			<div class="action-row" data-route-date-presets><button type="button" class="button button--quiet" data-route-date-preset="today">Heute</button><button type="button" class="button button--quiet" data-route-date-preset="tomorrow">Morgen</button><button type="button" class="button button--quiet" data-route-date-preset="business-day">Nächster Werktag</button></div>
 			<p class="form-hint">Die Berechnung erzeugt einen Entwurf, keine Termine. Gespeicherte Orte werden beim Absenden serverseitig erneut geprüft.</p>
-			<button class="button" type="submit" disabled?={ routeSelectableCandidateCount(data.Candidates) == 0 }>Route berechnen</button>
+			<div class="form-actions"><button class="button" type="submit" disabled?={ routeSelectableCandidateCount(data.Candidates) == 0 }>Route berechnen</button></div>
 		</form>
 		<div class="route-map-panel">
 			@mapAssetData(data.Shell.Page)

@@ -91,12 +91,15 @@ func TestFullCalendarAssetsArePageSpecific(t *testing.T) {
 	if strings.Index(calendar, "app.css") > strings.Index(calendar, "mobile-app.css") {
 		t.Fatal("mobile app presentation layer must load after application CSS")
 	}
+	if strings.Index(calendar, "fullcalendar-palette.css") > strings.Index(calendar, "mobile-app.css") {
+		t.Fatal("mobile app presentation layer must load after calendar styles so its responsive hierarchy wins the cascade")
+	}
 	if strings.Index(calendar, "presentation-bootstrap.js") > strings.Index(calendar, "control-foundation.css") {
 		t.Fatal("presentation preferences must be applied before styles load")
 	}
 }
 
-func TestMobileShellKeepsFiveDestinationsAndSeparatePrimaryAction(t *testing.T) {
+func TestMobileShellUsesOnlyBottomNavigationAndKeepsAdminDestinationsInMore(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
@@ -127,6 +130,9 @@ func TestMobileShellKeepsFiveDestinationsAndSeparatePrimaryAction(t *testing.T) 
 	if !strings.Contains(markup, `class="mobile-primary-action`) || !strings.Contains(markup, `href="/customers/new"`) {
 		t.Fatal("separate mobile primary action is missing")
 	}
+	if strings.Contains(markup, `mobile-app-bar__title`) {
+		t.Fatal("mobile utility bar must not repeat the page title")
+	}
 	for _, contract := range []string{
 		`data-mobile-menu-open`,
 		`aria-haspopup="dialog"`,
@@ -138,6 +144,48 @@ func TestMobileShellKeepsFiveDestinationsAndSeparatePrimaryAction(t *testing.T) 
 		if !strings.Contains(markup, contract) {
 			t.Errorf("mobile More sheet is missing %q", contract)
 		}
+	}
+	if strings.Contains(markup, `class="mobile-admin-nav"`) {
+		t.Fatal("admin shell must not render a second mobile navigation")
+	}
+	if !strings.Contains(markup, `data-actor-role="admin"`) {
+		t.Fatal("admin shell must expose a non-visual role hook for role-scoped mobile layout")
+	}
+	moreStart := strings.Index(markup, `<dialog id="mobile-more-sheet"`)
+	if moreStart < 0 {
+		t.Fatal("admin mobile More sheet is missing")
+	}
+	moreEndOffset := strings.Index(markup[moreStart:], `</dialog>`)
+	if moreEndOffset < 0 {
+		t.Fatal("admin mobile More sheet is not closed")
+	}
+	more := markup[moreStart : moreStart+moreEndOffset]
+	for _, href := range []string{
+		`href="/planning"`,
+		`href="/planning/routes"`,
+		`href="/admin/drivers"`,
+		`href="/admin/resources"`,
+		`href="/settings/route-locations"`,
+		`href="/admin/notifications"`,
+		`href="/admin/voice-recordings"`,
+		`href="/admin/users"`,
+	} {
+		if !strings.Contains(more, href) {
+			t.Errorf("admin mobile More sheet is missing %s", href)
+		}
+	}
+
+	output.Reset()
+	shell.Actor.Role = auth.RoleDriver
+	if err := appHeader(shell).Render(context.Background(), &output); err != nil {
+		t.Fatal(err)
+	}
+	driverMarkup := output.String()
+	if strings.Contains(driverMarkup, `class="mobile-admin-nav"`) {
+		t.Fatal("driver shell must not render a second mobile navigation")
+	}
+	if !strings.Contains(driverMarkup, `data-actor-role="driver"`) {
+		t.Fatal("driver shell must expose a non-visual role hook for role-scoped mobile layout")
 	}
 }
 
@@ -245,6 +293,25 @@ func TestDashboardRendersRoleSpecificChronologicalMobileToursWithoutChangingDesk
 		t.Fatal("admin mobile tour section boundaries are missing")
 	}
 	adminTourMarkup := adminMarkup[adminTourStart : adminTourStart+adminTourEnd]
+	if introStart := strings.Index(adminMarkup, `class="dashboard-intro"`); introStart < 0 || introStart > adminTourStart {
+		t.Fatal("desktop introduction must keep the page h1 before the mobile disposition in the accessibility order")
+	}
+	for _, contract := range []string{
+		`class="admin-tour__date-nav"`,
+		`href="/dashboard?date=2026-08-24"`,
+		`href="/dashboard?date=2026-08-26"`,
+		`href="/dashboard"`,
+		`href="/dashboard?date=2026-08-25"`,
+		`href="/dashboard?date=2026-08-25&amp;mode=exceptions"`,
+		`data-print-page`,
+	} {
+		if !strings.Contains(adminTourMarkup, contract) {
+			t.Errorf("admin mobile disposition is missing self-contained control %q", contract)
+		}
+	}
+	if strings.Count(adminTourMarkup, `aria-current="page"`) != 1 {
+		t.Fatal("admin mobile disposition must expose exactly one current mode without relying on color")
+	}
 	if firstAt, secondAt := strings.Index(adminTourMarkup, "Erster Halt"), strings.Index(adminTourMarkup, "Zweiter Halt"); firstAt < 0 || secondAt <= firstAt {
 		t.Fatalf("admin mobile tour does not preserve View.Today chronology: %s", adminTourMarkup)
 	}
@@ -262,6 +329,24 @@ func TestDashboardRendersRoleSpecificChronologicalMobileToursWithoutChangingDesk
 	}
 	if strings.Contains(adminTourMarkup, `<form`) || strings.Contains(adminTourMarkup, `/my-route`) {
 		t.Fatal("admin mobile tour must remain a read-only navigation surface without driver-only route actions")
+	}
+}
+
+func TestAdminRoutePrimaryActionUsesStickyActionContainer(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	if err := adminRoutePlanner(RoutePageData{}).Render(context.Background(), &output); err != nil {
+		t.Fatal(err)
+	}
+	markup := output.String()
+	button := strings.Index(markup, `>Route berechnen</button>`)
+	if button < 0 {
+		t.Fatal("admin route planner is missing its primary submit action")
+	}
+	container := strings.LastIndex(markup[:button], `class="form-actions"`)
+	if container < 0 || strings.Contains(markup[container:button], `</div>`) {
+		t.Fatal("Route berechnen must be inside the sticky form-actions container")
 	}
 }
 

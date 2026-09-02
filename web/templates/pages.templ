@@ -64,7 +64,6 @@ templ documentHeadWithAssets(data PageData, title string, firstStylePath string,
 		<script src={ data.PresentationBootstrapJSPath }></script>
 		<link rel="stylesheet" href={ data.ControlFoundationCSSPath }/>
 		<link rel="stylesheet" href={ data.CSSPath }/>
-		<link rel="stylesheet" href={ data.MobileCSSPath }/>
 		if firstStylePath != "" {
 			<link rel="stylesheet" href={ templ.SafeURL(firstStylePath) }/>
 		}
@@ -78,6 +77,7 @@ templ documentHeadWithAssets(data PageData, title string, firstStylePath string,
 			<script src={ data.FullCalendarJSPath } defer></script>
 			<script src={ data.FullCalendarThemeJSPath } defer></script>
 		}
+		<link rel="stylesheet" href={ data.MobileCSSPath }/>
 		<script type="module" src={ data.JSPath } defer></script>
 	</head>
 }

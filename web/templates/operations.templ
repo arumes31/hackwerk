@@ -38,7 +38,7 @@ templ Drivers(data DriversData) {
 		@documentHead(data.Shell.Page, "Fahrer – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page compact-page" data-operation-page>
+			<main id="hauptinhalt" class="page compact-page drivers-page admin-work-page" data-operation-page>
 				<div class="page-heading"><div><p class="eyebrow">Administration</p><h1>Fahrerprofile</h1><p>Kontaktdaten, Login, Rechte und Verfügbarkeit kompakt verwalten.</p></div><span class="status-badge">{ fmt.Sprint(len(data.Drivers)) } Profile</span></div>
 				if data.Error != "" {
 					<div class="form-alert" role="alert">{ data.Error }</div>
@@ -113,7 +113,7 @@ templ Resources(data ResourcesData) {
 		@documentHead(data.Shell.Page, "Ressourcen – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page compact-page" data-operation-page>
+			<main id="hauptinhalt" class="page compact-page resources-page admin-work-page" data-operation-page>
 				<div class="page-heading"><div><p class="eyebrow">Administration</p><h1>Ressourcen</h1><p>Maschinen, Fahrzeuge und Anhänger werden als einzelne, planbare Datensätze geführt.</p></div><span class="status-badge">{ fmt.Sprint(len(data.Resources)) } Ressourcen</span></div>
 				<details class="compact-create-panel">
 					<summary>+ Ressource anlegen</summary>
@@ -172,7 +172,7 @@ templ Availability(data AvailabilityData) {
 		@documentHead(data.Shell.Page, "Verfügbarkeit – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page compact-page" data-operation-page>
+			<main id="hauptinhalt" class="page compact-page availability-page admin-work-page" data-operation-page>
 				<div class="page-heading">
 					<div><p class="eyebrow">{ availabilityEyebrow(data.Admin) }</p><h1>Verfügbarkeit von { data.Data.Profile.DisplayName }</h1><p>Wochenzeiten und Ausnahmen; Europe/Vienna.</p></div>
 					<div class="action-row">

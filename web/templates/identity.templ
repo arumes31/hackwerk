@@ -46,7 +46,7 @@ type CreateUserValues struct {
 
 templ appHeader(shell ShellData) {
 	<a class="skip-link" href="#hauptinhalt">Zum Inhalt springen</a>
-	<header class="site-header">
+	<header class="site-header" data-actor-role={ string(shell.Actor.Role) }>
 		<div class="site-header__inner site-header__inner--desktop">
 			<a class="wordmark" href="/dashboard" aria-label={ shell.Page.AppName + " Übersicht" }><span class="wordmark__mark" aria-hidden="true">H</span><span>{ shell.Page.AppName }</span></a>
 			<nav class="primary-nav" aria-label="Hauptnavigation">
@@ -103,7 +103,6 @@ templ appHeader(shell ShellData) {
 		</div>
 		<div class="mobile-app-bar">
 			<a class="mobile-app-bar__brand" href="/dashboard" aria-label={ shell.Page.AppName + " Übersicht" }><span class="wordmark__mark" aria-hidden="true">H</span></a>
-			<span class="mobile-app-bar__title">{ mobilePageTitle(shell.ActivePath) }</span>
 			<div class="mobile-context-actions">
 				<button class="mobile-context-action" type="button" data-command-open aria-label="Globale Suche und Kommandos öffnen" title="Kommandos (Strg/⌘ K)">
 					@mobileShellIcon("search", "mobile-context-action__icon")
@@ -331,6 +330,9 @@ templ Dashboard(data DashboardData) {
 			@appHeader(data.Shell)
 			<main id="hauptinhalt" class="page dashboard-page" data-dashboard-role={ dashboardRole(data.Shell.Actor.Role) }>
 				<section class="dashboard-intro"><div><p class="eyebrow">Einsatzübersicht</p><h1>Grüß Gott, { data.Shell.Actor.DisplayName }.</h1><p>Termine, Rückmeldungen und Kapazität auf einen Blick.</p></div><div class="action-row"><button class="button button--quiet" type="button" data-print-page>Tagesübersicht drucken</button><a class="button dashboard-primary-action" href="/customers/new">Neuen Auftrag erfassen</a></div></section>
+				if data.Error == "" && data.Shell.Actor.Role == auth.RoleAdmin {
+					@adminTour(data.View)
+				}
 				if data.Error != "" {
 					<section class="empty-state" role="alert"><h2>Übersicht nicht verfügbar</h2><p>{ data.Error }</p><a class="button button--quiet" href="/dashboard">Heute erneut laden</a></section>
 				}
@@ -343,7 +345,22 @@ templ Dashboard(data DashboardData) {
 							<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + data.View.NextDate) } aria-label="Nächster Tag">→</a>
 						</nav>
 						if data.View.Admin {
-							<div class="action-row dashboard-mode" aria-label="Dashboardansicht"><a class={ dashboardModeClass(!data.View.ExceptionsOnly) } href={ templ.SafeURL("/dashboard?date=" + data.View.Date) }>Alle Einsätze</a><a class={ dashboardModeClass(data.View.ExceptionsOnly) } href={ templ.SafeURL("/dashboard?date=" + data.View.Date + "&mode=exceptions") }>Nur Ausnahmen</a></div>
+							<div class="action-row dashboard-mode" aria-label="Dashboardansicht">
+								<a
+									class={ dashboardModeClass(!data.View.ExceptionsOnly) }
+									href={ templ.SafeURL("/dashboard?date=" + data.View.Date) }
+									if !data.View.ExceptionsOnly {
+										aria-current="page"
+									}
+								>Alle Einsätze</a>
+								<a
+									class={ dashboardModeClass(data.View.ExceptionsOnly) }
+									href={ templ.SafeURL("/dashboard?date=" + data.View.Date + "&mode=exceptions") }
+									if data.View.ExceptionsOnly {
+										aria-current="page"
+									}
+								>Nur Ausnahmen</a>
+							</div>
 						}
 					</div>
 					<section class="dashboard-metrics" aria-label="Kennzahlen">
@@ -429,9 +446,6 @@ templ Dashboard(data DashboardData) {
 						</section>
 						if data.Shell.Actor.Role == auth.RoleDriver {
 							@driverTour(data.View.Today, data.View.Date, data.View.DateLabel, data.Shell.Actor.DriverID)
-						}
-						if data.Shell.Actor.Role == auth.RoleAdmin {
-							@adminTour(data.View.Today, data.View.Date, data.View.DateLabel)
 						}
 						<aside class="dashboard-side" aria-label="Tageshinweise">
 							<section class="dashboard-panel">
@@ -544,21 +558,48 @@ templ driverTour(items []dashboard.Appointment, selectedDate string, dateLabel s
 	</section>
 }
 
-templ adminTour(items []dashboard.Appointment, selectedDate string, dateLabel string) {
+templ adminTour(view dashboard.View) {
 	<section class="admin-tour" data-dashboard-projection="admin-tour" aria-labelledby="admin-tour-heading">
 		<div class="section-heading admin-tour__heading">
 			<div>
 				<p class="eyebrow">Disposition</p>
 				<h2 id="admin-tour-heading">Tagesdisposition</h2>
-				<p>{ dateLabel } · chronologisch über alle Hackmaschinen.</p>
+				<p>Alle Hackmaschinen · chronologisch und direkt bearbeitbar.</p>
 			</div>
-			<a class="button button--quiet admin-tour__calendar" href={ templ.SafeURL("/calendar?date=" + url.QueryEscape(selectedDate)) }>Kalender öffnen</a>
 		</div>
-		if len(items) == 0 {
+		<nav class="admin-tour__date-nav" aria-label="Dispositionstag auswählen">
+			<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + view.PreviousDate) } aria-label="Vorheriger Tag">←</a>
+			<div><span class="eyebrow">Tag</span><strong>{ view.DateLabel }</strong><small>Aktualisiert { view.UpdatedLabel } Uhr</small></div>
+			<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + view.NextDate) } aria-label="Nächster Tag">→</a>
+			<a class="button button--quiet admin-tour__today" href="/dashboard">Heute</a>
+		</nav>
+		<div class="admin-tour__commands">
+			<div class="admin-tour__mode" aria-label="Disposition filtern">
+				<a
+					class={ dashboardModeClass(!view.ExceptionsOnly) }
+					href={ templ.SafeURL("/dashboard?date=" + view.Date) }
+					if !view.ExceptionsOnly {
+						aria-current="page"
+					}
+				>Alle Einsätze</a>
+				<a
+					class={ dashboardModeClass(view.ExceptionsOnly) }
+					href={ templ.SafeURL("/dashboard?date=" + view.Date + "&mode=exceptions") }
+					if view.ExceptionsOnly {
+						aria-current="page"
+					}
+				>Nur Ausnahmen</a>
+			</div>
+			<div class="admin-tour__tools">
+				<a class="button button--quiet admin-tour__calendar" href={ templ.SafeURL("/calendar?date=" + url.QueryEscape(view.Date)) }>Kalender öffnen</a>
+				<button class="button button--quiet" type="button" data-print-page>Tag drucken</button>
+			</div>
+		</div>
+		if len(view.Today) == 0 {
 			<div class="empty-state"><h3>Keine Einsätze</h3><p>Für diesen Tag sind keine Vorschläge oder fixierten Termine eingetragen.</p><a class="button button--quiet" href="/waitlist">Warteliste disponieren</a></div>
 		} else {
 			<ol class="admin-tour__list" aria-label="Termine in zeitlicher Reihenfolge">
-				for index, item := range items {
+				for index, item := range view.Today {
 					<li class="admin-tour__item" data-admin-tour-appointment>
 						<article class="admin-tour__appointment" aria-label={ fmt.Sprintf("%d. Termin: %s um %s Uhr", index+1, item.CustomerName, dashboardTime(item.StartsAt)) }>
 							<div class="admin-tour__time">
@@ -845,7 +886,7 @@ templ Users(data UsersData) {
 		@documentHead(data.Shell.Page, "Benutzer & Fahrer – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page users-page">
+			<main id="hauptinhalt" class="page users-page admin-work-page">
 				<div class="users-heading">
 					<div><p class="eyebrow">Administration</p><h1>Benutzer &amp; Fahrer</h1><p>Zugänge, Rollen und Passwörter zentral verwalten. Fahrerprofile bleiben eigenständige Datensätze.</p></div>
 					<div class="users-heading__actions"><label class="user-directory-search">Zugänge filtern<input type="search" autocomplete="off" placeholder="Name, Benutzername oder E-Mail" data-user-filter/></label><span class="status-badge">{ fmt.Sprint(len(data.Users)) } Zugänge</span><a class="button" href="#new-user">Neuer Zugang</a></div>
@@ -1054,53 +1095,6 @@ func mobileMoreSummaryClass(active string) string {
 		return "nav-link--active"
 	}
 	return ""
-}
-
-func mobilePageTitle(active string) string {
-	switch {
-	case isActivePath(active, "/customers/new"):
-		return "Neuer Auftrag"
-	case isActivePath(active, "/calendar/feeds"):
-		return "Kalenderfeeds"
-	case isActivePath(active, "/calendar/appointments"):
-		return "Termin"
-	case isActivePath(active, "/settings/route-locations"):
-		return "Routenorte"
-	case isActivePath(active, "/admin/voice-recordings"):
-		return "Sprachaufnahmen"
-	case isActivePath(active, "/admin/notifications"):
-		return "Versand"
-	case isActivePath(active, "/admin/resources"):
-		return "Ressourcen"
-	case isActivePath(active, "/admin/drivers"):
-		return "Fahrer"
-	case isActivePath(active, "/admin/users"):
-		return "Benutzer"
-	case isActivePath(active, "/planning/routes"):
-		return "Karte & Routen"
-	case isActivePath(active, "/planning"):
-		return "Planung"
-	case isActivePath(active, "/my-route"):
-		return "Meine Route"
-	case isActivePath(active, "/availability"):
-		return "Verfügbarkeit"
-	case isActivePath(active, "/voice"):
-		return "Spracheingabe"
-	case isActivePath(active, "/profile"):
-		return "Profil"
-	case isActivePath(active, "/password"):
-		return "Passwort ändern"
-	case isActivePath(active, "/hilfe/erste-schritte"):
-		return "Erste Schritte"
-	case isActivePath(active, "/calendar"):
-		return "Kalender"
-	case isActivePath(active, "/waitlist"):
-		return "Warteliste"
-	case isActivePath(active, "/customers"):
-		return "Kunden"
-	default:
-		return "Heute"
-	}
 }
 
 func driverLink(role auth.Role) string {

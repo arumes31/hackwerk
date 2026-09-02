@@ -2385,7 +2385,7 @@ func Customers(data CustomerListData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 211, "<main id=\"hauptinhalt\" class=\"page compact-page customer-page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">Kundenakten</p><h1>Kunden &amp; Aufträge</h1><p>Kompakte Übersicht über Kontakte und Auftragsbestand.</p></div><div class=\"action-row\"><a class=\"button button--quiet\" href=\"/voice\">Sprachentwurf</a><a class=\"button\" href=\"/customers/new\">Neuer Auftrag</a></div></div><form id=\"customer-list-controls\" method=\"post\" action=\"/customers/search\" class=\"customer-list-toolbar\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 211, "<main id=\"hauptinhalt\" class=\"page compact-page customer-page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">Kundenakten</p><h1>Kunden &amp; Aufträge</h1><p>Kompakte Übersicht über Kontakte und Auftragsbestand.</p></div><div class=\"action-row\"><a class=\"button button--quiet\" href=\"/voice\">Sprachentwurf</a><a class=\"button mobile-redundant-primary-action\" href=\"/customers/new\">Neuer Auftrag</a></div></div><form id=\"customer-list-controls\" method=\"post\" action=\"/customers/search\" class=\"customer-list-toolbar\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -5765,7 +5765,7 @@ func Waitlist(data WaitlistData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 554, "<main id=\"hauptinhalt\" class=\"page compact-page waitlist-page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">Arbeitsvorrat</p><h1>Warteliste</h1><p>Kompakte Dispositionsansicht. Die Position bleibt relativ zu Filtern, Priorität und Sortierung.</p></div><a class=\"button\" href=\"/customers/new\">Neuen Auftrag erfassen</a></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 554, "<main id=\"hauptinhalt\" class=\"page compact-page waitlist-page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">Arbeitsvorrat</p><h1>Warteliste</h1><p>Kompakte Dispositionsansicht. Die Position bleibt relativ zu Filtern, Priorität und Sortierung.</p></div><a class=\"button mobile-redundant-primary-action\" href=\"/customers/new\">Neuen Auftrag erfassen</a></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

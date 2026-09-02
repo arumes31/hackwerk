@@ -59,7 +59,7 @@ func VoiceRecordings(data VoiceRecordingsData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<main id=\"hauptinhalt\" class=\"page compact-page voice-recordings-page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">Administration · Datenschutz</p><h1>Originale Sprachaufnahmen</h1><p>Nur Administratoren können diese Aufnahmen anhören. Jede Aufnahme wird spätestens 30 Tage nach dem Upload automatisch gelöscht.</p></div><span class=\"status-badge\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<main id=\"hauptinhalt\" class=\"page compact-page voice-recordings-page admin-work-page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">Administration · Datenschutz</p><h1>Originale Sprachaufnahmen</h1><p>Nur Administratoren können diese Aufnahmen anhören. Jede Aufnahme wird spätestens 30 Tage nach dem Upload automatisch gelöscht.</p></div><span class=\"status-badge\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

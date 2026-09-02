@@ -58,7 +58,7 @@ func RouteLocationsSettings(data RouteLocationsSettingsData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<main id=\"hauptinhalt\" class=\"page route-page compact-page route-location-page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">Einstellungen</p><h1>Routenorte</h1><p>Start und Ende werden aus klar benannten, geprüften Orten gewählt. Standards sind nur Vorauswahlen.</p></div><a class=\"button button--quiet\" href=\"/planning/routes\">Routenplanung öffnen</a></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<main id=\"hauptinhalt\" class=\"page route-page compact-page route-location-page admin-work-page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">Einstellungen</p><h1>Routenorte</h1><p>Start und Ende werden aus klar benannten, geprüften Orten gewählt. Standards sind nur Vorauswahlen.</p></div><a class=\"button button--quiet\" href=\"/planning/routes\">Routenplanung öffnen</a></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
