@@ -148,7 +148,7 @@ func TestRouteHTTPDriverCanReorderOnlyOwnAssignedRoute(t *testing.T) {
 		t.Fatalf("own route regions are not ordered next stop, stop list, map: next=%d stops=%d map=%d", nextStop, stopList, routeMap)
 	}
 	if !strings.Contains(body, `<details class="route-secondary-metrics">`) ||
-		!strings.Contains(body, `<details class="route-stop-reorder">`) ||
+		!strings.Contains(body, `class="route-order-actions route-stop-order-actions" data-route-order-actions`) ||
 		!strings.Contains(body, `<div class="route-reorder-panel" data-route-order-save>`) ||
 		!strings.Contains(body, `data-route-order-save-button`) ||
 		!strings.Contains(body, `method="post" action="/my-route/route-1/reorder"`) {
@@ -214,6 +214,53 @@ func TestRouteHTTPAdminPlansConfirmedCustomEndpoints(t *testing.T) {
 	if store.savedRoute.StartLabel != "Hof Süd" || store.savedRoute.EndLabel != "Lager Nord" ||
 		store.savedRoute.Start != (planning.Point{Latitude: 48.2, Longitude: 14.2}) || store.savedRoute.End != (planning.Point{Latitude: 48.25, Longitude: 14.25}) {
 		t.Fatalf("saved route=%+v", store.savedRoute)
+	}
+}
+
+func TestRouteHTTPPlanRejectsInvalidViennaDSTDepartures(t *testing.T) {
+	tests := []struct {
+		name      string
+		departure string
+		split     bool
+	}{
+		{name: "combined nonexistent local time", departure: "2026-03-29T02:30"},
+		{name: "combined ambiguous local time", departure: "2026-10-25T02:30"},
+		{name: "split nonexistent local time", departure: "2026-03-29T02:30", split: true},
+		{name: "split ambiguous local time", departure: "2026-10-25T02:30", split: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := routeHTTPFixture()
+			router, session, csrf := routeTestRouter(t, auth.RoleAdmin, "", store)
+			form := url.Values{
+				"csrf_token":                    {csrf},
+				"driver_id":                     {"driver-1"},
+				"chipper_resource_id":           {"resource-1"},
+				"job_id":                        {"job-1"},
+				"start_selection":               {"custom"},
+				"start_custom_confirmed_native": {"true"},
+				"start_custom_label":            {"Hof Süd"},
+				"start_custom_address":          {"Hofstraße 1"},
+				"start_latitude":                {"48.200000"},
+				"start_longitude":               {"14.200000"},
+				"end_selection":                 {"last_stop"},
+			}
+			if test.split {
+				date, clock, _ := strings.Cut(test.departure, "T")
+				form.Set("departure_date", date)
+				form.Set("departure_time", clock)
+			} else {
+				form.Set("departure", test.departure)
+			}
+
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/planning/routes", form, session, csrf))
+			if response.Code != http.StatusUnprocessableEntity ||
+				!strings.Contains(response.Body.String(), "gültiges Abfahrtsdatum und gültige Abfahrtszeit eingeben") ||
+				store.savedRoute.ID != "" {
+				t.Fatalf("response=%d body=%s saved=%+v", response.Code, response.Body.String(), store.savedRoute)
+			}
+		})
 	}
 }
 

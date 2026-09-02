@@ -2183,212 +2183,212 @@ func routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, now
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 188, "\">Stoppliste</h2></div><span class=\"status-badge\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 188, "\">Stoppliste</h2></div><div class=\"route-summary__badges\"><span class=\"status-badge\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var129 string
-		templ_7745c5c3_Var129, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(routePointCount(route)))
+		templ_7745c5c3_Var129, templ_7745c5c3_Err = templ.JoinStringErrs(routeSource(route.Directions))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 313, Col: 208}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 313, Col: 238}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var129))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 189, " Routenpunkte</span></div><details class=\"route-secondary-metrics\"><summary>Routendetails und Zeiten</summary><div class=\"route-secondary-metrics__content\"><dl class=\"suggestion-facts\"><div><dt>Abfahrt</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 189, "</span><span class=\"status-badge\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var130 string
-		templ_7745c5c3_Var130, templ_7745c5c3_Err = templ.JoinStringErrs(planningClock(route.Departure))
+		templ_7745c5c3_Var130, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(routePointCount(route)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 90}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 313, Col: 310}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var130))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 190, " Uhr</dd></div><div><dt>Startort</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 190, " Routenpunkte</span></div></div><details class=\"route-secondary-metrics\"><summary>Routendetails und Zeiten</summary><div class=\"route-secondary-metrics__content\"><dl class=\"suggestion-facts\"><div><dt>Abfahrt</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var131 string
-		templ_7745c5c3_Var131, templ_7745c5c3_Err = templ.JoinStringErrs(routeOptional(route.StartLabel))
+		templ_7745c5c3_Var131, templ_7745c5c3_Err = templ.JoinStringErrs(planningClock(route.Departure))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 166}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 90}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var131))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 191, "</dd></div><div><dt>Endort</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 191, " Uhr</dd></div><div><dt>Startort</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var132 string
-		templ_7745c5c3_Var132, templ_7745c5c3_Err = templ.JoinStringErrs(routeOptional(route.EndLabel))
+		templ_7745c5c3_Var132, templ_7745c5c3_Err = templ.JoinStringErrs(routeOptional(route.StartLabel))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 234}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 166}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var132))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 192, "</dd></div><div><dt>Strecke</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 192, "</dd></div><div><dt>Endort</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var133 string
-		templ_7745c5c3_Var133, templ_7745c5c3_Err = templ.JoinStringErrs(routeDistance(route.Directions.DistanceMeters))
+		templ_7745c5c3_Var133, templ_7745c5c3_Err = templ.JoinStringErrs(routeOptional(route.EndLabel))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 320}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 234}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var133))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 193, "</dd></div><div><dt>Fahrzeit</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 193, "</dd></div><div><dt>Strecke</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var134 string
-		templ_7745c5c3_Var134, templ_7745c5c3_Err = templ.JoinStringErrs(routeDuration(route.Directions.Duration))
+		templ_7745c5c3_Var134, templ_7745c5c3_Err = templ.JoinStringErrs(routeDistance(route.Directions.DistanceMeters))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 401}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 320}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var134))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 194, "</dd></div><div><dt>Arbeitszeit</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 194, "</dd></div><div><dt>Fahrzeit</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var135 string
-		templ_7745c5c3_Var135, templ_7745c5c3_Err = templ.JoinStringErrs(routeDuration(routeWorkDuration(route)))
+		templ_7745c5c3_Var135, templ_7745c5c3_Err = templ.JoinStringErrs(routeDuration(route.Directions.Duration))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 484}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 401}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var135))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 195, "</dd></div><div><dt>Gesamtzeit</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 195, "</dd></div><div><dt>Arbeitszeit</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var136 string
-		templ_7745c5c3_Var136, templ_7745c5c3_Err = templ.JoinStringErrs(routeDuration(route.EstimatedEndAt.Sub(route.Departure)))
+		templ_7745c5c3_Var136, templ_7745c5c3_Err = templ.JoinStringErrs(routeDuration(routeWorkDuration(route)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 583}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 484}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var136))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 196, "</dd></div><div><dt>Voraussichtliches Ende</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 196, "</dd></div><div><dt>Gesamtzeit</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var137 string
-		templ_7745c5c3_Var137, templ_7745c5c3_Err = templ.JoinStringErrs(planningClock(route.EstimatedEndAt))
+		templ_7745c5c3_Var137, templ_7745c5c3_Err = templ.JoinStringErrs(routeDuration(route.EstimatedEndAt.Sub(route.Departure)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 673}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 583}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var137))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 197, " Uhr</dd></div><div><dt>Hackmaschine</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 197, "</dd></div><div><dt>Voraussichtliches Ende</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var138 string
-		templ_7745c5c3_Var138, templ_7745c5c3_Err = templ.JoinStringErrs(route.ChipperName)
+		templ_7745c5c3_Var138, templ_7745c5c3_Err = templ.JoinStringErrs(planningClock(route.EstimatedEndAt))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 739}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 673}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var138))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 198, "</dd></div><div><dt>Transport</dt><dd>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 198, " Uhr</dd></div><div><dt>Hackmaschine</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var139 string
-		templ_7745c5c3_Var139, templ_7745c5c3_Err = templ.JoinStringErrs(routeOptional(route.TransportName))
+		templ_7745c5c3_Var139, templ_7745c5c3_Err = templ.JoinStringErrs(route.ChipperName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 815}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 739}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var139))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 199, "</dd></div></dl>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 199, "</dd></div><div><dt>Transport</dt><dd>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var140 string
+		templ_7745c5c3_Var140, templ_7745c5c3_Err = templ.JoinStringErrs(routeOptional(route.TransportName))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 317, Col: 815}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var140))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 200, "</dd></div></dl>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if route.Comparison.ManualDuration > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 200, "<p class=\"route-comparison\" data-route-comparison>Optimierung: ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var140 string
-			templ_7745c5c3_Var140, templ_7745c5c3_Err = templ.JoinStringErrs(routeDistance(routeComparisonDistanceSaving(route.Comparison)))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 319, Col: 132}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var140))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 201, " und ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 201, "<p class=\"route-comparison\" data-route-comparison>Optimierung: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var141 string
-			templ_7745c5c3_Var141, templ_7745c5c3_Err = templ.JoinStringErrs(routeDuration(routeComparisonDurationSaving(route.Comparison)))
+			templ_7745c5c3_Var141, templ_7745c5c3_Err = templ.JoinStringErrs(routeDistance(routeComparisonDistanceSaving(route.Comparison)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 319, Col: 203}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 319, Col: 132}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var141))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 202, " gegenüber der manuellen Reihenfolge gespart.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 202, " und ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var142 string
+			templ_7745c5c3_Var142, templ_7745c5c3_Err = templ.JoinStringErrs(routeDuration(routeComparisonDurationSaving(route.Comparison)))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 319, Col: 203}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var142))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 203, " gegenüber der manuellen Reihenfolge gespart.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 203, "<div class=\"action-row\"><a class=\"button button--quiet\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 204, "<div class=\"action-row\"><a class=\"button button--quiet\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var142 templ.SafeURL
-		templ_7745c5c3_Var142, templ_7745c5c3_Err = templ.JoinURLErrs(routeWaypointURL(route))
+		var templ_7745c5c3_Var143 templ.SafeURL
+		templ_7745c5c3_Var143, templ_7745c5c3_Err = templ.JoinURLErrs(routeWaypointURL(route))
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 321, Col: 90}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var142))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 204, "\" target=\"_blank\" rel=\"noopener noreferrer\">Gesamtroute in Google Maps</a><button class=\"button button--quiet\" type=\"button\" data-print>Routenblatt drucken</button><span class=\"status-badge\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var143 string
-		templ_7745c5c3_Var143, templ_7745c5c3_Err = templ.JoinStringErrs(routeSource(route.Directions))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 321, Col: 313}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var143))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 205, "</span></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 205, "\" target=\"_blank\" rel=\"noopener noreferrer\">Gesamtroute in Google Maps</a><button class=\"button button--quiet\" type=\"button\" data-print>Routenblatt drucken</button></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2762,140 +2762,153 @@ func routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, now
 				}
 			}
 			if reorder {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 238, "<details class=\"route-stop-reorder\"><summary>Reihenfolge ändern</summary><div class=\"route-order-actions\"><button class=\"button button--quiet\" type=\"submit\" name=\"move_up\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 238, "<div class=\"route-order-actions route-stop-order-actions\" data-route-order-actions aria-label=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var170 string
-				templ_7745c5c3_Var170, templ_7745c5c3_Err = templ.ResolveAttributeValue(stop.ID)
+				templ_7745c5c3_Var170, templ_7745c5c3_Err = templ.ResolveAttributeValue("Fahrreihenfolge für " + stop.JobNumber)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 343, Col: 122}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 341, Col: 143}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var170)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 239, "\" data-route-move=\"up\" aria-label=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 239, "\"><button class=\"button button--quiet\" type=\"submit\" name=\"move_up\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var171 string
-				templ_7745c5c3_Var171, templ_7745c5c3_Err = templ.ResolveAttributeValue(stop.JobNumber + " nach oben verschieben")
+				templ_7745c5c3_Var171, templ_7745c5c3_Err = templ.ResolveAttributeValue(stop.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 343, Col: 200}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 341, Col: 227}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var171)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 240, "\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if stop.Position == 1 {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 241, " disabled")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 242, ">↑ Hoch</button><button class=\"button button--quiet\" type=\"submit\" name=\"move_down\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 240, "\" data-route-move=\"up\" aria-label=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var172 string
-				templ_7745c5c3_Var172, templ_7745c5c3_Err = templ.ResolveAttributeValue(stop.ID)
+				templ_7745c5c3_Var172, templ_7745c5c3_Err = templ.ResolveAttributeValue(stop.JobNumber + " nach oben verschieben")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 343, Col: 336}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 341, Col: 305}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var172)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 243, "\" data-route-move=\"down\" aria-label=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 241, "\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if stop.Position == 1 {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 242, " disabled")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 243, ">↑ Hoch</button><button class=\"button button--quiet\" type=\"submit\" name=\"move_down\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var173 string
-				templ_7745c5c3_Var173, templ_7745c5c3_Err = templ.ResolveAttributeValue(stop.JobNumber + " nach unten verschieben")
+				templ_7745c5c3_Var173, templ_7745c5c3_Err = templ.ResolveAttributeValue(stop.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 343, Col: 417}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 341, Col: 441}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var173)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 244, "\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 244, "\" data-route-move=\"down\" aria-label=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var174 string
+				templ_7745c5c3_Var174, templ_7745c5c3_Err = templ.ResolveAttributeValue(stop.JobNumber + " nach unten verschieben")
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 341, Col: 522}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var174)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 245, "\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if stop.Position == len(route.Stops) {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 245, " disabled")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 246, " disabled")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 246, ">↓ Runter</button></div></details>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 247, ">↓ Runter</button></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 247, "</li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 248, "</li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 248, "</ol>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 249, "</ol>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if leg, ok := routeReturnLeg(route); ok {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 249, "<p class=\"form-hint\">Letzter Fahrabschnitt zum Endort: ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var174 string
-			templ_7745c5c3_Var174, templ_7745c5c3_Err = templ.JoinStringErrs(routeDistance(leg.DistanceMeters))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 350, Col: 94}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var174))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 250, " · ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 250, "<p class=\"form-hint\">Letzter Fahrabschnitt zum Endort: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var175 string
-			templ_7745c5c3_Var175, templ_7745c5c3_Err = templ.JoinStringErrs(routeDuration(leg.Duration))
+			templ_7745c5c3_Var175, templ_7745c5c3_Err = templ.JoinStringErrs(routeDistance(leg.DistanceMeters))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 350, Col: 129}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 347, Col: 94}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var175))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 251, "</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 251, " · ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var176 string
+			templ_7745c5c3_Var176, templ_7745c5c3_Err = templ.JoinStringErrs(routeDuration(leg.Duration))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 347, Col: 129}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var176))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 252, "</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 252, "<div class=\"visually-hidden\" aria-live=\"polite\" data-route-order-status></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 253, "<div class=\"visually-hidden\" aria-live=\"polite\" data-route-order-status></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if reorder {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 253, "<div class=\"route-reorder-panel\" data-route-order-save><div class=\"section-heading\"><div><p class=\"eyebrow\">Fahrreihenfolge</p><h3>Reihenfolge prüfen und speichern</h3></div></div><div class=\"planning-warning\" role=\"note\"><strong>Nur Fahrreihenfolge</strong><p>Aufträge, Zuordnung und Terminzeiten bleiben unverändert. Prüfen Sie nach dem Speichern, ob die neue Reihenfolge zu den festen Zeiten passt.</p></div><p class=\"form-hint\" data-route-order-save-status aria-live=\"polite\">Die angezeigte Reihenfolge wird erst mit der folgenden Aktion verbindlich gespeichert.</p><div class=\"form-actions\"><button class=\"button\" type=\"submit\" data-route-order-save-button>Angezeigte Fahrreihenfolge speichern</button></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 254, "<div class=\"route-reorder-panel\" data-route-order-save><div class=\"section-heading\"><div><p class=\"eyebrow\">Fahrreihenfolge</p><h3>Reihenfolge prüfen und speichern</h3></div></div><div class=\"planning-warning\" role=\"note\"><strong>Nur Fahrreihenfolge</strong><p>Aufträge, Zuordnung und Terminzeiten bleiben unverändert. Prüfen Sie nach dem Speichern, ob die neue Reihenfolge zu den festen Zeiten passt.</p></div><p class=\"form-hint\" data-route-order-save-status aria-live=\"polite\">Die angezeigte Reihenfolge wird erst mit der folgenden Aktion verbindlich gespeichert.</p><div class=\"form-actions\"><button class=\"button\" type=\"submit\" data-route-order-save-button>Angezeigte Fahrreihenfolge speichern</button></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if route.Status == planning.RouteStatusDraft {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 254, "<div class=\"form-actions\"><button class=\"button\" type=\"submit\">Route als Terminvorschläge zuweisen</button></div><p class=\"form-hint\">Es werden ausschließlich unverbindliche Vorschläge erzeugt. Kein Termin wird fixiert, keine Nachricht versendet.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 255, "<div class=\"form-actions\"><button class=\"button\" type=\"submit\">Route als Terminvorschläge zuweisen</button></div><p class=\"form-hint\">Es werden ausschließlich unverbindliche Vorschläge erzeugt. Kein Termin wird fixiert, keine Nachricht versendet.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 255, "</form></section>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 256, "</form></section>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2919,49 +2932,49 @@ func routeDriverOptions(options []planning.RouteDriverOption, selectedID string)
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var176 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var176 == nil {
-			templ_7745c5c3_Var176 = templ.NopComponent
+		templ_7745c5c3_Var177 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var177 == nil {
+			templ_7745c5c3_Var177 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		for _, option := range options {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 256, "<option value=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var177 string
-			templ_7745c5c3_Var177, templ_7745c5c3_Err = templ.ResolveAttributeValue(option.ID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 370, Col: 27}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var177)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 257, "\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if option.ID == selectedID {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 258, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 259, ">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 257, "<option value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var178 string
-			templ_7745c5c3_Var178, templ_7745c5c3_Err = templ.JoinStringErrs(option.Name)
+			templ_7745c5c3_Var178, templ_7745c5c3_Err = templ.ResolveAttributeValue(option.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 370, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 367, Col: 27}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var178))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var178)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 260, "</option>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 258, "\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if option.ID == selectedID {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 259, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 260, ">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var179 string
+			templ_7745c5c3_Var179, templ_7745c5c3_Err = templ.JoinStringErrs(option.Name)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 367, Col: 81}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var179))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 261, "</option>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2986,50 +2999,50 @@ func routeResourceOptions(options []planning.RouteResourceOption, resourceType s
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var179 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var179 == nil {
-			templ_7745c5c3_Var179 = templ.NopComponent
+		templ_7745c5c3_Var180 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var180 == nil {
+			templ_7745c5c3_Var180 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		for _, option := range options {
 			if option.Type == resourceType {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 261, "<option value=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var180 string
-				templ_7745c5c3_Var180, templ_7745c5c3_Err = templ.ResolveAttributeValue(option.ID)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 377, Col: 28}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var180)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 262, "\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if option.ID == selectedID {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 263, " selected")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 264, ">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 262, "<option value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var181 string
-				templ_7745c5c3_Var181, templ_7745c5c3_Err = templ.JoinStringErrs(option.Name)
+				templ_7745c5c3_Var181, templ_7745c5c3_Err = templ.ResolveAttributeValue(option.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 377, Col: 82}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 374, Col: 28}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var181))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var181)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 265, "</option>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 263, "\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if option.ID == selectedID {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 264, " selected")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 265, ">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var182 string
+				templ_7745c5c3_Var182, templ_7745c5c3_Err = templ.JoinStringErrs(option.Name)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 374, Col: 82}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var182))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 266, "</option>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

@@ -148,6 +148,18 @@ func TestIdentityHTTPLoginCSRFAndDriverGate(t *testing.T) {
 	}
 
 	csrfToken := cookies[1].Value
+	queryOnlyCSRF := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "https://example.test/logout?csrf_token="+url.QueryEscape(csrfToken), strings.NewReader(""))
+	queryOnlyCSRF.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	queryOnlyCSRF.Header.Set("Origin", "https://example.test")
+	for _, cookie := range cookies {
+		queryOnlyCSRF.AddCookie(cookie)
+	}
+	queryOnlyResponse := httptest.NewRecorder()
+	router.ServeHTTP(queryOnlyResponse, queryOnlyCSRF)
+	if queryOnlyResponse.Code != http.StatusForbidden || store.revoked {
+		t.Fatalf("query-only CSRF status = %d, revoked = %v", queryOnlyResponse.Code, store.revoked)
+	}
+
 	accessForm := url.Values{"csrf_token": {csrfToken}, "version": {"1"}, "role": {"admin"}, "active": {"true"}}
 	accessRequest := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "https://example.test/admin/users/other/access", strings.NewReader(accessForm.Encode()))
 	accessRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")

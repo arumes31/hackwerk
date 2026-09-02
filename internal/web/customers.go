@@ -233,7 +233,11 @@ func customerSearch(service *customers.Service, page templates.PageData, csrfCoo
 			IncompleteAddress:      request.Form.Get("incomplete_address") == "1",
 			IncludeArchived:        request.Form.Get("archived") == "1", Page: pageNumber, PageSize: 25,
 		}
-		if sortKey, direction, found := strings.Cut(request.Form.Get("order"), ":"); found {
+		order := request.Form.Get("table_order")
+		if order == "" {
+			order = request.Form.Get("order")
+		}
+		if sortKey, direction, found := strings.Cut(order, ":"); found {
 			filter.Sort, filter.Direction = sortKey, direction
 		}
 		renderCustomerList(response, request, service, page, csrfCookie, logger, filter)

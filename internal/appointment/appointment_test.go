@@ -647,14 +647,17 @@ func TestAppointmentQueryOperationsEnforcePermissionAndRange(t *testing.T) {
 	service := testService(t, assignedAppointment(LifecycleFixed, 3), driver.StatusAvailable)
 	from := testStart()
 	to := from.Add(time.Hour)
-	if _, err := service.PlanningOptions(t.Context(), auth.Actor{Role: auth.RoleDriver}); !errors.Is(err, auth.ErrForbidden) {
+	if _, err := service.PlanningOptions(t.Context(), auth.Actor{UserID: "driver-user", Role: auth.RoleDriver}); !errors.Is(err, auth.ErrForbidden) {
 		t.Fatalf("PlanningOptions() driver error = %v, want forbidden", err)
 	}
 	if _, err := service.ListConflictsAndCapacity(t.Context(), testAdmin(), from, from, nil, nil, ""); !errors.Is(err, ErrValidation) {
 		t.Fatalf("ListConflictsAndCapacity() empty range error = %v, want validation", err)
 	}
 	if _, err := service.ListConflictsAndCapacity(t.Context(), auth.Actor{Role: auth.RoleDriver}, from, to, nil, nil, ""); !errors.Is(err, auth.ErrForbidden) {
-		t.Fatalf("ListConflictsAndCapacity() driver error = %v, want forbidden", err)
+		t.Fatalf("ListConflictsAndCapacity() unauthenticated error = %v, want forbidden", err)
+	}
+	if _, err := service.ListConflictsAndCapacity(t.Context(), auth.Actor{UserID: "driver-user", Role: auth.RoleDriver}, from, to, nil, nil, ""); err != nil {
+		t.Fatalf("ListConflictsAndCapacity() authenticated driver error = %v", err)
 	}
 }
 

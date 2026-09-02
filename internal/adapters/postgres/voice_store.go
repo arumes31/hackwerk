@@ -253,7 +253,7 @@ func (store *VoiceStore) Get(ctx context.Context, actor auth.Actor, id string) (
 	if row.ExpiresAt.Time.Before(store.now().UTC()) && status != voice.StatusCommitted {
 		status = voice.StatusExpired
 	}
-	return voice.Draft{ID: row.ID, OwnerUserID: row.OwnerUserID, Status: status, Transcript: row.Transcript, Fields: fields, Warnings: row.Warnings, OverallConfidence: confidence, ProviderName: row.ProviderName, ProviderVersion: row.ProviderVersion, ParserVersion: row.ParserVersion, FailureCode: row.FailureCode, RetryCount: int32(row.RetryCount), ManualRetryCount: row.ManualRetryCount, Version: row.Version, Committed: customers.CreatedIntake{CustomerID: row.CommittedCustomerID, JobID: row.CommittedJobID, WaitlistID: row.CommittedWaitlistID}, CreatedAt: row.CreatedAt.Time.UTC(), UpdatedAt: row.UpdatedAt.Time.UTC(), ExpiresAt: row.ExpiresAt.Time.UTC()}, nil
+	return voice.Draft{ID: row.ID, OwnerUserID: row.OwnerUserID, Status: status, Transcript: row.Transcript, Fields: fields, Warnings: row.Warnings, OverallConfidence: confidence, ProviderName: row.ProviderName, ProviderVersion: row.ProviderVersion, ParserVersion: row.ParserVersion, FailureCode: row.FailureCode, RetryCount: int32(row.RetryCount), ManualRetryCount: row.ManualRetryCount, Version: row.Version, Committed: customers.CreatedIntake{CustomerID: row.CommittedCustomerID, JobID: row.CommittedJobID, WaitlistID: row.CommittedWaitlistID, JobNumber: row.CommittedJobNumber}, CreatedAt: row.CreatedAt.Time.UTC(), UpdatedAt: row.UpdatedAt.Time.UTC(), ExpiresAt: row.ExpiresAt.Time.UTC()}, nil
 }
 
 func (store *VoiceStore) FindDuplicates(ctx context.Context, input customers.CustomerInput) ([]customers.Duplicate, error) {
@@ -282,7 +282,7 @@ func (store *VoiceStore) Commit(ctx context.Context, actor auth.Actor, input voi
 			return lockErr
 		}
 		if row.Status == string(voice.StatusCommitted) {
-			created = customers.CreatedIntake{CustomerID: row.CommittedCustomerID, JobID: row.CommittedJobID, WaitlistID: row.CommittedWaitlistID}
+			created = customers.CreatedIntake{CustomerID: row.CommittedCustomerID, JobID: row.CommittedJobID, WaitlistID: row.CommittedWaitlistID, JobNumber: row.CommittedJobNumber}
 			return nil
 		}
 		if row.Status != string(voice.StatusNeedsReview) || row.Version != input.ExpectedVersion || !row.ExpiresAt.Time.After(store.now().UTC()) {

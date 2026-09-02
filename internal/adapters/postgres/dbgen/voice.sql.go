@@ -371,6 +371,7 @@ SELECT id::text, owner_user_id::text, status, COALESCE(transcript, '')::text AS 
        COALESCE(committed_customer_id::text, '')::text AS committed_customer_id,
        COALESCE(committed_job_id::text, '')::text AS committed_job_id,
        COALESCE(committed_waitlist_id::text, '')::text AS committed_waitlist_id,
+       COALESCE((SELECT job_number FROM jobs WHERE id = voice_drafts.committed_job_id), '')::text AS committed_job_number,
        committed_at, expires_at, version, created_at, updated_at
 FROM voice_drafts
 WHERE id = $1::uuid AND owner_user_id = $2::uuid
@@ -398,6 +399,7 @@ type GetVoiceDraftForOwnerRow struct {
 	CommittedCustomerID string
 	CommittedJobID      string
 	CommittedWaitlistID string
+	CommittedJobNumber  string
 	CommittedAt         pgtype.Timestamptz
 	ExpiresAt           pgtype.Timestamptz
 	Version             int32
@@ -425,6 +427,7 @@ func (q *Queries) GetVoiceDraftForOwner(ctx context.Context, arg GetVoiceDraftFo
 		&i.CommittedCustomerID,
 		&i.CommittedJobID,
 		&i.CommittedWaitlistID,
+		&i.CommittedJobNumber,
 		&i.CommittedAt,
 		&i.ExpiresAt,
 		&i.Version,
@@ -600,7 +603,8 @@ const lockVoiceDraftForOwner = `-- name: LockVoiceDraftForOwner :one
 SELECT id::text, status, expires_at, version,
        COALESCE(committed_customer_id::text, '')::text AS committed_customer_id,
        COALESCE(committed_job_id::text, '')::text AS committed_job_id,
-       COALESCE(committed_waitlist_id::text, '')::text AS committed_waitlist_id
+       COALESCE(committed_waitlist_id::text, '')::text AS committed_waitlist_id,
+       COALESCE((SELECT job_number FROM jobs WHERE id = voice_drafts.committed_job_id), '')::text AS committed_job_number
 FROM voice_drafts
 WHERE id = $1::uuid AND owner_user_id = $2::uuid
 FOR UPDATE
@@ -619,6 +623,7 @@ type LockVoiceDraftForOwnerRow struct {
 	CommittedCustomerID string
 	CommittedJobID      string
 	CommittedWaitlistID string
+	CommittedJobNumber  string
 }
 
 func (q *Queries) LockVoiceDraftForOwner(ctx context.Context, arg LockVoiceDraftForOwnerParams) (LockVoiceDraftForOwnerRow, error) {
@@ -632,6 +637,7 @@ func (q *Queries) LockVoiceDraftForOwner(ctx context.Context, arg LockVoiceDraft
 		&i.CommittedCustomerID,
 		&i.CommittedJobID,
 		&i.CommittedWaitlistID,
+		&i.CommittedJobNumber,
 	)
 	return i, err
 }

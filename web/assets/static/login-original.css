@@ -88,6 +88,8 @@ button:active{transform:scale(.98)}
 @keyframes smokeRise{0%{transform:translate(0,0) scale(0.5);opacity:0.8}100%{transform:translate(-16px,-32px) scale(2.4);opacity:0}}
 
 .wind-blade{animation:spinBlade 4s linear infinite;transform-box:fill-box;transform-origin:center}
+.wind-blade--west{animation-duration:3.2s}
+.wind-blade--east{animation-duration:4.1s}
 @keyframes spinBlade{to{transform:rotate(360deg)}}
 
 /* Roads & Bridges */
@@ -137,6 +139,8 @@ button:active{transform:scale(.98)}
 
 /* Ambient Cloud & Birds Motion */
 .cloud-group{animation:cloudFloat linear infinite}
+.cloud-group--near{animation-duration:65s}
+.cloud-group--far{animation-duration:90s;animation-delay:-35s}
 @keyframes cloudFloat{0%{transform:translateX(-220px)}100%{transform:translateX(1420px)}}
 
 .bird-flock{animation:birdFly 26s linear infinite}

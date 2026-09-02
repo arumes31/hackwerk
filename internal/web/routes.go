@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"example.invalid/hackplan/internal/auth"
+	"example.invalid/hackplan/internal/driver"
 	"example.invalid/hackplan/internal/planning"
 	"example.invalid/hackplan/internal/routelocation"
 	"example.invalid/hackplan/web/templates"
@@ -141,11 +142,7 @@ func draftMoveTarget(form url.Values) (string, int32, error) {
 func planRoute(service *planning.RouteService, dependencies Dependencies, page templates.PageData, csrfCookie string) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
-		departureValue := strings.TrimSpace(request.Form.Get("departure"))
-		if departureValue == "" {
-			departureValue = strings.TrimSpace(request.Form.Get("departure_date")) + "T" + strings.TrimSpace(request.Form.Get("departure_time"))
-		}
-		departure, departureErr := time.ParseInLocation("2006-01-02T15:04", departureValue, routeLocation())
+		departure, departureErr := parseRouteDeparture(request)
 		start, startLabel, _, startErr := routeEndpoint(request, dependencies.RouteLocations, session.Actor, "start", false)
 		end, endLabel, endAtLastStop, endErr := routeEndpoint(request, dependencies.RouteLocations, session.Actor, "end", true)
 		if departureErr != nil || startErr != nil || endErr != nil {
@@ -238,17 +235,21 @@ func routePlanValidationMessage(request *http.Request, fallback string) string {
 	if strings.TrimSpace(request.Form.Get("chipper_resource_id")) == "" {
 		missing = append(missing, "Hackmaschine auswählen")
 	}
-	departure := strings.TrimSpace(request.Form.Get("departure"))
-	if departure == "" {
-		departure = strings.TrimSpace(request.Form.Get("departure_date")) + "T" + strings.TrimSpace(request.Form.Get("departure_time"))
-	}
-	if _, err := time.ParseInLocation("2006-01-02T15:04", departure, routeLocation()); err != nil {
+	if _, err := parseRouteDeparture(request); err != nil {
 		missing = append(missing, "gültiges Abfahrtsdatum und gültige Abfahrtszeit eingeben")
 	}
 	if len(missing) == 0 {
 		return fallback
 	}
 	return "Bitte ergänzen: " + strings.Join(missing, "; ") + "."
+}
+
+func parseRouteDeparture(request *http.Request) (time.Time, error) {
+	value := strings.TrimSpace(request.Form.Get("departure"))
+	if value == "" {
+		value = strings.TrimSpace(request.Form.Get("departure_date")) + "T" + strings.TrimSpace(request.Form.Get("departure_time"))
+	}
+	return driver.ParseLocalDateTime(value, routeLocation())
 }
 
 func routeEndpointValidationProblems(request *http.Request, prefix, heading string, allowLastStop bool) []string {

@@ -63,7 +63,7 @@ func TestVoiceDraftReviewCommitIsAtomicPrivateAndIdempotent(t *testing.T) {
 		t.Fatalf("committed draft retained PII: transcript=%q fields=%q", retainedTranscript, retainedFields)
 	}
 	again, err := service.Commit(ctx, driver, voice.CommitInput{DraftID: draft.ID, ExpectedVersion: draft.Version, Reviewed: true, Intake: input, RequestID: "voice-commit-retry"})
-	if err != nil || again.CustomerID != created.CustomerID || again.JobID != created.JobID {
+	if err != nil || again.CustomerID != created.CustomerID || again.JobID != created.JobID || again.JobNumber != created.JobNumber {
 		t.Fatalf("idempotent commit=%#v/%v", again, err)
 	}
 	for _, table := range []string{"customers", "jobs", "waitlist_entries"} {

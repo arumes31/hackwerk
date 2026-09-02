@@ -180,6 +180,21 @@ func TestTask09VoiceReviewMobileJourney(t *testing.T) {
 	if err = chromedp.Run(browser, network.Enable()); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
+	if err = runBrowserStep(browser, "reject empty native recording",
+		chromedp.Evaluate(emptyMediaRecorderInstallScript, nil),
+		chromedp.Click("[data-voice-start]", chromedp.ByQuery),
+		chromedp.Poll(`!document.querySelector('[data-voice-stop]')?.disabled`, nil),
+		chromedp.Click("[data-voice-stop]", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('[data-voice-status]')?.textContent.includes('keine verwertbare Aufnahme') && document.querySelector('[data-voice-preview]')?.hidden`, nil),
+		chromedp.Evaluate(emptyMediaRecorderRestoreScript, nil),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	select {
+	case request := <-uploadRequests:
+		t.Fatalf("empty native recording unexpectedly caused POST %s", request.Path)
+	default:
+	}
 	var recorded mediaRecorderFixture
 	if err = runBrowserStep(browser, "generate Edge MediaRecorder fixture", chromedp.Evaluate(mediaRecorderFixtureScript, &recorded, awaitJavaScriptPromise)); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
@@ -335,16 +350,43 @@ const mediaRecorderFixtureScript = `(async () => {
 	gain.connect(destination);
 	const chunks = [];
 	const recorder = new MediaRecorder(destination.stream, {mimeType});
+	let recordedBytes = 0;
+	let resolveEnoughAudio;
+	let rejectEnoughAudio;
+	const enoughAudioData = new Promise((resolve, reject) => {
+		resolveEnoughAudio = resolve;
+		rejectEnoughAudio = reject;
+	});
 	recorder.addEventListener("dataavailable", (event) => {
-		if (event.data.size > 0) chunks.push(event.data);
+		if (event.data.size > 0) {
+			chunks.push(event.data);
+			recordedBytes += event.data.size;
+			if (recordedBytes >= 64) resolveEnoughAudio();
+		}
+	});
+	const started = new Promise((resolve, reject) => {
+		recorder.addEventListener("start", resolve, {once: true});
+		recorder.addEventListener("error", () => reject(new Error("MediaRecorder failed before start")), {once: true});
 	});
 	const stopped = new Promise((resolve, reject) => {
 		recorder.addEventListener("stop", resolve, {once: true});
-		recorder.addEventListener("error", () => reject(new Error("MediaRecorder failed")), {once: true});
+		recorder.addEventListener("error", () => {
+			const error = new Error("MediaRecorder failed");
+			rejectEnoughAudio(error);
+			reject(error);
+		}, {once: true});
 	});
 	recorder.start(250);
+	await started;
 	oscillator.start();
 	await new Promise((resolve) => window.setTimeout(resolve, 2200));
+	if (recordedBytes < 64) {
+		recorder.requestData();
+		await Promise.race([
+			enoughAudioData,
+			new Promise((_, reject) => window.setTimeout(() => reject(new Error("MediaRecorder produced less than 64 bytes within 5 seconds")), 5000)),
+		]);
+	}
 	oscillator.stop();
 	recorder.stop();
 	await stopped;
@@ -360,6 +402,44 @@ const mediaRecorderFixtureScript = `(async () => {
 	form.elements.duration_seconds.value = "2";
 	form.elements.duration_seconds.dispatchEvent(new Event("input", {bubbles: true}));
 	return {...capabilities, supported: true, mimeType: file.type, size: file.size, fileCount: form.elements.audio.files.length};
+})()`
+
+const emptyMediaRecorderInstallScript = `(() => {
+	window.__hackwerkVoiceTestOriginals = {
+		MediaRecorder: window.MediaRecorder,
+		AudioContext: window.AudioContext,
+		getUserMedia: navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices),
+	};
+	class EmptyMediaRecorder extends EventTarget {
+		static isTypeSupported(type) { return type.startsWith("audio/webm"); }
+		constructor(stream, options) {
+			super();
+			this.stream = stream;
+			this.mimeType = options.mimeType;
+			this.state = "inactive";
+		}
+		start() { this.state = "recording"; }
+		stop() {
+			this.state = "inactive";
+			queueMicrotask(() => this.dispatchEvent(new Event("stop")));
+		}
+		pause() { this.state = "paused"; }
+		resume() { this.state = "recording"; }
+	}
+	window.MediaRecorder = EmptyMediaRecorder;
+	Object.defineProperty(window, "AudioContext", {configurable: true, value: undefined});
+	Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+		configurable: true,
+		value: async () => ({getTracks: () => [{stop() {}}]}),
+	});
+})()`
+
+const emptyMediaRecorderRestoreScript = `(() => {
+	const originals = window.__hackwerkVoiceTestOriginals;
+	window.MediaRecorder = originals.MediaRecorder;
+	Object.defineProperty(window, "AudioContext", {configurable: true, value: originals.AudioContext});
+	Object.defineProperty(navigator.mediaDevices, "getUserMedia", {configurable: true, value: originals.getUserMedia});
+	delete window.__hackwerkVoiceTestOriginals;
 })()`
 
 func minimalWAV() []byte {

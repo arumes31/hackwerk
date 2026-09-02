@@ -18,6 +18,8 @@ func TestVoiceCaptureCancelsNavigationUploadAndUsesAmbiguousDeliveryMessage(t *t
 	for _, contract := range []string{
 		`Der Übertragungsstatus ist unbekannt.`,
 		`[401, 403, 404].includes(response.status)`,
+		`if (blob.size < 64)`,
+		`Der Browser hat keine verwertbare Aufnahme erzeugt. Bitte nehmen Sie erneut auf.`,
 	} {
 		if !strings.Contains(javascript, contract) {
 			t.Errorf("voice capture script does not preserve %q", contract)

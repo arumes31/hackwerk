@@ -378,7 +378,7 @@ func TestCustomerHTTPFiltersSortAndPaginationStayInPOSTBody(t *testing.T) {
 	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleAdmin, store)
 	form := url.Values{
 		"csrf_token": {csrfToken}, "q": {"Maier"}, "sort": {"name"}, "direction": {"asc"},
-		"order": {"jobs:desc"}, "archived": {"1"}, "missing_contact": {"1"},
+		"order": {"recent:desc"}, "table_order": {"jobs:desc"}, "archived": {"1"}, "missing_contact": {"1"},
 		"incomplete_address": {"1"}, "job_activity": {"active"}, "notification": {"none"},
 		"locality": {"Linz"}, "region": {"Nord"}, "page": {"2"},
 	}
@@ -394,6 +394,7 @@ func TestCustomerHTTPFiltersSortAndPaginationStayInPOSTBody(t *testing.T) {
 	}
 	for _, required := range []string{
 		`class="list-sort-controls"`, `value="jobs:desc" selected`, `aria-sort="descending"`,
+		`name="table_order"`,
 		`href="/customers/` + testCustomerID + `"`, `Kundenakte öffnen`,
 		`Kundenliste mit Kontaktstatus`, `Keine Benachrichtigung`, `Kontaktdaten fehlen`,
 		`name="missing_contact" value="1"`, `name="incomplete_address" value="1"`,

@@ -304,6 +304,9 @@ func TestSecurityTOTPRecoveryAndLoginWorkflows(t *testing.T) {
 	if err != nil || len(codes) != recoveryCodeCount || len(store.recoveryHashes) != recoveryCodeCount {
 		t.Fatalf("confirm TOTP = %d codes, %v", len(codes), err)
 	}
+	if err := service.RenameTOTP(t.Context(), Actor{}, "Diensthandy", "request-unauthenticated"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("unauthenticated RenameTOTP() error = %v, want forbidden", err)
+	}
 	if err := service.RenameTOTP(t.Context(), actor, " Diensthandy ", "request-3"); err != nil || store.totp.Name != "Diensthandy" {
 		t.Fatalf("rename TOTP = %q, %v", store.totp.Name, err)
 	}

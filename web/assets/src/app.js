@@ -2753,6 +2753,12 @@ if (voiceCapture) {
           const blob = new Blob(chunks, { type: recorder.mimeType });
           stopTracks(); resetControls();
           if (cancelled) return;
+          if (blob.size < 64) {
+            chunks = [];
+            clearPreview();
+            announce("Der Browser hat keine verwertbare Aufnahme erzeugt. Bitte nehmen Sie erneut auf.");
+            return;
+          }
           pendingAudio = blob;
           pendingDurationMs = durationMs;
           prefillAudioDuration(blob, durationMs / 1000);

@@ -2859,14 +2859,14 @@ func Customers(data CustomerListData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 274, "\" type=\"submit\" name=\"order\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 274, "\" type=\"submit\" name=\"table_order\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var134 string
 			templ_7745c5c3_Var134, templ_7745c5c3_Err = templ.ResolveAttributeValue(customerSortOrder(data.Page.CustomerFilter, "name"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 528, Col: 239}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 528, Col: 245}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var134)
 			if templ_7745c5c3_Err != nil {
@@ -2879,7 +2879,7 @@ func Customers(data CustomerListData) templ.Component {
 			var templ_7745c5c3_Var135 string
 			templ_7745c5c3_Var135, templ_7745c5c3_Err = templ.JoinStringErrs(customerSortMark(data.Page.CustomerFilter, "name"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 528, Col: 330}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 528, Col: 336}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var135))
 			if templ_7745c5c3_Err != nil {
@@ -2920,14 +2920,14 @@ func Customers(data CustomerListData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 279, "\" type=\"submit\" name=\"order\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 279, "\" type=\"submit\" name=\"table_order\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var139 string
 			templ_7745c5c3_Var139, templ_7745c5c3_Err = templ.ResolveAttributeValue(customerSortOrder(data.Page.CustomerFilter, "locality"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 529, Col: 251}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 529, Col: 257}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var139)
 			if templ_7745c5c3_Err != nil {
@@ -2940,7 +2940,7 @@ func Customers(data CustomerListData) templ.Component {
 			var templ_7745c5c3_Var140 string
 			templ_7745c5c3_Var140, templ_7745c5c3_Err = templ.JoinStringErrs(customerSortMark(data.Page.CustomerFilter, "locality"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 529, Col: 344}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 529, Col: 350}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var140))
 			if templ_7745c5c3_Err != nil {
@@ -2981,14 +2981,14 @@ func Customers(data CustomerListData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 284, "\" type=\"submit\" name=\"order\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 284, "\" type=\"submit\" name=\"table_order\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var144 string
 			templ_7745c5c3_Var144, templ_7745c5c3_Err = templ.ResolveAttributeValue(customerSortOrder(data.Page.CustomerFilter, "jobs"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 531, Col: 239}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 531, Col: 245}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var144)
 			if templ_7745c5c3_Err != nil {
@@ -3001,7 +3001,7 @@ func Customers(data CustomerListData) templ.Component {
 			var templ_7745c5c3_Var145 string
 			templ_7745c5c3_Var145, templ_7745c5c3_Err = templ.JoinStringErrs(customerSortMark(data.Page.CustomerFilter, "jobs"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 531, Col: 353}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 531, Col: 359}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var145))
 			if templ_7745c5c3_Err != nil {
@@ -3042,14 +3042,14 @@ func Customers(data CustomerListData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 289, "\" type=\"submit\" name=\"order\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 289, "\" type=\"submit\" name=\"table_order\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var149 string
 			templ_7745c5c3_Var149, templ_7745c5c3_Err = templ.ResolveAttributeValue(customerSortOrder(data.Page.CustomerFilter, "recent"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 532, Col: 245}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 532, Col: 251}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var149)
 			if templ_7745c5c3_Err != nil {
@@ -3062,7 +3062,7 @@ func Customers(data CustomerListData) templ.Component {
 			var templ_7745c5c3_Var150 string
 			templ_7745c5c3_Var150, templ_7745c5c3_Err = templ.JoinStringErrs(customerSortMark(data.Page.CustomerFilter, "recent"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 532, Col: 350}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/customers.templ`, Line: 532, Col: 356}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var150))
 			if templ_7745c5c3_Err != nil {

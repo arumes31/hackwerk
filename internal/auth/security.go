@@ -493,8 +493,11 @@ func (service *Service) ConfirmTOTPEnrollment(ctx context.Context, actor Actor, 
 }
 
 func (service *Service) RenameTOTP(ctx context.Context, actor Actor, name, requestID string) error {
+	if actor.UserID == "" || service.security == nil {
+		return ErrForbidden
+	}
 	name, err := normalizeSecurityMethodName(name, "Authenticator-App")
-	if err != nil || service.security == nil {
+	if err != nil {
 		return ErrInvalidInput
 	}
 	return service.security.RenameTOTP(ctx, actor, name, requestID)

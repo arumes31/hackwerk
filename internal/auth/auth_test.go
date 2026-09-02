@@ -22,6 +22,9 @@ func TestRoleAllows(t *testing.T) {
 	if Role("unknown").Allows(PermissionDashboardView) {
 		t.Fatal("unknown role must be denied")
 	}
+	if RoleAdmin.Allows(Permission("unknown.permission")) || RoleAdmin.Allows("") {
+		t.Fatal("admin must be denied unknown or empty permissions")
+	}
 	if err := (Actor{UserID: "driver", Role: RoleDriver}).Require(PermissionUserManage); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("Require() error = %v", err)
 	}

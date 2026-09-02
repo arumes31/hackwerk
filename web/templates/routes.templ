@@ -310,7 +310,7 @@ templ ownRoute(data RoutePageData) {
 
 templ routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, now time.Time) {
 	<section class="route-summary route-stop-section" aria-labelledby={ "route-stops-heading-" + route.ID }>
-		<div class="section-heading"><div><p class="eyebrow">{ route.DriverName }</p><h2 id={ "route-stops-heading-" + route.ID }>Stoppliste</h2></div><span class="status-badge">{ fmt.Sprint(routePointCount(route)) } Routenpunkte</span></div>
+		<div class="section-heading"><div><p class="eyebrow">{ route.DriverName }</p><h2 id={ "route-stops-heading-" + route.ID }>Stoppliste</h2></div><div class="route-summary__badges"><span class="status-badge">{ routeSource(route.Directions) }</span><span class="status-badge">{ fmt.Sprint(routePointCount(route)) } Routenpunkte</span></div></div>
 		<details class="route-secondary-metrics">
 			<summary>Routendetails und Zeiten</summary>
 			<div class="route-secondary-metrics__content">
@@ -318,7 +318,7 @@ templ routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, no
 				if route.Comparison.ManualDuration > 0 {
 					<p class="route-comparison" data-route-comparison>Optimierung: { routeDistance(routeComparisonDistanceSaving(route.Comparison)) } und { routeDuration(routeComparisonDurationSaving(route.Comparison)) } gegenüber der manuellen Reihenfolge gespart.</p>
 				}
-				<div class="action-row"><a class="button button--quiet" href={ routeWaypointURL(route) } target="_blank" rel="noopener noreferrer">Gesamtroute in Google Maps</a><button class="button button--quiet" type="button" data-print>Routenblatt drucken</button><span class="status-badge">{ routeSource(route.Directions) }</span></div>
+				<div class="action-row"><a class="button button--quiet" href={ routeWaypointURL(route) } target="_blank" rel="noopener noreferrer">Gesamtroute in Google Maps</a><button class="button button--quiet" type="button" data-print>Routenblatt drucken</button></div>
 				if route.Directions.Estimated {
 					<div class="planning-warning" role="note"><strong>Geschätzte Strecke</strong><p>Der Routingdienst war nicht verfügbar. Linie, Kilometer und Fahrzeit basieren auf Luftlinie mit Straßenfaktor.</p></div>
 				}
@@ -338,10 +338,7 @@ templ routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, no
 							<a href={ routePhoneURL(stop.CustomerPhone) } data-route-call>Anrufen</a>
 						}
 						if reorder {
-							<details class="route-stop-reorder">
-								<summary>Reihenfolge ändern</summary>
-								<div class="route-order-actions"><button class="button button--quiet" type="submit" name="move_up" value={ stop.ID } data-route-move="up" aria-label={ stop.JobNumber + " nach oben verschieben" } disabled?={ stop.Position == 1 }>↑ Hoch</button><button class="button button--quiet" type="submit" name="move_down" value={ stop.ID } data-route-move="down" aria-label={ stop.JobNumber + " nach unten verschieben" } disabled?={ stop.Position == len(route.Stops) }>↓ Runter</button></div>
-							</details>
+							<div class="route-order-actions route-stop-order-actions" data-route-order-actions aria-label={ "Fahrreihenfolge für " + stop.JobNumber }><button class="button button--quiet" type="submit" name="move_up" value={ stop.ID } data-route-move="up" aria-label={ stop.JobNumber + " nach oben verschieben" } disabled?={ stop.Position == 1 }>↑ Hoch</button><button class="button button--quiet" type="submit" name="move_down" value={ stop.ID } data-route-move="down" aria-label={ stop.JobNumber + " nach unten verschieben" } disabled?={ stop.Position == len(route.Stops) }>↓ Runter</button></div>
 						}
 					</li>
 				}

@@ -48,6 +48,19 @@ func TestHostAllowlistAndTrustedProxyHeaders(t *testing.T) {
 	if trustedResponse.Header().Get("Strict-Transport-Security") == "" || trustedResponse.Header().Get("X-Test-Remote") != "198.51.100.2" {
 		t.Fatalf("trusted forwarded headers ignored: %#v", trustedResponse.Header())
 	}
+
+	longChain := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://hackwerk.example/", nil)
+	longChain.RemoteAddr = "10.1.2.3:1234"
+	longChain.Header.Set("X-Forwarded-For", strings.Join([]string{
+		"198.51.100.1", "198.51.100.2", "198.51.100.3", "198.51.100.4",
+		"198.51.100.5", "198.51.100.6", "198.51.100.7", "198.51.100.8",
+		"203.0.113.99", "10.2.3.4",
+	}, ", "))
+	longChainResponse := httptest.NewRecorder()
+	handler.ServeHTTP(longChainResponse, longChain)
+	if longChainResponse.Header().Get("X-Test-Remote") != "203.0.113.99" {
+		t.Fatalf("long forwarded chain client=%q, want proxy-appended client", longChainResponse.Header().Get("X-Test-Remote"))
+	}
 }
 
 func TestDevelopmentWildcardAllowsTailscaleHost(t *testing.T) {

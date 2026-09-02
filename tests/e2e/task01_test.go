@@ -112,10 +112,11 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 	var usersDesktopScreenshot []byte
 	var loginDesktopScreenshot []byte
 	var installPromptFlow struct {
-		HiddenStateHonored bool `json:"hiddenStateHonored"`
-		ShownAfterEvent    bool `json:"shownAfterEvent"`
-		HiddenAfterUse     bool `json:"hiddenAfterUse"`
-		PromptCalls        int  `json:"promptCalls"`
+		HiddenStateHonored      bool `json:"hiddenStateHonored"`
+		HiddenBehindPrivacy     bool `json:"hiddenBehindPrivacy"`
+		ShownAfterPrivacyClosed bool `json:"shownAfterPrivacyClosed"`
+		HiddenAfterUse          bool `json:"hiddenAfterUse"`
+		PromptCalls             int  `json:"promptCalls"`
 	}
 	var desktopLogin struct {
 		HasStyles          bool    `json:"hasStyles"`
@@ -165,7 +166,10 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 			event.userChoice=Promise.resolve({outcome:'accepted'});
 			window.dispatchEvent(event);
 		})()`, nil),
-		chromedp.Evaluate(`(()=>{const prompt=document.querySelector('[data-install-prompt]');return !prompt.hidden&&getComputedStyle(prompt).display!=='none'})()`, &installPromptFlow.ShownAfterEvent),
+		chromedp.Evaluate(`(()=>{const notice=document.querySelector('[data-privacy-notice]');const prompt=document.querySelector('[data-install-prompt]');return !notice.hidden&&prompt.hidden&&getComputedStyle(prompt).display==='none'})()`, &installPromptFlow.HiddenBehindPrivacy),
+		chromedp.Click("[data-privacy-notice-dismiss]", chromedp.ByQuery),
+		chromedp.Poll(`(()=>{const prompt=document.querySelector('[data-install-prompt]');return !prompt.hidden&&getComputedStyle(prompt).display!=='none'})()`, nil),
+		chromedp.Evaluate(`(()=>{const prompt=document.querySelector('[data-install-prompt]');return !prompt.hidden&&getComputedStyle(prompt).display!=='none'})()`, &installPromptFlow.ShownAfterPrivacyClosed),
 		chromedp.Click("[data-install-accept]", chromedp.ByQuery),
 		chromedp.Poll(`(()=>{const prompt=document.querySelector('[data-install-prompt]');return prompt.hidden&&window.__hackwerkInstallPromptCalls===1})()`, nil),
 		chromedp.Evaluate(`(()=>{const prompt=document.querySelector('[data-install-prompt]');return prompt.hidden&&getComputedStyle(prompt).display==='none'})()`, &installPromptFlow.HiddenAfterUse),
@@ -181,7 +185,7 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 	if !desktopLogin.HasStyles || desktopLogin.HasLegacyAsset || !desktopLogin.Grid || desktopLogin.PanelWidth < 400 || desktopLogin.PanelWidth > 440 || desktopLogin.CenterDelta > 2 || !desktopLogin.HasBuildMeta || !desktopLogin.PasswordIconOnly || !desktopLogin.PasswordIconInline || desktopLogin.HasScrollTop {
 		t.Fatalf("desktop login field-manual layout = %+v", desktopLogin)
 	}
-	if !installPromptFlow.HiddenStateHonored || !installPromptFlow.ShownAfterEvent || !installPromptFlow.HiddenAfterUse || installPromptFlow.PromptCalls != 1 {
+	if !installPromptFlow.HiddenStateHonored || !installPromptFlow.HiddenBehindPrivacy || !installPromptFlow.ShownAfterPrivacyClosed || !installPromptFlow.HiddenAfterUse || installPromptFlow.PromptCalls != 1 {
 		t.Fatalf("install prompt flow = %+v", installPromptFlow)
 	}
 	detailsForm := "form[action='/admin/users/" + driverUserID + "/details']"
@@ -363,11 +367,10 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 		t.Fatalf("confirmed reset hash-changed/must-change = %v/%v", resetPasswordHash != createdPasswordHash, createdMustChange)
 	}
 
-	createdAccessForm := "form[action='/admin/users/" + createdUserID + "/access']"
+	createdAccessForm := "form.user-access-status[action='/admin/users/" + createdUserID + "/access']"
 	var deactivateCancelConfirmCalls int
 	if err := runBrowserStep(browserContext, "cancel user deactivation",
 		chromedp.Evaluate(`document.querySelector(`+quoteJS(createdAccessForm)+`).closest('details').open=true`, nil),
-		chromedp.Evaluate(`document.querySelector(`+quoteJS(createdAccessForm+" [name='active']")+`).checked=false`, nil),
 		chromedp.Evaluate(`window.__e2eConfirmCalls=0;window.confirm=()=>{window.__e2eConfirmCalls++;return false}`, nil),
 		chromedp.Click(createdAccessForm+" button[type='submit']", chromedp.ByQuery),
 		chromedp.Evaluate(`window.__e2eConfirmCalls`, &deactivateCancelConfirmCalls),

@@ -216,7 +216,7 @@ func csrfProtection(identity *auth.Service, csrfCookieName string, page template
 					return
 				}
 				if presented == "" {
-					presented = request.Form.Get("csrf_token")
+					presented = request.PostForm.Get("csrf_token")
 				}
 			}
 			csrfCookie, cookieErr := request.Cookie(csrfCookieName)
