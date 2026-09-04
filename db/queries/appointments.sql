@@ -230,10 +230,13 @@ SELECT (
         SELECT 1 FROM appointment_drivers ad JOIN drivers d ON d.id=ad.driver_id
         WHERE ad.appointment_id=sqlc.arg(appointment_id)::uuid AND NOT d.active
     )
-    AND EXISTS (
-        SELECT 1 FROM appointment_resources ar JOIN resources r ON r.id=ar.resource_id
-        WHERE ar.appointment_id=sqlc.arg(appointment_id)::uuid AND ar.purpose='chipping'
-          AND r.resource_type='chipper' AND r.active
+    AND (
+        sqlc.arg(allow_missing_chipper)::boolean
+        OR EXISTS (
+            SELECT 1 FROM appointment_resources ar JOIN resources r ON r.id=ar.resource_id
+            WHERE ar.appointment_id=sqlc.arg(appointment_id)::uuid AND ar.purpose='chipping'
+              AND r.resource_type='chipper' AND r.active
+        )
     )
     AND NOT EXISTS (
         SELECT 1 FROM appointment_resources ar JOIN resources r ON r.id=ar.resource_id

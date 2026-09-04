@@ -268,7 +268,7 @@ func (s *PlanningStore) Adopt(ctx context.Context, actor auth.Actor, suggestionI
 				return planning.ErrConflict
 			}
 		}
-		ready, readyErr := q.AppointmentAssignmentsReady(ctx, dbgen.AppointmentAssignmentsReadyParams{AppointmentID: appointmentUUID, JobType: row.JobType, TransportMode: row.TransportMode, ExternalTransportConfirmed: row.ExternalTransportConfirmed})
+		ready, readyErr := q.AppointmentAssignmentsReady(ctx, dbgen.AppointmentAssignmentsReadyParams{AppointmentID: appointmentUUID, JobType: row.JobType, TransportMode: row.TransportMode, ExternalTransportConfirmed: row.ExternalTransportConfirmed, AllowMissingChipper: false})
 		if readyErr != nil {
 			return readyErr
 		}

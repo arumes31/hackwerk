@@ -70,10 +70,49 @@ func TestRouteStoreAssignsEveryStopAsProposalWithoutOutbox(t *testing.T) {
 	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT version FROM appointments WHERE id=$1", assigned.Stops[0].AppointmentID).Scan(&appointmentVersion); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.service.FixAppointment(fixture.ctx, fixture.admin, appointment.FixInput{MutateInput: appointment.MutateInput{
-		ID: assigned.Stops[0].AppointmentID, ExpectedVersion: appointmentVersion, RequestID: "route-without-chipper-fix",
-	}}); !errors.Is(err, appointment.ErrValidation) {
-		t.Fatalf("FixAppointment() error = %v, want validation until a chipper is assigned", err)
+	if _, err := fixture.service.FixAppointment(fixture.ctx, fixture.admin, appointment.FixInput{
+		MutateInput:          appointment.MutateInput{ID: assigned.Stops[0].AppointmentID, ExpectedVersion: appointmentVersion, RequestID: "route-without-chipper-unconfirmed"},
+		MissingChipperReason: "Maschine wird vor Ort organisiert",
+	}); !errors.Is(err, appointment.ErrValidation) {
+		t.Fatalf("FixAppointment() error = %v, want validation without explicit confirmation", err)
+	}
+	var notesBeforeFix int
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM job_notes WHERE job_id=$1", jobID).Scan(&notesBeforeFix); err != nil {
+		t.Fatal(err)
+	}
+	if notesBeforeFix != 0 {
+		t.Fatalf("notes before confirmed fix = %d", notesBeforeFix)
+	}
+	fixed, err := fixture.service.FixAppointment(fixture.ctx, fixture.admin, appointment.FixInput{
+		MutateInput:           appointment.MutateInput{ID: assigned.Stops[0].AppointmentID, ExpectedVersion: appointmentVersion, RequestID: "route-without-chipper-confirmed"},
+		ConfirmWithoutChipper: true,
+		MissingChipperReason:  "  Maschine wird vor Ort organisiert  ",
+	})
+	if err != nil {
+		t.Fatalf("FixAppointment() confirmed error = %v", err)
+	}
+	if fixed.Lifecycle != appointment.LifecycleFixed || len(fixed.Resources) != 0 {
+		t.Fatalf("fixed appointment = %#v", fixed)
+	}
+	var noteBody, noteAuthor string
+	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT n.body, n.author_user_id::text FROM job_notes n WHERE n.job_id=$1 ORDER BY n.created_at DESC, n.id DESC LIMIT 1`, jobID).Scan(&noteBody, &noteAuthor); err != nil {
+		t.Fatal(err)
+	}
+	if noteBody != "Termin ohne Hackmaschine fixiert: Maschine wird vor Ort organisiert" || noteAuthor != fixture.admin.UserID {
+		t.Fatalf("missing chipper note/author = %q/%q", noteBody, noteAuthor)
+	}
+	var fixedAudit, noteAudit, fixedOutbox int
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM audit_events WHERE action='appointment.fixed' AND object_id=$1", fixed.ID).Scan(&fixedAudit); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM audit_events WHERE action='job.note_added' AND object_id=$1", jobID).Scan(&noteAudit); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM outbox_events WHERE aggregate_id=$1", fixed.ID).Scan(&fixedOutbox); err != nil {
+		t.Fatal(err)
+	}
+	if fixedAudit != 1 || noteAudit != 1 || fixedOutbox == 0 {
+		t.Fatalf("fixed audit/note audit/outbox = %d/%d/%d", fixedAudit, noteAudit, fixedOutbox)
 	}
 	overview, err := store.LoadRouteCandidates(fixture.ctx, nil)
 	if err != nil || len(overview) != 1 || overview[0].JobID != jobID || overview[0].UnavailableReason != "Bereits eingeplant" {

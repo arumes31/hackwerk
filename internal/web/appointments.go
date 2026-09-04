@@ -861,6 +861,8 @@ func fixAppointment(service *appointment.Service, logger *slog.Logger) http.Hand
 			value, err = service.FixAppointment(request.Context(), session.Actor, appointment.FixInput{
 				MutateInput:               appointment.MutateInput{ID: chi.URLParam(request, "appointmentID"), ExpectedVersion: version, RequestID: middleware.GetReqID(request.Context())},
 				WithoutNotificationReason: request.Form.Get("without_notification_reason"),
+				MissingChipperReason:      request.Form.Get("missing_chipper_reason"),
+				ConfirmWithoutChipper:     request.Form.Get("confirm_without_chipper") == "true",
 			})
 		}
 		appointmentMutationResult(response, request, logger, value, err, "appointment_fix_rejected")

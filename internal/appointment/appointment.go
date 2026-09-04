@@ -256,7 +256,7 @@ func (s *Service) PreviewMutation(ctx context.Context, actor auth.Actor, input P
 	}
 	result.Checks = append(result.Checks,
 		PreflightCheck{Key: "driver", Label: "Primärfahrer", Passed: primaryDriver, Severity: PreflightBlocking, Detail: "Mindestens ein Fahrer und genau ein Primärfahrer."},
-		PreflightCheck{Key: "chipper", Label: "Hackressource", Passed: chipper, Severity: PreflightBlocking, Detail: "Eine aktive Hackmaschine ist erforderlich."},
+		PreflightCheck{Key: "chipper", Label: "Hackressource", Passed: chipper, Severity: PreflightWarning, Detail: chipperPreflightDetail(chipper)},
 		PreflightCheck{Key: "transport", Label: "Transport", Passed: transport, Severity: PreflightBlocking, Detail: "Interner Transport benötigt ein Transportmittel; externer Transport muss bestätigt sein."},
 	)
 	from, to := reservationRange(candidate, startsAt, endsAt)
@@ -376,6 +376,8 @@ type CompleteInput struct {
 type FixInput struct {
 	MutateInput
 	WithoutNotificationReason string
+	MissingChipperReason      string
+	ConfirmWithoutChipper     bool
 }
 
 type Store interface {
@@ -687,7 +689,8 @@ func (s *Service) FixAppointment(ctx context.Context, actor auth.Actor, input Fi
 		return Appointment{}, err
 	}
 	input.WithoutNotificationReason = strings.TrimSpace(input.WithoutNotificationReason)
-	if len([]rune(input.WithoutNotificationReason)) > 1000 {
+	input.MissingChipperReason = strings.TrimSpace(input.MissingChipperReason)
+	if len([]rune(input.WithoutNotificationReason)) > 1000 || len([]rune(input.MissingChipperReason)) > 1000 {
 		return Appointment{}, ErrValidation
 	}
 	current, err := s.store.Get(ctx, input.ID)
@@ -700,8 +703,14 @@ func (s *Service) FixAppointment(ctx context.Context, actor auth.Actor, input Fi
 	if current.Lifecycle != LifecycleProposal {
 		return Appointment{}, ErrTransition
 	}
-	if err := validateAppointmentAssignments(current); err != nil {
+	if err := validateAppointmentAssignmentsWithoutChipper(current); err != nil {
 		return Appointment{}, err
+	}
+	if hasChippingResource(current) {
+		input.ConfirmWithoutChipper = false
+		input.MissingChipperReason = ""
+	} else if !input.ConfirmWithoutChipper || input.MissingChipperReason == "" {
+		return Appointment{}, fmt.Errorf("%w: missing chipper confirmation and reason required", ErrValidation)
 	}
 	availableFrom, availableTo := reservationRange(current, current.StartsAt, current.EndsAt)
 	if _, err := s.checkAvailability(ctx, actor, current.Drivers, availableFrom, availableTo, current.AvailabilityOverrideReason); err != nil {
@@ -941,15 +950,33 @@ func reservationRange(current Appointment, startsAt, endsAt time.Time) (time.Tim
 }
 
 func validateAppointmentAssignments(value Appointment) error {
+	if err := validateAppointmentAssignmentsWithoutChipper(value); err != nil {
+		return err
+	}
+	if !hasChippingResource(value) {
+		return fmt.Errorf("%w: chipping resource required", ErrValidation)
+	}
+	return nil
+}
+
+func validateAppointmentAssignmentsWithoutChipper(value Appointment) error {
 	if len(value.Drivers) == 0 || !slices.ContainsFunc(value.Drivers, func(item DriverAssignment) bool { return item.Primary }) {
 		return fmt.Errorf("%w: primary driver required", ErrValidation)
 	}
-	if !slices.ContainsFunc(value.Resources, func(item AssignedResource) bool {
-		return item.Type == resource.TypeChipper && item.Purpose == PurposeChipping
-	}) {
-		return fmt.Errorf("%w: chipping resource required", ErrValidation)
-	}
 	return validateAppointmentTransport(value)
+}
+
+func hasChippingResource(value Appointment) bool {
+	return slices.ContainsFunc(value.Resources, func(item AssignedResource) bool {
+		return item.Type == resource.TypeChipper && item.Purpose == PurposeChipping
+	})
+}
+
+func chipperPreflightDetail(assigned bool) string {
+	if assigned {
+		return "Eine aktive Hackmaschine ist zugewiesen."
+	}
+	return "Keine Hackmaschine zugewiesen. Zum Fixieren sind Bestätigungsnotiz und ausdrückliche Bestätigung erforderlich."
 }
 
 func validateAppointmentTransport(value Appointment) error {

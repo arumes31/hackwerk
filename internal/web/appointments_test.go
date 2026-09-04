@@ -168,6 +168,42 @@ func TestAppointmentHTTPAdminMutationAndConflictEndpoints(t *testing.T) {
 	}
 }
 
+func TestAppointmentHTTPFixWithoutChipperRequiresConfirmedReason(t *testing.T) {
+	startsAt := time.Date(2026, 9, 5, 6, 0, 0, 0, time.UTC)
+	fixture := func() *appointmentHTTPStore {
+		return &appointmentHTTPStore{current: appointment.Appointment{
+			ID: testAppointmentID, JobID: testJobID, JobType: "chipping_only", Lifecycle: appointment.LifecycleProposal, Version: 1,
+			StartsAt: startsAt, EndsAt: startsAt.Add(2 * time.Hour),
+			Drivers: []appointment.DriverAssignment{{ID: operationDriverID, Name: "Anna Fahrerin", Primary: true}},
+		}}
+	}
+	tests := []struct {
+		name       string
+		form       url.Values
+		wantStatus int
+		wantCalls  int
+	}{
+		{name: "missing confirmation", form: url.Values{"version": {"1"}, "missing_chipper_reason": {"Maschine folgt später"}}, wantStatus: http.StatusUnprocessableEntity},
+		{name: "missing reason", form: url.Values{"version": {"1"}, "confirm_without_chipper": {"true"}}, wantStatus: http.StatusUnprocessableEntity},
+		{name: "confirmed reason", form: url.Values{"version": {"1"}, "confirm_without_chipper": {"true"}, "missing_chipper_reason": {"Maschine folgt später"}}, wantStatus: http.StatusOK, wantCalls: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := fixture()
+			router, session, csrf := appointmentTestRouter(t, auth.RoleAdmin, store)
+			test.form.Set("csrf_token", csrf)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/api/v1/appointments/"+testAppointmentID+"/fix", test.form, session, csrf))
+			if response.Code != test.wantStatus || store.fixCalls != test.wantCalls {
+				t.Fatalf("fix response/calls = %d %q/%d", response.Code, response.Body.String(), store.fixCalls)
+			}
+			if test.wantCalls == 1 && (!store.lastFix.ConfirmWithoutChipper || store.lastFix.MissingChipperReason != "Maschine folgt später") {
+				t.Fatalf("fix input = %#v", store.lastFix)
+			}
+		})
+	}
+}
+
 func TestAppointmentErrorPresentationMapsStablePublicErrors(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -852,6 +888,7 @@ type appointmentHTTPStore struct {
 	driverCanComplete    bool
 	driverCanCompleteSet bool
 	lastMove             appointment.MoveInput
+	lastFix              appointment.FixInput
 	lastReopen           appointment.ReopenInput
 }
 
@@ -949,8 +986,9 @@ func (store *appointmentHTTPStore) Reschedule(_ context.Context, _ auth.Actor, i
 	store.lastMove = input
 	return store.current, nil
 }
-func (store *appointmentHTTPStore) Fix(context.Context, auth.Actor, appointment.FixInput) (appointment.Appointment, error) {
+func (store *appointmentHTTPStore) Fix(_ context.Context, _ auth.Actor, input appointment.FixInput) (appointment.Appointment, error) {
 	store.fixCalls++
+	store.lastFix = input
 	return store.current, nil
 }
 func (store *appointmentHTTPStore) Cancel(context.Context, auth.Actor, appointment.CancelInput) (appointment.Appointment, error) {

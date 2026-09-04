@@ -400,7 +400,7 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 			if chipperID.Valid {
 				ready, readyErr := q.AppointmentAssignmentsReady(ctx, dbgen.AppointmentAssignmentsReadyParams{
 					AppointmentID: appointmentUUID, JobType: stop.JobType, TransportMode: stop.TransportMode,
-					ExternalTransportConfirmed: stop.ExternalTransportConfirmed,
+					ExternalTransportConfirmed: stop.ExternalTransportConfirmed, AllowMissingChipper: false,
 				})
 				if readyErr != nil {
 					return readyErr

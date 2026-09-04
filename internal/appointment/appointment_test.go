@@ -882,6 +882,73 @@ func TestPreviewMutationIsAdminOnlyAndReportsAuthoritativeChecks(t *testing.T) {
 	}
 }
 
+func TestFixAppointmentWithoutChipperRequiresConfirmationAndReason(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		confirmed bool
+		reason    string
+		wantError bool
+	}{
+		{name: "neither confirmation nor reason", wantError: true},
+		{name: "reason without confirmation", reason: "Maschine wird vor Ort organisiert", wantError: true},
+		{name: "confirmation without reason", confirmed: true, wantError: true},
+		{name: "confirmed with reason", confirmed: true, reason: "  Maschine wird vor Ort organisiert  "},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			current := assignedAppointment(LifecycleProposal, 3)
+			current.Resources = nil
+			store := &fakeStore{current: current}
+			service, err := New(store, fakeAvailability{status: driver.StatusAvailable}, time.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = service.FixAppointment(t.Context(), testAdmin(), FixInput{
+				MutateInput: MutateInput{ID: current.ID, ExpectedVersion: current.Version},
+				ConfirmWithoutChipper: test.confirmed,
+				MissingChipperReason:  test.reason,
+			})
+			if test.wantError {
+				if !errors.Is(err, ErrValidation) || store.fixCalled {
+					t.Fatalf("FixAppointment() error/called = %v/%t, want validation/no persistence", err, store.fixCalled)
+				}
+				return
+			}
+			if err != nil || !store.fixCalled || !store.lastFix.ConfirmWithoutChipper || store.lastFix.MissingChipperReason != "Maschine wird vor Ort organisiert" {
+				t.Fatalf("FixAppointment() error/input = %v/%#v", err, store.lastFix)
+			}
+		})
+	}
+}
+
+func TestPreviewMutationWarnsAboutMissingChipper(t *testing.T) {
+	t.Parallel()
+	current := assignedAppointment(LifecycleProposal, 3)
+	current.Resources = nil
+	store := &fakeStore{current: current}
+	service, err := New(store, fakeAvailability{status: driver.StatusAvailable}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewMutation(t.Context(), testAdmin(), PreflightInput{
+		AppointmentID: current.ID, Action: "fix", ExpectedVersion: current.Version,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range preview.Checks {
+		if check.Key == "chipper" {
+			if check.Passed || check.Severity != PreflightWarning || !strings.Contains(check.Detail, "Bestätigungsnotiz") {
+				t.Fatalf("chipper check = %#v", check)
+			}
+			return
+		}
+	}
+	t.Fatal("chipper warning missing")
+}
+
 func TestPreviewMutationUsesAuthoritativeTransportValidation(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

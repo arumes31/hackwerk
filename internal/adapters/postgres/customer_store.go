@@ -233,7 +233,7 @@ func (store *CustomerStore) UpdateJob(ctx context.Context, actor auth.Actor, inp
 			}
 			ready, readyErr := queries.AppointmentAssignmentsReady(ctx, dbgen.AppointmentAssignmentsReadyParams{
 				AppointmentID: appointmentID, JobType: string(input.Job.JobType), TransportMode: string(input.Job.TransportMode),
-				ExternalTransportConfirmed: input.Job.ExternalTransportConfirmed,
+				ExternalTransportConfirmed: input.Job.ExternalTransportConfirmed, AllowMissingChipper: false,
 			})
 			if readyErr != nil {
 				return readyErr
