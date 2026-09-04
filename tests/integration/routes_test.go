@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"example.invalid/hackplan/internal/adapters/postgres"
+	"example.invalid/hackplan/internal/appointment"
 	"example.invalid/hackplan/internal/auth"
 	"example.invalid/hackplan/internal/planning"
 )
@@ -23,7 +24,11 @@ func TestRouteStoreAssignsEveryStopAsProposalWithoutOutbox(t *testing.T) {
 
 	departure := time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC)
 	draft, err := store.SaveRouteDraft(fixture.ctx, fixture.admin, planning.SaveRouteDraftInput{
-		Route: routeDraftForCandidates(fixture, departure, candidates, false), RequestID: "route-create",
+		Route: func() planning.RouteDraft {
+			route := routeDraftForCandidates(fixture, departure, candidates, false)
+			route.ChipperResourceID = ""
+			return route
+		}(), RequestID: "route-create",
 	})
 	if err != nil {
 		t.Fatalf("SaveRouteDraft() error = %v", err)
@@ -53,6 +58,22 @@ func TestRouteStoreAssignsEveryStopAsProposalWithoutOutbox(t *testing.T) {
 	}
 	if lifecycle != "proposal" || workflow != "planning" || bufferBefore != 15 || bufferAfter != 15 || outbox != 0 {
 		t.Fatalf("proposal state = %s/%s, buffers=%d/%d outbox=%d", lifecycle, workflow, bufferBefore, bufferAfter, outbox)
+	}
+	var chipperAssignments int
+	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT count(*) FROM appointment_resources WHERE appointment_id=$1 AND purpose='chipping'`, assigned.Stops[0].AppointmentID).Scan(&chipperAssignments); err != nil {
+		t.Fatal(err)
+	}
+	if chipperAssignments != 0 || assigned.ChipperResourceID != "" || assigned.ChipperName != "" {
+		t.Fatalf("optional chipper assignment count/route = %d/%#v", chipperAssignments, assigned)
+	}
+	var appointmentVersion int32
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT version FROM appointments WHERE id=$1", assigned.Stops[0].AppointmentID).Scan(&appointmentVersion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.service.FixAppointment(fixture.ctx, fixture.admin, appointment.FixInput{MutateInput: appointment.MutateInput{
+		ID: assigned.Stops[0].AppointmentID, ExpectedVersion: appointmentVersion, RequestID: "route-without-chipper-fix",
+	}}); !errors.Is(err, appointment.ErrValidation) {
+		t.Fatalf("FixAppointment() error = %v, want validation until a chipper is assigned", err)
 	}
 	overview, err := store.LoadRouteCandidates(fixture.ctx, nil)
 	if err != nil || len(overview) != 1 || overview[0].JobID != jobID || overview[0].UnavailableReason != "Bereits eingeplant" {

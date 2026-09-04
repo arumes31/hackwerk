@@ -306,7 +306,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	if err := chromedp.Run(desktopRouteSelectionContext,
 		chromedp.Click(".route-candidate[data-job-id='"+jobID+"'] .route-candidate__select span", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector("input[name='job_id'][value='`+jobID+`']").checked`, &selectedByCard),
-		chromedp.Evaluate(`(() => { const feedback=document.querySelector('[data-route-form-feedback]'); return !feedback.hidden&&feedback.textContent.includes('Fahrer auswählen')&&feedback.textContent.includes('Hackmaschine auswählen'); })()`, &selectionFeedbackSpecific),
+		chromedp.Evaluate(`(() => { const feedback=document.querySelector('[data-route-form-feedback]'); return !feedback.hidden&&feedback.textContent.includes('Fahrer auswählen')&&!feedback.textContent.includes('Hackmaschine auswählen'); })()`, &selectionFeedbackSpecific),
 		chromedp.Evaluate(`document.querySelector(".route-map-marker--candidate[data-job-id='`+jobID+`']").classList.contains('route-map-marker--selected')`, &selectedMarkerState),
 		chromedp.Focus("input[name='job_id'][value='"+jobID+"']", chromedp.ByQuery),
 		chromedp.KeyEvent(" "),
@@ -324,7 +324,6 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		chromedp.Evaluate(`document.querySelector("input[name='job_id'][value='`+jobID+`']").checked`, &selectedByMap),
 		chromedp.Click("input[name='job_id'][value='"+secondJobID+"']", chromedp.ByQuery),
 		chromedp.SetValue("select[name='driver_id']", driverID, chromedp.ByQuery),
-		chromedp.SetValue("select[name='chipper_resource_id']", chipperID, chromedp.ByQuery),
 		chromedp.SetValue("input[name='departure_date']", "2026-09-01", chromedp.ByQuery),
 		chromedp.SetValue("input[name='departure_time']", "07:00", chromedp.ByQuery),
 		chromedp.Evaluate(`document.documentElement.scrollWidth > window.innerWidth`, &desktopOverflow),
@@ -371,7 +370,8 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	if err := chromedp.Run(browser, chromedp.Text("main", &routeText, chromedp.ByQuery)); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(routeText, "4 Routenpunkte") || !strings.Contains(routeText, "Straßenrouting") || !strings.Contains(routeText, "keine Nachricht") {
+	if !strings.Contains(routeText, "4 Routenpunkte") || !strings.Contains(routeText, "Straßenrouting") ||
+		!strings.Contains(routeText, "Keine Hackmaschine zugewiesen") || !strings.Contains(routeText, "keine Nachricht") {
 		t.Fatalf("route summary misses safety information: %s", routeText)
 	}
 
@@ -419,18 +419,23 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		t.Fatalf("assigned proposal count=%d", len(appointmentTimes))
 	}
 	var assignedStatus string
-	var proposalCount, outboxCount int
+	var proposalCount, chipperAssignmentCount, outboxCount int
 	if err := pool.QueryRow(t.Context(), "SELECT status FROM route_drafts WHERE id=$1", routeID).Scan(&assignedStatus); err != nil {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM appointments WHERE job_id=ANY($1::uuid[]) AND lifecycle_status='proposal'", []string{jobID, secondJobID}).Scan(&proposalCount); err != nil {
 		t.Fatal(err)
 	}
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM appointment_resources ar
+		JOIN appointments a ON a.id=ar.appointment_id
+		WHERE a.job_id=ANY($1::uuid[]) AND ar.purpose='chipping'`, []string{jobID, secondJobID}).Scan(&chipperAssignmentCount); err != nil {
+		t.Fatal(err)
+	}
 	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM outbox_events WHERE aggregate_id IN (SELECT id FROM appointments WHERE job_id=ANY($1::uuid[]))", []string{jobID, secondJobID}).Scan(&outboxCount); err != nil {
 		t.Fatal(err)
 	}
-	if assignedStatus != "assigned" || proposalCount != 2 || outboxCount != 0 {
-		t.Fatalf("assignment status/proposals/outbox=%s/%d/%d", assignedStatus, proposalCount, outboxCount)
+	if assignedStatus != "assigned" || proposalCount != 2 || chipperAssignmentCount != 0 || outboxCount != 0 {
+		t.Fatalf("assignment status/proposals/chipper assignments/outbox=%s/%d/%d/%d", assignedStatus, proposalCount, chipperAssignmentCount, outboxCount)
 	}
 	if err := runBrowserStep(browser, "driver mobile route",
 		chromedp.Evaluate(`document.querySelector("header form[action='/logout']").requestSubmit()`, nil),

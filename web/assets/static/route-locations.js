@@ -327,7 +327,7 @@ routePlannerForms.forEach(form => {
       const problem = endpointProblem(...endpoint);
       if (problem) problems.push(problem);
     }
-    for (const [name, message] of [["driver_id", "Fahrer auswählen."], ["chipper_resource_id", "Hackmaschine auswählen."], ["departure_date", "Abfahrtsdatum eingeben."], ["departure_time", "Abfahrtszeit eingeben."]]) {
+    for (const [name, message] of [["driver_id", "Fahrer auswählen."], ["departure_date", "Abfahrtsdatum eingeben."], ["departure_time", "Abfahrtszeit eingeben."]]) {
       const input = form.elements.namedItem(name);
       if (!String(input?.value || "").trim()) problems.push({ message, target: input });
     }
@@ -349,7 +349,7 @@ routePlannerForms.forEach(form => {
     feedbackList.replaceChildren();
     if (problems.length === 0) {
       const item = document.createElement("li");
-      item.textContent = "Aufträge, Orte, Fahrer, Hackmaschine und Abfahrt sind vollständig.";
+      item.textContent = "Aufträge, Orte, Fahrer und Abfahrt sind vollständig. Eine Hackmaschine kann optional zugewiesen werden.";
       feedbackList.append(item);
       return problems;
     }

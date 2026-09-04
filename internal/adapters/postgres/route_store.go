@@ -322,14 +322,17 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 			return bufferErr
 		}
 		driverID, _ := uuid(draft.RdDriverID)
-		chipperID, _ := uuid(draft.RdChipperResourceID)
+		var chipperID pgtype.UUID
+		if draft.RdChipperResourceID != "" {
+			chipperID, _ = uuid(draft.RdChipperResourceID)
+		}
 		var transportID pgtype.UUID
 		if draft.TransportResourceID != "" {
 			transportID, _ = uuid(draft.TransportResourceID)
 		}
 		reservationCursor := draft.DepartureAt.Time
 		for index, stop := range stops {
-			if err := validateRouteStopForAssignment(stop); err != nil {
+			if err := validateRouteStopForAssignment(stop, transportID.Valid); err != nil {
 				return err
 			}
 			beforeMinutes, bufferErr := routeTravelBufferMinutes(int64(stop.TravelDurationSeconds))
@@ -372,14 +375,16 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 			if rows != 1 {
 				return planning.ErrConflict
 			}
-			rows, insertErr = q.InsertAppointmentResource(ctx, dbgen.InsertAppointmentResourceParams{
-				AppointmentID: appointmentUUID, ResourceID: chipperID, Purpose: "chipping",
-			})
-			if insertErr != nil {
-				return mapRouteError(insertErr)
-			}
-			if rows != 1 {
-				return planning.ErrConflict
+			if chipperID.Valid {
+				rows, insertErr = q.InsertAppointmentResource(ctx, dbgen.InsertAppointmentResourceParams{
+					AppointmentID: appointmentUUID, ResourceID: chipperID, Purpose: "chipping",
+				})
+				if insertErr != nil {
+					return mapRouteError(insertErr)
+				}
+				if rows != 1 {
+					return planning.ErrConflict
+				}
 			}
 			if transportID.Valid {
 				rows, insertErr = q.InsertAppointmentResource(ctx, dbgen.InsertAppointmentResourceParams{
@@ -392,15 +397,17 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 					return planning.ErrConflict
 				}
 			}
-			ready, readyErr := q.AppointmentAssignmentsReady(ctx, dbgen.AppointmentAssignmentsReadyParams{
-				AppointmentID: appointmentUUID, JobType: stop.JobType, TransportMode: stop.TransportMode,
-				ExternalTransportConfirmed: stop.ExternalTransportConfirmed,
-			})
-			if readyErr != nil {
-				return readyErr
-			}
-			if !ready {
-				return planning.ErrConflict
+			if chipperID.Valid {
+				ready, readyErr := q.AppointmentAssignmentsReady(ctx, dbgen.AppointmentAssignmentsReadyParams{
+					AppointmentID: appointmentUUID, JobType: stop.JobType, TransportMode: stop.TransportMode,
+					ExternalTransportConfirmed: stop.ExternalTransportConfirmed,
+				})
+				if readyErr != nil {
+					return readyErr
+				}
+				if !ready {
+					return planning.ErrConflict
+				}
 			}
 			if err := q.SetJobWorkflow(ctx, dbgen.SetJobWorkflowParams{WorkflowStatus: "planning", JobID: jobID}); err != nil {
 				return err
@@ -584,9 +591,12 @@ func prepareRouteDraftValues(actor auth.Actor, route planning.RouteDraft) (route
 	if err != nil {
 		return routeDraftValues{}, planning.ErrValidation
 	}
-	chipperID, err := uuid(route.ChipperResourceID)
-	if err != nil {
-		return routeDraftValues{}, planning.ErrValidation
+	var chipperID pgtype.UUID
+	if route.ChipperResourceID != "" {
+		chipperID, err = uuid(route.ChipperResourceID)
+		if err != nil {
+			return routeDraftValues{}, planning.ErrValidation
+		}
 	}
 	if route.TransportResourceID != "" {
 		if _, err := uuid(route.TransportResourceID); err != nil {
@@ -709,20 +719,25 @@ func lockRouteSelections(ctx context.Context, q *dbgen.Queries, route planning.R
 	if !driverReady {
 		return planning.ErrConflict
 	}
-	resourceTexts := []string{route.ChipperResourceID}
+	resourceTexts := make([]string, 0, 2)
+	if route.ChipperResourceID != "" {
+		resourceTexts = append(resourceTexts, route.ChipperResourceID)
+	}
 	if route.TransportResourceID != "" {
 		resourceTexts = append(resourceTexts, route.TransportResourceID)
 	}
 	resourceIDs, err := uuidSlice(resourceTexts)
-	if err != nil || route.ChipperResourceID == route.TransportResourceID {
+	if err != nil || (route.ChipperResourceID != "" && route.ChipperResourceID == route.TransportResourceID) {
 		return planning.ErrValidation
 	}
-	locked, err := q.LockPlanningResources(ctx, resourceIDs)
-	if err != nil {
-		return err
-	}
-	if len(locked) != len(resourceIDs) {
-		return planning.ErrConflict
+	if len(resourceIDs) > 0 {
+		locked, lockErr := q.LockPlanningResources(ctx, resourceIDs)
+		if lockErr != nil {
+			return lockErr
+		}
+		if len(locked) != len(resourceIDs) {
+			return planning.ErrConflict
+		}
 	}
 	resources, err := q.ListRouteResources(ctx)
 	if err != nil {
@@ -732,7 +747,7 @@ func lockRouteSelections(ctx context.Context, q *dbgen.Queries, route planning.R
 	for _, resource := range resources {
 		types[resource.ID] = resource.ResourceType
 	}
-	if types[route.ChipperResourceID] != "chipper" {
+	if route.ChipperResourceID != "" && types[route.ChipperResourceID] != "chipper" {
 		return planning.ErrConflict
 	}
 	if route.TransportResourceID != "" && types[route.TransportResourceID] != "transport_vehicle" {
@@ -741,14 +756,25 @@ func lockRouteSelections(ctx context.Context, q *dbgen.Queries, route planning.R
 	return nil
 }
 
-func validateRouteStopForAssignment(stop dbgen.LockRouteStopsForAssignmentRow) error {
+func validateRouteStopForAssignment(stop dbgen.LockRouteStopsForAssignmentRow, hasTransportResource bool) error {
 	if stop.ArchivedAt.Valid || stop.WaitlistID == "" || stop.JobVersion != stop.CurrentJobVersion ||
 		stop.WaitlistVersion != stop.CurrentWaitlistVersion ||
 		(stop.WorkflowStatus != "waitlist" && stop.WorkflowStatus != "planning") ||
 		stop.Latitude == "" || stop.Longitude == "" || !stop.PlannedEndsAt.Time.After(stop.PlannedStartsAt.Time) {
 		return planning.ErrConflict
 	}
-	return nil
+	switch stop.JobType {
+	case "chipping_only":
+		return nil
+	case "chipping_with_transport":
+		if stop.TransportMode == "internal" && hasTransportResource {
+			return nil
+		}
+		if stop.TransportMode == "external" && stop.ExternalTransportConfirmed {
+			return nil
+		}
+	}
+	return planning.ErrConflict
 }
 
 func validateRouteOrder(stored []dbgen.ListRouteStopsRow, stops []planning.RouteStop, order []string) error {

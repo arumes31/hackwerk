@@ -141,9 +141,9 @@ templ adminRoutePlanner(data RoutePageData) {
 					</select>
 				</label>
 				<label>
-					Hackmaschine
-					<select name="chipper_resource_id" required>
-						<option value="">Bitte wählen</option>@routeResourceOptions(data.Options.Resources, "chipper", data.Form.ChipperResourceID)
+					Hackmaschine (optional)
+					<select name="chipper_resource_id">
+						<option value="">Keine zuweisen</option>@routeResourceOptions(data.Options.Resources, "chipper", data.Form.ChipperResourceID)
 					</select>
 				</label>
 				<label>
@@ -157,7 +157,7 @@ templ adminRoutePlanner(data RoutePageData) {
 			</div>
 			<label class="check-label"><input type="checkbox" name="optimize" value="true" checked?={ !data.Form.Submitted || data.Form.Optimize }/> Reihenfolge nach Fahrzeit optimieren</label>
 			<div class="action-row" data-route-date-presets><button type="button" class="button button--quiet" data-route-date-preset="today">Heute</button><button type="button" class="button button--quiet" data-route-date-preset="tomorrow">Morgen</button><button type="button" class="button button--quiet" data-route-date-preset="business-day">Nächster Werktag</button></div>
-			<p class="form-hint">Die Berechnung erzeugt einen Entwurf, keine Termine. Gespeicherte Orte werden beim Absenden serverseitig erneut geprüft.</p>
+			<p class="form-hint">Die Berechnung erzeugt einen Entwurf, keine Termine. Eine Hackmaschine kann später vor dem Fixieren zugewiesen werden. Gespeicherte Orte werden beim Absenden serverseitig erneut geprüft.</p>
 			<div class="form-actions"><button class="button" type="submit" disabled?={ routeSelectableCandidateCount(data.Candidates) == 0 }>Route berechnen</button></div>
 		</form>
 		<div class="route-map-panel">
@@ -237,12 +237,12 @@ templ parallelRouteBoard(data RoutePageData) {
 		<div class="section-heading"><div><p class="eyebrow">Parallele Tagesplanung</p><h2 id="parallel-routes-title">Routen am { planningDateOnly(data.SelectedDay) }</h2></div><span class="status-badge">{ fmt.Sprint(len(data.ParallelRoutes)) } Entwürfe</span></div>
 		<form method="get" action="/planning/routes" class="filter-grid route-day-filter"><label>Planungstag<input type="date" name="date" value={ data.SelectedDay }/></label><button class="button button--quiet" type="submit">Tag anzeigen</button></form>
 		if len(data.ParallelRoutes) < 2 {
-			<p class="form-hint">Sobald mindestens zwei Routenentwürfe an diesem Tag vorhanden sind, können Stopps zwischen Fahrer-/Maschinenrouten verschoben werden.</p>
+			<p class="form-hint">Sobald mindestens zwei Routenentwürfe an diesem Tag vorhanden sind, können Stopps zwischen Fahrerrouten verschoben werden.</p>
 		}
 		<div class="parallel-route-grid">
 			for _, route := range data.ParallelRoutes {
 				<article class="parallel-route-card">
-					<div class="section-heading"><div><h3>{ route.DriverName }</h3><p>{ route.ChipperName } · { planningClock(route.Departure) } Uhr</p></div><span class="status-badge">v{ strconv.Itoa(int(route.Version)) }</span></div>
+					<div class="section-heading"><div><h3>{ route.DriverName }</h3><p>{ routeChipperLabel(route.ChipperName) } · { planningClock(route.Departure) } Uhr</p></div><span class="status-badge">v{ strconv.Itoa(int(route.Version)) }</span></div>
 					<ol class="parallel-stop-list">
 						for _, stop := range route.Stops {
 							<li>
@@ -255,7 +255,7 @@ templ parallelRouteBoard(data RoutePageData) {
 											<option value="">Verschieben nach …</option>
 											for _, target := range data.ParallelRoutes {
 												if target.ID != route.ID {
-													<option value={ target.ID + "|" + strconv.Itoa(int(target.Version)) } data-version={ strconv.Itoa(int(target.Version)) }>{ target.DriverName } · { target.ChipperName }</option>
+													<option value={ target.ID + "|" + strconv.Itoa(int(target.Version)) } data-version={ strconv.Itoa(int(target.Version)) }>{ target.DriverName } · { routeChipperLabel(target.ChipperName) }</option>
 												}
 											}
 										</select><input type="hidden" name="target_version" value="" data-target-version/><button class="button button--quiet" type="submit">Verschieben</button>
@@ -310,11 +310,19 @@ templ ownRoute(data RoutePageData) {
 
 templ routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, now time.Time) {
 	<section class="route-summary route-stop-section" aria-labelledby={ "route-stops-heading-" + route.ID }>
-		<div class="section-heading"><div><p class="eyebrow">{ route.DriverName }</p><h2 id={ "route-stops-heading-" + route.ID }>Stoppliste</h2></div><div class="route-summary__badges"><span class="status-badge">{ routeSource(route.Directions) }</span><span class="status-badge">{ fmt.Sprint(routePointCount(route)) } Routenpunkte</span></div></div>
+		<div class="section-heading">
+			<div><p class="eyebrow">{ route.DriverName }</p><h2 id={ "route-stops-heading-" + route.ID }>Stoppliste</h2></div>
+			<div class="route-summary__badges">
+				<span class="status-badge">{ routeSource(route.Directions) }</span><span class="status-badge">{ fmt.Sprint(routePointCount(route)) } Routenpunkte</span>
+				if route.ChipperName == "" {
+					<span class="status-badge">Keine Hackmaschine zugewiesen</span>
+				}
+			</div>
+		</div>
 		<details class="route-secondary-metrics">
 			<summary>Routendetails und Zeiten</summary>
 			<div class="route-secondary-metrics__content">
-				<dl class="suggestion-facts"><div><dt>Abfahrt</dt><dd>{ planningClock(route.Departure) } Uhr</dd></div><div><dt>Startort</dt><dd>{ routeOptional(route.StartLabel) }</dd></div><div><dt>Endort</dt><dd>{ routeOptional(route.EndLabel) }</dd></div><div><dt>Strecke</dt><dd>{ routeDistance(route.Directions.DistanceMeters) }</dd></div><div><dt>Fahrzeit</dt><dd>{ routeDuration(route.Directions.Duration) }</dd></div><div><dt>Arbeitszeit</dt><dd>{ routeDuration(routeWorkDuration(route)) }</dd></div><div><dt>Gesamtzeit</dt><dd>{ routeDuration(route.EstimatedEndAt.Sub(route.Departure)) }</dd></div><div><dt>Voraussichtliches Ende</dt><dd>{ planningClock(route.EstimatedEndAt) } Uhr</dd></div><div><dt>Hackmaschine</dt><dd>{ route.ChipperName }</dd></div><div><dt>Transport</dt><dd>{ routeOptional(route.TransportName) }</dd></div></dl>
+				<dl class="suggestion-facts"><div><dt>Abfahrt</dt><dd>{ planningClock(route.Departure) } Uhr</dd></div><div><dt>Startort</dt><dd>{ routeOptional(route.StartLabel) }</dd></div><div><dt>Endort</dt><dd>{ routeOptional(route.EndLabel) }</dd></div><div><dt>Strecke</dt><dd>{ routeDistance(route.Directions.DistanceMeters) }</dd></div><div><dt>Fahrzeit</dt><dd>{ routeDuration(route.Directions.Duration) }</dd></div><div><dt>Arbeitszeit</dt><dd>{ routeDuration(routeWorkDuration(route)) }</dd></div><div><dt>Gesamtzeit</dt><dd>{ routeDuration(route.EstimatedEndAt.Sub(route.Departure)) }</dd></div><div><dt>Voraussichtliches Ende</dt><dd>{ planningClock(route.EstimatedEndAt) } Uhr</dd></div><div><dt>Hackmaschine</dt><dd>{ routeChipperLabel(route.ChipperName) }</dd></div><div><dt>Transport</dt><dd>{ routeOptional(route.TransportName) }</dd></div></dl>
 				if route.Comparison.ManualDuration > 0 {
 					<p class="route-comparison" data-route-comparison>Optimierung: { routeDistance(routeComparisonDistanceSaving(route.Comparison)) } und { routeDuration(routeComparisonDurationSaving(route.Comparison)) } gegenüber der manuellen Reihenfolge gespart.</p>
 				}
@@ -498,6 +506,12 @@ func routeDistance(value int) string {
 func routeOptional(value string) string {
 	if value == "" {
 		return "nicht zugewiesen"
+	}
+	return value
+}
+func routeChipperLabel(value string) string {
+	if value == "" {
+		return "Keine Hackmaschine zugewiesen"
 	}
 	return value
 }

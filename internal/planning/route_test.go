@@ -355,6 +355,25 @@ func TestRouteServicePlanCanEndAtLastStop(t *testing.T) {
 	}
 }
 
+func TestRouteServicePlanAllowsMissingChipperResource(t *testing.T) {
+	t.Parallel()
+	input := validPlanRouteInput()
+	input.ChipperResourceID = ""
+	store := &routeStoreFake{candidates: []RouteCandidate{{
+		JobID: input.JobIDs[0], JobType: "chipping_only", Location: Point{Latitude: 48.25, Longitude: 14.25},
+		WorkDuration: time.Hour, JobVersion: 1, WaitlistVersion: 1,
+	}}}
+	service := newRouteTestService(t, store)
+
+	route, err := service.Plan(t.Context(), routeAdmin(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if route.ChipperResourceID != "" || store.savedDraft.Route.ChipperResourceID != "" {
+		t.Fatalf("chipper resource = %q/%q, want unassigned", route.ChipperResourceID, store.savedDraft.Route.ChipperResourceID)
+	}
+}
+
 func TestRouteServicePlanNormalizesEndpointLabels(t *testing.T) {
 	t.Parallel()
 	input := validPlanRouteInput()

@@ -475,7 +475,7 @@ func (s *RouteService) validatePlanInput(input PlanRouteInput) error {
 	}
 	startLabel := strings.TrimSpace(input.StartLabel)
 	endLabel := strings.TrimSpace(input.EndLabel)
-	if input.Departure.IsZero() || input.DriverID == "" || input.ChipperResourceID == "" || !input.Start.Valid() ||
+	if input.Departure.IsZero() || input.DriverID == "" || !input.Start.Valid() ||
 		startLabel == "" || (!input.EndAtLastStop && (!input.End.Valid() || endLabel == "")) ||
 		len([]rune(startLabel)) > 200 || len([]rune(endLabel)) > 200 || len(input.JobIDs) < 1 || len(input.JobIDs) > s.config.MaxStops {
 		return ErrValidation

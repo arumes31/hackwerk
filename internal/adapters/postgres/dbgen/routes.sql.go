@@ -23,7 +23,8 @@ func (q *Queries) DeleteRouteStops(ctx context.Context, routeDraftID pgtype.UUID
 
 const getRouteDraft = `-- name: GetRouteDraft :one
 SELECT rd.id::text, rd.actor_user_id::text, rd.driver_id::text, d.display_name AS driver_name,
-       rd.chipper_resource_id::text, chipper.name AS chipper_name,
+       COALESCE(rd.chipper_resource_id::text, '')::text AS rd_chipper_resource_id,
+       COALESCE(chipper.name, '')::text AS chipper_name,
        COALESCE(rd.transport_resource_id::text, '')::text AS transport_resource_id,
        COALESCE(transport.name, '')::text AS transport_name,
        rd.departure_at, rd.start_label, rd.start_latitude::text, rd.start_longitude::text,
@@ -32,7 +33,7 @@ SELECT rd.id::text, rd.actor_user_id::text, rd.driver_id::text, d.display_name A
        rd.version, rd.created_at, rd.updated_at
 FROM route_drafts rd
 JOIN drivers d ON d.id=rd.driver_id
-JOIN resources chipper ON chipper.id=rd.chipper_resource_id
+LEFT JOIN resources chipper ON chipper.id=rd.chipper_resource_id
 LEFT JOIN resources transport ON transport.id=rd.transport_resource_id
 WHERE rd.id=$1::uuid
 `
@@ -609,7 +610,8 @@ func (q *Queries) ListRouteStops(ctx context.Context, routeDraftID pgtype.UUID) 
 }
 
 const lockRouteDraft = `-- name: LockRouteDraft :one
-SELECT rd.id::text, rd.driver_id::text, rd.chipper_resource_id::text,
+SELECT rd.id::text, rd.driver_id::text,
+       COALESCE(rd.chipper_resource_id::text, '')::text AS rd_chipper_resource_id,
        COALESCE(rd.transport_resource_id::text, '')::text AS transport_resource_id,
        rd.departure_at, rd.duration_seconds, rd.status, rd.version
 FROM route_drafts rd

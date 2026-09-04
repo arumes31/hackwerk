@@ -79,6 +79,7 @@ func TestRouteHTTPAdminSeesRoutableJobsAndDriverCannotPlan(t *testing.T) {
 		!strings.Contains(body, "HA-2026-0042") || !strings.Contains(body, "data-route-candidate") ||
 		!strings.Contains(body, `value="custom"`) || !strings.Contains(body, "Anderen Startort verwenden") ||
 		!strings.Contains(body, "Anderen Endort verwenden") || !strings.Contains(body, "Beim letzten Stopp") ||
+		!strings.Contains(body, "Hackmaschine (optional)") || strings.Contains(body, `name="chipper_resource_id" required`) ||
 		!strings.Contains(body, `data-route-admin="true"`) || !strings.Contains(body, "Aufträge ohne Haufenstandort") {
 		t.Fatalf("admin route page=%d %s", response.Code, response.Body.String())
 	}
@@ -189,7 +190,6 @@ func TestRouteHTTPAdminPlansConfirmedCustomEndpoints(t *testing.T) {
 		"csrf_token":                    {csrf},
 		"departure":                     {"2026-08-27T08:00"},
 		"driver_id":                     {"driver-1"},
-		"chipper_resource_id":           {"resource-1"},
 		"job_id":                        {"job-1"},
 		"start_selection":               {"custom"},
 		"start_custom_confirmed_native": {"true"},
@@ -212,7 +212,8 @@ func TestRouteHTTPAdminPlansConfirmedCustomEndpoints(t *testing.T) {
 		t.Fatalf("plan=%d location=%q body=%s", response.Code, response.Header().Get("Location"), response.Body.String())
 	}
 	if store.savedRoute.StartLabel != "Hof Süd" || store.savedRoute.EndLabel != "Lager Nord" ||
-		store.savedRoute.Start != (planning.Point{Latitude: 48.2, Longitude: 14.2}) || store.savedRoute.End != (planning.Point{Latitude: 48.25, Longitude: 14.25}) {
+		store.savedRoute.Start != (planning.Point{Latitude: 48.2, Longitude: 14.2}) || store.savedRoute.End != (planning.Point{Latitude: 48.25, Longitude: 14.25}) ||
+		store.savedRoute.ChipperResourceID != "" {
 		t.Fatalf("saved route=%+v", store.savedRoute)
 	}
 }
@@ -323,7 +324,6 @@ func TestRouteHTTPValidationKeepsSubmittedSelectionAndNamesMissingFields(t *test
 		"Bitte ergänzen:",
 		"individuellen Startort ausdrücklich",
 		"Fahrer auswählen",
-		"Hackmaschine auswählen",
 		`value="job-1" aria-label="HA-2026-0042 für die Route auswählen" checked`,
 		`name="start_selection" value="custom" checked`,
 		`name="start_custom_label" maxlength="120" autocomplete="off" placeholder="z. B. Lagerplatz Nord" value="Lagerplatz Süd"`,
@@ -331,6 +331,9 @@ func TestRouteHTTPValidationKeepsSubmittedSelectionAndNamesMissingFields(t *test
 		if !strings.Contains(body, expected) {
 			t.Fatalf("validation response missing %q: status=%d body=%s", expected, response.Code, body)
 		}
+	}
+	if strings.Contains(body, "Hackmaschine auswählen") {
+		t.Fatalf("optional chipper is still reported as missing: %s", body)
 	}
 	if response.Code != http.StatusUnprocessableEntity || store.savedRoute.ID != "" {
 		t.Fatalf("validation response=%d saved=%+v", response.Code, store.savedRoute)

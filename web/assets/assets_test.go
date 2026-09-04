@@ -778,6 +778,7 @@ func TestRouteLocationSearchAppliesAddressAndCoordinatesInOneAction(t *testing.T
 		`const setActive = (choice, selectionChanged = false) => {`,
 		`setActive(choice, true)`,
 		`Die Bezeichnung darf höchstens 120 Zeichen lang sein.`,
+		`Eine Hackmaschine kann optional zugewiesen werden.`,
 	} {
 		if !strings.Contains(javascript, expected) {
 			t.Fatalf("route-location save script missing %q", expected)
@@ -785,5 +786,8 @@ func TestRouteLocationSearchAppliesAddressAndCoordinatesInOneAction(t *testing.T
 	}
 	if strings.Contains(javascript, `Bitte noch eine Bezeichnung eingeben und anschließend Standort übernehmen`) {
 		t.Fatal("address search still requires a second confirmation step")
+	}
+	if strings.Contains(javascript, `["chipper_resource_id", "Hackmaschine auswählen."]`) {
+		t.Fatal("route form script still requires a chipper resource")
 	}
 }

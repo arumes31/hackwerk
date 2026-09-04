@@ -232,9 +232,6 @@ func routePlanValidationMessage(request *http.Request, fallback string) string {
 	if strings.TrimSpace(request.Form.Get("driver_id")) == "" {
 		missing = append(missing, "Fahrer auswählen")
 	}
-	if strings.TrimSpace(request.Form.Get("chipper_resource_id")) == "" {
-		missing = append(missing, "Hackmaschine auswählen")
-	}
 	if _, err := parseRouteDeparture(request); err != nil {
 		missing = append(missing, "gültiges Abfahrtsdatum und gültige Abfahrtszeit eingeben")
 	}
