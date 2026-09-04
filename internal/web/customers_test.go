@@ -30,6 +30,8 @@ type customerHTTPStore struct {
 
 	created         customers.CreatedIntake
 	createdCustomer customers.CustomerInput
+	partners        []customers.TransportPartner
+	createdPartner  customers.TransportPartnerInput
 	input           customers.IntakeInput
 	jobEdit         customers.UpdateJobInput
 	listFilter      customers.CustomerListFilter
@@ -54,6 +56,13 @@ type customerHTTPStore struct {
 
 func (store *customerHTTPStore) FindDuplicates(context.Context, customers.CustomerInput) ([]customers.Duplicate, error) {
 	return store.created.Duplicates, nil
+}
+func (store *customerHTTPStore) ListTransportPartners(context.Context) ([]customers.TransportPartner, error) {
+	return store.partners, nil
+}
+func (store *customerHTTPStore) CreateTransportPartner(_ context.Context, _ auth.Actor, input customers.TransportPartnerInput, _ string) (string, error) {
+	store.createdPartner = input
+	return "partner-1", nil
 }
 
 func (store *customerHTTPStore) CreateIntake(_ context.Context, _ auth.Actor, input customers.IntakeInput, _ string) (customers.CreatedIntake, error) {
@@ -196,6 +205,24 @@ func TestCustomerHTTPCreatesCustomerWithoutJob(t *testing.T) {
 	}
 	if store.createdCustomer.FirstName != "Anna" || store.createCalls != 0 {
 		t.Fatalf("customer=%#v create intake calls=%d", store.createdCustomer, store.createCalls)
+	}
+}
+
+func TestTransportPartnerListAndInputAreAvailableToDrivers(t *testing.T) {
+	store := &customerHTTPStore{partners: []customers.TransportPartner{{ID: "partner-1", Name: "Holztrans GmbH", Type: customers.TransportPartnerCompany}}}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+
+	page := httptest.NewRecorder()
+	router.ServeHTTP(page, authenticatedCustomerRequest(t, http.MethodGet, "/transport-partners", nil, sessionToken, csrfToken))
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Holztrans GmbH") || !strings.Contains(page.Body.String(), `name="phone"`) {
+		t.Fatalf("page = %d body=%q", page.Code, page.Body.String())
+	}
+
+	form := url.Values{"csrf_token": {csrfToken}, "partner_type": {"person"}, "name": {"Max Fahrer"}, "phone": {"+43 660 123456"}}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/transport-partners", form, sessionToken, csrfToken))
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/transport-partners" || store.createdPartner.Name != "Max Fahrer" {
+		t.Fatalf("response=%d location=%q partner=%#v", response.Code, response.Header().Get("Location"), store.createdPartner)
 	}
 }
 

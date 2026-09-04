@@ -27,6 +27,8 @@ func registerCustomerRoutes(router chi.Router, dependencies Dependencies, page t
 	router.Post("/customers/new/search", intakeCustomerSearch(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers", createIntake(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers/customer-only", createCustomerOnly(service, page, csrfCookie, dependencies.Logger))
+	router.Get("/transport-partners", transportPartnersPage(service, page, csrfCookie, dependencies.Logger))
+	router.Post("/transport-partners", createTransportPartner(service, page, csrfCookie, dependencies.Logger))
 	router.Get("/customers/{customerID}", customerDetail(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers/{customerID}", updateCustomer(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers/{customerID}/archive", archiveCustomer(service, dependencies.Logger))
@@ -44,6 +46,36 @@ func registerCustomerRoutes(router chi.Router, dependencies Dependencies, page t
 	router.Post("/waitlist/{waitlistID}/remove", removeWaitlist(service, dependencies.Logger))
 	router.Post("/waitlist/filter-favorites", saveWaitlistFilterFavorite(service, dependencies.Logger))
 	router.Post("/waitlist/filter-favorites/{favoriteID}/delete", deleteWaitlistFilterFavorite(service, dependencies.Logger))
+}
+
+func transportPartnersPage(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		partners, err := service.ListTransportPartners(request.Context(), session.Actor)
+		if err != nil {
+			renderCustomerError(response, request, page, logger, err, "Transportpartner nicht verfügbar")
+			return
+		}
+		render(response, request, templates.TransportPartners(templates.TransportPartnersData{Shell: shell(request, page, csrfCookie), Partners: partners}), http.StatusOK, logger)
+	}
+}
+
+func createTransportPartner(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		session, _ := sessionFromContext(request.Context())
+		_, err := service.CreateTransportPartner(request.Context(), session.Actor, customers.TransportPartnerInput{
+			Type: customers.TransportPartnerType(request.Form.Get("partner_type")), Name: request.Form.Get("name"),
+			Phone: request.Form.Get("phone"), Address: request.Form.Get("address"), InternalNote: request.Form.Get("internal_note"),
+		}, middleware.GetReqID(request.Context()))
+		if err != nil {
+			partners, _ := service.ListTransportPartners(request.Context(), session.Actor)
+			render(response, request, templates.TransportPartners(templates.TransportPartnersData{
+				Shell: shell(request, page, csrfCookie), Partners: partners, Error: "Der Transportpartner konnte nicht gespeichert werden. Name und Art prüfen.",
+			}), http.StatusUnprocessableEntity, logger)
+			return
+		}
+		http.Redirect(response, request, "/transport-partners", http.StatusSeeOther)
+	}
 }
 
 func createCustomerOnly(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
@@ -149,12 +181,18 @@ func jobForm(service *customers.Service, page templates.PageData, csrfCookie str
 			render(response, request, templates.Error(page, http.StatusConflict, "Kunde archiviert", "Für einen archivierten Kunden kann kein Auftrag angelegt werden."), http.StatusConflict, logger)
 			return
 		}
+		partners, err := service.ListTransportPartners(request.Context(), session.Actor)
+		if err != nil {
+			renderCustomerError(response, request, page, logger, err, "Transportpartner nicht verfügbar")
+			return
+		}
 		render(response, request, templates.JobForm(templates.JobFormData{
 			Shell: shell(request, page, csrfCookie), CustomerID: detail.Customer.ID,
 			CustomerName: displayCustomerName(detail.Customer), Values: defaultIntakeValues(),
 			CustomerRegion:   detail.Customer.Region,
 			CustomerAddress:  customerAddressText(detail.Customer),
 			CustomerLatitude: floatFormValue(detail.Customer.Latitude), CustomerLongitude: floatFormValue(detail.Customer.Longitude),
+			Partners: partners,
 		}), http.StatusOK, logger)
 	}
 }
@@ -208,6 +246,7 @@ func jobFormData(request *http.Request, service *customers.Service, page templat
 	data.CustomerAddress = customerAddressText(detail.Customer)
 	data.CustomerLatitude = floatFormValue(detail.Customer.Latitude)
 	data.CustomerLongitude = floatFormValue(detail.Customer.Longitude)
+	data.Partners, _ = service.ListTransportPartners(request.Context(), session.Actor)
 	return data
 }
 
@@ -224,11 +263,17 @@ func duplicateJobForm(service *customers.Service, page templates.PageData, csrfC
 			renderCustomerError(response, request, page, logger, customers.ErrConflict, "Auftragsentwurf nicht verfügbar")
 			return
 		}
+		partners, err := service.ListTransportPartners(request.Context(), session.Actor)
+		if err != nil {
+			renderCustomerError(response, request, page, logger, err, "Transportpartner nicht verfügbar")
+			return
+		}
 		render(response, request, templates.JobForm(templates.JobFormData{
 			Shell: shell(request, page, csrfCookie), CustomerID: draft.CustomerID, CustomerName: draft.CustomerName,
 			Values: jobDraftValues(draft.Job), CustomerLatitude: floatFormValue(detail.Customer.Latitude),
 			CustomerLongitude: floatFormValue(detail.Customer.Longitude), CustomerRegion: detail.Customer.Region,
 			CustomerAddress: customerAddressText(detail.Customer),
+			Partners:        partners,
 		}), http.StatusOK, logger)
 	}
 }
@@ -315,9 +360,14 @@ func renderIntakePage(response http.ResponseWriter, request *http.Request, servi
 		renderCustomerError(response, request, page, logger, err, "Kundenauswahl nicht verfügbar")
 		return
 	}
+	partners, err := service.ListTransportPartners(request.Context(), session.Actor)
+	if err != nil {
+		renderCustomerError(response, request, page, logger, err, "Transportpartner nicht verfügbar")
+		return
+	}
 	render(response, request, templates.Intake(templates.IntakeData{
 		Shell: shell(request, page, csrfCookie), Customers: result, CustomerSearch: search,
-		Values: values, Error: formError, FieldErrors: fieldErrors,
+		Values: values, Error: formError, FieldErrors: fieldErrors, Partners: partners,
 	}), status, logger)
 }
 
@@ -362,6 +412,11 @@ func customerDetail(service *customers.Service, page templates.PageData, csrfCoo
 			return
 		}
 		detail.PageRequestID = middleware.GetReqID(request.Context())
+		partners, err := service.ListTransportPartners(request.Context(), session.Actor)
+		if err != nil {
+			renderCustomerError(response, request, page, logger, err, "Transportpartner nicht verfügbar")
+			return
+		}
 		message := ""
 		if request.URL.Query().Get("duplicate_warning") == "1" {
 			message = "Hinweis: Es gibt ähnlich wirkende Kundenakten. Bitte prüfen Sie diese vor einer späteren Zusammenführung. Es wurde nichts automatisch verbunden."
@@ -374,6 +429,7 @@ func customerDetail(service *customers.Service, page templates.PageData, csrfCoo
 		render(response, request, templates.CustomerDetail(templates.CustomerDetailData{
 			Shell: shell(request, page, csrfCookie), Detail: detail, Error: message,
 			CustomerValues: customerEditValues(detail.Customer), CustomerVersion: strconv.FormatInt(int64(detail.Customer.Version), 10),
+			Partners: partners,
 		}), http.StatusOK, logger)
 	}
 }
@@ -478,6 +534,7 @@ func renderCustomerEditFailure(response http.ResponseWriter, request *http.Reque
 		Shell: shellData, Detail: detail,
 		CustomerValues: customerEditValues(detail.Customer), CustomerVersion: strconv.FormatInt(int64(detail.Customer.Version), 10),
 	}
+	data.Partners, _ = service.ListTransportPartners(request.Context(), session.Actor)
 	if jobID == "" {
 		data.OpenCustomerEdit = true
 		data.CustomerValues = values
@@ -668,6 +725,7 @@ func intakeValues(request *http.Request) templates.IntakeValues {
 		Source: request.Form.Get("source"), Note: request.Form.Get("note"),
 		PileLatitude: request.Form.Get("pile_latitude"), PileLongitude: request.Form.Get("pile_longitude"),
 		PileLocationSource: request.Form.Get("pile_location_source"),
+		TransportPartnerID: request.Form.Get("transport_partner_id"),
 		ExternalConfirmed:  request.Form.Get("external_confirmed") == "true",
 	}
 }
@@ -683,6 +741,7 @@ func jobDraftValues(job customers.JobInput) templates.IntakeValues {
 		PreferredEnd: job.PreferredEndDate, PreferenceMode: string(job.PreferenceMode), PreferenceText: job.PreferenceText, Urgency: string(job.Urgency),
 		Region: job.Region, Source: string(job.Source), ExternalConfirmed: job.ExternalTransportConfirmed,
 		PileLocationSource: string(job.PileLocationSource),
+		TransportPartnerID: job.TransportPartnerID,
 	}
 	if job.EstimatedTransportMinutes > 0 {
 		values.TransportDuration = strconv.Itoa(job.EstimatedTransportMinutes)
@@ -846,8 +905,11 @@ func validateJobForm(values templates.IntakeValues, add func(string, string, str
 		add("transport_mode", "Transportmodus", "Für einen Transportauftrag einen Transportmodus auswählen.")
 	}
 	if jobType == customers.JobTypeChippingOnly &&
-		(strings.TrimSpace(values.TransportDuration) != "" || strings.TrimSpace(values.Trips) != "" || transportMode != customers.TransportNone) {
+		(strings.TrimSpace(values.TransportDuration) != "" || strings.TrimSpace(values.Trips) != "" || transportMode != customers.TransportNone || strings.TrimSpace(values.TransportPartnerID) != "") {
 		add("job_type", "Auftragstyp", "Transportangaben sind nur bei einem Transportauftrag zulässig.")
+	}
+	if values.TransportPartnerID != "" && !safeID(values.TransportPartnerID) {
+		add("transport_partner_id", "Transportpartner", "Einen gültigen Transportpartner auswählen.")
 	}
 	if values.ExternalConfirmed && (jobType != customers.JobTypeChippingWithTransport || transportMode != customers.TransportExternal) {
 		add("external_confirmed", "Transportbestätigung", "Nur externen Transport ausdrücklich bestätigen.")
@@ -921,6 +983,7 @@ func jobInput(values templates.IntakeValues) (customers.JobInput, error) {
 		Urgency: customers.Urgency(values.Urgency), Region: values.Region, Source: customers.Source(values.Source),
 		ExternalTransportConfirmed: values.ExternalConfirmed,
 		PileLatitude:               pileLatitude, PileLongitude: pileLongitude, PileLocationSource: pileSource,
+		TransportPartnerID: values.TransportPartnerID,
 	}, nil
 }
 

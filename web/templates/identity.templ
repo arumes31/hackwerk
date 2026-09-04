@@ -54,6 +54,7 @@ templ appHeader(shell ShellData) {
 				@navLink(shell, "/calendar", "Kalender")
 				@navLink(shell, "/waitlist", "Warteliste")
 				@navLink(shell, "/customers", "Kunden")
+				@navLink(shell, "/transport-partners", "Transportpartner")
 				if shell.Actor.Role == auth.RoleAdmin {
 					@navLink(shell, "/planning", "Planung")
 					@navLink(shell, "/planning/routes", "Karte & Routen")
@@ -229,6 +230,7 @@ templ appHeader(shell ShellData) {
 templ mobileMoreActions(shell ShellData) {
 	<span class="mobile-more__label">Erfassen</span>
 	@mobileMoreLink(shell, "/voice", "Auftrag per Sprache")
+	@mobileMoreLink(shell, "/transport-partners", "Transportpartner")
 	if shell.Actor.Role == auth.RoleDriver && shell.Actor.DriverID != "" {
 		@mobileMoreLink(shell, "/my-route", "Meine Route")
 		@mobileMoreLink(shell, "/availability", "Meine Verfügbarkeit")

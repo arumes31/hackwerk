@@ -31,6 +31,7 @@ func TestJobTransportValidation(t *testing.T) {
 			input.TransportMode = TransportUndecided
 		}},
 		{name: "chipping only with trips", mutate: func(input *JobInput) { input.TransportTripCount = 1 }, wantErr: true},
+		{name: "chipping only with partner", mutate: func(input *JobInput) { input.TransportPartnerID = "partner-1" }, wantErr: true},
 		{name: "transport without mode", mutate: func(input *JobInput) { input.JobType = JobTypeChippingWithTransport }, wantErr: true},
 		{name: "external confirmed with internal mode", mutate: func(input *JobInput) {
 			input.JobType = JobTypeChippingWithTransport
@@ -41,6 +42,11 @@ func TestJobTransportValidation(t *testing.T) {
 			input.JobType = JobTypeChippingWithTransport
 			input.TransportMode = TransportExternal
 			input.ExternalTransportConfirmed = true
+		}},
+		{name: "transport with partner", mutate: func(input *JobInput) {
+			input.JobType = JobTypeChippingWithTransport
+			input.TransportMode = TransportExternal
+			input.TransportPartnerID = "partner-1"
 		}},
 		{name: "hack duration exceeds storage bound", mutate: func(input *JobInput) {
 			input.EstimatedHackMinutes = MaxJobDurationMinutes + 1

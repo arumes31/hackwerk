@@ -28,7 +28,7 @@ INSERT INTO jobs (
     job_number, customer_id, job_type, volume_m3, estimated_hack_minutes,
     estimated_transport_minutes, transport_trip_count, transport_mode, external_transport_confirmed,
     preferred_start_date, preferred_end_date, preference_mode, preference_text, urgency, region, source,
-    pile_latitude, pile_longitude, pile_location_source, pile_location_updated_at
+    pile_latitude, pile_longitude, pile_location_source, pile_location_updated_at, transport_partner_id
 ) VALUES (
     sqlc.arg(job_number), sqlc.arg(customer_id)::uuid, sqlc.arg(job_type), sqlc.arg(volume_m3)::numeric,
     sqlc.arg(estimated_hack_minutes), sqlc.arg(estimated_transport_minutes), sqlc.arg(transport_trip_count),
@@ -37,7 +37,8 @@ INSERT INTO jobs (
     sqlc.arg(preference_mode), NULLIF(sqlc.arg(preference_text)::text, ''), sqlc.arg(urgency), NULLIF(sqlc.arg(region)::text, ''), sqlc.arg(source),
     NULLIF(sqlc.arg(pile_latitude)::text, '')::numeric, NULLIF(sqlc.arg(pile_longitude)::text, '')::numeric,
     NULLIF(sqlc.arg(pile_location_source)::text, ''),
-    CASE WHEN NULLIF(sqlc.arg(pile_latitude)::text, '') IS NULL THEN NULL ELSE now() END
+    CASE WHEN NULLIF(sqlc.arg(pile_latitude)::text, '') IS NULL THEN NULL ELSE now() END,
+    NULLIF(sqlc.arg(transport_partner_id)::text, '')::uuid
 ) RETURNING id::text;
 
 -- name: InsertWaitlistEntry :one
@@ -216,6 +217,9 @@ SELECT id::text, job_number, job_type, volume_m3::text, estimated_hack_minutes,
        COALESCE(pile_latitude::text, '')::text AS pile_latitude,
        COALESCE(pile_longitude::text, '')::text AS pile_longitude,
        COALESCE(pile_location_source, '')::text AS pile_location_source,
+       COALESCE(transport_partner_id::text, '')::text AS transport_partner_id,
+       COALESCE((SELECT tp.name FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_name,
+       COALESCE((SELECT tp.partner_type FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_type,
        COALESCE((SELECT a.id::text FROM appointments a WHERE a.job_id=jobs.id AND a.lifecycle_status IN ('proposal','fixed') ORDER BY a.starts_at DESC, a.id DESC LIMIT 1), '')::text AS active_appointment_id
 FROM jobs WHERE customer_id = sqlc.arg(customer_id)::uuid
 ORDER BY received_at DESC, id DESC;
@@ -239,6 +243,9 @@ SELECT id::text, customer_id::text, job_number, job_type, volume_m3::text,
        COALESCE(pile_latitude::text, '')::text AS pile_latitude,
        COALESCE(pile_longitude::text, '')::text AS pile_longitude,
        COALESCE(pile_location_source, '')::text AS pile_location_source
+       , COALESCE(transport_partner_id::text, '')::text AS transport_partner_id
+       , COALESCE((SELECT tp.name FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_name
+       , COALESCE((SELECT tp.partner_type FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_type
 FROM jobs WHERE id = sqlc.arg(id)::uuid;
 
 -- name: LockJobForArchive :one
@@ -401,6 +408,7 @@ UPDATE jobs SET
     pile_longitude = NULLIF(sqlc.arg(pile_longitude)::text, '')::numeric,
     pile_location_source = NULLIF(sqlc.arg(pile_location_source)::text, ''),
     pile_location_updated_at = CASE WHEN NULLIF(sqlc.arg(pile_latitude)::text, '') IS NULL THEN NULL ELSE now() END,
+    transport_partner_id = NULLIF(sqlc.arg(transport_partner_id)::text, '')::uuid,
     version = version + 1, updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND version = sqlc.arg(expected_version)
   AND archived_at IS NULL AND workflow_status IN ('waitlist', 'planning', 'scheduled');

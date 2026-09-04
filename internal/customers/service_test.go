@@ -47,6 +47,12 @@ type storeStub struct {
 func (store *storeStub) FindDuplicates(context.Context, CustomerInput) ([]Duplicate, error) {
 	return store.duplicates, nil
 }
+func (store *storeStub) ListTransportPartners(context.Context) ([]TransportPartner, error) {
+	return nil, nil
+}
+func (store *storeStub) CreateTransportPartner(context.Context, auth.Actor, TransportPartnerInput, string) (string, error) {
+	return "partner-1", nil
+}
 func (store *storeStub) CreateIntake(context.Context, auth.Actor, IntakeInput, string) (CreatedIntake, error) {
 	store.createCalls++
 	return store.created, nil

@@ -21,6 +21,7 @@ type IntakeValues struct {
 	FirstName, LastName, CompanyName, Street, PostalCode, Locality, Region, AddressFreeform            string
 	Phone, Email, Notification, JobType, Volume, HackDuration, TransportDuration, Trips                string
 	TransportMode, PreferredStart, PreferredEnd, PreferenceMode, PreferenceText, Urgency, Source, Note string
+	TransportPartnerID                                                                                 string
 	PileLatitude, PileLongitude, PileLocationSource                                                    string
 	ExternalConfirmed                                                                                  bool
 }
@@ -32,6 +33,7 @@ type IntakeData struct {
 	Values         IntakeValues
 	Error          string
 	FieldErrors    []FormFieldError
+	Partners       []customers.TransportPartner
 }
 
 type FormFieldError struct {
@@ -51,6 +53,7 @@ type CustomerDetailData struct {
 	JobValues                                 IntakeValues
 	JobFieldErrors                            []FormFieldError
 	JobConflict                               bool
+	Partners                                  []customers.TransportPartner
 }
 
 type WaitlistData struct {
@@ -67,6 +70,13 @@ type JobFormData struct {
 	Error                                                     string
 	FieldErrors                                               []FormFieldError
 	CustomerLatitude, CustomerLongitude                       string
+	Partners                                                  []customers.TransportPartner
+}
+
+type TransportPartnersData struct {
+	Shell    ShellData
+	Partners []customers.TransportPartner
+	Error    string
 }
 
 type WorkspaceSearchData struct {
@@ -108,6 +118,46 @@ templ WorkspaceSearch(data WorkspaceSearchData) {
 			@appFooter(data.Shell.Page)
 		</body>
 	</html>
+}
+
+templ TransportPartners(data TransportPartnersData) {
+	<!DOCTYPE html>
+	<html lang="de-AT">
+		@documentHead(data.Shell.Page, "Transportpartner – "+data.Shell.Page.AppName)
+		<body>
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page compact-page">
+				<div class="page-heading"><div><p class="eyebrow">Transport</p><h1>Transportpartner</h1><p>Personen und Firmen einmal erfassen und bei Transportaufträgen wiederverwenden.</p></div><a class="button button--quiet" href="/customers">Zu Kunden &amp; Aufträgen</a></div>
+				if data.Error != "" {
+					<div class="form-alert" role="alert">{ data.Error }</div>
+				}
+				<details class="compact-create-panel" open?={ len(data.Partners) == 0 }>
+					<summary>+ Transportpartner erfassen</summary>
+					<form method="post" action="/transport-partners" class="form-grid compact-form">
+						<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
+						<label>Art<select name="partner_type" required><option value="person">Person</option><option value="company">Firma</option></select></label>
+						<label>Name<input name="name" maxlength="200" required/></label>
+						<label>Telefon (optional)<input name="phone" type="tel" maxlength="64"/></label>
+						<label>Adresse (optional)<input name="address" maxlength="500"/></label>
+						<label>Interne Bemerkung (optional)<textarea name="internal_note" maxlength="1000"></textarea></label>
+						<button class="button" type="submit">Partner speichern</button>
+					</form>
+				</details>
+				<section class="compact-list" aria-label="Transportpartner">
+					for _, partner := range data.Partners {
+						<article class="compact-row"><div class="compact-row__details"><strong>{ partner.Name }</strong><span class="status-badge">{ transportPartnerTypeLabel(partner.Type) }</span><span>{ fallback(partner.Phone) }</span><span>{ fallback(partner.Address) }</span></div></article>
+					}
+				</section>
+			</main>@appFooter(data.Shell.Page)
+		</body>
+	</html>
+}
+
+func transportPartnerTypeLabel(value customers.TransportPartnerType) string {
+	if value == customers.TransportPartnerCompany {
+		return "Firma"
+	}
+	return "Person"
 }
 
 func searchKindLabel(kind string) string {
@@ -383,7 +433,13 @@ templ customerFormFields(values IntakeValues, fieldErrors []FormFieldError) {
 	</div>
 }
 
-templ jobIntakeFields(page PageData, prefix string, values IntakeValues, fieldErrors []FormFieldError, customerLatitude string, customerLongitude string, customerAddress string, customerRegion string) {
+templ transportPartnerOptions(partners []customers.TransportPartner, selected string) {
+	for _, partner := range partners {
+		<option value={ partner.ID } selected?={ selected == partner.ID }>{ partner.Name } · { transportPartnerTypeLabel(partner.Type) }</option>
+	}
+}
+
+templ jobIntakeFields(page PageData, prefix string, values IntakeValues, fieldErrors []FormFieldError, customerLatitude string, customerLongitude string, customerAddress string, customerRegion string, partners []customers.TransportPartner) {
 	<fieldset class="compact-form-section job-form-section job-core-section">
 		<legend>Hackauftrag</legend>
 		<div class="job-core-grid">
@@ -421,6 +477,13 @@ templ jobIntakeFields(page PageData, prefix string, values IntakeValues, fieldEr
 				</label>
 				<label class="compact-field">
 					Transportmodus<select id="transport_mode" name="transport_mode" data-transport-control data-transport-mode aria-invalid={ formFieldInvalid(fieldErrors, "transport_mode") } aria-describedby={ formFieldDescription(fieldErrors, "transport_mode") }><option value="none" selected?={ values.TransportMode == "none" }>Kein Transport</option><option value="undecided" selected?={ values.TransportMode == "undecided" }>Noch offen</option><option value="internal" selected?={ values.TransportMode == "internal" }>Intern</option><option value="external" selected?={ values.TransportMode == "external" }>Extern</option></select>@formFieldMessage(fieldErrors, "transport_mode")
+				</label>
+				<label class="compact-field">
+					Fahrer / Transportfirma (optional)
+					<select name="transport_partner_id" data-transport-control>
+						<option value="">Noch nicht zugeordnet</option>@transportPartnerOptions(partners, values.TransportPartnerID)
+					</select>
+					<small><a href="/transport-partners" target="_blank" rel="noopener">Liste öffnen oder neuen Partner erfassen</a></small>
 				</label>
 				<div class="compact-check-field" data-external-confirmation>
 					<label class="check-label"><input id="external_confirmed" name="external_confirmed" type="checkbox" value="true" checked?={ values.ExternalConfirmed } aria-invalid={ formFieldInvalid(fieldErrors, "external_confirmed") } aria-describedby={ formFieldDescription(fieldErrors, "external_confirmed") }/> Externer Transport bestätigt</label>@formFieldMessage(fieldErrors, "external_confirmed")
@@ -609,7 +672,7 @@ templ Intake(data IntakeData) {
 						<form method="post" action="/customers" class="intake-form customer-job-workbench" data-transport-form data-sticky-actions>
 							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="transport_mode" value="none" data-transport-default disabled/>
 							@customerFormFields(data.Values, data.FieldErrors)
-							@jobIntakeFields(data.Shell.Page, "new-intake-job", data.Values, data.FieldErrors, "", "", intakeCustomerAddress(data.Values), data.Values.Region)
+							@jobIntakeFields(data.Shell.Page, "new-intake-job", data.Values, data.FieldErrors, "", "", intakeCustomerAddress(data.Values), data.Values.Region, data.Partners)
 							<div class="form-actions workbench-form-actions"><p>Es wird noch kein Termin erzeugt.</p><button class="button" type="submit">Kunde &amp; Auftrag auf Warteliste setzen</button></div>
 						</form>
 					</details>
@@ -790,6 +853,12 @@ templ CustomerDetail(data CustomerDetailData) {
 														<label class="compact-field">
 															Transportmodus<select name="transport_mode" data-transport-control data-transport-mode aria-invalid={ formFieldInvalid(jobEditErrorsFor(data, job), "transport_mode") } aria-describedby={ formFieldDescription(jobEditErrorsFor(data, job), "transport_mode") }><option value="none" selected?={ jobEditValuesFor(data, job).TransportMode == "none" }>Kein Transport</option><option value="undecided" selected?={ jobEditValuesFor(data, job).TransportMode == "undecided" }>Noch offen</option><option value="internal" selected?={ jobEditValuesFor(data, job).TransportMode == "internal" }>Intern</option><option value="external" selected?={ jobEditValuesFor(data, job).TransportMode == "external" }>Extern</option></select>@formFieldMessage(jobEditErrorsFor(data, job), "transport_mode")
 														</label>
+														<label class="compact-field">
+															Fahrer / Transportfirma (optional)
+															<select name="transport_partner_id" data-transport-control>
+																<option value="">Noch nicht zugeordnet</option>@transportPartnerOptions(data.Partners, jobEditValuesFor(data, job).TransportPartnerID)
+															</select><small><a href="/transport-partners" target="_blank" rel="noopener">Liste verwalten</a></small>
+														</label>
 														<div class="compact-check-field" data-external-confirmation>
 															<label class="check-label"><input name="external_confirmed" type="checkbox" value="true" checked?={ jobEditValuesFor(data, job).ExternalConfirmed } aria-invalid={ formFieldInvalid(jobEditErrorsFor(data, job), "external_confirmed") } aria-describedby={ formFieldDescription(jobEditErrorsFor(data, job), "external_confirmed") }/> Externer Transport bestätigt</label>@formFieldMessage(jobEditErrorsFor(data, job), "external_confirmed")
 														</div>
@@ -898,6 +967,7 @@ func jobEditValuesFor(data CustomerDetailData, job customers.Job) IntakeValues {
 		PreferenceMode: string(job.PreferenceMode),
 		PreferenceText: job.PreferenceText, Urgency: string(job.Urgency), Region: job.Region, Source: string(job.Source),
 		ExternalConfirmed: job.ExternalTransportConfirmed, PileLocationSource: string(job.PileLocationSource),
+		TransportPartnerID: job.TransportPartnerID,
 	}
 	if job.TransportTripCount == 0 {
 		values.Trips = "0"
@@ -993,7 +1063,7 @@ templ JobForm(data JobFormData) {
 				@formErrorSummary(data.Error, data.FieldErrors)
 				<form method="post" action={ "/customers/" + data.CustomerID + "/jobs" } class="intake-form customer-job-workbench" data-transport-form data-sticky-actions>
 					<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="transport_mode" value="none" data-transport-default disabled/>
-					@jobIntakeFields(data.Shell.Page, "new-customer-job", data.Values, data.FieldErrors, data.CustomerLatitude, data.CustomerLongitude, data.CustomerAddress, data.CustomerRegion)
+					@jobIntakeFields(data.Shell.Page, "new-customer-job", data.Values, data.FieldErrors, data.CustomerLatitude, data.CustomerLongitude, data.CustomerAddress, data.CustomerRegion, data.Partners)
 					<div class="form-actions workbench-form-actions"><a class="button button--quiet" href={ "/customers/" + data.CustomerID }>Abbrechen</a><button class="button" type="submit">Auf Warteliste setzen</button></div>
 				</form>
 			</main>@appFooter(data.Shell.Page)

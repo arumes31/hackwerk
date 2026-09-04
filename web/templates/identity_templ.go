@@ -132,6 +132,10 @@ func appHeader(shell ShellData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
+		templ_7745c5c3_Err = navLink(shell, "/transport-partners", "Transportpartner").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
 		if shell.Actor.Role == auth.RoleAdmin {
 			templ_7745c5c3_Err = navLink(shell, "/planning", "Planung").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
@@ -153,7 +157,7 @@ func appHeader(shell ShellData) templ.Component {
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(shell.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 67, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 68, Col: 105}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 		if templ_7745c5c3_Err != nil {
@@ -212,7 +216,7 @@ func appHeader(shell ShellData) templ.Component {
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue("Kontomenü für " + shell.Actor.DisplayName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 87, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 88, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {
@@ -225,7 +229,7 @@ func appHeader(shell ShellData) templ.Component {
 		var templ_7745c5c3_Var7 string
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(shell.Actor.DisplayName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 88, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 89, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 		if templ_7745c5c3_Err != nil {
@@ -238,7 +242,7 @@ func appHeader(shell ShellData) templ.Component {
 		var templ_7745c5c3_Var8 string
 		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(roleLabel(shell.Actor.Role))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 88, Col: 119}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 89, Col: 119}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 		if templ_7745c5c3_Err != nil {
@@ -281,7 +285,7 @@ func appHeader(shell ShellData) templ.Component {
 		var templ_7745c5c3_Var9 string
 		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(shell.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 99, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 100, Col: 105}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 		if templ_7745c5c3_Err != nil {
@@ -294,7 +298,7 @@ func appHeader(shell ShellData) templ.Component {
 		var templ_7745c5c3_Var10 string
 		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(shell.Page.AppName + " Übersicht")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 105, Col: 101}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 106, Col: 101}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 		if templ_7745c5c3_Err != nil {
@@ -323,7 +327,7 @@ func appHeader(shell ShellData) templ.Component {
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(shell.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 115, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 116, Col: 105}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 		if templ_7745c5c3_Err != nil {
@@ -354,7 +358,7 @@ func appHeader(shell ShellData) templ.Component {
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(shell.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 133, Col: 148}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 134, Col: 148}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 		if templ_7745c5c3_Err != nil {
@@ -540,6 +544,10 @@ func mobileMoreActions(shell ShellData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
+		templ_7745c5c3_Err = mobileMoreLink(shell, "/transport-partners", "Transportpartner").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
 		if shell.Actor.Role == auth.RoleDriver && shell.Actor.DriverID != "" {
 			templ_7745c5c3_Err = mobileMoreLink(shell, "/my-route", "Meine Route").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
@@ -639,7 +647,7 @@ func mobileMoreActions(shell ShellData) templ.Component {
 		var templ_7745c5c3_Var18 string
 		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(shell.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 253, Col: 100}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 255, Col: 100}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 		if templ_7745c5c3_Err != nil {
@@ -686,7 +694,7 @@ func mobileNavLink(shell ShellData, path string, label string, icon string) temp
 		var templ_7745c5c3_Var21 templ.SafeURL
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(path))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 259, Col: 28}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 261, Col: 28}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 		if templ_7745c5c3_Err != nil {
@@ -730,7 +738,7 @@ func mobileNavLink(shell ShellData, path string, label string, icon string) temp
 		var templ_7745c5c3_Var23 string
 		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 266, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 268, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 		if templ_7745c5c3_Err != nil {
@@ -777,7 +785,7 @@ func mobileMoreLink(shell ShellData, path string, label string) templ.Component 
 		var templ_7745c5c3_Var26 templ.SafeURL
 		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(path))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 271, Col: 30}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 273, Col: 30}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 		if templ_7745c5c3_Err != nil {
@@ -803,7 +811,7 @@ func mobileMoreLink(shell ShellData, path string, label string) templ.Component 
 		var templ_7745c5c3_Var28 string
 		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 271, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 273, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 		if templ_7745c5c3_Err != nil {
@@ -966,7 +974,7 @@ func navLink(shell ShellData, path string, label string) templ.Component {
 		var templ_7745c5c3_Var35 templ.SafeURL
 		templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(path))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 305, Col: 28}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 307, Col: 28}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 		if templ_7745c5c3_Err != nil {
@@ -1002,7 +1010,7 @@ func navLink(shell ShellData, path string, label string) templ.Component {
 		var templ_7745c5c3_Var37 string
 		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 310, Col: 9}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 312, Col: 9}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 		if templ_7745c5c3_Err != nil {
@@ -1100,7 +1108,7 @@ func Dashboard(data DashboardData) templ.Component {
 		var templ_7745c5c3_Var40 string
 		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue(dashboardRole(data.Shell.Actor.Role))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 331, Col: 112}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 333, Col: 112}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 		if templ_7745c5c3_Err != nil {
@@ -1113,7 +1121,7 @@ func Dashboard(data DashboardData) templ.Component {
 		var templ_7745c5c3_Var41 string
 		templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(data.Shell.Actor.DisplayName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 332, Col: 129}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 334, Col: 129}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 		if templ_7745c5c3_Err != nil {
@@ -1137,7 +1145,7 @@ func Dashboard(data DashboardData) templ.Component {
 			var templ_7745c5c3_Var42 string
 			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(data.Error)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 337, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 339, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 			if templ_7745c5c3_Err != nil {
@@ -1156,7 +1164,7 @@ func Dashboard(data DashboardData) templ.Component {
 			var templ_7745c5c3_Var43 templ.SafeURL
 			templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/dashboard?date=" + data.View.PreviousDate))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 342, Col: 104}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 344, Col: 104}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 			if templ_7745c5c3_Err != nil {
@@ -1169,7 +1177,7 @@ func Dashboard(data DashboardData) templ.Component {
 			var templ_7745c5c3_Var44 string
 			templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(data.View.DateLabel)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 343, Col: 69}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 345, Col: 69}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 			if templ_7745c5c3_Err != nil {
@@ -1182,7 +1190,7 @@ func Dashboard(data DashboardData) templ.Component {
 			var templ_7745c5c3_Var45 string
 			templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(data.View.UpdatedLabel)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 343, Col: 123}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 345, Col: 123}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 			if templ_7745c5c3_Err != nil {
@@ -1195,7 +1203,7 @@ func Dashboard(data DashboardData) templ.Component {
 			var templ_7745c5c3_Var46 templ.SafeURL
 			templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/dashboard?date=" + data.View.NextDate))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 345, Col: 100}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 347, Col: 100}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 			if templ_7745c5c3_Err != nil {
@@ -1235,7 +1243,7 @@ func Dashboard(data DashboardData) templ.Component {
 				var templ_7745c5c3_Var49 templ.SafeURL
 				templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/dashboard?date=" + data.View.Date))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 351, Col: 66}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 353, Col: 66}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 				if templ_7745c5c3_Err != nil {
@@ -1280,7 +1288,7 @@ func Dashboard(data DashboardData) templ.Component {
 				var templ_7745c5c3_Var52 templ.SafeURL
 				templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/dashboard?date=" + data.View.Date + "&mode=exceptions"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 358, Col: 87}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 360, Col: 87}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
 				if templ_7745c5c3_Err != nil {
@@ -1413,7 +1421,7 @@ func Dashboard(data DashboardData) templ.Component {
 					var templ_7745c5c3_Var53 string
 					templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(data.View.Counts.Attention))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 388, Col: 77}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 390, Col: 77}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
 					if templ_7745c5c3_Err != nil {
@@ -1432,7 +1440,7 @@ func Dashboard(data DashboardData) templ.Component {
 					var templ_7745c5c3_Var54 string
 					templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(data.View.Counts.OverdueConfirmations))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 391, Col: 88}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 393, Col: 88}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
 					if templ_7745c5c3_Err != nil {
@@ -1451,7 +1459,7 @@ func Dashboard(data DashboardData) templ.Component {
 					var templ_7745c5c3_Var55 string
 					templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(data.View.Counts.DeclinedConfirmations))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 394, Col: 89}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 396, Col: 89}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var55))
 					if templ_7745c5c3_Err != nil {
@@ -1470,7 +1478,7 @@ func Dashboard(data DashboardData) templ.Component {
 					var templ_7745c5c3_Var56 string
 					templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(data.View.Counts.CallbackRequests))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 397, Col: 95}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 399, Col: 95}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
 					if templ_7745c5c3_Err != nil {
@@ -1489,7 +1497,7 @@ func Dashboard(data DashboardData) templ.Component {
 					var templ_7745c5c3_Var57 string
 					templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(data.View.Counts.NotificationIssues))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 400, Col: 111}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 402, Col: 111}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
 					if templ_7745c5c3_Err != nil {
@@ -1508,7 +1516,7 @@ func Dashboard(data DashboardData) templ.Component {
 					var templ_7745c5c3_Var58 string
 					templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(data.View.Counts.Overrides))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 403, Col: 77}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 405, Col: 77}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
 					if templ_7745c5c3_Err != nil {
@@ -1527,7 +1535,7 @@ func Dashboard(data DashboardData) templ.Component {
 					var templ_7745c5c3_Var59 string
 					templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(len(data.View.UrgentJobs)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 406, Col: 91}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 408, Col: 91}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
 					if templ_7745c5c3_Err != nil {
@@ -1577,7 +1585,7 @@ func Dashboard(data DashboardData) templ.Component {
 						var templ_7745c5c3_Var62 string
 						templ_7745c5c3_Var62, templ_7745c5c3_Err = templ.JoinStringErrs(notificationStateLabel(issue.State))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 413, Col: 138}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 415, Col: 138}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var62))
 						if templ_7745c5c3_Err != nil {
@@ -1590,7 +1598,7 @@ func Dashboard(data DashboardData) templ.Component {
 						var templ_7745c5c3_Var63 string
 						templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.JoinStringErrs(notificationChannelLabel(issue.Channel))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 414, Col: 58}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 416, Col: 58}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var63))
 						if templ_7745c5c3_Err != nil {
@@ -1603,7 +1611,7 @@ func Dashboard(data DashboardData) templ.Component {
 						var templ_7745c5c3_Var64 string
 						templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.JoinStringErrs(issue.Recipient)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 414, Col: 81}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 416, Col: 81}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var64))
 						if templ_7745c5c3_Err != nil {
@@ -1616,7 +1624,7 @@ func Dashboard(data DashboardData) templ.Component {
 						var templ_7745c5c3_Var65 templ.SafeURL
 						templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/admin/notifications/" + issue.ID + "/retry"))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 415, Col: 100}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 417, Col: 100}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var65))
 						if templ_7745c5c3_Err != nil {
@@ -1629,7 +1637,7 @@ func Dashboard(data DashboardData) templ.Component {
 						var templ_7745c5c3_Var66 string
 						templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 415, Col: 170}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 417, Col: 170}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var66)
 						if templ_7745c5c3_Err != nil {
@@ -1667,7 +1675,7 @@ func Dashboard(data DashboardData) templ.Component {
 					var templ_7745c5c3_Var67 templ.SafeURL
 					templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.JoinURLErrs("/calendar/appointments/" + item.ID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 427, Col: 54}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 429, Col: 54}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var67))
 					if templ_7745c5c3_Err != nil {
@@ -1680,7 +1688,7 @@ func Dashboard(data DashboardData) templ.Component {
 					var templ_7745c5c3_Var68 string
 					templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.JoinStringErrs(item.JobNumber)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 427, Col: 81}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 429, Col: 81}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var68))
 					if templ_7745c5c3_Err != nil {
@@ -1693,7 +1701,7 @@ func Dashboard(data DashboardData) templ.Component {
 					var templ_7745c5c3_Var69 string
 					templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.JoinStringErrs(item.CustomerName)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 427, Col: 115}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 429, Col: 115}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var69))
 					if templ_7745c5c3_Err != nil {
@@ -1706,7 +1714,7 @@ func Dashboard(data DashboardData) templ.Component {
 					var templ_7745c5c3_Var70 string
 					templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardTime(item.StartsAt))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 427, Col: 151}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 429, Col: 151}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var70))
 					if templ_7745c5c3_Err != nil {
@@ -1740,7 +1748,7 @@ func Dashboard(data DashboardData) templ.Component {
 				var templ_7745c5c3_Var71 string
 				templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.ResolveAttributeValue(group.ResourceName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 439, Col: 81}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 441, Col: 81}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var71)
 				if templ_7745c5c3_Err != nil {
@@ -1753,7 +1761,7 @@ func Dashboard(data DashboardData) templ.Component {
 				var templ_7745c5c3_Var72 string
 				templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.JoinStringErrs(group.ResourceName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 440, Col: 33}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 442, Col: 33}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var72))
 				if templ_7745c5c3_Err != nil {
@@ -1791,7 +1799,7 @@ func Dashboard(data DashboardData) templ.Component {
 			var templ_7745c5c3_Var73 string
 			templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.JoinStringErrs(availabilityTitle(data.View.Admin))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 452, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 454, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var73))
 			if templ_7745c5c3_Err != nil {
@@ -1926,7 +1934,7 @@ func metricCard(label string, value int64, href string) templ.Component {
 		var templ_7745c5c3_Var75 templ.SafeURL
 		templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(href))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 493, Col: 50}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 495, Col: 50}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var75))
 		if templ_7745c5c3_Err != nil {
@@ -1939,7 +1947,7 @@ func metricCard(label string, value int64, href string) templ.Component {
 		var templ_7745c5c3_Var76 string
 		templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%s: %d", label, value))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 493, Col: 101}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 495, Col: 101}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var76)
 		if templ_7745c5c3_Err != nil {
@@ -1952,7 +1960,7 @@ func metricCard(label string, value int64, href string) templ.Component {
 		var templ_7745c5c3_Var77 string
 		templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(value))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 493, Col: 131}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 495, Col: 131}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var77))
 		if templ_7745c5c3_Err != nil {
@@ -1965,7 +1973,7 @@ func metricCard(label string, value int64, href string) templ.Component {
 		var templ_7745c5c3_Var78 string
 		templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 493, Col: 156}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 495, Col: 156}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var78))
 		if templ_7745c5c3_Err != nil {
@@ -2007,7 +2015,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var80 string
 		templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.ResolveAttributeValue(item.StartsAt.Format(time.RFC3339))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 498, Col: 81}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 500, Col: 81}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var80)
 		if templ_7745c5c3_Err != nil {
@@ -2020,7 +2028,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var81 string
 		templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.ResolveAttributeValue(item.StartsAt.Format(time.RFC3339))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 498, Col: 141}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 500, Col: 141}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var81)
 		if templ_7745c5c3_Err != nil {
@@ -2033,7 +2041,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var82 string
 		templ_7745c5c3_Var82, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardTime(item.StartsAt))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 498, Col: 174}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 500, Col: 174}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var82))
 		if templ_7745c5c3_Err != nil {
@@ -2046,7 +2054,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var83 string
 		templ_7745c5c3_Var83, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardTime(item.EndsAt))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 498, Col: 218}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 500, Col: 218}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var83))
 		if templ_7745c5c3_Err != nil {
@@ -2081,7 +2089,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var86 string
 		templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.JoinStringErrs(appointmentIcon(item.Confirmation))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 500, Col: 160}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 502, Col: 160}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var86))
 		if templ_7745c5c3_Err != nil {
@@ -2094,7 +2102,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var87 string
 		templ_7745c5c3_Var87, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardStatus(item.Lifecycle, item.Confirmation))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 500, Col: 221}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 502, Col: 221}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var87))
 		if templ_7745c5c3_Err != nil {
@@ -2107,7 +2115,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var88 templ.SafeURL
 		templ_7745c5c3_Var88, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/customers/" + item.CustomerID + "#job-" + item.JobID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 501, Col: 86}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 503, Col: 86}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var88))
 		if templ_7745c5c3_Err != nil {
@@ -2120,7 +2128,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var89 string
 		templ_7745c5c3_Var89, templ_7745c5c3_Err = templ.JoinStringErrs(item.CustomerName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 501, Col: 108}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 503, Col: 108}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var89))
 		if templ_7745c5c3_Err != nil {
@@ -2133,7 +2141,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var90 string
 		templ_7745c5c3_Var90, templ_7745c5c3_Err = templ.JoinStringErrs(item.VolumeM3)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 502, Col: 29}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 504, Col: 29}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var90))
 		if templ_7745c5c3_Err != nil {
@@ -2146,7 +2154,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var91 string
 		templ_7745c5c3_Var91, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardJobType(item.JobType))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 502, Col: 80}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 504, Col: 80}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var91))
 		if templ_7745c5c3_Err != nil {
@@ -2159,7 +2167,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var92 string
 		templ_7745c5c3_Var92, templ_7745c5c3_Err = templ.JoinStringErrs(item.Locality)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 502, Col: 101}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 504, Col: 101}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var92))
 		if templ_7745c5c3_Err != nil {
@@ -2172,7 +2180,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var93 string
 		templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.JoinStringErrs(item.Drivers)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 503, Col: 20}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 505, Col: 20}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var93))
 		if templ_7745c5c3_Err != nil {
@@ -2185,7 +2193,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var94 string
 		templ_7745c5c3_Var94, templ_7745c5c3_Err = templ.JoinStringErrs(item.Resources)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 503, Col: 91}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 505, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var94))
 		if templ_7745c5c3_Err != nil {
@@ -2203,7 +2211,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 			var templ_7745c5c3_Var95 string
 			templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.JoinStringErrs(item.LatestNote)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 505, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 507, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var95))
 			if templ_7745c5c3_Err != nil {
@@ -2227,7 +2235,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var96 templ.SafeURL
 		templ_7745c5c3_Var96, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(item.MapsURL))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 510, Col: 86}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 512, Col: 86}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var96))
 		if templ_7745c5c3_Err != nil {
@@ -2240,7 +2248,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var97 templ.SafeURL
 		templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/customers/" + item.CustomerID + "#job-" + item.JobID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 510, Col: 261}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 512, Col: 261}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var97))
 		if templ_7745c5c3_Err != nil {
@@ -2253,7 +2261,7 @@ func dashboardAppointment(item dashboard.Appointment) templ.Component {
 		var templ_7745c5c3_Var98 templ.SafeURL
 		templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/customers/" + item.CustomerID + "#notes-" + item.JobID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 510, Col: 394}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 512, Col: 394}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var98))
 		if templ_7745c5c3_Err != nil {
@@ -2295,7 +2303,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 		var templ_7745c5c3_Var100 string
 		templ_7745c5c3_Var100, templ_7745c5c3_Err = templ.JoinStringErrs(dateLabel)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 521, Col: 18}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 523, Col: 18}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var100))
 		if templ_7745c5c3_Err != nil {
@@ -2313,7 +2321,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 			var templ_7745c5c3_Var101 templ.SafeURL
 			templ_7745c5c3_Var101, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/my-route?date=" + url.QueryEscape(selectedDate)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 524, Col: 126}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 526, Col: 126}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var101))
 			if templ_7745c5c3_Err != nil {
@@ -2346,7 +2354,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var102 string
 				templ_7745c5c3_Var102, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d. Einsatz: %s um %s Uhr", index+1, item.CustomerName, dashboardTime(item.StartsAt)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 533, Col: 159}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 535, Col: 159}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var102)
 				if templ_7745c5c3_Err != nil {
@@ -2359,7 +2367,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var103 string
 				templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(index + 1))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 535, Col: 82}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 537, Col: 82}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var103))
 				if templ_7745c5c3_Err != nil {
@@ -2372,7 +2380,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var104 string
 				templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.ResolveAttributeValue(item.StartsAt.Format(time.RFC3339))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 536, Col: 59}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 538, Col: 59}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var104)
 				if templ_7745c5c3_Err != nil {
@@ -2385,7 +2393,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var105 string
 				templ_7745c5c3_Var105, templ_7745c5c3_Err = templ.ResolveAttributeValue(item.StartsAt.Format(time.RFC3339))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 536, Col: 119}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 538, Col: 119}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var105)
 				if templ_7745c5c3_Err != nil {
@@ -2398,7 +2406,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var106 string
 				templ_7745c5c3_Var106, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardTime(item.StartsAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 536, Col: 152}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 538, Col: 152}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var106))
 				if templ_7745c5c3_Err != nil {
@@ -2411,7 +2419,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var107 string
 				templ_7745c5c3_Var107, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardTime(item.EndsAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 537, Col: 47}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 539, Col: 47}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var107))
 				if templ_7745c5c3_Err != nil {
@@ -2446,7 +2454,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var110 string
 				templ_7745c5c3_Var110, templ_7745c5c3_Err = templ.JoinStringErrs(appointmentIcon(item.Confirmation))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 540, Col: 165}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 542, Col: 165}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var110))
 				if templ_7745c5c3_Err != nil {
@@ -2459,7 +2467,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var111 string
 				templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardStatus(item.Lifecycle, item.Confirmation))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 540, Col: 226}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 542, Col: 226}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var111))
 				if templ_7745c5c3_Err != nil {
@@ -2472,7 +2480,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var112 string
 				templ_7745c5c3_Var112, templ_7745c5c3_Err = templ.JoinStringErrs(item.CustomerName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 541, Col: 31}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 543, Col: 31}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var112))
 				if templ_7745c5c3_Err != nil {
@@ -2485,7 +2493,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var113 string
 				templ_7745c5c3_Var113, templ_7745c5c3_Err = templ.JoinStringErrs(item.VolumeM3)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 542, Col: 34}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 544, Col: 34}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var113))
 				if templ_7745c5c3_Err != nil {
@@ -2498,7 +2506,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var114 string
 				templ_7745c5c3_Var114, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardJobType(item.JobType))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 542, Col: 85}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 544, Col: 85}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var114))
 				if templ_7745c5c3_Err != nil {
@@ -2511,7 +2519,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var115 string
 				templ_7745c5c3_Var115, templ_7745c5c3_Err = templ.JoinStringErrs(item.Locality)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 542, Col: 106}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 544, Col: 106}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var115))
 				if templ_7745c5c3_Err != nil {
@@ -2524,7 +2532,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var116 string
 				templ_7745c5c3_Var116, templ_7745c5c3_Err = templ.JoinStringErrs(item.Drivers)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 543, Col: 82}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 545, Col: 82}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var116))
 				if templ_7745c5c3_Err != nil {
@@ -2537,7 +2545,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var117 string
 				templ_7745c5c3_Var117, templ_7745c5c3_Err = templ.JoinStringErrs(item.Resources)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 543, Col: 141}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 545, Col: 141}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var117))
 				if templ_7745c5c3_Err != nil {
@@ -2555,7 +2563,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 					var templ_7745c5c3_Var118 string
 					templ_7745c5c3_Var118, templ_7745c5c3_Err = templ.JoinStringErrs(item.LatestNote)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 545, Col: 61}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 547, Col: 61}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var118))
 					if templ_7745c5c3_Err != nil {
@@ -2573,7 +2581,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var119 templ.SafeURL
 				templ_7745c5c3_Var119, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(item.MapsURL))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 548, Col: 83}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 550, Col: 83}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var119))
 				if templ_7745c5c3_Err != nil {
@@ -2586,7 +2594,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var120 templ.SafeURL
 				templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/customers/" + item.CustomerID + "#job-" + item.JobID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 549, Col: 117}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 551, Col: 117}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var120))
 				if templ_7745c5c3_Err != nil {
@@ -2599,7 +2607,7 @@ func driverTour(items []dashboard.Appointment, selectedDate string, dateLabel st
 				var templ_7745c5c3_Var121 templ.SafeURL
 				templ_7745c5c3_Var121, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/customers/" + item.CustomerID + "#notes-" + item.JobID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 550, Col: 119}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 552, Col: 119}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var121))
 				if templ_7745c5c3_Err != nil {
@@ -2651,7 +2659,7 @@ func adminTour(view dashboard.View) templ.Component {
 		var templ_7745c5c3_Var123 templ.SafeURL
 		templ_7745c5c3_Var123, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/dashboard?date=" + view.PreviousDate))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 571, Col: 95}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 573, Col: 95}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var123))
 		if templ_7745c5c3_Err != nil {
@@ -2664,7 +2672,7 @@ func adminTour(view dashboard.View) templ.Component {
 		var templ_7745c5c3_Var124 string
 		templ_7745c5c3_Var124, templ_7745c5c3_Err = templ.JoinStringErrs(view.DateLabel)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 572, Col: 64}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 574, Col: 64}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var124))
 		if templ_7745c5c3_Err != nil {
@@ -2677,7 +2685,7 @@ func adminTour(view dashboard.View) templ.Component {
 		var templ_7745c5c3_Var125 string
 		templ_7745c5c3_Var125, templ_7745c5c3_Err = templ.JoinStringErrs(view.UpdatedLabel)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 572, Col: 114}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 574, Col: 114}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var125))
 		if templ_7745c5c3_Err != nil {
@@ -2690,7 +2698,7 @@ func adminTour(view dashboard.View) templ.Component {
 		var templ_7745c5c3_Var126 templ.SafeURL
 		templ_7745c5c3_Var126, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/dashboard?date=" + view.NextDate))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 573, Col: 91}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 575, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var126))
 		if templ_7745c5c3_Err != nil {
@@ -2725,7 +2733,7 @@ func adminTour(view dashboard.View) templ.Component {
 		var templ_7745c5c3_Var129 templ.SafeURL
 		templ_7745c5c3_Var129, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/dashboard?date=" + view.Date))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 580, Col: 57}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 582, Col: 57}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var129))
 		if templ_7745c5c3_Err != nil {
@@ -2770,7 +2778,7 @@ func adminTour(view dashboard.View) templ.Component {
 		var templ_7745c5c3_Var132 templ.SafeURL
 		templ_7745c5c3_Var132, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/dashboard?date=" + view.Date + "&mode=exceptions"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 587, Col: 78}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 589, Col: 78}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var132))
 		if templ_7745c5c3_Err != nil {
@@ -2793,7 +2801,7 @@ func adminTour(view dashboard.View) templ.Component {
 		var templ_7745c5c3_Var133 templ.SafeURL
 		templ_7745c5c3_Var133, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/calendar?date=" + url.QueryEscape(view.Date)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 594, Col: 125}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 596, Col: 125}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var133))
 		if templ_7745c5c3_Err != nil {
@@ -2821,7 +2829,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var134 string
 				templ_7745c5c3_Var134, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d. Termin: %s um %s Uhr", index+1, item.CustomerName, dashboardTime(item.StartsAt)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 604, Col: 157}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 606, Col: 157}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var134)
 				if templ_7745c5c3_Err != nil {
@@ -2834,7 +2842,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var135 string
 				templ_7745c5c3_Var135, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(index + 1))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 606, Col: 81}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 608, Col: 81}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var135))
 				if templ_7745c5c3_Err != nil {
@@ -2847,7 +2855,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var136 string
 				templ_7745c5c3_Var136, templ_7745c5c3_Err = templ.ResolveAttributeValue(item.StartsAt.Format(time.RFC3339))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 607, Col: 59}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 609, Col: 59}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var136)
 				if templ_7745c5c3_Err != nil {
@@ -2860,7 +2868,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var137 string
 				templ_7745c5c3_Var137, templ_7745c5c3_Err = templ.ResolveAttributeValue(item.StartsAt.Format(time.RFC3339))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 607, Col: 119}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 609, Col: 119}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var137)
 				if templ_7745c5c3_Err != nil {
@@ -2873,7 +2881,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var138 string
 				templ_7745c5c3_Var138, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardTime(item.StartsAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 607, Col: 152}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 609, Col: 152}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var138))
 				if templ_7745c5c3_Err != nil {
@@ -2886,7 +2894,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var139 string
 				templ_7745c5c3_Var139, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardTime(item.EndsAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 608, Col: 47}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 610, Col: 47}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var139))
 				if templ_7745c5c3_Err != nil {
@@ -2921,7 +2929,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var142 string
 				templ_7745c5c3_Var142, templ_7745c5c3_Err = templ.JoinStringErrs(appointmentIcon(item.Confirmation))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 612, Col: 143}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 614, Col: 143}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var142))
 				if templ_7745c5c3_Err != nil {
@@ -2934,7 +2942,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var143 string
 				templ_7745c5c3_Var143, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardStatus(item.Lifecycle, item.Confirmation))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 612, Col: 204}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 614, Col: 204}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var143))
 				if templ_7745c5c3_Err != nil {
@@ -2952,7 +2960,7 @@ func adminTour(view dashboard.View) templ.Component {
 					var templ_7745c5c3_Var144 string
 					templ_7745c5c3_Var144, templ_7745c5c3_Err = templ.JoinStringErrs(item.JobNumber)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 614, Col: 71}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 616, Col: 71}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var144))
 					if templ_7745c5c3_Err != nil {
@@ -2970,7 +2978,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var145 string
 				templ_7745c5c3_Var145, templ_7745c5c3_Err = templ.JoinStringErrs(item.CustomerName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 617, Col: 31}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 619, Col: 31}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var145))
 				if templ_7745c5c3_Err != nil {
@@ -2983,7 +2991,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var146 string
 				templ_7745c5c3_Var146, templ_7745c5c3_Err = templ.JoinStringErrs(item.VolumeM3)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 618, Col: 34}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 620, Col: 34}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var146))
 				if templ_7745c5c3_Err != nil {
@@ -2996,7 +3004,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var147 string
 				templ_7745c5c3_Var147, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardJobType(item.JobType))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 618, Col: 85}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 620, Col: 85}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var147))
 				if templ_7745c5c3_Err != nil {
@@ -3009,7 +3017,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var148 string
 				templ_7745c5c3_Var148, templ_7745c5c3_Err = templ.JoinStringErrs(item.Locality)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 618, Col: 106}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 620, Col: 106}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var148))
 				if templ_7745c5c3_Err != nil {
@@ -3022,7 +3030,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var149 string
 				templ_7745c5c3_Var149, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardAssignment(item.Drivers))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 619, Col: 108}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 621, Col: 108}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var149))
 				if templ_7745c5c3_Err != nil {
@@ -3035,7 +3043,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var150 string
 				templ_7745c5c3_Var150, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardAssignment(item.Resources))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 619, Col: 189}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 621, Col: 189}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var150))
 				if templ_7745c5c3_Err != nil {
@@ -3065,7 +3073,7 @@ func adminTour(view dashboard.View) templ.Component {
 					var templ_7745c5c3_Var151 string
 					templ_7745c5c3_Var151, templ_7745c5c3_Err = templ.JoinStringErrs(item.LatestNote)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 627, Col: 61}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 629, Col: 61}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var151))
 					if templ_7745c5c3_Err != nil {
@@ -3083,7 +3091,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var152 templ.SafeURL
 				templ_7745c5c3_Var152, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/calendar/appointments/" + item.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 630, Col: 113}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 632, Col: 113}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var152))
 				if templ_7745c5c3_Err != nil {
@@ -3096,7 +3104,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var153 templ.SafeURL
 				templ_7745c5c3_Var153, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/customers/" + item.CustomerID + "#job-" + item.JobID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 631, Col: 117}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 633, Col: 117}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var153))
 				if templ_7745c5c3_Err != nil {
@@ -3109,7 +3117,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var154 templ.SafeURL
 				templ_7745c5c3_Var154, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(item.MapsURL))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 632, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 634, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var154))
 				if templ_7745c5c3_Err != nil {
@@ -3122,7 +3130,7 @@ func adminTour(view dashboard.View) templ.Component {
 				var templ_7745c5c3_Var155 templ.SafeURL
 				templ_7745c5c3_Var155, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/customers/" + item.CustomerID + "#notes-" + item.JobID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 633, Col: 136}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 635, Col: 136}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var155))
 				if templ_7745c5c3_Err != nil {
@@ -3196,7 +3204,7 @@ func availabilityRow(item dashboard.DriverAvailability) templ.Component {
 		var templ_7745c5c3_Var159 string
 		templ_7745c5c3_Var159, templ_7745c5c3_Err = templ.JoinStringErrs(item.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 648, Col: 22}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 650, Col: 22}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var159))
 		if templ_7745c5c3_Err != nil {
@@ -3209,7 +3217,7 @@ func availabilityRow(item dashboard.DriverAvailability) templ.Component {
 		var templ_7745c5c3_Var160 string
 		templ_7745c5c3_Var160, templ_7745c5c3_Err = templ.JoinStringErrs(item.State)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 648, Col: 52}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 650, Col: 52}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var160))
 		if templ_7745c5c3_Err != nil {
@@ -3222,7 +3230,7 @@ func availabilityRow(item dashboard.DriverAvailability) templ.Component {
 		var templ_7745c5c3_Var161 string
 		templ_7745c5c3_Var161, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(item.BookedMinutes))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 648, Col: 90}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 650, Col: 90}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var161))
 		if templ_7745c5c3_Err != nil {
@@ -3240,7 +3248,7 @@ func availabilityRow(item dashboard.DriverAvailability) templ.Component {
 			var templ_7745c5c3_Var162 string
 			templ_7745c5c3_Var162, templ_7745c5c3_Err = templ.JoinStringErrs(item.Windows)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 650, Col: 37}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 652, Col: 37}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var162))
 			if templ_7745c5c3_Err != nil {
@@ -3259,7 +3267,7 @@ func availabilityRow(item dashboard.DriverAvailability) templ.Component {
 			var templ_7745c5c3_Var163 string
 			templ_7745c5c3_Var163, templ_7745c5c3_Err = templ.JoinStringErrs(item.ExceptionReasons)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 653, Col: 46}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 655, Col: 46}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var163))
 			if templ_7745c5c3_Err != nil {
@@ -3323,7 +3331,7 @@ func capacityPanel(values []dashboard.Capacity) templ.Component {
 			var templ_7745c5c3_Var165 string
 			templ_7745c5c3_Var165, templ_7745c5c3_Err = templ.JoinStringErrs(capacity.ResourceName)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 670, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 672, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var165))
 			if templ_7745c5c3_Err != nil {
@@ -3336,7 +3344,7 @@ func capacityPanel(values []dashboard.Capacity) templ.Component {
 			var templ_7745c5c3_Var166 string
 			templ_7745c5c3_Var166, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(capacity.TotalMinutes))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 671, Col: 53}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 673, Col: 53}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var166)
 			if templ_7745c5c3_Err != nil {
@@ -3349,7 +3357,7 @@ func capacityPanel(values []dashboard.Capacity) templ.Component {
 			var templ_7745c5c3_Var167 string
 			templ_7745c5c3_Var167, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(capacity.FreeMinutes))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 671, Col: 96}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 673, Col: 96}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var167)
 			if templ_7745c5c3_Err != nil {
@@ -3362,7 +3370,7 @@ func capacityPanel(values []dashboard.Capacity) templ.Component {
 			var templ_7745c5c3_Var168 string
 			templ_7745c5c3_Var168, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%s: %d von %d Minuten frei", capacity.ResourceName, capacity.FreeMinutes, capacity.TotalMinutes))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 671, Col: 221}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 673, Col: 221}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var168)
 			if templ_7745c5c3_Err != nil {
@@ -3375,7 +3383,7 @@ func capacityPanel(values []dashboard.Capacity) templ.Component {
 			var templ_7745c5c3_Var169 string
 			templ_7745c5c3_Var169, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(capacity.FreeMinutes))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 671, Col: 276}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 673, Col: 276}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var169))
 			if templ_7745c5c3_Err != nil {
@@ -3388,7 +3396,7 @@ func capacityPanel(values []dashboard.Capacity) templ.Component {
 			var templ_7745c5c3_Var170 string
 			templ_7745c5c3_Var170, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(capacity.TotalMinutes))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 671, Col: 318}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 673, Col: 318}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var170))
 			if templ_7745c5c3_Err != nil {
@@ -3412,7 +3420,7 @@ func capacityPanel(values []dashboard.Capacity) templ.Component {
 				var templ_7745c5c3_Var171 string
 				templ_7745c5c3_Var171, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardTime(slot.StartsAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 677, Col: 36}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 679, Col: 36}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var171))
 				if templ_7745c5c3_Err != nil {
@@ -3425,7 +3433,7 @@ func capacityPanel(values []dashboard.Capacity) templ.Component {
 				var templ_7745c5c3_Var172 string
 				templ_7745c5c3_Var172, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardTime(slot.EndsAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 677, Col: 69}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 679, Col: 69}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var172))
 				if templ_7745c5c3_Err != nil {
@@ -3498,7 +3506,7 @@ func unplannedPanel(values []dashboard.UrgentJob) templ.Component {
 			var templ_7745c5c3_Var174 templ.SafeURL
 			templ_7745c5c3_Var174, templ_7745c5c3_Err = templ.JoinURLErrs("/calendar/plan?job_id=" + item.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 696, Col: 66}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 698, Col: 66}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var174))
 			if templ_7745c5c3_Err != nil {
@@ -3511,7 +3519,7 @@ func unplannedPanel(values []dashboard.UrgentJob) templ.Component {
 			var templ_7745c5c3_Var175 string
 			templ_7745c5c3_Var175, templ_7745c5c3_Err = templ.JoinStringErrs(item.CustomerName)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 696, Col: 96}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 698, Col: 96}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var175))
 			if templ_7745c5c3_Err != nil {
@@ -3524,7 +3532,7 @@ func unplannedPanel(values []dashboard.UrgentJob) templ.Component {
 			var templ_7745c5c3_Var176 string
 			templ_7745c5c3_Var176, templ_7745c5c3_Err = templ.JoinStringErrs(item.VolumeM3)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 696, Col: 117}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 698, Col: 117}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var176))
 			if templ_7745c5c3_Err != nil {
@@ -3537,7 +3545,7 @@ func unplannedPanel(values []dashboard.UrgentJob) templ.Component {
 			var templ_7745c5c3_Var177 string
 			templ_7745c5c3_Var177, templ_7745c5c3_Err = templ.JoinStringErrs(item.Number)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 696, Col: 152}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 698, Col: 152}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var177))
 			if templ_7745c5c3_Err != nil {
@@ -3550,7 +3558,7 @@ func unplannedPanel(values []dashboard.UrgentJob) templ.Component {
 			var templ_7745c5c3_Var178 string
 			templ_7745c5c3_Var178, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardUrgencyLabel(item.Urgency))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 696, Col: 195}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 698, Col: 195}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var178))
 			if templ_7745c5c3_Err != nil {
@@ -3602,7 +3610,7 @@ func capacityForecast(days []dashboard.DailyCapacity) templ.Component {
 			var templ_7745c5c3_Var180 templ.SafeURL
 			templ_7745c5c3_Var180, templ_7745c5c3_Err = templ.JoinURLErrs("/calendar?date=" + day.Date)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 706, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 708, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var180))
 			if templ_7745c5c3_Err != nil {
@@ -3615,7 +3623,7 @@ func capacityForecast(days []dashboard.DailyCapacity) templ.Component {
 			var templ_7745c5c3_Var181 string
 			templ_7745c5c3_Var181, templ_7745c5c3_Err = templ.JoinStringErrs(day.DateLabel)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 707, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 709, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var181))
 			if templ_7745c5c3_Err != nil {
@@ -3633,7 +3641,7 @@ func capacityForecast(days []dashboard.DailyCapacity) templ.Component {
 				var templ_7745c5c3_Var182 string
 				templ_7745c5c3_Var182, templ_7745c5c3_Err = templ.JoinStringErrs(capacity.ResourceName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 709, Col: 35}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 711, Col: 35}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var182))
 				if templ_7745c5c3_Err != nil {
@@ -3646,7 +3654,7 @@ func capacityForecast(days []dashboard.DailyCapacity) templ.Component {
 				var templ_7745c5c3_Var183 string
 				templ_7745c5c3_Var183, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(capacity.FreeMinutes))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 709, Col: 73}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 711, Col: 73}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var183))
 				if templ_7745c5c3_Err != nil {
@@ -3709,7 +3717,7 @@ func urgentPanel(values []dashboard.UrgentJob) templ.Component {
 			var templ_7745c5c3_Var185 templ.SafeURL
 			templ_7745c5c3_Var185, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/customers/" + item.CustomerID + "#job-" + item.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 724, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 726, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var185))
 			if templ_7745c5c3_Err != nil {
@@ -3722,7 +3730,7 @@ func urgentPanel(values []dashboard.UrgentJob) templ.Component {
 			var templ_7745c5c3_Var186 string
 			templ_7745c5c3_Var186, templ_7745c5c3_Err = templ.JoinStringErrs(item.CustomerName)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 724, Col: 128}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 726, Col: 128}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var186))
 			if templ_7745c5c3_Err != nil {
@@ -3735,7 +3743,7 @@ func urgentPanel(values []dashboard.UrgentJob) templ.Component {
 			var templ_7745c5c3_Var187 string
 			templ_7745c5c3_Var187, templ_7745c5c3_Err = templ.JoinStringErrs(item.VolumeM3)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 724, Col: 149}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 726, Col: 149}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var187))
 			if templ_7745c5c3_Err != nil {
@@ -3748,7 +3756,7 @@ func urgentPanel(values []dashboard.UrgentJob) templ.Component {
 			var templ_7745c5c3_Var188 string
 			templ_7745c5c3_Var188, templ_7745c5c3_Err = templ.JoinStringErrs(item.Number)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 724, Col: 184}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 726, Col: 184}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var188))
 			if templ_7745c5c3_Err != nil {
@@ -3761,7 +3769,7 @@ func urgentPanel(values []dashboard.UrgentJob) templ.Component {
 			var templ_7745c5c3_Var189 string
 			templ_7745c5c3_Var189, templ_7745c5c3_Err = templ.JoinStringErrs(dashboardUrgencyLabel(item.Urgency))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 724, Col: 227}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 726, Col: 227}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var189))
 			if templ_7745c5c3_Err != nil {
@@ -3774,7 +3782,7 @@ func urgentPanel(values []dashboard.UrgentJob) templ.Component {
 			var templ_7745c5c3_Var190 string
 			templ_7745c5c3_Var190, templ_7745c5c3_Err = templ.JoinStringErrs(item.Locality)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 724, Col: 248}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 726, Col: 248}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var190))
 			if templ_7745c5c3_Err != nil {
@@ -3837,7 +3845,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var192 string
 		templ_7745c5c3_Var192, templ_7745c5c3_Err = templ.JoinStringErrs(data.Profile.DisplayName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 737, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 739, Col: 74}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var192))
 		if templ_7745c5c3_Err != nil {
@@ -3872,7 +3880,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var195 string
 		templ_7745c5c3_Var195, templ_7745c5c3_Err = templ.JoinStringErrs(activeLabel(data.Profile.Active))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 738, Col: 126}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 740, Col: 126}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var195))
 		if templ_7745c5c3_Err != nil {
@@ -3885,7 +3893,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var196 string
 		templ_7745c5c3_Var196, templ_7745c5c3_Err = templ.JoinStringErrs(roleLabel(data.Profile.Role))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 738, Col: 190}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 740, Col: 190}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var196))
 		if templ_7745c5c3_Err != nil {
@@ -3903,7 +3911,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var197 string
 			templ_7745c5c3_Var197, templ_7745c5c3_Err = templ.JoinStringErrs(data.Error)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 744, Col: 87}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 746, Col: 87}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var197))
 			if templ_7745c5c3_Err != nil {
@@ -3922,7 +3930,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var198 string
 			templ_7745c5c3_Var198, templ_7745c5c3_Err = templ.JoinStringErrs(data.Notice)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 747, Col: 107}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 749, Col: 107}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var198))
 			if templ_7745c5c3_Err != nil {
@@ -3940,7 +3948,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var199 string
 		templ_7745c5c3_Var199, templ_7745c5c3_Err = templ.JoinStringErrs(data.Profile.Username)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 752, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 754, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var199))
 		if templ_7745c5c3_Err != nil {
@@ -3953,7 +3961,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var200 string
 		templ_7745c5c3_Var200, templ_7745c5c3_Err = templ.JoinStringErrs(driverLabel(data.Profile.DriverID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 752, Col: 163}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 754, Col: 163}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var200))
 		if templ_7745c5c3_Err != nil {
@@ -3966,7 +3974,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var201 string
 		templ_7745c5c3_Var201, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 754, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 756, Col: 74}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var201)
 		if templ_7745c5c3_Err != nil {
@@ -3979,7 +3987,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var202 string
 		templ_7745c5c3_Var202, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(data.Profile.Version))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 754, Col: 154}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 756, Col: 154}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var202)
 		if templ_7745c5c3_Err != nil {
@@ -4032,7 +4040,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var203 string
 		templ_7745c5c3_Var203, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Profile.DisplayName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 756, Col: 137}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 758, Col: 137}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var203)
 		if templ_7745c5c3_Err != nil {
@@ -4045,7 +4053,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var204 string
 		templ_7745c5c3_Var204, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Profile.WorkPhoneRaw)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 757, Col: 147}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 759, Col: 147}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var204)
 		if templ_7745c5c3_Err != nil {
@@ -4058,7 +4066,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var205 string
 		templ_7745c5c3_Var205, templ_7745c5c3_Err = templ.JoinStringErrs(fallback(data.Profile.Email))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 763, Col: 86}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 765, Col: 86}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var205))
 		if templ_7745c5c3_Err != nil {
@@ -4071,7 +4079,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var206 string
 		templ_7745c5c3_Var206, templ_7745c5c3_Err = templ.JoinStringErrs(emailVerificationLabel(data.Profile))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 763, Col: 161}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 765, Col: 161}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var206))
 		if templ_7745c5c3_Err != nil {
@@ -4089,7 +4097,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var207 string
 			templ_7745c5c3_Var207, templ_7745c5c3_Err = templ.JoinStringErrs(data.Profile.PendingEmail)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 765, Col: 123}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 767, Col: 123}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var207))
 			if templ_7745c5c3_Err != nil {
@@ -4102,7 +4110,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var208 string
 			templ_7745c5c3_Var208, templ_7745c5c3_Err = templ.JoinStringErrs(pendingEmailStatus(data.Profile))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 765, Col: 173}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 767, Col: 173}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var208))
 			if templ_7745c5c3_Err != nil {
@@ -4115,7 +4123,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var209 string
 			templ_7745c5c3_Var209, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 766, Col: 149}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 768, Col: 149}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var209)
 			if templ_7745c5c3_Err != nil {
@@ -4128,7 +4136,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var210 string
 			templ_7745c5c3_Var210, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 766, Col: 364}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 768, Col: 364}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var210)
 			if templ_7745c5c3_Err != nil {
@@ -4146,7 +4154,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var211 string
 		templ_7745c5c3_Var211, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 768, Col: 136}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 770, Col: 136}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var211)
 		if templ_7745c5c3_Err != nil {
@@ -4184,7 +4192,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var212 string
 			templ_7745c5c3_Var212, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 783, Col: 154}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 785, Col: 154}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var212)
 			if templ_7745c5c3_Err != nil {
@@ -4197,7 +4205,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var213 string
 			templ_7745c5c3_Var213, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Profile.TOTPName)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 783, Col: 217}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 785, Col: 217}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var213)
 			if templ_7745c5c3_Err != nil {
@@ -4210,7 +4218,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var214 string
 			templ_7745c5c3_Var214, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 784, Col: 135}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 786, Col: 135}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var214)
 			if templ_7745c5c3_Err != nil {
@@ -4228,7 +4236,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var215 string
 			templ_7745c5c3_Var215, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 786, Col: 153}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 788, Col: 153}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var215)
 			if templ_7745c5c3_Err != nil {
@@ -4246,7 +4254,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var216 string
 		templ_7745c5c3_Var216, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 792, Col: 122}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 794, Col: 122}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var216)
 		if templ_7745c5c3_Err != nil {
@@ -4269,7 +4277,7 @@ func Profile(data ProfileData) templ.Component {
 				var templ_7745c5c3_Var217 string
 				templ_7745c5c3_Var217, templ_7745c5c3_Err = templ.JoinStringErrs(passkey.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 796, Col: 42}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 798, Col: 42}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var217))
 				if templ_7745c5c3_Err != nil {
@@ -4282,7 +4290,7 @@ func Profile(data ProfileData) templ.Component {
 				var templ_7745c5c3_Var218 string
 				templ_7745c5c3_Var218, templ_7745c5c3_Err = templ.JoinStringErrs(profileDateTime(passkey.CreatedAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 796, Col: 109}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 798, Col: 109}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var218))
 				if templ_7745c5c3_Err != nil {
@@ -4291,7 +4299,7 @@ func Profile(data ProfileData) templ.Component {
 				var templ_7745c5c3_Var219 string
 				templ_7745c5c3_Var219, templ_7745c5c3_Err = templ.JoinStringErrs(lastUsedLabel(passkey.LastUsedAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 796, Col: 146}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 798, Col: 146}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var219))
 				if templ_7745c5c3_Err != nil {
@@ -4304,7 +4312,7 @@ func Profile(data ProfileData) templ.Component {
 				var templ_7745c5c3_Var220 templ.SafeURL
 				templ_7745c5c3_Var220, templ_7745c5c3_Err = templ.JoinURLErrs("/profile/security/passkeys/" + passkey.EncodedID + "/rename")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 796, Col: 276}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 798, Col: 276}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var220))
 				if templ_7745c5c3_Err != nil {
@@ -4317,7 +4325,7 @@ func Profile(data ProfileData) templ.Component {
 				var templ_7745c5c3_Var221 string
 				templ_7745c5c3_Var221, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 796, Col: 346}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 798, Col: 346}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var221)
 				if templ_7745c5c3_Err != nil {
@@ -4330,7 +4338,7 @@ func Profile(data ProfileData) templ.Component {
 				var templ_7745c5c3_Var222 string
 				templ_7745c5c3_Var222, templ_7745c5c3_Err = templ.ResolveAttributeValue("passkey-rename-" + passkey.EncodedID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 796, Col: 424}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 798, Col: 424}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var222)
 				if templ_7745c5c3_Err != nil {
@@ -4343,7 +4351,7 @@ func Profile(data ProfileData) templ.Component {
 				var templ_7745c5c3_Var223 string
 				templ_7745c5c3_Var223, templ_7745c5c3_Err = templ.JoinStringErrs(passkey.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 796, Col: 457}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 798, Col: 457}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var223))
 				if templ_7745c5c3_Err != nil {
@@ -4356,7 +4364,7 @@ func Profile(data ProfileData) templ.Component {
 				var templ_7745c5c3_Var224 string
 				templ_7745c5c3_Var224, templ_7745c5c3_Err = templ.ResolveAttributeValue("passkey-rename-" + passkey.EncodedID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 796, Col: 516}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 798, Col: 516}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var224)
 				if templ_7745c5c3_Err != nil {
@@ -4369,7 +4377,7 @@ func Profile(data ProfileData) templ.Component {
 				var templ_7745c5c3_Var225 string
 				templ_7745c5c3_Var225, templ_7745c5c3_Err = templ.ResolveAttributeValue(passkey.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 796, Col: 551}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 798, Col: 551}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var225)
 				if templ_7745c5c3_Err != nil {
@@ -4382,7 +4390,7 @@ func Profile(data ProfileData) templ.Component {
 				var templ_7745c5c3_Var226 templ.SafeURL
 				templ_7745c5c3_Var226, templ_7745c5c3_Err = templ.JoinURLErrs("/profile/security/passkeys/" + passkey.EncodedID + "/delete")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 796, Col: 747}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 798, Col: 747}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var226))
 				if templ_7745c5c3_Err != nil {
@@ -4395,7 +4403,7 @@ func Profile(data ProfileData) templ.Component {
 				var templ_7745c5c3_Var227 string
 				templ_7745c5c3_Var227, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 796, Col: 817}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 798, Col: 817}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var227)
 				if templ_7745c5c3_Err != nil {
@@ -4423,7 +4431,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var228 string
 			templ_7745c5c3_Var228, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.SafeURL(data.TOTPEnrollment.QRCodeDataURI))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 803, Col: 343}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 805, Col: 343}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var228)
 			if templ_7745c5c3_Err != nil {
@@ -4436,7 +4444,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var229 string
 			templ_7745c5c3_Var229, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.TOTPEnrollment.Secret)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 803, Col: 488}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 805, Col: 488}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var229)
 			if templ_7745c5c3_Err != nil {
@@ -4449,7 +4457,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var230 string
 			templ_7745c5c3_Var230, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.TOTPEnrollment.Secret)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 803, Col: 621}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 805, Col: 621}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var230)
 			if templ_7745c5c3_Err != nil {
@@ -4462,7 +4470,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var231 string
 			templ_7745c5c3_Var231, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 803, Col: 810}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 805, Col: 810}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var231)
 			if templ_7745c5c3_Err != nil {
@@ -4490,7 +4498,7 @@ func Profile(data ProfileData) templ.Component {
 				var templ_7745c5c3_Var232 string
 				templ_7745c5c3_Var232, templ_7745c5c3_Err = templ.JoinStringErrs(code)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 813, Col: 27}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 815, Col: 27}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var232))
 				if templ_7745c5c3_Err != nil {
@@ -4508,7 +4516,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var233 string
 			templ_7745c5c3_Var233, templ_7745c5c3_Err = templ.ResolveAttributeValue(strings.Join(data.RecoveryCodes, "\n"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 816, Col: 157}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 818, Col: 157}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var233)
 			if templ_7745c5c3_Err != nil {
@@ -4526,7 +4534,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var234 string
 		templ_7745c5c3_Var234, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 819, Col: 136}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 821, Col: 136}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var234)
 		if templ_7745c5c3_Err != nil {
@@ -4544,7 +4552,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var235 string
 			templ_7745c5c3_Var235, templ_7745c5c3_Err = templ.JoinStringErrs(item.DeviceLabel)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 828, Col: 36}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 830, Col: 36}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var235))
 			if templ_7745c5c3_Err != nil {
@@ -4567,7 +4575,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var236 string
 			templ_7745c5c3_Var236, templ_7745c5c3_Err = templ.JoinStringErrs(profileDateTime(item.CreatedAt))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 833, Col: 66}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 835, Col: 66}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var236))
 			if templ_7745c5c3_Err != nil {
@@ -4580,7 +4588,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var237 string
 			templ_7745c5c3_Var237, templ_7745c5c3_Err = templ.JoinStringErrs(profileDateTime(item.LastUsedAt))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 833, Col: 120}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 835, Col: 120}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var237))
 			if templ_7745c5c3_Err != nil {
@@ -4593,7 +4601,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var238 string
 			templ_7745c5c3_Var238, templ_7745c5c3_Err = templ.JoinStringErrs(profileDateTime(item.AbsoluteExpiresAt))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 833, Col: 209}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 835, Col: 209}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var238))
 			if templ_7745c5c3_Err != nil {
@@ -4606,7 +4614,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var239 templ.SafeURL
 			templ_7745c5c3_Var239, templ_7745c5c3_Err = templ.JoinURLErrs("/profile/sessions/" + item.ID + "/revoke")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 835, Col: 80}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 837, Col: 80}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var239))
 			if templ_7745c5c3_Err != nil {
@@ -4619,7 +4627,7 @@ func Profile(data ProfileData) templ.Component {
 			var templ_7745c5c3_Var240 string
 			templ_7745c5c3_Var240, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 835, Col: 150}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 837, Col: 150}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var240)
 			if templ_7745c5c3_Err != nil {
@@ -4637,7 +4645,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var241 string
 		templ_7745c5c3_Var241, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 839, Col: 131}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 841, Col: 131}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var241)
 		if templ_7745c5c3_Err != nil {
@@ -4650,7 +4658,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var242 string
 		templ_7745c5c3_Var242, templ_7745c5c3_Err = templ.JoinStringErrs(data.Shell.Page.BuildVersion)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 843, Col: 134}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 845, Col: 134}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var242))
 		if templ_7745c5c3_Err != nil {
@@ -4663,7 +4671,7 @@ func Profile(data ProfileData) templ.Component {
 		var templ_7745c5c3_Var243 string
 		templ_7745c5c3_Var243, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 849, Col: 146}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 851, Col: 146}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var243)
 		if templ_7745c5c3_Err != nil {
@@ -4735,7 +4743,7 @@ func securityCheck(label string, ready bool, detail string) templ.Component {
 		var templ_7745c5c3_Var247 string
 		templ_7745c5c3_Var247, templ_7745c5c3_Err = templ.JoinStringErrs(securityCheckIcon(ready))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 859, Col: 116}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 861, Col: 116}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var247))
 		if templ_7745c5c3_Err != nil {
@@ -4748,7 +4756,7 @@ func securityCheck(label string, ready bool, detail string) templ.Component {
 		var templ_7745c5c3_Var248 string
 		templ_7745c5c3_Var248, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 859, Col: 146}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 861, Col: 146}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var248))
 		if templ_7745c5c3_Err != nil {
@@ -4761,7 +4769,7 @@ func securityCheck(label string, ready bool, detail string) templ.Component {
 		var templ_7745c5c3_Var249 string
 		templ_7745c5c3_Var249, templ_7745c5c3_Err = templ.JoinStringErrs(detail)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 859, Col: 172}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 861, Col: 172}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var249))
 		if templ_7745c5c3_Err != nil {
@@ -4824,7 +4832,7 @@ func Password(data PasswordData) templ.Component {
 			var templ_7745c5c3_Var251 string
 			templ_7745c5c3_Var251, templ_7745c5c3_Err = templ.JoinStringErrs(data.Error)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 874, Col: 55}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 876, Col: 55}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var251))
 			if templ_7745c5c3_Err != nil {
@@ -4842,7 +4850,7 @@ func Password(data PasswordData) templ.Component {
 		var templ_7745c5c3_Var252 string
 		templ_7745c5c3_Var252, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 876, Col: 130}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 878, Col: 130}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var252)
 		if templ_7745c5c3_Err != nil {
@@ -4908,7 +4916,7 @@ func Users(data UsersData) templ.Component {
 		var templ_7745c5c3_Var254 string
 		templ_7745c5c3_Var254, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprint(len(data.Users)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 892, Col: 261}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 894, Col: 261}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var254))
 		if templ_7745c5c3_Err != nil {
@@ -4926,7 +4934,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var255 string
 			templ_7745c5c3_Var255, templ_7745c5c3_Err = templ.JoinStringErrs(data.Error)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 895, Col: 87}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 897, Col: 87}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var255))
 			if templ_7745c5c3_Err != nil {
@@ -4949,7 +4957,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var256 string
 			templ_7745c5c3_Var256, templ_7745c5c3_Err = templ.ResolveAttributeValue(strings.ToLower(user.DisplayName + " " + user.Username + " " + user.Email))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 900, Col: 142}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 902, Col: 142}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var256)
 			if templ_7745c5c3_Err != nil {
@@ -4962,7 +4970,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var257 string
 			templ_7745c5c3_Var257, templ_7745c5c3_Err = templ.JoinStringErrs(user.DisplayName)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 903, Col: 32}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 905, Col: 32}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var257))
 			if templ_7745c5c3_Err != nil {
@@ -4975,7 +4983,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var258 string
 			templ_7745c5c3_Var258, templ_7745c5c3_Err = templ.JoinStringErrs("@" + user.Username)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 904, Col: 34}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 906, Col: 34}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var258))
 			if templ_7745c5c3_Err != nil {
@@ -4993,7 +5001,7 @@ func Users(data UsersData) templ.Component {
 				var templ_7745c5c3_Var259 templ.SafeURL
 				templ_7745c5c3_Var259, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("mailto:" + user.Email))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 906, Col: 58}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 908, Col: 58}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var259))
 				if templ_7745c5c3_Err != nil {
@@ -5006,7 +5014,7 @@ func Users(data UsersData) templ.Component {
 				var templ_7745c5c3_Var260 string
 				templ_7745c5c3_Var260, templ_7745c5c3_Err = templ.JoinStringErrs(user.Email)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 906, Col: 73}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 908, Col: 73}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var260))
 				if templ_7745c5c3_Err != nil {
@@ -5024,7 +5032,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var261 string
 			templ_7745c5c3_Var261, templ_7745c5c3_Err = templ.JoinStringErrs(roleLabel(user.Role))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 909, Col: 87}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 911, Col: 87}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var261))
 			if templ_7745c5c3_Err != nil {
@@ -5059,7 +5067,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var264 string
 			templ_7745c5c3_Var264, templ_7745c5c3_Err = templ.JoinStringErrs(activeLabel(user.Active))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 909, Col: 167}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 911, Col: 167}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var264))
 			if templ_7745c5c3_Err != nil {
@@ -5072,7 +5080,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var265 string
 			templ_7745c5c3_Var265, templ_7745c5c3_Err = templ.JoinStringErrs(driverLabel(user.DriverID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 909, Col: 243}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 911, Col: 243}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var265))
 			if templ_7745c5c3_Err != nil {
@@ -5095,7 +5103,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var266 templ.SafeURL
 			templ_7745c5c3_Var266, templ_7745c5c3_Err = templ.JoinURLErrs("/admin/users/" + user.ID + "/details")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 914, Col: 77}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 916, Col: 77}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var266))
 			if templ_7745c5c3_Err != nil {
@@ -5108,7 +5116,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var267 string
 			templ_7745c5c3_Var267, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 916, Col: 78}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 918, Col: 78}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var267)
 			if templ_7745c5c3_Err != nil {
@@ -5121,7 +5129,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var268 string
 			templ_7745c5c3_Var268, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(user.Version))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 917, Col: 79}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 919, Col: 79}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var268)
 			if templ_7745c5c3_Err != nil {
@@ -5134,7 +5142,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var269 string
 			templ_7745c5c3_Var269, templ_7745c5c3_Err = templ.ResolveAttributeValue(user.Username)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 918, Col: 87}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 920, Col: 87}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var269)
 			if templ_7745c5c3_Err != nil {
@@ -5147,7 +5155,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var270 string
 			templ_7745c5c3_Var270, templ_7745c5c3_Err = templ.ResolveAttributeValue(user.DisplayName)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 919, Col: 93}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 921, Col: 93}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var270)
 			if templ_7745c5c3_Err != nil {
@@ -5160,7 +5168,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var271 string
 			templ_7745c5c3_Var271, templ_7745c5c3_Err = templ.ResolveAttributeValue(user.Email)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 920, Col: 99}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 922, Col: 99}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var271)
 			if templ_7745c5c3_Err != nil {
@@ -5173,7 +5181,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var272 templ.SafeURL
 			templ_7745c5c3_Var272, templ_7745c5c3_Err = templ.JoinURLErrs("/admin/users/" + user.ID + "/access")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 924, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 926, Col: 76}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var272))
 			if templ_7745c5c3_Err != nil {
@@ -5186,7 +5194,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var273 string
 			templ_7745c5c3_Var273, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 926, Col: 78}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 928, Col: 78}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var273)
 			if templ_7745c5c3_Err != nil {
@@ -5199,7 +5207,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var274 string
 			templ_7745c5c3_Var274, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(user.Version))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 926, Col: 150}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 928, Col: 150}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var274)
 			if templ_7745c5c3_Err != nil {
@@ -5222,7 +5230,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var275 string
 			templ_7745c5c3_Var275, templ_7745c5c3_Err = templ.ResolveAttributeValue("Rolle für " + user.Username)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 930, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 932, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var275)
 			if templ_7745c5c3_Err != nil {
@@ -5255,7 +5263,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var276 templ.SafeURL
 			templ_7745c5c3_Var276, templ_7745c5c3_Err = templ.JoinURLErrs("/admin/users/" + user.ID + "/access")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 934, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 936, Col: 76}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var276))
 			if templ_7745c5c3_Err != nil {
@@ -5268,7 +5276,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var277 string
 			templ_7745c5c3_Var277, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 936, Col: 78}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 938, Col: 78}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var277)
 			if templ_7745c5c3_Err != nil {
@@ -5281,7 +5289,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var278 string
 			templ_7745c5c3_Var278, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(user.Version))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 936, Col: 150}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 938, Col: 150}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var278)
 			if templ_7745c5c3_Err != nil {
@@ -5294,7 +5302,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var279 string
 			templ_7745c5c3_Var279, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(user.Role))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 936, Col: 212}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 938, Col: 212}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var279)
 			if templ_7745c5c3_Err != nil {
@@ -5322,7 +5330,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var280 templ.SafeURL
 			templ_7745c5c3_Var280, templ_7745c5c3_Err = templ.JoinURLErrs("/admin/users/" + user.ID + "/reset-password")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 946, Col: 84}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 948, Col: 84}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var280))
 			if templ_7745c5c3_Err != nil {
@@ -5335,7 +5343,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var281 string
 			templ_7745c5c3_Var281, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 948, Col: 78}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 950, Col: 78}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var281)
 			if templ_7745c5c3_Err != nil {
@@ -5348,7 +5356,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var282 string
 			templ_7745c5c3_Var282, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(user.Version))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 948, Col: 150}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 950, Col: 150}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var282)
 			if templ_7745c5c3_Err != nil {
@@ -5361,7 +5369,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var283 templ.SafeURL
 			templ_7745c5c3_Var283, templ_7745c5c3_Err = templ.JoinURLErrs("/admin/users/" + user.ID + "/reset-security")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 952, Col: 84}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 954, Col: 84}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var283))
 			if templ_7745c5c3_Err != nil {
@@ -5374,7 +5382,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var284 string
 			templ_7745c5c3_Var284, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 954, Col: 78}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 956, Col: 78}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var284)
 			if templ_7745c5c3_Err != nil {
@@ -5387,7 +5395,7 @@ func Users(data UsersData) templ.Component {
 			var templ_7745c5c3_Var285 string
 			templ_7745c5c3_Var285, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(user.Version))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 954, Col: 150}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 956, Col: 150}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var285)
 			if templ_7745c5c3_Err != nil {
@@ -5405,7 +5413,7 @@ func Users(data UsersData) templ.Component {
 		var templ_7745c5c3_Var286 string
 		templ_7745c5c3_Var286, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 963, Col: 319}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 965, Col: 319}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var286)
 		if templ_7745c5c3_Err != nil {
@@ -5418,7 +5426,7 @@ func Users(data UsersData) templ.Component {
 		var templ_7745c5c3_Var287 string
 		templ_7745c5c3_Var287, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Values.Username)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 963, Col: 444}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 965, Col: 444}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var287)
 		if templ_7745c5c3_Err != nil {
@@ -5431,7 +5439,7 @@ func Users(data UsersData) templ.Component {
 		var templ_7745c5c3_Var288 string
 		templ_7745c5c3_Var288, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Values.DisplayName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 963, Col: 600}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 965, Col: 600}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var288)
 		if templ_7745c5c3_Err != nil {
@@ -5444,7 +5452,7 @@ func Users(data UsersData) templ.Component {
 		var templ_7745c5c3_Var289 string
 		templ_7745c5c3_Var289, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Values.Email)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 963, Col: 740}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/identity.templ`, Line: 965, Col: 740}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var289)
 		if templ_7745c5c3_Err != nil {

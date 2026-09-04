@@ -419,6 +419,9 @@ SELECT id::text, customer_id::text, job_number, job_type, volume_m3::text,
        COALESCE(pile_latitude::text, '')::text AS pile_latitude,
        COALESCE(pile_longitude::text, '')::text AS pile_longitude,
        COALESCE(pile_location_source, '')::text AS pile_location_source
+       , COALESCE(transport_partner_id::text, '')::text AS transport_partner_id
+       , COALESCE((SELECT tp.name FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_name
+       , COALESCE((SELECT tp.partner_type FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_type
 FROM jobs WHERE id = $1::uuid
 `
 
@@ -447,6 +450,9 @@ type GetJobRow struct {
 	PileLatitude               string
 	PileLongitude              string
 	PileLocationSource         string
+	TransportPartnerID         string
+	TransportPartnerName       string
+	TransportPartnerType       string
 }
 
 func (q *Queries) GetJob(ctx context.Context, id pgtype.UUID) (GetJobRow, error) {
@@ -477,6 +483,9 @@ func (q *Queries) GetJob(ctx context.Context, id pgtype.UUID) (GetJobRow, error)
 		&i.PileLatitude,
 		&i.PileLongitude,
 		&i.PileLocationSource,
+		&i.TransportPartnerID,
+		&i.TransportPartnerName,
+		&i.TransportPartnerType,
 	)
 	return i, err
 }
@@ -544,7 +553,7 @@ INSERT INTO jobs (
     job_number, customer_id, job_type, volume_m3, estimated_hack_minutes,
     estimated_transport_minutes, transport_trip_count, transport_mode, external_transport_confirmed,
     preferred_start_date, preferred_end_date, preference_mode, preference_text, urgency, region, source,
-    pile_latitude, pile_longitude, pile_location_source, pile_location_updated_at
+    pile_latitude, pile_longitude, pile_location_source, pile_location_updated_at, transport_partner_id
 ) VALUES (
     $1, $2::uuid, $3, $4::numeric,
     $5, $6, $7,
@@ -553,7 +562,8 @@ INSERT INTO jobs (
     $12, NULLIF($13::text, ''), $14, NULLIF($15::text, ''), $16,
     NULLIF($17::text, '')::numeric, NULLIF($18::text, '')::numeric,
     NULLIF($19::text, ''),
-    CASE WHEN NULLIF($17::text, '') IS NULL THEN NULL ELSE now() END
+    CASE WHEN NULLIF($17::text, '') IS NULL THEN NULL ELSE now() END,
+    NULLIF($20::text, '')::uuid
 ) RETURNING id::text
 `
 
@@ -577,6 +587,7 @@ type InsertJobParams struct {
 	PileLatitude               string
 	PileLongitude              string
 	PileLocationSource         string
+	TransportPartnerID         string
 }
 
 func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) (string, error) {
@@ -600,6 +611,7 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) (string, e
 		arg.PileLatitude,
 		arg.PileLongitude,
 		arg.PileLocationSource,
+		arg.TransportPartnerID,
 	)
 	var id string
 	err := row.Scan(&id)
@@ -752,6 +764,9 @@ SELECT id::text, job_number, job_type, volume_m3::text, estimated_hack_minutes,
        COALESCE(pile_latitude::text, '')::text AS pile_latitude,
        COALESCE(pile_longitude::text, '')::text AS pile_longitude,
        COALESCE(pile_location_source, '')::text AS pile_location_source,
+       COALESCE(transport_partner_id::text, '')::text AS transport_partner_id,
+       COALESCE((SELECT tp.name FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_name,
+       COALESCE((SELECT tp.partner_type FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_type,
        COALESCE((SELECT a.id::text FROM appointments a WHERE a.job_id=jobs.id AND a.lifecycle_status IN ('proposal','fixed') ORDER BY a.starts_at DESC, a.id DESC LIMIT 1), '')::text AS active_appointment_id
 FROM jobs WHERE customer_id = $1::uuid
 ORDER BY received_at DESC, id DESC
@@ -781,6 +796,9 @@ type ListCustomerJobsRow struct {
 	PileLatitude               string
 	PileLongitude              string
 	PileLocationSource         string
+	TransportPartnerID         string
+	TransportPartnerName       string
+	TransportPartnerType       string
 	ActiveAppointmentID        string
 }
 
@@ -817,6 +835,9 @@ func (q *Queries) ListCustomerJobs(ctx context.Context, customerID pgtype.UUID) 
 			&i.PileLatitude,
 			&i.PileLongitude,
 			&i.PileLocationSource,
+			&i.TransportPartnerID,
+			&i.TransportPartnerName,
+			&i.TransportPartnerType,
 			&i.ActiveAppointmentID,
 		); err != nil {
 			return nil, err
@@ -1688,8 +1709,9 @@ UPDATE jobs SET
     pile_longitude = NULLIF($16::text, '')::numeric,
     pile_location_source = NULLIF($17::text, ''),
     pile_location_updated_at = CASE WHEN NULLIF($15::text, '') IS NULL THEN NULL ELSE now() END,
+    transport_partner_id = NULLIF($18::text, '')::uuid,
     version = version + 1, updated_at = now()
-WHERE id = $18::uuid AND version = $19
+WHERE id = $19::uuid AND version = $20
   AND archived_at IS NULL AND workflow_status IN ('waitlist', 'planning', 'scheduled')
 `
 
@@ -1711,6 +1733,7 @@ type UpdateJobParams struct {
 	PileLatitude               string
 	PileLongitude              string
 	PileLocationSource         string
+	TransportPartnerID         string
 	ID                         pgtype.UUID
 	ExpectedVersion            int32
 }
@@ -1734,6 +1757,7 @@ func (q *Queries) UpdateJob(ctx context.Context, arg UpdateJobParams) (int64, er
 		arg.PileLatitude,
 		arg.PileLongitude,
 		arg.PileLocationSource,
+		arg.TransportPartnerID,
 		arg.ID,
 		arg.ExpectedVersion,
 	)

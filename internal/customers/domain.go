@@ -21,6 +21,7 @@ type Source string
 type NotificationPreference string
 type PileLocationSource string
 type PreferenceMode string
+type TransportPartnerType string
 
 const (
 	JobTypeChippingOnly          JobType                = "chipping_only"
@@ -49,6 +50,8 @@ const (
 	PreferenceFixed              PreferenceMode         = "fixed"
 	PreferenceWindow             PreferenceMode         = "window"
 	PreferenceFlexible           PreferenceMode         = "flexible"
+	TransportPartnerPerson       TransportPartnerType   = "person"
+	TransportPartnerCompany      TransportPartnerType   = "company"
 )
 
 var ErrValidation = errors.New("customers: validation failed")
@@ -77,6 +80,7 @@ type JobInput struct {
 	Source                               Source
 	PileLatitude, PileLongitude          *float64
 	PileLocationSource                   PileLocationSource
+	TransportPartnerID                   string
 }
 
 const (
@@ -145,7 +149,7 @@ func (input JobInput) Validate() error {
 	if !input.JobType.Valid() || !input.TransportMode.Valid() || !input.Urgency.Valid() || !input.Source.Valid() {
 		return fmt.Errorf("%w: invalid selection", ErrValidation)
 	}
-	if input.JobType == JobTypeChippingOnly && (input.EstimatedTransportMinutes != 0 || input.TransportTripCount != 0 || input.TransportMode != TransportNone || input.ExternalTransportConfirmed) {
+	if input.JobType == JobTypeChippingOnly && (input.EstimatedTransportMinutes != 0 || input.TransportTripCount != 0 || input.TransportMode != TransportNone || input.ExternalTransportConfirmed || strings.TrimSpace(input.TransportPartnerID) != "") {
 		return fmt.Errorf("%w: transport values on chipping-only job", ErrValidation)
 	}
 	if input.JobType == JobTypeChippingWithTransport &&
@@ -183,6 +187,10 @@ func (input JobInput) Validate() error {
 		return fmt.Errorf("%w: fixed preference requires exact date", ErrValidation)
 	}
 	return nil
+}
+
+func (value TransportPartnerType) Valid() bool {
+	return value == TransportPartnerPerson || value == TransportPartnerCompany
 }
 
 func (value JobType) Valid() bool {

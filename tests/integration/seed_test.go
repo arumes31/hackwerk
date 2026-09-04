@@ -37,7 +37,7 @@ func TestDevelopmentSeedIsCompleteSyntheticAndIdempotent(t *testing.T) {
 	t.Cleanup(pool.Close)
 	if _, err := pool.Exec(t.Context(), `TRUNCATE worker_heartbeats, voice_drafts, planning_suggestions, planning_runs, calendar_feeds,
 		notifications, confirmation_requests, outbox_events, appointment_resources, appointment_drivers, appointments,
-		job_notes, waitlist_entries, jobs, job_number_counters, customers, availability_exceptions, availability_rules,
+		job_notes, waitlist_entries, jobs, job_number_counters, customers, transport_partners, availability_exceptions, availability_rules,
 		resources, audit_events, auth_rate_limits, sessions, drivers, users RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatal(err)
 	}

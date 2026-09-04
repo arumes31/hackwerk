@@ -26,6 +26,35 @@ func NewCustomerStore(pool *pgxpool.Pool) *CustomerStore {
 	return &CustomerStore{pool: pool, queries: dbgen.New(pool)}
 }
 
+func (store *CustomerStore) ListTransportPartners(ctx context.Context) ([]customers.TransportPartner, error) {
+	rows, err := store.queries.ListActiveTransportPartners(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]customers.TransportPartner, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, customers.TransportPartner{
+			ID: row.ID, Type: customers.TransportPartnerType(row.PartnerType), Name: row.Name,
+			Phone: row.Phone, Address: row.Address, InternalNote: row.InternalNote, Version: row.Version,
+		})
+	}
+	return result, nil
+}
+
+func (store *CustomerStore) CreateTransportPartner(ctx context.Context, actor auth.Actor, input customers.TransportPartnerInput, requestID string) (id string, resultErr error) {
+	resultErr = store.transaction(ctx, func(queries *dbgen.Queries) error {
+		var err error
+		id, err = queries.InsertTransportPartner(ctx, dbgen.InsertTransportPartnerParams{
+			PartnerType: string(input.Type), Name: input.Name, Phone: input.Phone, Address: input.Address, InternalNote: input.InternalNote,
+		})
+		if err != nil {
+			return err
+		}
+		return insertAudit(ctx, queries, actor, "transport_partner.created", "transport_partner", id, requestID, []string{"created"})
+	})
+	return id, resultErr
+}
+
 func (store *CustomerStore) FindDuplicates(ctx context.Context, input customers.CustomerInput) ([]customers.Duplicate, error) {
 	rows, err := store.queries.FindDuplicateCustomers(ctx, dbgen.FindDuplicateCustomersParams{
 		PhoneNormalized: customers.NormalizePhone(input.PhoneRaw), Email: input.Email,
@@ -64,6 +93,9 @@ func (store *CustomerStore) CreateIntake(ctx context.Context, actor auth.Actor, 
 		}
 		jobNumber, err := nextJobNumber(ctx, queries)
 		if err != nil {
+			return err
+		}
+		if err := lockTransportPartner(ctx, queries, input.Job.TransportPartnerID); err != nil {
 			return err
 		}
 		jobParams, err := insertJobParams(customerID, jobNumber, input.Job)
@@ -120,6 +152,9 @@ func (store *CustomerStore) CreateJob(ctx context.Context, actor auth.Actor, inp
 		if err != nil {
 			return err
 		}
+		if err := lockTransportPartner(ctx, queries, input.Job.TransportPartnerID); err != nil {
+			return err
+		}
 		params, err := insertJobParams(input.CustomerID, jobNumber, input.Job)
 		if err != nil {
 			return err
@@ -172,6 +207,9 @@ func (store *CustomerStore) UpdateJob(ctx context.Context, actor auth.Actor, inp
 		}
 		if current.Version != input.ExpectedVersion || !editableJobWorkflow(current.WorkflowStatus) {
 			return customers.ErrConflict
+		}
+		if err := lockTransportPartner(ctx, queries, input.Job.TransportPartnerID); err != nil {
+			return err
 		}
 		var fixedAppointmentID string
 		if current.WorkflowStatus == "scheduled" {
@@ -358,6 +396,7 @@ func (store *CustomerStore) DuplicateJobDraft(ctx context.Context, id string) (c
 			PreferenceText: row.PreferenceText, Urgency: customers.Urgency(row.Urgency),
 			Region: row.Region, Source: customers.Source(row.Source), PileLatitude: parseFloat(row.PileLatitude),
 			PileLongitude: parseFloat(row.PileLongitude), PileLocationSource: customers.PileLocationSource(row.PileLocationSource),
+			TransportPartnerID: row.TransportPartnerID,
 		},
 	}, nil
 }
@@ -804,6 +843,7 @@ func insertJobParams(customerID string, jobNumber string, input customers.JobInp
 		PreferenceMode: string(preferenceMode),
 		Region:         input.Region, Source: string(input.Source), PileLatitude: floatString(input.PileLatitude),
 		PileLongitude: floatString(input.PileLongitude), PileLocationSource: string(input.PileLocationSource),
+		TransportPartnerID: input.TransportPartnerID,
 	}, nil
 }
 
@@ -832,7 +872,23 @@ func updateJobParams(id pgtype.UUID, input customers.UpdateJobInput) (dbgen.Upda
 		Region: input.Job.Region, Source: string(input.Job.Source),
 		PileLatitude: floatString(input.Job.PileLatitude), PileLongitude: floatString(input.Job.PileLongitude),
 		PileLocationSource: string(input.Job.PileLocationSource), ID: id, ExpectedVersion: input.ExpectedVersion,
+		TransportPartnerID: input.Job.TransportPartnerID,
 	}, nil
+}
+
+func lockTransportPartner(ctx context.Context, queries *dbgen.Queries, id string) error {
+	if id == "" {
+		return nil
+	}
+	parsedID, err := uuid(id)
+	if err != nil {
+		return customers.ErrValidation
+	}
+	if _, err := queries.LockActiveTransportPartner(ctx, parsedID); errors.Is(err, pgx.ErrNoRows) {
+		return customers.ErrValidation
+	} else {
+		return err
+	}
 }
 
 func pageValues(page, pageSize int) (int32, int32, error) {
@@ -917,6 +973,8 @@ func jobFromRow(row dbgen.ListCustomerJobsRow) customers.Job {
 		PileLatitude: parseFloat(row.PileLatitude), PileLongitude: parseFloat(row.PileLongitude),
 		PileLocationSource:  customers.PileLocationSource(row.PileLocationSource),
 		ActiveAppointmentID: row.ActiveAppointmentID,
+		TransportPartnerID:  row.TransportPartnerID, TransportPartnerName: row.TransportPartnerName,
+		TransportPartnerType: customers.TransportPartnerType(row.TransportPartnerType),
 	}
 	job.PileMapsURL = customers.PointMapsURL(job.PileLatitude, job.PileLongitude)
 	return job

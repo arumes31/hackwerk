@@ -100,6 +100,19 @@ type Job struct {
 	PileLatitude, PileLongitude                                                        *float64
 	PileLocationSource                                                                 PileLocationSource
 	PileMapsURL                                                                        string
+	TransportPartnerID, TransportPartnerName                                           string
+	TransportPartnerType                                                               TransportPartnerType
+}
+
+type TransportPartner struct {
+	ID, Name, Phone, Address, InternalNote string
+	Type                                   TransportPartnerType
+	Version                                int32
+}
+
+type TransportPartnerInput struct {
+	Name, Phone, Address, InternalNote string
+	Type                               TransportPartnerType
 }
 
 type Note struct {
@@ -213,6 +226,8 @@ type UpdateJobInput struct {
 
 type Store interface {
 	FindDuplicates(context.Context, CustomerInput) ([]Duplicate, error)
+	ListTransportPartners(context.Context) ([]TransportPartner, error)
+	CreateTransportPartner(context.Context, auth.Actor, TransportPartnerInput, string) (string, error)
 	CreateCustomer(context.Context, auth.Actor, CustomerInput, string) (string, error)
 	CreateIntake(context.Context, auth.Actor, IntakeInput, string) (CreatedIntake, error)
 	CreateJob(context.Context, auth.Actor, CreateJobInput) (CreatedIntake, error)
@@ -234,6 +249,27 @@ type Store interface {
 	UpdateWaitlistPriority(context.Context, auth.Actor, string, int32, string, int32, string) error
 	RemoveWaitlist(context.Context, auth.Actor, string, int32, string, string) error
 	AddNote(context.Context, auth.Actor, string, string, string, string, string) (string, error)
+}
+
+func (service *Service) ListTransportPartners(ctx context.Context, actor auth.Actor) ([]TransportPartner, error) {
+	if err := actor.Require(auth.PermissionJobCreate); err != nil {
+		return nil, err
+	}
+	return service.store.ListTransportPartners(ctx)
+}
+
+func (service *Service) CreateTransportPartner(ctx context.Context, actor auth.Actor, input TransportPartnerInput, requestID string) (string, error) {
+	if err := actor.Require(auth.PermissionJobCreate); err != nil {
+		return "", err
+	}
+	input.Name = strings.TrimSpace(input.Name)
+	input.Phone = strings.TrimSpace(input.Phone)
+	input.Address = strings.TrimSpace(input.Address)
+	input.InternalNote = strings.TrimSpace(input.InternalNote)
+	if input.Name == "" || len([]rune(input.Name)) > 200 || len([]rune(input.Phone)) > 64 || len([]rune(input.Address)) > 500 || len([]rune(input.InternalNote)) > 1000 || !input.Type.Valid() || strings.ContainsAny(input.Phone, "\r\n") {
+		return "", ErrValidation
+	}
+	return service.store.CreateTransportPartner(ctx, actor, input, requestID)
 }
 
 func (service *Service) CreateCustomer(ctx context.Context, actor auth.Actor, input CreateCustomerInput) (CreatedCustomer, error) {
@@ -269,6 +305,7 @@ func (service *Service) CreateJob(ctx context.Context, actor auth.Actor, input C
 		input.Job.PreferenceMode = PreferenceWindow
 	}
 	input.Job.Region = strings.TrimSpace(input.Job.Region)
+	input.Job.TransportPartnerID = strings.TrimSpace(input.Job.TransportPartnerID)
 	if input.CustomerID == "" || len([]rune(input.InitialNote)) > 4000 {
 		return CreatedIntake{}, ErrValidation
 	}
@@ -293,6 +330,7 @@ func (service *Service) UpdateJob(ctx context.Context, actor auth.Actor, input U
 		input.Job.PreferenceMode = PreferenceWindow
 	}
 	input.Job.Region = strings.TrimSpace(input.Job.Region)
+	input.Job.TransportPartnerID = strings.TrimSpace(input.Job.TransportPartnerID)
 	if input.ID == "" || input.ExpectedVersion < 1 {
 		return ErrValidation
 	}
@@ -584,6 +622,7 @@ func normalizeIntake(input *IntakeInput) {
 		input.Job.PreferenceMode = PreferenceWindow
 	}
 	input.Job.Region = strings.TrimSpace(input.Job.Region)
+	input.Job.TransportPartnerID = strings.TrimSpace(input.Job.TransportPartnerID)
 	input.InitialNote = strings.TrimSpace(input.InitialNote)
 }
 

@@ -217,6 +217,7 @@ type Job struct {
 	PileLocationSource         *string
 	PileLocationUpdatedAt      pgtype.Timestamptz
 	PreferenceMode             string
+	TransportPartnerID         pgtype.UUID
 }
 
 type JobNote struct {
@@ -402,6 +403,19 @@ type Session struct {
 	RevokedAt         pgtype.Timestamptz
 	CreatedAt         pgtype.Timestamptz
 	DeviceLabel       string
+}
+
+type TransportPartner struct {
+	ID           pgtype.UUID
+	PartnerType  string
+	Name         string
+	Phone        *string
+	Address      *string
+	InternalNote *string
+	Active       bool
+	Version      int32
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
 }
 
 type User struct {

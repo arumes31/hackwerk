@@ -754,7 +754,7 @@ func TestMapLibreCSPWorkerUsesSupportedConfigurationAPI(t *testing.T) {
 	}
 }
 
-func TestRouteLocationSaveConfirmsValidDraftAndKeepsNativeFallback(t *testing.T) {
+func TestRouteLocationSearchAppliesAddressAndCoordinatesInOneAction(t *testing.T) {
 	t.Parallel()
 
 	script, err := Files.ReadFile("static/route-locations.js")
@@ -769,7 +769,9 @@ func TestRouteLocationSaveConfirmsValidDraftAndKeepsNativeFallback(t *testing.T)
 		`if (confirmLocation()) return;`,
 		`address.value = text;`,
 		`data-route-location-selected-result`,
-		`Adresse ausgewählt. Bitte noch eine Bezeichnung eingeben`,
+		`label.value = text.split(",")[0].trim().slice(0, 120);`,
+		`if (!confirmLocation()) return;`,
+		`Adresse und Koordinaten wurden gemeinsam übernommen.`,
 		`data-route-form-feedback`,
 		`Bitte mindestens einen Auftrag auswählen.`,
 		`dataset.routeLocationsReady = "true"`,
@@ -781,7 +783,7 @@ func TestRouteLocationSaveConfirmsValidDraftAndKeepsNativeFallback(t *testing.T)
 			t.Fatalf("route-location save script missing %q", expected)
 		}
 	}
-	if strings.Contains(javascript, `label.value = text;`) {
-		t.Fatal("address search overwrites the editable route-location label")
+	if strings.Contains(javascript, `Bitte noch eine Bezeichnung eingeben und anschließend Standort übernehmen`) {
+		t.Fatal("address search still requires a second confirmation step")
 	}
 }

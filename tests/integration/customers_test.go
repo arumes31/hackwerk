@@ -40,6 +40,29 @@ func TestCustomersPersistence(t *testing.T) {
 		if jobs != 0 {
 			t.Fatalf("jobs = %d", jobs)
 		}
+		partnerID, err := service.CreateTransportPartner(ctx, admin, customers.TransportPartnerInput{
+			Type: customers.TransportPartnerCompany, Name: "Holztrans GmbH", Phone: "+43 660 123456", Address: "Waldweg 1",
+		}, "request-partner")
+		if err != nil {
+			t.Fatal(err)
+		}
+		job := customerIntake("", "", "80", customers.UrgencyNormal, "Nord").Job
+		job.JobType, job.TransportMode, job.TransportPartnerID = customers.JobTypeChippingWithTransport, customers.TransportExternal, partnerID
+		job.EstimatedTransportMinutes = 60
+		if _, err := service.CreateJob(ctx, admin, customers.CreateJobInput{CustomerID: created.CustomerID, Job: job, RequestID: "request-partner-job"}); err != nil {
+			t.Fatal(err)
+		}
+		detail, err := service.CustomerDetail(ctx, admin, created.CustomerID)
+		if err != nil || len(detail.Jobs) != 1 || detail.Jobs[0].TransportPartnerName != "Holztrans GmbH" {
+			t.Fatalf("detail=%#v error=%v", detail, err)
+		}
+		var auditText string
+		if err := pool.QueryRow(ctx, "SELECT COALESCE(string_agg(metadata::text, ' '), '') FROM audit_events").Scan(&auditText); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(auditText, "Holztrans") || strings.Contains(auditText, "+43 660") {
+			t.Fatalf("transport partner pii leaked into audit: %s", auditText)
+		}
 	})
 
 	t.Run("intake is atomic and audit contains no pii", func(t *testing.T) {
@@ -427,7 +450,7 @@ func customerFixture(t *testing.T) (context.Context, *pgxpool.Pool, *customers.S
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, `TRUNCATE job_notes, waitlist_entries, jobs, job_number_counters, customers,
+	if _, err := pool.Exec(ctx, `TRUNCATE job_notes, waitlist_entries, jobs, job_number_counters, customers, transport_partners,
 		audit_events, auth_rate_limits, sessions, drivers, users RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatal(err)
 	}
