@@ -240,6 +240,7 @@ templ jobLocationEditor(page PageData, prefix string, values IntakeValues, custo
 		<div class="location-actions">
 			<div class="location-customer-choice"><button class="button button--quiet" type="button" aria-describedby={ prefix + "-customer-address-hint" } data-location-customer>Kundenadresse wählen</button><small id={ prefix + "-customer-address-hint" } data-location-customer-address>{ customerAddressHint(customerAddress) }</small></div>
 			<button class="button button--quiet" type="button" data-location-device>Meinen Standort verwenden</button>
+			<a class="button button--quiet" data-location-maps aria-disabled="true" target="_blank" rel="noopener noreferrer">In Google Maps öffnen</a>
 			<button class="button" type="button" data-location-commit>Standort übernehmen</button>
 			<button class="button button--quiet" type="button" data-location-clear>Standort entfernen</button>
 		</div>

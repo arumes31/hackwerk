@@ -208,6 +208,35 @@ func TestCustomerHTTPCreatesCustomerWithoutJob(t *testing.T) {
 	}
 }
 
+func TestCustomerHTTPListUsesNeutralNewActionLabel(t *testing.T) {
+	store := &customerHTTPStore{}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodGet, "/customers", nil, sessionToken, csrfToken))
+	body := response.Body.String()
+
+	if response.Code != http.StatusOK || !strings.Contains(body, `href="/customers/new">Neu</a>`) {
+		t.Fatalf("customer list status/body = %d/%s", response.Code, body)
+	}
+	if strings.Contains(body, `href="/customers/new">Neuer Auftrag</a>`) {
+		t.Fatalf("customer list still uses order-only action label: %s", body)
+	}
+}
+
+func TestCustomerHTTPPileLocationEditorProvidesDisabledMapsAction(t *testing.T) {
+	store := &customerHTTPStore{}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodGet, "/customers/new", nil, sessionToken, csrfToken))
+	body := response.Body.String()
+
+	if response.Code != http.StatusOK || !strings.Contains(body, `data-location-maps aria-disabled="true"`) ||
+		!strings.Contains(body, `target="_blank" rel="noopener noreferrer"`) ||
+		!strings.Contains(body, `>In Google Maps öffnen</a>`) {
+		t.Fatalf("pile location maps action status/body = %d/%s", response.Code, body)
+	}
+}
+
 func TestTransportPartnerListAndInputAreAvailableToDrivers(t *testing.T) {
 	store := &customerHTTPStore{partners: []customers.TransportPartner{{ID: "partner-1", Name: "Holztrans GmbH", Type: customers.TransportPartnerCompany}}}
 	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)

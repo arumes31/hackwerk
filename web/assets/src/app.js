@@ -2969,6 +2969,7 @@ function initializeJobLocationEditor(editor, maplibregl) {
   const committedSource = editor.querySelector("[data-location-committed-source]");
   const badge = editor.querySelector("[data-location-badge]");
   const message = editor.querySelector("[data-location-message]");
+  const mapsLink = editor.querySelector("[data-location-maps]");
   if (!canvas || !latitudeInput || !longitudeInput || !committedLatitude || !committedLongitude || !committedSource) return;
 
   let draftSource = editor.dataset.initialSource || "coordinates";
@@ -2980,9 +2981,23 @@ function initializeJobLocationEditor(editor, maplibregl) {
     if (message) message.textContent = text;
     if (badge) badge.textContent = status;
   };
+  const updateMapsLink = (point) => {
+    if (!mapsLink) return;
+    if (!point) {
+      mapsLink.removeAttribute("href");
+      mapsLink.setAttribute("aria-disabled", "true");
+      return;
+    }
+    const url = new URL("https://www.google.com/maps/search/");
+    url.searchParams.set("api", "1");
+    url.searchParams.set("query", `${displayCoordinate(point.latitude)},${displayCoordinate(point.longitude)}`);
+    mapsLink.href = url.toString();
+    mapsLink.setAttribute("aria-disabled", "false");
+  };
   const setInputValidity = (valid) => {
     latitudeInput.setAttribute("aria-invalid", String(!valid));
     longitudeInput.setAttribute("aria-invalid", String(!valid));
+    updateMapsLink(valid ? mapPoint(latitudeInput.value, longitudeInput.value) : null);
   };
   const setMarker = (point, center = true) => {
     if (!map || !maplibregl) return;
@@ -3149,6 +3164,7 @@ function initializeJobLocationEditor(editor, maplibregl) {
     searchAddress();
   });
 
+  updateMapsLink(initialPoint);
   if (initialPoint) setMarker(initialPoint, false);
   map?.on("click", (event) => setDraft(
     { latitude: event.lngLat.lat, longitude: event.lngLat.lng },

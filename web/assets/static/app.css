@@ -855,7 +855,8 @@ textarea { min-height: 6rem; resize: vertical; }
 .inline-note textarea { min-height: 4rem; }
 .button--danger { border-color: #8c2f24; background: #8c2f24; }
 .button--danger:hover { border-color: #6f2019; background: #6f2019; }
-.button:disabled { opacity: .6; cursor: not-allowed; }
+.button:disabled,
+.button[aria-disabled="true"] { opacity: .6; cursor: not-allowed; }
 .pagination { justify-content: center; margin-top: 1.25rem; }
 
 /* Compact is the application default: dense work lists, forms only on demand. */

@@ -542,7 +542,7 @@ func TestTask02LocationSearchWithoutMap(t *testing.T) {
   <input type="hidden" data-location-committed-latitude><input type="hidden" data-location-committed-longitude><input type="hidden" data-location-committed-source>
   <input type="search" data-location-search-input><button type="button" data-location-search-submit>Suchen</button>
   <p data-location-search-status></p><ul data-location-search-results hidden></ul>
-  <p data-location-message></p><button type="button" data-location-commit>Standort übernehmen</button>
+  <p data-location-message></p><a data-location-maps aria-disabled="true">In Google Maps öffnen</a><button type="button" data-location-commit>Standort übernehmen</button><button type="button" data-location-clear>Standort entfernen</button>
 </section></form><script src="/assets/app.js"></script></body></html>`)
 		case "/assets/app.js":
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -569,7 +569,7 @@ func TestTask02LocationSearchWithoutMap(t *testing.T) {
 	t.Cleanup(cancelTimeout)
 	t.Cleanup(func() { _ = chromedp.Cancel(browserContext) })
 
-	var draftPrepared, committed bool
+	var draftPrepared, mapsLinkReady, committed, mapsLinkDisabled bool
 	if err := chromedp.Run(browserContext,
 		chromedp.Navigate(server.URL),
 		chromedp.WaitVisible("[data-map-fallback]:not([hidden])", chromedp.ByQuery),
@@ -585,6 +585,11 @@ func TestTask02LocationSearchWithoutMap(t *testing.T) {
 				&& editor.querySelector('[data-location-committed-longitude]').value === ''
 				&& editor.querySelector('[data-location-committed-source]').value === '';
 		})()`, &draftPrepared),
+		chromedp.Evaluate(`(() => {
+			const link = document.querySelector('[data-location-maps]');
+			return link.getAttribute('aria-disabled') === 'false'
+				&& link.href === 'https://www.google.com/maps/search/?api=1&query=46.710000%2C15.570000';
+		})()`, &mapsLinkReady),
 		chromedp.Click("[data-location-commit]", chromedp.ByQuery),
 		chromedp.Evaluate(`(() => {
 			const editor = document.querySelector('[data-job-location-editor]');
@@ -592,11 +597,16 @@ func TestTask02LocationSearchWithoutMap(t *testing.T) {
 				&& editor.querySelector('[data-location-committed-longitude]').value === '15.570000'
 				&& editor.querySelector('[data-location-committed-source]').value === 'coordinates';
 		})()`, &committed),
+		chromedp.Click("[data-location-clear]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const link = document.querySelector('[data-location-maps]');
+			return link.getAttribute('aria-disabled') === 'true' && !link.hasAttribute('href');
+		})()`, &mapsLinkDisabled),
 	); err != nil {
 		t.Fatalf("location fallback journey: %s", browserDiagnostics(browserContext, err))
 	}
-	if !draftPrepared || !committed {
-		t.Fatalf("fallback draft prepared=%v, committed=%v", draftPrepared, committed)
+	if !draftPrepared || !mapsLinkReady || !committed || !mapsLinkDisabled {
+		t.Fatalf("fallback draft prepared=%v, maps link ready=%v, committed=%v, maps link disabled=%v", draftPrepared, mapsLinkReady, committed, mapsLinkDisabled)
 	}
 }
 
