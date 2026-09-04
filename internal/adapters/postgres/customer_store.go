@@ -884,11 +884,11 @@ func lockTransportPartner(ctx context.Context, queries *dbgen.Queries, id string
 	if err != nil {
 		return customers.ErrValidation
 	}
-	if _, err := queries.LockActiveTransportPartner(ctx, parsedID); errors.Is(err, pgx.ErrNoRows) {
+	_, err = queries.LockActiveTransportPartner(ctx, parsedID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return customers.ErrValidation
-	} else {
-		return err
 	}
+	return err
 }
 
 func pageValues(page, pageSize int) (int32, int32, error) {

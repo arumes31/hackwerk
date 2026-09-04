@@ -394,6 +394,8 @@ func (s *Service) requireExceptionPolicy(ctx context.Context, driverID string, e
 		if exceptionType == ExceptionAvailableOverride {
 			return nil
 		}
+	case PolicyAssumedAvailable:
+		return ErrValidation
 	}
 	return ErrValidation
 }
