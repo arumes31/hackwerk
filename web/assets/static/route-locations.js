@@ -90,7 +90,7 @@ function initializeRouteLocationEditor(editor) {
     confirmed.value = "true";
     if (nativeConfirmed) nativeConfirmed.checked = true;
     if (message) message.textContent = "Standort übernommen. Änderungen an Adresse oder Koordinaten müssen erneut bestätigt werden.";
-    setSelectedResultState("Ausdrücklich übernommen");
+    setSelectedResultState("Übernommen");
     setError("");
     notifyStatus();
     return true;

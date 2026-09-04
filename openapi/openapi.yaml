@@ -44,7 +44,7 @@ paths:
   /api/v1/geocoding/search:
     post:
       operationId: searchGeocodingCandidates
-      description: Sucht über den statisch konfigurierten Geocoding-Dienst nach Kartenpositionen. Speichert weder Suchtext noch Treffer und übernimmt keinen Haufenstandort.
+      description: Sucht über den statisch konfigurierten Geocoding-Dienst nach Kartenpositionen. Speichert weder Suchtext noch Treffer; die Browserauswahl übernimmt Adresse und Koordinaten nur gemeinsam in den lokalen Formularentwurf.
       security: [{ sessionCookie: [] }]
       parameters:
         - name: X-CSRF-Token
@@ -63,7 +63,7 @@ paths:
                 query: { type: string, minLength: 3, maxLength: 200 }
       responses:
         "200":
-          description: Höchstens die konfigurierte Anzahl prüfbarer Kartentreffer; keine Standortübernahme.
+          description: Höchstens die konfigurierte Anzahl prüfbarer Kartentreffer; keine serverseitige Mutation.
           headers:
             Cache-Control: { schema: { type: string, const: no-store } }
           content:
@@ -681,6 +681,41 @@ paths:
       responses:
         "200": { description: Suchergebnis nach Name, Firma, Ort, Telefon oder Auftragsnummer. }
         "403": { description: Berechtigung oder CSRF fehlt. }
+  /customers/customer-only:
+    post:
+      operationId: createCustomerOnly
+      description: Erzeugt bewusst nur eine Kundenakte, ohne Auftrag oder Wartelisteneintrag.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/CustomerOnlyForm" }
+      responses:
+        "303": { description: Kundenakte angelegt; Redirect zur Kundenakte, optional mit Dublettenhinweis. }
+        "403": { description: Berechtigung oder CSRF fehlt. }
+        "422": { description: Kundenangaben fachlich ungültig. }
+  /transport-partners:
+    get:
+      operationId: listTransportPartners
+      description: Zeigt berechtigten Administratoren und Fahrern die wiederverwendbaren aktiven Transportpartner.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Serverseitig gerenderte Liste mit Person/Firma, Name und optionalen Kontaktdaten. }
+        "403": { description: Berechtigung fehlt. }
+    post:
+      operationId: createTransportPartner
+      description: Erfasst einen von Fahrerprofilen und Fahrzeugressourcen getrennten Transportpartner.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/TransportPartnerForm" }
+      responses:
+        "303": { description: Transportpartner angelegt und zur Liste weitergeleitet. }
+        "403": { description: Berechtigung oder CSRF fehlt. }
+        "422": { description: Art oder Name ungültig beziehungsweise bereits aktiv vergeben. }
   /customers/{customerID}:
     parameters:
       - $ref: "#/components/parameters/CustomerID"
@@ -896,7 +931,7 @@ paths:
   /availability:
     get:
       operationId: getOwnAvailability
-      description: Mobile HTML-Verwaltung der eigenen Wochenregeln und Ausnahmen; das Zielprofil stammt ausschließlich aus der Session.
+      description: Mobile HTML-Verwaltung gemäß Profilrichtlinie; Aushilfsfahrer erfassen nur einzelne verfügbare Tage/Zeitfenster, das Zielprofil stammt ausschließlich aus der Session.
       security: [{ sessionCookie: [] }]
       responses:
         "200": { description: Wochenplan, Ausnahmen und normalisierte 14-Tage-Vorschau in Europe/Vienna. }
@@ -922,7 +957,7 @@ paths:
   /availability/exceptions/vacation-preset:
     post:
       operationId: createOwnVacationPreset
-      description: Erzeugt Abwesenheitsausnahmen für einen Tag oder eine Arbeitswoche in Europe/Vienna.
+      description: Erzeugt ausschließlich für bestehende Profile im Übergangsmodus Abwesenheitsausnahmen für einen Tag oder eine Arbeitswoche in Europe/Vienna.
       security: [{ sessionCookie: [] }]
       responses:
         "303": { description: Urlaubsausnahmen gespeichert. }
@@ -1060,7 +1095,7 @@ paths:
     parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
     post:
       operationId: previewAppointmentMutation
-      description: Nebenwirkungsfreie Admin-Prüfung vor Move, Resize, Assignment oder Fixierung. Mutation und PostgreSQL-Reservierungsconstraints prüfen beim anschließenden Schreiben erneut.
+      description: Nebenwirkungsfreie Admin-Prüfung vor Move, Resize, Assignment oder Fixierung. Eine Abweichung vom Kunden-Wunschzeitraum erscheint als nicht blockierende Warnung. Mutation und PostgreSQL-Reservierungsconstraints prüfen beim anschließenden Schreiben erneut.
       security: [{ sessionCookie: [] }]
       requestBody:
         required: true
@@ -1573,12 +1608,13 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [key, label, detail, passed]
+            required: [key, label, detail, passed, severity]
             properties:
               key: { type: string }
               label: { type: string }
               detail: { type: string }
               passed: { type: boolean }
+              severity: { type: string, enum: [blocking, warning, info] }
         conflicts: { type: array, items: { type: object, additionalProperties: true } }
     NotificationStatus:
       type: object
@@ -1639,7 +1675,7 @@ components:
         starts_at: { type: string, format: date-time }
         ends_at: { type: string, format: date-time }
         status: { type: string, enum: [available, limited, unavailable] }
-        source: { type: string, enum: [none, rule, exception, inactive_driver] }
+        source: { type: string, enum: [none, rule, exception, policy, inactive_driver] }
         source_type: { type: string }
         reason: { type: string, description: Minimierter deutscher Grund ohne interne Bemerkung. }
     AvailabilityResponse:
@@ -1703,6 +1739,7 @@ components:
         transport_duration: { type: string, description: Minuten oder Stunden:Minuten. }
         transport_trips: { type: integer, minimum: 0 }
         transport_mode: { type: string, enum: [none, internal, external, undecided] }
+        transport_partner_id: { type: string, format: uuid, description: Optionaler aktiver Partner; bei chipping_only unzulässig. }
         external_confirmed: { type: boolean, default: false }
         preferred_start: { type: string, format: date }
         preferred_end: { type: string, format: date }
@@ -1715,6 +1752,24 @@ components:
       allOf:
         - $ref: "#/components/schemas/CustomerFields"
         - $ref: "#/components/schemas/JobForm"
+    CustomerOnlyForm:
+      allOf:
+        - $ref: "#/components/schemas/CustomerFields"
+        - type: object
+          required: [csrf_token]
+          properties:
+            csrf_token: { type: string, writeOnly: true }
+    TransportPartnerForm:
+      type: object
+      additionalProperties: false
+      required: [csrf_token, partner_type, name]
+      properties:
+        csrf_token: { type: string, writeOnly: true }
+        partner_type: { type: string, enum: [person, company] }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        phone: { type: string, maxLength: 64 }
+        address: { type: string, maxLength: 1000 }
+        internal_note: { type: string, maxLength: 2000 }
   securitySchemes:
     sessionCookie:
       type: apiKey

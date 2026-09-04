@@ -242,10 +242,10 @@ SELECT id::text, customer_id::text, job_number, job_type, volume_m3::text,
        archived_at, version,
        COALESCE(pile_latitude::text, '')::text AS pile_latitude,
        COALESCE(pile_longitude::text, '')::text AS pile_longitude,
-       COALESCE(pile_location_source, '')::text AS pile_location_source
-       , COALESCE(transport_partner_id::text, '')::text AS transport_partner_id
-       , COALESCE((SELECT tp.name FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_name
-       , COALESCE((SELECT tp.partner_type FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_type
+       COALESCE(pile_location_source, '')::text AS pile_location_source,
+       COALESCE(transport_partner_id::text, '')::text AS transport_partner_id,
+       COALESCE((SELECT tp.name FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_name,
+       COALESCE((SELECT tp.partner_type FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_type
 FROM jobs WHERE id = sqlc.arg(id)::uuid;
 
 -- name: LockJobForArchive :one

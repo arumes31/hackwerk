@@ -69,9 +69,13 @@ func createTransportPartner(service *customers.Service, page templates.PageData,
 		}, middleware.GetReqID(request.Context()))
 		if err != nil {
 			partners, _ := service.ListTransportPartners(request.Context(), session.Actor)
+			status := http.StatusUnprocessableEntity
+			if errors.Is(err, auth.ErrForbidden) {
+				status = http.StatusForbidden
+			}
 			render(response, request, templates.TransportPartners(templates.TransportPartnersData{
 				Shell: shell(request, page, csrfCookie), Partners: partners, Error: "Der Transportpartner konnte nicht gespeichert werden. Name und Art prüfen.",
-			}), http.StatusUnprocessableEntity, logger)
+			}), status, logger)
 			return
 		}
 		http.Redirect(response, request, "/transport-partners", http.StatusSeeOther)
