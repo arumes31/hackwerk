@@ -50,8 +50,8 @@ func TestDashboardStoreRemainsBoundedWithOperationalData(t *testing.T) {
 
 		UPDATE customers SET latitude=48.21, longitude=14.21
 		WHERE email::text LIKE 'dashboard-%';
-		INSERT INTO drivers (display_name)
-		SELECT 'Lastfahrer ' || value FROM generate_series(3,6) AS value;
+		INSERT INTO drivers (display_name, availability_policy)
+		SELECT 'Lastfahrer ' || value, 'legacy_rules' FROM generate_series(3,6) AS value;
 		INSERT INTO availability_rules (driver_id,iso_weekday,local_start,local_end,valid_from,status)
 		SELECT d.id, weekday, '07:00', '17:00', '2026-01-01', 'available'
 		FROM drivers d CROSS JOIN generate_series(1,5) AS weekday

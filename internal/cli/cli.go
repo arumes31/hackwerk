@@ -683,11 +683,23 @@ func seedOperations(ctx context.Context, pool *pgxpool.Pool, identity *auth.Serv
 		}
 		profile, ok := byUserID[user.ID]
 		if !ok {
-			id, createErr := driverService.CreateProfile(ctx, actor, driver.ProfileInput{UserID: user.ID, DisplayName: account.displayName, CanCompleteJobs: true}, "seed-dev")
+			id, createErr := driverService.CreateProfile(ctx, actor, driver.ProfileInput{
+				UserID: user.ID, DisplayName: account.displayName, CanCompleteJobs: true,
+				AvailabilityPolicy: driver.PolicyLegacyRules,
+			}, "seed-dev")
 			if createErr != nil {
 				return createErr
 			}
 			profile = driver.Profile{ID: id, UserID: user.ID, DisplayName: account.displayName, IsActive: true}
+		} else if profile.AvailabilityPolicy != driver.PolicyLegacyRules {
+			updateErr := driverService.UpdateProfile(ctx, actor, profile.ID, profile.Version, driver.ProfileInput{
+				UserID: profile.UserID, DisplayName: profile.DisplayName, Phone: profile.Phone, Email: profile.Email,
+				CanCompleteJobs: profile.CanCompleteJobs, InternalNote: profile.InternalNote,
+				IsPrimary: profile.IsPrimary, AvailabilityPolicy: driver.PolicyLegacyRules,
+			}, "seed-dev")
+			if updateErr != nil {
+				return updateErr
+			}
 		}
 		schedule, scheduleErr := driverService.Schedule(ctx, actor, profile.ID)
 		if scheduleErr != nil {

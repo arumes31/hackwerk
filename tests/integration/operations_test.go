@@ -145,11 +145,11 @@ func operationsFixture(t *testing.T) (context.Context, *pgxpool.Pool, *driver.Se
 	if err := pool.QueryRow(ctx, "INSERT INTO users (username, display_name, role, password_hash, must_change_password) VALUES ('operations-owner', 'Franz Fahrer', 'driver', 'not-used', false) RETURNING id::text").Scan(&owner.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, "INSERT INTO drivers (user_id, display_name) VALUES ($1, 'Franz Fahrer') RETURNING id::text", owner.UserID).Scan(&owner.DriverID); err != nil {
+	if err := pool.QueryRow(ctx, "INSERT INTO drivers (user_id, display_name, availability_policy) VALUES ($1, 'Franz Fahrer', 'legacy_rules') RETURNING id::text", owner.UserID).Scan(&owner.DriverID); err != nil {
 		t.Fatal(err)
 	}
 	var foreignID string
-	if err := pool.QueryRow(ctx, "INSERT INTO drivers (display_name) VALUES ('Maria ohne Login') RETURNING id::text").Scan(&foreignID); err != nil {
+	if err := pool.QueryRow(ctx, "INSERT INTO drivers (display_name, availability_policy) VALUES ('Maria ohne Login', 'legacy_rules') RETURNING id::text").Scan(&foreignID); err != nil {
 		t.Fatal(err)
 	}
 	location, err := time.LoadLocation("Europe/Vienna")

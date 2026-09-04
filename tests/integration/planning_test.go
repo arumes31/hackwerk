@@ -274,7 +274,7 @@ func TestPlanningPerformanceBudgetWithRealisticDataset(t *testing.T) {
 	}
 	for index := 3; index <= 6; index++ {
 		var driverID string
-		if err := fixture.pool.QueryRow(fixture.ctx, "INSERT INTO drivers (display_name) VALUES ($1) RETURNING id::text", fmt.Sprintf("Fahrer %d", index)).Scan(&driverID); err != nil {
+		if err := fixture.pool.QueryRow(fixture.ctx, "INSERT INTO drivers (display_name, availability_policy) VALUES ($1, 'legacy_rules') RETURNING id::text", fmt.Sprintf("Fahrer %d", index)).Scan(&driverID); err != nil {
 			t.Fatal(err)
 		}
 		for weekday := 1; weekday <= 5; weekday++ {

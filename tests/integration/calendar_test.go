@@ -650,7 +650,7 @@ func newCalendarFixture(t *testing.T) calendarFixture {
 		t.Fatal(err)
 	}
 	var driver1, driver2 string
-	if err := pool.QueryRow(ctx, "INSERT INTO drivers (display_name) VALUES ('Franz'), ('Maria') RETURNING id::text").Scan(&driver1); err != nil {
+	if err := pool.QueryRow(ctx, "INSERT INTO drivers (display_name, availability_policy) VALUES ('Franz', 'legacy_rules'), ('Maria', 'legacy_rules') RETURNING id::text").Scan(&driver1); err != nil {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(ctx, "SELECT id::text FROM drivers WHERE display_name='Maria'").Scan(&driver2); err != nil {
