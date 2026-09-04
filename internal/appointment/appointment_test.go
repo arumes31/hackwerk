@@ -924,6 +924,36 @@ func TestPreviewMutationUsesAuthoritativeTransportValidation(t *testing.T) {
 	}
 }
 
+func TestPreviewMutationWarnsWhenCustomerRequestedAnotherDate(t *testing.T) {
+	t.Parallel()
+	current := assignedAppointment(LifecycleProposal, 3)
+	current.PreferredStartDate = "2026-09-10"
+	current.PreferredEndDate = "2026-09-12"
+	current.PreferenceMode = "window"
+	store := &fakeStore{current: current}
+	service, err := New(store, fakeAvailability{status: driver.StatusAvailable}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startsAt := time.Date(2026, 9, 15, 8, 0, 0, 0, time.UTC)
+	preview, err := service.PreviewMutation(t.Context(), testAdmin(), PreflightInput{
+		AppointmentID: current.ID, Action: "move", ExpectedVersion: current.Version,
+		StartsAt: startsAt, EndsAt: startsAt.Add(2 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range preview.Checks {
+		if check.Key == "customer_preference" {
+			if check.Severity != PreflightWarning || check.Passed || check.Detail != "Kunde möchte einen anderen Zeitraum (10.09.–12.09.2026)." {
+				t.Fatalf("preference check = %#v", check)
+			}
+			return
+		}
+	}
+	t.Fatal("customer preference warning missing")
+}
+
 func TestSwapAppointmentsIsAdminOnlyAndVersioned(t *testing.T) {
 	t.Parallel()
 	first := assignedAppointment(LifecycleProposal, 2)

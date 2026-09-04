@@ -333,6 +333,7 @@ func (s *AppointmentStore) Get(ctx context.Context, id string) (appointment.Appo
 	value := appointment.Appointment{
 		ID: row.AID, JobID: row.AJobID, JobNumber: row.JobNumber, JobWorkflow: row.WorkflowStatus,
 		JobType: row.JobType, TransportMode: row.TransportMode,
+		PreferredStartDate: row.PreferredStartDate, PreferredEndDate: row.PreferredEndDate, PreferenceMode: row.PreferenceMode,
 		Lifecycle: appointment.Lifecycle(row.LifecycleStatus), Confirmation: appointment.Confirmation(row.ConfirmationStatus),
 		StartsAt: row.StartsAt.Time.UTC(), EndsAt: row.EndsAt.Time.UTC(), BufferBeforeMinutes: row.BufferBeforeMinutes,
 		BufferAfterMinutes: row.BufferAfterMinutes, AvailabilityOverrideReason: row.AvailabilityOverrideReason,

@@ -1006,12 +1006,13 @@ function renderAppointmentPreflight(preview) {
   timing.textContent = `Arbeit ${preview.WorkingMinutes ?? preview.working_minutes ?? 0} Min. · Transport ${preview.TransportMinutes ?? preview.transport_minutes ?? 0} Min. · Puffer ${preview.BufferBeforeMinutes ?? preview.buffer_before_minutes ?? 0}/${preview.BufferAfterMinutes ?? preview.buffer_after_minutes ?? 0} Min.`;
   const list = document.createElement("ul");
   list.className = "preflight-check-list";
-  (preview.Checks || preview.checks || []).forEach((check) => {
-    const item = document.createElement("li");
-    const passed = check.Passed ?? check.passed;
-    item.className = passed ? "preflight-check preflight-check--passed" : "preflight-check preflight-check--failed";
-    const label = document.createElement("strong");
-    label.textContent = `${passed ? "Bestanden" : "Prüfen"}: ${check.Label || check.label}`;
+	  (preview.Checks || preview.checks || []).forEach((check) => {
+	    const item = document.createElement("li");
+	    const passed = check.Passed ?? check.passed;
+	    const severity = check.Severity || check.severity || "blocking";
+	    item.className = severity === "warning" ? "preflight-check preflight-check--warning" : (passed ? "preflight-check preflight-check--passed" : "preflight-check preflight-check--failed");
+	    const label = document.createElement("strong");
+	    label.textContent = `${severity === "warning" ? "Hinweis" : (passed ? "Bestanden" : "Prüfen")}: ${check.Label || check.label}`;
     const detail = document.createElement("span");
     detail.textContent = check.Detail || check.detail || "";
     item.append(label, detail); list.append(item);

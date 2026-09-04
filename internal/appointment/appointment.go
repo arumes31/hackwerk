@@ -32,6 +32,7 @@ var (
 type Lifecycle string
 type Confirmation string
 type Purpose string
+type PreflightSeverity string
 
 const (
 	LifecycleDraft     Lifecycle = "draft"
@@ -50,6 +51,10 @@ const (
 	PurposeTransport Purpose = "transport"
 	PurposeTrailer   Purpose = "trailer"
 	PurposeOther     Purpose = "other"
+
+	PreflightBlocking PreflightSeverity = "blocking"
+	PreflightWarning  PreflightSeverity = "warning"
+	PreflightInfo     PreflightSeverity = "info"
 )
 
 type TimeInput struct {
@@ -85,6 +90,7 @@ type AssignedResource struct {
 
 type Appointment struct {
 	ID, JobID, JobNumber, JobWorkflow, JobType, TransportMode string
+	PreferredStartDate, PreferredEndDate, PreferenceMode      string
 	Lifecycle                                                 Lifecycle
 	Confirmation                                              Confirmation
 	StartsAt, EndsAt                                          time.Time
@@ -159,10 +165,11 @@ type ConflictResolution struct {
 }
 
 type PreflightCheck struct {
-	Key    string `json:"key"`
-	Label  string `json:"label"`
-	Detail string `json:"detail"`
-	Passed bool   `json:"passed"`
+	Key      string            `json:"key"`
+	Label    string            `json:"label"`
+	Detail   string            `json:"detail"`
+	Passed   bool              `json:"passed"`
+	Severity PreflightSeverity `json:"severity"`
 }
 
 type PreflightInput struct {
@@ -229,6 +236,7 @@ func (s *Service) PreviewMutation(ctx context.Context, actor auth.Actor, input P
 		PreflightCheck{Key: "job", Label: "Auftrag", Passed: strings.TrimSpace(current.JobID) != "", Detail: current.JobNumber},
 		PreflightCheck{Key: "time", Label: "Zeit und Dauer", Passed: endsAt.After(startsAt) && endsAt.Sub(startsAt) >= time.Duration(current.EstimatedHackMinutes+current.EstimatedTransportMinutes)*time.Minute, Detail: "Arbeits-, Transport- und Pufferzeit sind getrennt ausgewiesen."},
 	)
+	result.Checks = append(result.Checks, customerPreferenceCheck(candidate, startsAt))
 	primaryDriver := false
 	for _, assigned := range candidate.Drivers {
 		primaryDriver = primaryDriver || assigned.Primary
@@ -276,6 +284,35 @@ func (s *Service) PreviewMutation(ctx context.Context, actor auth.Actor, input P
 		PreflightCheck{Key: "conflicts", Label: "Konflikte", Passed: len(conflicts) == 0, Detail: fmt.Sprintf("%d betroffene Belegung(en)", len(conflicts))},
 	)
 	return result, nil
+}
+
+func customerPreferenceCheck(candidate Appointment, startsAt time.Time) PreflightCheck {
+	check := PreflightCheck{
+		Key: "customer_preference", Label: "Kundenwunsch", Passed: true, Severity: PreflightInfo,
+		Detail: "Kein fester Wunschzeitraum hinterlegt.",
+	}
+	if candidate.PreferenceMode == "flexible" || candidate.PreferredStartDate == "" || candidate.PreferredEndDate == "" {
+		return check
+	}
+	location, err := time.LoadLocation("Europe/Vienna")
+	if err != nil {
+		return check
+	}
+	localDate := startsAt.In(location).Format(time.DateOnly)
+	start, startErr := time.Parse(time.DateOnly, candidate.PreferredStartDate)
+	end, endErr := time.Parse(time.DateOnly, candidate.PreferredEndDate)
+	if startErr != nil || endErr != nil {
+		return check
+	}
+	period := start.Format("02.01.") + "–" + end.Format("02.01.2006")
+	if localDate >= candidate.PreferredStartDate && localDate <= candidate.PreferredEndDate {
+		check.Detail = "Der Termin liegt im Kundenwunsch " + period + "."
+		return check
+	}
+	check.Passed = false
+	check.Severity = PreflightWarning
+	check.Detail = "Kunde möchte einen anderen Zeitraum (" + period + ")."
+	return check
 }
 
 type SwapInput struct {

@@ -206,7 +206,9 @@ SELECT a.id::text, a.job_id::text, j.job_number, a.lifecycle_status, a.confirmat
        a.starts_at, a.ends_at, a.buffer_before_minutes, a.buffer_after_minutes,
        COALESCE(a.availability_override_reason, '')::text AS availability_override_reason,
        a.version, j.workflow_status, j.job_type, j.transport_mode,
-       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes
+       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes,
+       COALESCE(j.preferred_start_date::text, '')::text AS preferred_start_date,
+       COALESCE(j.preferred_end_date::text, '')::text AS preferred_end_date, j.preference_mode
 FROM appointments a
 JOIN jobs j ON j.id = a.job_id
 WHERE a.id = $1::uuid
@@ -230,6 +232,9 @@ type GetAppointmentRow struct {
 	ExternalTransportConfirmed bool
 	EstimatedHackMinutes       int32
 	EstimatedTransportMinutes  int32
+	PreferredStartDate         string
+	PreferredEndDate           string
+	PreferenceMode             string
 }
 
 func (q *Queries) GetAppointment(ctx context.Context, id pgtype.UUID) (GetAppointmentRow, error) {
@@ -253,6 +258,9 @@ func (q *Queries) GetAppointment(ctx context.Context, id pgtype.UUID) (GetAppoin
 		&i.ExternalTransportConfirmed,
 		&i.EstimatedHackMinutes,
 		&i.EstimatedTransportMinutes,
+		&i.PreferredStartDate,
+		&i.PreferredEndDate,
+		&i.PreferenceMode,
 	)
 	return i, err
 }
@@ -346,7 +354,9 @@ SELECT a.id::text, a.job_id::text, a.lifecycle_status, a.confirmation_status,
        COALESCE(a.availability_override_reason, '')::text AS availability_override_reason,
        COALESCE(a.cancellation_reason, '')::text AS cancellation_reason,
        a.version, j.workflow_status, j.job_type, j.transport_mode,
-       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes
+       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes,
+       COALESCE(j.preferred_start_date::text, '')::text AS preferred_start_date,
+       COALESCE(j.preferred_end_date::text, '')::text AS preferred_end_date, j.preference_mode
 FROM appointments a
 JOIN jobs j ON j.id = a.job_id
 WHERE a.id = $1::uuid
@@ -371,6 +381,9 @@ type GetAppointmentForUpdateRow struct {
 	ExternalTransportConfirmed bool
 	EstimatedHackMinutes       int32
 	EstimatedTransportMinutes  int32
+	PreferredStartDate         string
+	PreferredEndDate           string
+	PreferenceMode             string
 }
 
 func (q *Queries) GetAppointmentForUpdate(ctx context.Context, id pgtype.UUID) (GetAppointmentForUpdateRow, error) {
@@ -394,6 +407,9 @@ func (q *Queries) GetAppointmentForUpdate(ctx context.Context, id pgtype.UUID) (
 		&i.ExternalTransportConfirmed,
 		&i.EstimatedHackMinutes,
 		&i.EstimatedTransportMinutes,
+		&i.PreferredStartDate,
+		&i.PreferredEndDate,
+		&i.PreferenceMode,
 	)
 	return i, err
 }
