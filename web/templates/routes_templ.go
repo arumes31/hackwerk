@@ -252,7 +252,7 @@ func adminRoutePlanner(data RoutePageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\"><div class=\"section-heading\"><div><p class=\"eyebrow\">Schritt 1</p><h2>Start und Ende festlegen</h2></div><a class=\"button button--quiet\" href=\"/settings/route-locations\">Orte verwalten</a></div><p class=\"form-hint\">Wählen Sie einen gespeicherten Ort oder bestätigen Sie einen anderen Ort ausdrücklich. Die Route verwendet keinen stillen Ersatzstandort.</p><div class=\"route-location-grid\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\"><div class=\"section-heading\"><div><p class=\"eyebrow\">Schritt 1</p><h2>Start und Ende festlegen</h2></div><a class=\"button button--quiet\" href=\"/settings/route-locations\">Orte verwalten</a></div><p class=\"form-hint\">Wählen Sie einen gespeicherten Ort oder übernehmen Sie eine gefundene Adresse. Die Route verwendet keinen stillen Ersatzstandort.</p><div class=\"route-location-grid\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1394,33 +1394,33 @@ func routeLocationChooser(prefix string, heading string, locations []RouteLocati
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 120, "\"></label></div><label class=\"check-label route-location-native-confirm\"><input type=\"checkbox\" name=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 120, "\"></label></div><noscript><label class=\"check-label route-location-native-confirm\"><input type=\"checkbox\" name=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var80 string
 		templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.ResolveAttributeValue(prefix + "_custom_confirmed_native")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 227, Col: 126}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 227, Col: 136}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var80)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 121, "\" value=\"true\" data-route-location-native-confirmed> Adresse und Koordinaten geprüft</label><div class=\"route-location-custom__confirm\"><button class=\"button button--quiet\" type=\"button\" data-route-location-confirm>Standort übernehmen</button><span id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 121, "\" value=\"true\" data-route-location-native-confirmed> Manuell eingegebenen Standort bestätigen</label></noscript><div class=\"route-location-custom__confirm\"><button class=\"button button--quiet\" type=\"button\" data-route-location-confirm>Manuelle Eingabe übernehmen</button><span id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var81 string
 		templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.ResolveAttributeValue(prefix + "-custom-hint")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 228, Col: 190}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/routes.templ`, Line: 228, Col: 198}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var81)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 122, "\" class=\"form-hint\" data-route-location-message aria-live=\"polite\">Bitte Adresse oder Koordinaten prüfen und anschließend übernehmen.</span></div></div></div><p class=\"form-alert route-location-picker__error\" data-route-location-error role=\"alert\" hidden></p></fieldset>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 122, "\" class=\"form-hint\" data-route-location-message aria-live=\"polite\">Ein Suchtreffer übernimmt Adresse und Koordinaten gemeinsam. Manuelle Änderungen bitte einmal übernehmen.</span></div></div></div><p class=\"form-alert route-location-picker__error\" data-route-location-error role=\"alert\" hidden></p></fieldset>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -120,7 +120,7 @@ function initializeRouteLocationEditor(editor) {
     addressText.textContent = text;
     const state = document.createElement("small");
     state.setAttribute("data-route-location-selected-state", "");
-    state.textContent = "Noch nicht übernommen";
+    state.textContent = "Zur Übernahme auswählen";
     selected.append(title, addressText, state);
     item.append(selected);
     results.append(item);
@@ -176,20 +176,15 @@ function initializeRouteLocationEditor(editor) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "location-search__result";
-        button.textContent = text;
+        button.textContent = `Adresse übernehmen: ${text}`;
         button.addEventListener("click", () => {
           address.value = text;
+          if (!String(label.value || "").trim()) label.value = text.split(",")[0].trim().slice(0, 120);
           setCoordinateDraft(lat, lon);
           showSelectedResult(text);
-          showSearchStatus("Die Auswahl bleibt als Entwurf sichtbar und speichert noch nichts.");
-          if (message) message.textContent = "Adresse und Koordinaten vorbereitet; noch nicht übernommen.";
-          if (!String(label.value || "").trim()) {
-            setError("Adresse ausgewählt. Bitte noch eine Bezeichnung eingeben und anschließend Standort übernehmen.");
-            label.focus({ preventScroll: true });
-          } else {
-            setError("");
-            confirm.focus({ preventScroll: true });
-          }
+          if (!confirmLocation()) return;
+          showSearchStatus("Adresse und Koordinaten wurden gemeinsam übernommen.");
+          if (message) message.textContent = "Adresse und Koordinaten übernommen.";
           notifyStatus();
         });
         item.append(button);
@@ -311,12 +306,17 @@ routePlannerForms.forEach(form => {
     const latitude = picker.querySelector("[data-route-location-latitude]");
     const longitude = picker.querySelector("[data-route-location-longitude]");
     const confirmed = picker.querySelector("[data-route-location-confirmed]")?.value === "true" || picker.querySelector("[data-route-location-native-confirmed]")?.checked;
-    if (!String(label?.value || "").trim()) return { message: `${heading}: Bezeichnung eingeben.`, target: label };
-    if (!String(address?.value || "").trim()) return { message: `${heading}: geprüfte Adresse eingeben.`, target: address };
+    const hasLabel = Boolean(String(label?.value || "").trim());
+    const hasAddress = Boolean(String(address?.value || "").trim());
+    const hasLatitude = Boolean(String(latitude?.value || "").trim());
+    const hasLongitude = Boolean(String(longitude?.value || "").trim());
+    if (!hasLabel && !hasAddress && !hasLatitude && !hasLongitude) return { message: `${heading} auswählen oder Adresse übernehmen.`, target: picker };
+    if (!hasLabel) return { message: `${heading}: Bezeichnung eingeben.`, target: label };
+    if (!hasAddress) return { message: `${heading}: Adresse eingeben oder suchen.`, target: address };
     const lat = routeLocationCoordinate(latitude?.value, -90, 90);
     const lon = routeLocationCoordinate(longitude?.value, -180, 180);
     if (lat === null || lon === null) return { message: `${heading}: gültige Koordinaten eingeben.`, target: latitude };
-    if (!confirmed) return { message: `${heading}: ausdrücklich mit „Standort übernehmen“ bestätigen.`, target: picker.querySelector("[data-route-location-confirm]") };
+    if (!confirmed) return { message: `${heading}: manuell geänderten Standort übernehmen.`, target: picker.querySelector("[data-route-location-confirm]") };
     return null;
   };
 

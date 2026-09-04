@@ -98,7 +98,7 @@ templ adminRoutePlanner(data RoutePageData) {
 		<form method="post" action="/planning/routes" class="route-builder form-card" data-sticky-actions>
 			<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
 			<div class="section-heading"><div><p class="eyebrow">Schritt 1</p><h2>Start und Ende festlegen</h2></div><a class="button button--quiet" href="/settings/route-locations">Orte verwalten</a></div>
-			<p class="form-hint">Wählen Sie einen gespeicherten Ort oder bestätigen Sie einen anderen Ort ausdrücklich. Die Route verwendet keinen stillen Ersatzstandort.</p>
+			<p class="form-hint">Wählen Sie einen gespeicherten Ort oder übernehmen Sie eine gefundene Adresse. Die Route verwendet keinen stillen Ersatzstandort.</p>
 			<div class="route-location-grid">
 				@routeLocationChooser("start", "Startort", data.RouteLocations, data.DefaultStartID, false, data.Form.Submitted, data.Form.Start)
 				@routeLocationChooser("end", "Endort", data.RouteLocations, data.DefaultEndID, true, data.Form.Submitted, data.Form.End)
@@ -224,8 +224,8 @@ templ routeLocationChooser(prefix string, heading string, locations []RouteLocat
 					<label>Breitengrad<input type="text" name={ prefix + "_latitude" } inputmode="decimal" autocomplete="off" placeholder="48,208000" value={ state.Latitude } data-route-location-latitude aria-describedby={ prefix + "-custom-hint" }/></label>
 					<label>Längengrad<input type="text" name={ prefix + "_longitude" } inputmode="decimal" autocomplete="off" placeholder="16,373000" value={ state.Longitude } data-route-location-longitude aria-describedby={ prefix + "-custom-hint" }/></label>
 				</div>
-				<label class="check-label route-location-native-confirm"><input type="checkbox" name={ prefix + "_custom_confirmed_native" } value="true" data-route-location-native-confirmed/> Adresse und Koordinaten geprüft</label>
-				<div class="route-location-custom__confirm"><button class="button button--quiet" type="button" data-route-location-confirm>Standort übernehmen</button><span id={ prefix + "-custom-hint" } class="form-hint" data-route-location-message aria-live="polite">Bitte Adresse oder Koordinaten prüfen und anschließend übernehmen.</span></div>
+				<noscript><label class="check-label route-location-native-confirm"><input type="checkbox" name={ prefix + "_custom_confirmed_native" } value="true" data-route-location-native-confirmed/> Manuell eingegebenen Standort bestätigen</label></noscript>
+				<div class="route-location-custom__confirm"><button class="button button--quiet" type="button" data-route-location-confirm>Manuelle Eingabe übernehmen</button><span id={ prefix + "-custom-hint" } class="form-hint" data-route-location-message aria-live="polite">Ein Suchtreffer übernimmt Adresse und Koordinaten gemeinsam. Manuelle Änderungen bitte einmal übernehmen.</span></div>
 			</div>
 		</div>
 		<p class="form-alert route-location-picker__error" data-route-location-error role="alert" hidden></p>
