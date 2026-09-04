@@ -29,3 +29,14 @@
 /.codex-tmp/
 /.codex-cache/
 /secrets/
+/.cursor/
+/.gemini/
+/.grok/
+/.impeccable/
+/.claude/
+/.agent/
+/.github/agents/
+/.github/hooks/
+/.github/skills/
+
+
