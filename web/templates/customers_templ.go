@@ -2651,7 +2651,7 @@ func Customers(data CustomerListData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 234, "<main id=\"hauptinhalt\" class=\"page compact-page customer-page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">Kundenakten</p><h1>Kunden &amp; Aufträge</h1><p>Kompakte Übersicht über Kontakte und Auftragsbestand.</p></div><div class=\"action-row\"><a class=\"button button--quiet\" href=\"/voice\">Sprachentwurf</a><a class=\"button mobile-redundant-primary-action\" href=\"/customers/new\">Neuer Auftrag</a></div></div><form id=\"customer-list-controls\" method=\"post\" action=\"/customers/search\" class=\"customer-list-toolbar\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 234, "<main id=\"hauptinhalt\" class=\"page compact-page customer-page\"><div class=\"page-heading\"><div><p class=\"eyebrow\">Kundenakten</p><h1>Kunden &amp; Aufträge</h1><p>Kompakte Übersicht über Kontakte und Auftragsbestand.</p></div><div class=\"action-row\"><a class=\"button button--quiet\" href=\"/voice\">Sprachentwurf</a><a class=\"button mobile-redundant-primary-action\" href=\"/customers/new\">Neu</a></div></div><form id=\"customer-list-controls\" method=\"post\" action=\"/customers/search\" class=\"customer-list-toolbar\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

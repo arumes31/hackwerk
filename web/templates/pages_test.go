@@ -8,9 +8,29 @@ import (
 	"time"
 
 	"example.invalid/hackplan/internal/auth"
+	"example.invalid/hackplan/internal/customers"
 	"example.invalid/hackplan/internal/dashboard"
 	"example.invalid/hackplan/internal/planning"
 )
+
+func TestCustomersUsesNeutralNewActionLabel(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	data := CustomerListData{
+		Shell: ShellData{Page: PageData{AppName: "HackWerk"}},
+		Page:  customers.Page[customers.CustomerSummary]{},
+	}
+	if err := Customers(data).Render(context.Background(), &output); err != nil {
+		t.Fatal(err)
+	}
+	markup := output.String()
+	if !strings.Contains(markup, `href="/customers/new">Neu</a>`) {
+		t.Fatalf("customer list is missing neutral new action: %s", markup)
+	}
+	if strings.Contains(markup, `href="/customers/new">Neuer Auftrag</a>`) {
+		t.Fatalf("customer list still uses order-only action label: %s", markup)
+	}
+}
 
 func TestRoutePointCountIncludesDistinctEndpoints(t *testing.T) {
 	t.Parallel()
