@@ -250,7 +250,7 @@ func appointmentMutationPreview(service *appointment.Service, mailEnabled, smsEn
 		assessment := notification.AssessChannels(detail.NotificationPreference, detail.Email, detail.Phone, mailEnabled, smsEnabled)
 		notificationPassed := len(assessment.Targets) > 0 || strings.TrimSpace(request.Form.Get("without_notification_reason")) != ""
 		preview.Checks = append(preview.Checks, appointment.PreflightCheck{
-			Key: "notification", Label: "Benachrichtigung", Passed: notificationPassed,
+			Key: "notification", Label: "Benachrichtigung", Passed: notificationPassed, Severity: appointment.PreflightBlocking,
 			Detail: firstNonEmpty(assessment.Warning, "Kanal und maskiertes Ziel sind verfügbar."),
 		})
 		location, locationErr := time.LoadLocation("Europe/Vienna")
@@ -265,7 +265,7 @@ func appointmentMutationPreview(service *appointment.Service, mailEnabled, smsEn
 			localStart.Hour()*60+localStart.Minute() >= openAt.Hour()*60+openAt.Minute() &&
 			localEnd.Hour()*60+localEnd.Minute() <= closeAt.Hour()*60+closeAt.Minute()
 		preview.Checks = append(preview.Checks, appointment.PreflightCheck{
-			Key: "overtime", Label: "Überstundenrisiko", Passed: insideOperatingDay,
+			Key: "overtime", Label: "Überstundenrisiko", Passed: insideOperatingDay, Severity: appointment.PreflightBlocking,
 			Detail: "Hinweis aus konfigurierter Betriebszeit; keine arbeitsrechtliche Freigabe.",
 		})
 		writeJSON(response, http.StatusOK, preview)

@@ -232,9 +232,9 @@ func (s *Service) PreviewMutation(ctx context.Context, actor auth.Actor, input P
 		Checks: make([]PreflightCheck, 0, 8),
 	}
 	result.Checks = append(result.Checks,
-		PreflightCheck{Key: "version", Label: "Terminversion", Passed: current.Version == input.ExpectedVersion, Detail: "Aktueller Stand wird beim Speichern erneut geprüft."},
-		PreflightCheck{Key: "job", Label: "Auftrag", Passed: strings.TrimSpace(current.JobID) != "", Detail: current.JobNumber},
-		PreflightCheck{Key: "time", Label: "Zeit und Dauer", Passed: endsAt.After(startsAt) && endsAt.Sub(startsAt) >= time.Duration(current.EstimatedHackMinutes+current.EstimatedTransportMinutes)*time.Minute, Detail: "Arbeits-, Transport- und Pufferzeit sind getrennt ausgewiesen."},
+		PreflightCheck{Key: "version", Label: "Terminversion", Passed: current.Version == input.ExpectedVersion, Severity: PreflightBlocking, Detail: "Aktueller Stand wird beim Speichern erneut geprüft."},
+		PreflightCheck{Key: "job", Label: "Auftrag", Passed: strings.TrimSpace(current.JobID) != "", Severity: PreflightBlocking, Detail: current.JobNumber},
+		PreflightCheck{Key: "time", Label: "Zeit und Dauer", Passed: endsAt.After(startsAt) && endsAt.Sub(startsAt) >= time.Duration(current.EstimatedHackMinutes+current.EstimatedTransportMinutes)*time.Minute, Severity: PreflightBlocking, Detail: "Arbeits-, Transport- und Pufferzeit sind getrennt ausgewiesen."},
 	)
 	result.Checks = append(result.Checks, customerPreferenceCheck(candidate, startsAt))
 	primaryDriver := false
@@ -255,9 +255,9 @@ func (s *Service) PreviewMutation(ctx context.Context, actor auth.Actor, input P
 		}
 	}
 	result.Checks = append(result.Checks,
-		PreflightCheck{Key: "driver", Label: "Primärfahrer", Passed: primaryDriver, Detail: "Mindestens ein Fahrer und genau ein Primärfahrer."},
-		PreflightCheck{Key: "chipper", Label: "Hackressource", Passed: chipper, Detail: "Eine aktive Hackmaschine ist erforderlich."},
-		PreflightCheck{Key: "transport", Label: "Transport", Passed: transport, Detail: "Interner Transport benötigt ein Transportmittel; externer Transport muss bestätigt sein."},
+		PreflightCheck{Key: "driver", Label: "Primärfahrer", Passed: primaryDriver, Severity: PreflightBlocking, Detail: "Mindestens ein Fahrer und genau ein Primärfahrer."},
+		PreflightCheck{Key: "chipper", Label: "Hackressource", Passed: chipper, Severity: PreflightBlocking, Detail: "Eine aktive Hackmaschine ist erforderlich."},
+		PreflightCheck{Key: "transport", Label: "Transport", Passed: transport, Severity: PreflightBlocking, Detail: "Interner Transport benötigt ein Transportmittel; externer Transport muss bestätigt sein."},
 	)
 	from, to := reservationRange(candidate, startsAt, endsAt)
 	availabilityPassed := true
@@ -280,8 +280,8 @@ func (s *Service) PreviewMutation(ctx context.Context, actor auth.Actor, input P
 	}
 	result.Conflicts = conflicts
 	result.Checks = append(result.Checks,
-		PreflightCheck{Key: "availability", Label: "Fahrerverfügbarkeit", Passed: availabilityPassed, Detail: "Abweichungen benötigen eine Admin-Begründung."},
-		PreflightCheck{Key: "conflicts", Label: "Konflikte", Passed: len(conflicts) == 0, Detail: fmt.Sprintf("%d betroffene Belegung(en)", len(conflicts))},
+		PreflightCheck{Key: "availability", Label: "Fahrerverfügbarkeit", Passed: availabilityPassed, Severity: PreflightBlocking, Detail: "Abweichungen benötigen eine Admin-Begründung."},
+		PreflightCheck{Key: "conflicts", Label: "Konflikte", Passed: len(conflicts) == 0, Severity: PreflightBlocking, Detail: fmt.Sprintf("%d betroffene Belegung(en)", len(conflicts))},
 	)
 	return result, nil
 }

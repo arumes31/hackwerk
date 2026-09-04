@@ -869,6 +869,9 @@ func TestPreviewMutationIsAdminOnlyAndReportsAuthoritativeChecks(t *testing.T) {
 	}
 	checks := make(map[string]bool, len(preview.Checks))
 	for _, check := range preview.Checks {
+		if check.Severity != PreflightBlocking && check.Severity != PreflightWarning && check.Severity != PreflightInfo {
+			t.Fatalf("preflight check %q has invalid severity %q", check.Key, check.Severity)
+		}
 		checks[check.Key] = check.Passed
 	}
 	if checks["version"] || !checks["job"] || !checks["time"] || !checks["driver"] || !checks["chipper"] || !checks["transport"] || !checks["availability"] || checks["conflicts"] {
