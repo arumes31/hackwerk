@@ -25,6 +25,18 @@ func TestReleaseScriptsReadSchemaVersionFromBinary(t *testing.T) {
 	}
 }
 
+func TestContainerSmokeUsesWebAuthnCompatibleLoopbackHost(t *testing.T) {
+	t.Parallel()
+	smoke := repositoryFile(t, "scripts", "release", "container-smoke.sh")
+
+	if !strings.Contains(smoke, "APP_BASE_URL=http://localhost:18533") {
+		t.Fatal("container smoke must use a domain-compatible WebAuthn RP host")
+	}
+	if strings.Contains(smoke, "APP_BASE_URL=http://127.0.0.1:18533") {
+		t.Fatal("container smoke uses an IP address that WebAuthn rejects as an RP ID")
+	}
+}
+
 func TestProductionComposeHealthAndProviderSecretContracts(t *testing.T) {
 	t.Parallel()
 	compose := repositoryFile(t, "compose.prod.example.yaml")

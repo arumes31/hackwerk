@@ -45,7 +45,7 @@ docker run --rm --network "$network" -e APP_ENV=development -e DATABASE_URL="$da
 app_id=$(docker run -d --name "$app" --label "hackwerk.audit=$audit_label" --network "$network" --read-only --user 65532:65532 \
   --cap-drop ALL --security-opt no-new-privileges --pids-limit 128 \
   --tmpfs /tmp:size=64m,mode=1777,noexec,nosuid,nodev \
-  -e APP_ENV=test -e APP_BASE_URL=http://127.0.0.1:18533 \
+  -e APP_ENV=test -e APP_BASE_URL=http://localhost:18533 \
   -e APP_LISTEN_ADDR=:18533 -e DATABASE_URL="$database_url" "$image" serve)
 
 attempt=0
