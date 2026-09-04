@@ -255,8 +255,8 @@ document.querySelectorAll("[data-route-location-picker]").forEach(picker => {
     if (kind === "saved") {
       id.value = choice.dataset.routeLocationId || "";
       version.value = choice.dataset.routeLocationVersion || "";
-      latitude.value = choice.dataset.routeLocationLatitude || "";
-      longitude.value = choice.dataset.routeLocationLongitude || "";
+      latitude.value = choice.dataset.routeLocationSavedLatitude || "";
+      longitude.value = choice.dataset.routeLocationSavedLongitude || "";
       confirmed.value = "";
       if (nativeConfirmed) nativeConfirmed.checked = false;
       lastStop.value = "";

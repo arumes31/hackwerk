@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
@@ -14,10 +15,13 @@ import (
 
 	"example.invalid/hackplan/internal/adapters/postgres"
 	"example.invalid/hackplan/internal/app"
+	"example.invalid/hackplan/internal/auth"
 	"example.invalid/hackplan/internal/buildinfo"
 	"example.invalid/hackplan/internal/config"
 	"example.invalid/hackplan/internal/planning"
 	"example.invalid/hackplan/internal/web"
+	webassets "example.invalid/hackplan/web/assets"
+	"example.invalid/hackplan/web/templates"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
 )
@@ -548,6 +552,88 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	assertCommandPaletteJourney(t, browser)
 }
 
+func TestRouteLocationOneClickFeedbackUsesCustomCoordinates(t *testing.T) {
+	routeLocationsJavaScript, err := webassets.Files.ReadFile("static/route-locations.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/":
+			response.Header().Set("Content-Type", "text/html; charset=utf-8")
+			data := templates.RoutePageData{
+				Shell: templates.ShellData{
+					Page: templates.PageData{
+						AppName: "HackWerk", JSPath: "/assets/empty.js", PresentationBootstrapJSPath: "/assets/empty.js",
+						CSSPath: "/assets/empty.css", MobileCSSPath: "/assets/empty.css", ControlFoundationCSSPath: "/assets/empty.css",
+						ManifestPath: "/assets/empty", IconPath: "/assets/empty", RouteLocationsJSPath: "/assets/route-locations.js",
+					},
+					Actor: auth.Actor{Role: auth.RoleAdmin, DisplayName: "Test"}, CSRFToken: "csrf",
+				},
+				Candidates: []planning.RouteCandidate{{JobID: "job", JobNumber: "HA-2026-0001", CustomerName: "Test", Region: "Linz", VolumeM3: "10", Location: planning.Point{Latitude: 48.3, Longitude: 14.3}}},
+				Options: planning.RouteOptions{
+					Drivers:   []planning.RouteDriverOption{{ID: "driver", Name: "Fahrer"}},
+					Resources: []planning.RouteResourceOption{{ID: "chipper", Name: "Hacki", Type: "chipper"}},
+				},
+				Departure:      "2026-09-05T07:00",
+				SelectedJobIDs: []string{"job"},
+				RouteLocations: []templates.RouteLocationOption{{ID: "yard", Name: "Betriebshof", Address: "Hof 1", Latitude: "48.200000", Longitude: "14.200000", Version: 1, Active: true, DefaultEnd: true}},
+				DefaultEndID:   "yard",
+				Form:           templates.RouteFormState{DriverID: "driver", ChipperResourceID: "chipper"},
+			}
+			if err := templates.Routes(data).Render(request.Context(), response); err != nil {
+				t.Error(err)
+			}
+		case "/assets/route-locations.js":
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = response.Write(routeLocationsJavaScript)
+		case "/assets/empty.js", "/assets/empty.css", "/assets/empty":
+			response.WriteHeader(http.StatusNoContent)
+		case "/api/v1/geocoding/search":
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(response, `{"results":[{"label":"eworx, Hafenstraße 2a, 4020 Linz","latitude":48.314789,"longitude":14.302487}]}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	options := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(browserExecutable(t)), chromedp.Headless, chromedp.DisableGPU, chromedp.NoSandbox, chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck, chromedp.UserDataDir(browserProfileDir(t)), chromedp.WindowSize(1000, 800))
+	allocator, cancelAllocator := chromedp.NewExecAllocator(context.Background(), options...)
+	t.Cleanup(cancelAllocator)
+	browser, cancelBrowser := chromedp.NewContext(allocator)
+	t.Cleanup(cancelBrowser)
+	browser, cancelTimeout := context.WithTimeout(browser, 30*time.Second)
+	t.Cleanup(cancelTimeout)
+
+	var ready bool
+	if err := chromedp.Run(browser,
+		chromedp.Navigate(server.URL),
+		chromedp.Poll(`document.documentElement.dataset.routeLocationsReady==='true'`, nil),
+		chromedp.SetValue("[data-route-location-search-input]", "eworx", chromedp.ByQuery),
+		chromedp.Click("[data-route-location-search-submit]", chromedp.ByQuery),
+		chromedp.WaitVisible("button.location-search__result", chromedp.ByQuery),
+		chromedp.Click("button.location-search__result", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const form=document.querySelector('form[action="/planning/routes"]');
+			const editor=form.querySelector('[data-route-location-prefix="start"] [data-route-location-editor]');
+			const feedback=form.querySelector('[data-route-form-feedback]');
+			return form.elements.start_custom_confirmed.value==='true'
+				&&editor.querySelector('[data-route-location-latitude]').value==='48.314789'
+				&&editor.querySelector('[data-route-location-longitude]').value==='14.302487'
+				&&feedback.classList.contains('route-form-feedback--complete')
+				&&!feedback.textContent.includes('gültige Koordinaten eingeben');
+		})()`, &ready),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browser, err))
+	}
+	if !ready {
+		var state string
+		_ = chromedp.Run(browser, chromedp.Evaluate(`JSON.stringify((()=>{const form=document.querySelector('form[action="/planning/routes"]');const editor=form.querySelector('[data-route-location-prefix="start"] [data-route-location-editor]');return {latitude:editor.querySelector('[data-route-location-latitude]').value,longitude:editor.querySelector('[data-route-location-longitude]').value,confirmed:form.elements.start_custom_confirmed.value,feedback:form.querySelector('[data-route-form-feedback]').textContent}})())`, &state))
+		t.Fatalf("one-click route location not ready: %s", state)
+	}
+}
+
 func assertCommandPaletteJourney(t *testing.T, browser context.Context) {
 	t.Helper()
 	var commandResults int
@@ -614,36 +700,33 @@ func assertRouteGeocodingJourney(t *testing.T, browser context.Context, serverUR
 	if geocodingResultCount != 1 {
 		t.Fatalf("route geocoding results=%d status=%q", geocodingResultCount, geocodingStatus)
 	}
-	var geocodingDraftVisible, geocodingNeedsLabel, customLocationConfirmed bool
+	var customLocationAccepted bool
 	if err := runBrowserStep(browser, "select searched custom route location",
 		chromedp.Click("[data-route-location-prefix='start'] button.location-search__result", chromedp.ByQuery),
 		chromedp.Evaluate(`(() => {
 			const picker=document.querySelector('[data-route-location-prefix="start"]');
+			const editor=picker.querySelector('[data-route-location-editor]');
+			const form=picker.closest('form');
+			const fields=new FormData(form);
+			const feedback=form.querySelector('[data-route-form-feedback]')?.textContent||'';
 			return !picker.querySelector('[data-route-location-custom]').hidden
 				&&!picker.querySelector('[data-route-location-search-results]').hidden
 				&&Boolean(picker.querySelector('[data-route-location-selected-result]'))
-				&&picker.querySelector('[data-route-location-confirmed]').value==='';
-		})()`, &geocodingDraftVisible),
-		chromedp.Evaluate(`document.querySelector('[data-route-location-prefix="start"] [data-route-location-error]')?.textContent.includes('Bezeichnung')`, &geocodingNeedsLabel),
+				&&picker.querySelector('[data-route-location-confirmed]').value==='true'
+				&&editor.querySelector('[data-route-location-latitude]').value==='46.710000'
+				&&editor.querySelector('[data-route-location-longitude]').value==='15.570000'
+				&&fields.get('start_latitude')==='46.710000'
+				&&fields.get('start_longitude')==='15.570000'
+				&&picker.querySelector('[data-route-location-selected-state]')?.textContent.includes('Übernommen')
+				&&!feedback.includes('Startort: gültige Koordinaten eingeben.');
+		})()`, &customLocationAccepted),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
-	if err := runBrowserStep(browser, "confirm searched custom route location",
-		chromedp.SetValue("input[name='start_custom_label']", "Waldlager", chromedp.ByQuery),
-		chromedp.Evaluate(`document.querySelector("[data-route-location-prefix='start'] [data-route-location-confirm]").click()`, nil),
-		chromedp.Evaluate(`(() => {
-			const picker=document.querySelector('[data-route-location-prefix="start"]');
-			return picker.querySelector('[data-route-location-confirmed]').value==='true'
-				&&!picker.querySelector('[data-route-location-custom]').hidden
-				&&picker.querySelector('[data-route-location-selected-state]')?.textContent.includes('übernommen');
-		})()`, &customLocationConfirmed),
-	); err != nil {
-		t.Fatal(browserDiagnostics(browser, err))
-	}
-	if geocodingDraftVisible && geocodingNeedsLabel && customLocationConfirmed {
+	if customLocationAccepted {
 		return
 	}
 	var state string
-	_ = chromedp.Run(browser, chromedp.Evaluate(`JSON.stringify((()=>{const picker=document.querySelector('[data-route-location-prefix="start"]');return {result:picker.querySelector('.location-search__result')?.outerHTML||'',address:picker.querySelector('[data-route-location-address]')?.value||'',latitude:picker.querySelector('[data-route-location-latitude]')?.value||'',confirmed:picker.querySelector('[data-route-location-confirmed]')?.value||'',error:picker.querySelector('[data-route-location-error]')?.textContent||'',status:picker.querySelector('[data-route-location-search-status]')?.textContent||''}})())`, &state))
-	t.Fatalf("route geocoding draft/label/confirmed=%v/%v/%v state=%s", geocodingDraftVisible, geocodingNeedsLabel, customLocationConfirmed, state)
+	_ = chromedp.Run(browser, chromedp.Evaluate(`JSON.stringify((()=>{const picker=document.querySelector('[data-route-location-prefix="start"]');const editor=picker.querySelector('[data-route-location-editor]');return {result:picker.querySelector('.location-search__result')?.outerHTML||'',address:picker.querySelector('[data-route-location-address]')?.value||'',latitude:editor.querySelector('[data-route-location-latitude]')?.value||'',longitude:editor.querySelector('[data-route-location-longitude]')?.value||'',confirmed:picker.querySelector('[data-route-location-confirmed]')?.value||'',error:picker.querySelector('[data-route-location-error]')?.textContent||'',status:picker.querySelector('[data-route-location-search-status]')?.textContent||'',feedback:picker.closest('form').querySelector('[data-route-form-feedback]')?.textContent||''}})())`, &state))
+	t.Fatalf("route geocoding one-click acceptance=%v state=%s", customLocationAccepted, state)
 }

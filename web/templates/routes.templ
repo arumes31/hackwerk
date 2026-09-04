@@ -195,7 +195,7 @@ templ routeLocationChooser(prefix string, heading string, locations []RouteLocat
 		<div class="route-location-picker__choices" role="radiogroup" aria-label={ heading + " auswählen" }>
 			for _, location := range locations {
 				<label class="route-location-choice">
-					<input type="radio" name={ prefix + "_selection" } value={ "saved:" + location.ID + ":" + strconv.Itoa(int(location.Version)) } checked?={ routeLocationChoiceChecked(state.Selection, submitted, "saved:" + location.ID + ":" + strconv.Itoa(int(location.Version)), location.ID == defaultID) } data-route-location-choice data-route-location-kind="saved" data-route-location-id={ location.ID } data-route-location-version={ strconv.Itoa(int(location.Version)) } data-route-location-label={ location.Name } data-route-location-latitude={ location.Latitude } data-route-location-longitude={ location.Longitude }/>
+					<input type="radio" name={ prefix + "_selection" } value={ "saved:" + location.ID + ":" + strconv.Itoa(int(location.Version)) } checked?={ routeLocationChoiceChecked(state.Selection, submitted, "saved:" + location.ID + ":" + strconv.Itoa(int(location.Version)), location.ID == defaultID) } data-route-location-choice data-route-location-kind="saved" data-route-location-id={ location.ID } data-route-location-version={ strconv.Itoa(int(location.Version)) } data-route-location-saved-label={ location.Name } data-route-location-saved-latitude={ location.Latitude } data-route-location-saved-longitude={ location.Longitude }/>
 					<span><strong>{ location.Name }</strong><small>{ location.Address }</small></span>
 				</label>
 			}

@@ -3646,8 +3646,8 @@ function initializeRouteMap(canvas, maplibregl) {
   const selectedEnd = context.querySelector('[data-route-location-prefix="end"] [data-route-location-choice]:checked');
   const routeStart = mapPoint(canvas.dataset.routeStartLatitude, canvas.dataset.routeStartLongitude);
   const routeEnd = mapPoint(canvas.dataset.routeEndLatitude, canvas.dataset.routeEndLongitude);
-  const start = routeStart || mapPoint(selectedStart?.dataset.routeLocationLatitude, selectedStart?.dataset.routeLocationLongitude);
-  const end = routeEnd || mapPoint(selectedEnd?.dataset.routeLocationLatitude, selectedEnd?.dataset.routeLocationLongitude);
+  const start = routeStart || mapPoint(selectedStart?.dataset.routeLocationSavedLatitude, selectedStart?.dataset.routeLocationSavedLongitude);
+  const end = routeEnd || mapPoint(selectedEnd?.dataset.routeLocationSavedLatitude, selectedEnd?.dataset.routeLocationSavedLongitude);
   let currentStart = start;
   let currentEnd = end;
   const stopJobIDs = new Set(stops.map((stop) => stop.jobID).filter(Boolean));
@@ -3796,8 +3796,8 @@ function initializeRouteMap(canvas, maplibregl) {
     if (!picker || !choice) return { point: null, label: prefix === "start" ? "Startort" : "Endort" };
     if (choice.dataset.routeLocationKind === "saved") {
       return {
-        point: mapPoint(choice.dataset.routeLocationLatitude, choice.dataset.routeLocationLongitude),
-        label: String(choice.dataset.routeLocationLabel || (prefix === "start" ? "Startort" : "Endort")).trim(),
+        point: mapPoint(choice.dataset.routeLocationSavedLatitude, choice.dataset.routeLocationSavedLongitude),
+        label: String(choice.dataset.routeLocationSavedLabel || (prefix === "start" ? "Startort" : "Endort")).trim(),
       };
     }
     if (choice.dataset.routeLocationKind === "last-stop") {
@@ -3812,10 +3812,10 @@ function initializeRouteMap(canvas, maplibregl) {
   const renderEndpointMarkers = (fromPicker = false) => {
     const startEndpoint = fromPicker
       ? selectedEndpoint("start")
-      : { point: start, label: String(canvas.dataset.routeStartLabel || selectedStart?.dataset.routeLocationLabel || "Startort").trim() };
+      : { point: start, label: String(canvas.dataset.routeStartLabel || selectedStart?.dataset.routeLocationSavedLabel || "Startort").trim() };
     const endEndpoint = fromPicker
       ? selectedEndpoint("end")
-      : { point: end, label: String(canvas.dataset.routeEndLabel || selectedEnd?.dataset.routeLocationLabel || "Endort").trim() };
+      : { point: end, label: String(canvas.dataset.routeEndLabel || selectedEnd?.dataset.routeLocationSavedLabel || "Endort").trim() };
     currentStart = startEndpoint.point;
     currentEnd = endEndpoint.point;
     updateStartButton();
