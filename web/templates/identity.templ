@@ -54,7 +54,6 @@ templ appHeader(shell ShellData) {
 				@navLink(shell, "/calendar", "Kalender")
 				@navLink(shell, "/waitlist", "Warteliste")
 				@navLink(shell, "/customers", "Kunden")
-				@navLink(shell, "/transport-partners", "Transportpartner")
 				if shell.Actor.Role == auth.RoleAdmin {
 					@navLink(shell, "/planning", "Planung")
 					@navLink(shell, "/planning/routes", "Karte & Routen")
@@ -78,6 +77,7 @@ templ appHeader(shell ShellData) {
 							@navLink(shell, "/admin/users", "Benutzer & Fahrer")
 							@navLink(shell, "/admin/drivers", "Fahrerverfügbarkeit")
 							@navLink(shell, "/admin/resources", "Ressourcen")
+							@navLink(shell, "/transport-partners", "Transportpartner")
 							@navLink(shell, "/settings/route-locations", "Routenorte")
 							@navLink(shell, "/admin/notifications", "Versand")
 							@navLink(shell, "/admin/voice-recordings", "Sprachaufnahmen")
@@ -230,7 +230,6 @@ templ appHeader(shell ShellData) {
 templ mobileMoreActions(shell ShellData) {
 	<span class="mobile-more__label">Erfassen</span>
 	@mobileMoreLink(shell, "/voice", "Auftrag per Sprache")
-	@mobileMoreLink(shell, "/transport-partners", "Transportpartner")
 	if shell.Actor.Role == auth.RoleDriver && shell.Actor.DriverID != "" {
 		@mobileMoreLink(shell, "/my-route", "Meine Route")
 		@mobileMoreLink(shell, "/availability", "Meine Verfügbarkeit")
@@ -244,6 +243,7 @@ templ mobileMoreActions(shell ShellData) {
 		@mobileMoreLink(shell, "/planning/routes", "Karte & Routen")
 		@mobileMoreLink(shell, "/admin/drivers", "Fahrer")
 		@mobileMoreLink(shell, "/admin/resources", "Ressourcen")
+		@mobileMoreLink(shell, "/transport-partners", "Transportpartner")
 		@mobileMoreLink(shell, "/settings/route-locations", "Routenorte")
 		@mobileMoreLink(shell, "/admin/notifications", "Versand")
 		@mobileMoreLink(shell, "/admin/voice-recordings", "Sprachaufnahmen")

@@ -163,6 +163,7 @@ func TestMobileShellUsesOnlyBottomNavigationAndKeepsAdminDestinationsInMore(t *t
 	for _, href := range []string{
 		`href="/planning"`,
 		`href="/planning/routes"`,
+		`href="/transport-partners"`,
 		`href="/admin/drivers"`,
 		`href="/admin/resources"`,
 		`href="/settings/route-locations"`,
@@ -186,6 +187,43 @@ func TestMobileShellUsesOnlyBottomNavigationAndKeepsAdminDestinationsInMore(t *t
 	}
 	if !strings.Contains(driverMarkup, `data-actor-role="driver"`) {
 		t.Fatal("driver shell must expose a non-visual role hook for role-scoped mobile layout")
+	}
+	if strings.Contains(driverMarkup, `href="/transport-partners"`) {
+		t.Fatal("driver shell must not expose transport partners outside the administration menu")
+	}
+}
+
+func TestDesktopTransportPartnersNavigationIsGroupedUnderAdministration(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	shell := ShellData{
+		Page:       PageData{AppName: "HackWerk"},
+		ActivePath: "/transport-partners",
+		Actor:      auth.Actor{Role: auth.RoleAdmin, DisplayName: "Test"},
+	}
+	if err := appHeader(shell).Render(context.Background(), &output); err != nil {
+		t.Fatal(err)
+	}
+	markup := output.String()
+	primaryStart := strings.Index(markup, `<nav class="primary-nav"`)
+	primaryEnd := strings.Index(markup[primaryStart:], `</nav>`)
+	if primaryStart < 0 || primaryEnd < 0 {
+		t.Fatal("desktop primary navigation boundaries are missing")
+	}
+	primary := markup[primaryStart : primaryStart+primaryEnd]
+	if strings.Contains(primary, `href="/transport-partners"`) {
+		t.Fatal("transport partners must not remain in the desktop primary navigation")
+	}
+
+	adminStart := strings.Index(markup, `data-admin-menu`)
+	adminEnd := strings.Index(markup[adminStart:], `</details>`)
+	if adminStart < 0 || adminEnd < 0 {
+		t.Fatal("desktop administration menu boundaries are missing")
+	}
+	adminMenu := markup[adminStart : adminStart+adminEnd]
+	if !strings.Contains(adminMenu, `href="/transport-partners" class="nav-link nav-link--active"`) {
+		t.Fatal("desktop administration menu must contain the active transport partners destination")
 	}
 }
 
