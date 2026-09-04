@@ -28,11 +28,12 @@ type customerHTTPStore struct {
 	waitlist customers.Page[customers.WaitlistItem]
 	list     customers.Page[customers.CustomerSummary]
 
-	created        customers.CreatedIntake
-	input          customers.IntakeInput
-	jobEdit        customers.UpdateJobInput
-	listFilter     customers.CustomerListFilter
-	waitlistFilter customers.WaitlistFilter
+	created         customers.CreatedIntake
+	createdCustomer customers.CustomerInput
+	input           customers.IntakeInput
+	jobEdit         customers.UpdateJobInput
+	listFilter      customers.CustomerListFilter
+	waitlistFilter  customers.WaitlistFilter
 
 	createCalls          int
 	updateCustomerCalls  int
@@ -59,6 +60,10 @@ func (store *customerHTTPStore) CreateIntake(_ context.Context, _ auth.Actor, in
 	store.createCalls++
 	store.input = input
 	return store.created, nil
+}
+func (store *customerHTTPStore) CreateCustomer(_ context.Context, _ auth.Actor, input customers.CustomerInput, _ string) (string, error) {
+	store.createdCustomer = input
+	return testCustomerID, nil
 }
 
 func (store *customerHTTPStore) CreateJob(context.Context, auth.Actor, customers.CreateJobInput) (customers.CreatedIntake, error) {
@@ -173,6 +178,24 @@ func TestCustomerHTTPDriverIntakeUsesCSRFAndPRG(t *testing.T) {
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden || store.createCalls != 1 {
 		t.Fatalf("missing CSRF status = %d, create calls = %d", response.Code, store.createCalls)
+	}
+}
+
+func TestCustomerHTTPCreatesCustomerWithoutJob(t *testing.T) {
+	store := &customerHTTPStore{}
+	router, sessionToken, csrfToken := customerTestRouter(t, auth.RoleDriver, store)
+	form := url.Values{
+		"csrf_token": {csrfToken}, "first_name": {"Anna"}, "last_name": {"Wald"},
+		"country_code": {"AT"}, "notification": {"none"},
+	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodPost, "/customers/customer-only", form, sessionToken, csrfToken))
+
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/customers/"+testCustomerID {
+		t.Fatalf("response = %d location=%q body=%q", response.Code, response.Header().Get("Location"), response.Body.String())
+	}
+	if store.createdCustomer.FirstName != "Anna" || store.createCalls != 0 {
+		t.Fatalf("customer=%#v create intake calls=%d", store.createdCustomer, store.createCalls)
 	}
 }
 

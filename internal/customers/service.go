@@ -190,6 +190,16 @@ type UpdateCustomerInput struct {
 	Customer        CustomerInput
 }
 
+type CreateCustomerInput struct {
+	Customer  CustomerInput
+	RequestID string
+}
+
+type CreatedCustomer struct {
+	CustomerID string
+	Duplicates []Duplicate
+}
+
 type CreateJobInput struct {
 	CustomerID, InitialNote, RequestID string
 	Job                                JobInput
@@ -203,6 +213,7 @@ type UpdateJobInput struct {
 
 type Store interface {
 	FindDuplicates(context.Context, CustomerInput) ([]Duplicate, error)
+	CreateCustomer(context.Context, auth.Actor, CustomerInput, string) (string, error)
 	CreateIntake(context.Context, auth.Actor, IntakeInput, string) (CreatedIntake, error)
 	CreateJob(context.Context, auth.Actor, CreateJobInput) (CreatedIntake, error)
 	UpdateJob(context.Context, auth.Actor, UpdateJobInput) error
@@ -223,6 +234,25 @@ type Store interface {
 	UpdateWaitlistPriority(context.Context, auth.Actor, string, int32, string, int32, string) error
 	RemoveWaitlist(context.Context, auth.Actor, string, int32, string, string) error
 	AddNote(context.Context, auth.Actor, string, string, string, string, string) (string, error)
+}
+
+func (service *Service) CreateCustomer(ctx context.Context, actor auth.Actor, input CreateCustomerInput) (CreatedCustomer, error) {
+	if err := actor.Require(auth.PermissionCustomerCreate); err != nil {
+		return CreatedCustomer{}, err
+	}
+	normalizeCustomer(&input.Customer)
+	if err := input.Customer.Validate(); err != nil {
+		return CreatedCustomer{}, err
+	}
+	duplicates, err := service.store.FindDuplicates(ctx, input.Customer)
+	if err != nil {
+		return CreatedCustomer{}, fmt.Errorf("customers: checking duplicates: %w", err)
+	}
+	id, err := service.store.CreateCustomer(ctx, actor, input.Customer, input.RequestID)
+	if err != nil {
+		return CreatedCustomer{}, fmt.Errorf("customers: creating customer: %w", err)
+	}
+	return CreatedCustomer{CustomerID: id, Duplicates: duplicates}, nil
 }
 
 func (service *Service) CreateJob(ctx context.Context, actor auth.Actor, input CreateJobInput) (CreatedIntake, error) {

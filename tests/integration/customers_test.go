@@ -24,6 +24,24 @@ import (
 )
 
 func TestCustomersPersistence(t *testing.T) {
+	t.Run("customer can be created without a job", func(t *testing.T) {
+		ctx, pool, service, admin, _ := customerFixture(t)
+		created, err := service.CreateCustomer(ctx, admin, customers.CreateCustomerInput{
+			Customer:  customers.CustomerInput{FirstName: "Anna", LastName: "Wald", CountryCode: "AT", NotificationPreference: customers.NotifyNone},
+			RequestID: "request-customer-only",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var jobs int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM jobs WHERE customer_id=$1", created.CustomerID).Scan(&jobs); err != nil {
+			t.Fatal(err)
+		}
+		if jobs != 0 {
+			t.Fatalf("jobs = %d", jobs)
+		}
+	})
+
 	t.Run("intake is atomic and audit contains no pii", func(t *testing.T) {
 		ctx, pool, service, admin, _ := customerFixture(t)
 		input := customerIntake("Franz", "Huber", "80", customers.UrgencyNormal, "Unterneukirchen")

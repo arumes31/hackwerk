@@ -26,6 +26,7 @@ func registerCustomerRoutes(router chi.Router, dependencies Dependencies, page t
 	router.Get("/customers/new", intakePage(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers/new/search", intakeCustomerSearch(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers", createIntake(service, page, csrfCookie, dependencies.Logger))
+	router.Post("/customers/customer-only", createCustomerOnly(service, page, csrfCookie, dependencies.Logger))
 	router.Get("/customers/{customerID}", customerDetail(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers/{customerID}", updateCustomer(service, page, csrfCookie, dependencies.Logger))
 	router.Post("/customers/{customerID}/archive", archiveCustomer(service, dependencies.Logger))
@@ -43,6 +44,34 @@ func registerCustomerRoutes(router chi.Router, dependencies Dependencies, page t
 	router.Post("/waitlist/{waitlistID}/remove", removeWaitlist(service, dependencies.Logger))
 	router.Post("/waitlist/filter-favorites", saveWaitlistFilterFavorite(service, dependencies.Logger))
 	router.Post("/waitlist/filter-favorites/{favoriteID}/delete", deleteWaitlistFilterFavorite(service, dependencies.Logger))
+}
+
+func createCustomerOnly(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		values := intakeValues(request)
+		fieldErrors := customerEditFormErrors(values)
+		if len(fieldErrors) > 0 {
+			renderIntakePage(response, request, service, page, csrfCookie, logger, "", values, "Bitte korrigieren Sie die markierten Kundenfelder.", fieldErrors, http.StatusUnprocessableEntity)
+			return
+		}
+		session, _ := sessionFromContext(request.Context())
+		created, err := service.CreateCustomer(request.Context(), session.Actor, customers.CreateCustomerInput{
+			Customer: customerInputFromValues(values), RequestID: middleware.GetReqID(request.Context()),
+		})
+		if err != nil {
+			status := http.StatusUnprocessableEntity
+			if errors.Is(err, auth.ErrForbidden) {
+				status = http.StatusForbidden
+			}
+			renderIntakePage(response, request, service, page, csrfCookie, logger, "", values, "Der Kunde konnte nicht gespeichert werden. Bitte prüfen Sie die Kundenangaben.", fieldErrors, status)
+			return
+		}
+		location := "/customers/" + url.PathEscape(created.CustomerID)
+		if len(created.Duplicates) > 0 {
+			location += "?duplicate_warning=1"
+		}
+		http.Redirect(response, request, location, http.StatusSeeOther)
+	}
 }
 
 func workspaceSearch(service *customers.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {

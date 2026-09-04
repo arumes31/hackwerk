@@ -10,36 +10,38 @@ import (
 )
 
 type storeStub struct {
-	createCalls    int
-	priorityCalls  int
-	listCalls      int
-	created        CreatedIntake
-	duplicates     []Duplicate
-	favoriteName   string
-	favoriteFilter WaitlistFilter
-	createJob      CreateJobInput
-	updateJob      UpdateJobInput
-	archiveJobID   string
-	archiveJobV    int32
-	customerFilter CustomerListFilter
-	draft          JobDraft
-	recentCustomer string
-	recentJob      string
-	recent         []RecentRecord
-	detail         CustomerDetail
-	updateCustomer UpdateCustomerInput
-	archiveCustID  string
-	archiveCustV   int32
-	waitlistFilter WaitlistFilter
-	priorityID     string
-	priority       int32
-	priorityReason string
-	searchResults  []SearchResult
-	removeID       string
-	removeReason   string
-	noteJobID      string
-	noteBody       string
-	noteKey        string
+	createCalls       int
+	createCustomer    CustomerInput
+	createdCustomerID string
+	priorityCalls     int
+	listCalls         int
+	created           CreatedIntake
+	duplicates        []Duplicate
+	favoriteName      string
+	favoriteFilter    WaitlistFilter
+	createJob         CreateJobInput
+	updateJob         UpdateJobInput
+	archiveJobID      string
+	archiveJobV       int32
+	customerFilter    CustomerListFilter
+	draft             JobDraft
+	recentCustomer    string
+	recentJob         string
+	recent            []RecentRecord
+	detail            CustomerDetail
+	updateCustomer    UpdateCustomerInput
+	archiveCustID     string
+	archiveCustV      int32
+	waitlistFilter    WaitlistFilter
+	priorityID        string
+	priority          int32
+	priorityReason    string
+	searchResults     []SearchResult
+	removeID          string
+	removeReason      string
+	noteJobID         string
+	noteBody          string
+	noteKey           string
 }
 
 func (store *storeStub) FindDuplicates(context.Context, CustomerInput) ([]Duplicate, error) {
@@ -48,6 +50,10 @@ func (store *storeStub) FindDuplicates(context.Context, CustomerInput) ([]Duplic
 func (store *storeStub) CreateIntake(context.Context, auth.Actor, IntakeInput, string) (CreatedIntake, error) {
 	store.createCalls++
 	return store.created, nil
+}
+func (store *storeStub) CreateCustomer(_ context.Context, _ auth.Actor, input CustomerInput, _ string) (string, error) {
+	store.createCustomer = input
+	return store.createdCustomerID, nil
 }
 func (store *storeStub) CreateJob(_ context.Context, _ auth.Actor, input CreateJobInput) (CreatedIntake, error) {
 	store.createJob = input
@@ -140,6 +146,32 @@ func TestCreateIntakeValidatesAndPreservesDuplicateWarning(t *testing.T) {
 	}
 	if store.createCalls != 1 || created.JobNumber != "HA-2026-0001" || len(created.Duplicates) != 1 {
 		t.Fatalf("created = %#v, calls = %d", created, store.createCalls)
+	}
+}
+
+func TestCreateCustomerWithoutJobNormalizesAndReturnsDuplicateWarning(t *testing.T) {
+	t.Parallel()
+	store := &storeStub{
+		createdCustomerID: "customer-1",
+		duplicates:        []Duplicate{{ID: "existing"}},
+	}
+	service, err := NewService(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := service.CreateCustomer(t.Context(), auth.Actor{UserID: "driver-1", Role: auth.RoleDriver}, CreateCustomerInput{
+		Customer:  CustomerInput{FirstName: "  Anna ", LastName: " Wald ", CountryCode: " at ", NotificationPreference: NotifyNone},
+		RequestID: "request-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.CustomerID != "customer-1" || len(created.Duplicates) != 1 {
+		t.Fatalf("created = %#v", created)
+	}
+	if store.createCustomer.FirstName != "Anna" || store.createCustomer.LastName != "Wald" || store.createCustomer.CountryCode != "AT" {
+		t.Fatalf("stored customer = %#v", store.createCustomer)
 	}
 }
 

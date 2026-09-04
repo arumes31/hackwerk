@@ -596,6 +596,14 @@ templ Intake(data IntakeData) {
 						<button class="button button--quiet" type="submit">Suchen</button>
 					</form>
 					@formErrorSummary(data.Error, data.FieldErrors)
+					<details class="compact-create-panel intake-new-customer" data-new-customer-panel>
+						<summary>+ Nur Kundenakte anlegen</summary>
+						<form method="post" action="/customers/customer-only" class="intake-form" data-sticky-actions>
+							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
+							@customerFormFields(data.Values, data.FieldErrors)
+							<div class="form-actions workbench-form-actions"><p>Ein Auftrag kann später in der Kundenakte ergänzt werden.</p><button class="button" type="submit">Kundenakte speichern</button></div>
+						</form>
+					</details>
 					<details class="compact-create-panel intake-new-customer" data-new-customer-panel open?={ data.Error != "" }>
 						<summary>+ Neuer Kunde mit Auftrag</summary>
 						<form method="post" action="/customers" class="intake-form customer-job-workbench" data-transport-form data-sticky-actions>

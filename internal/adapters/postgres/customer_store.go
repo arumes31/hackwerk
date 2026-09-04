@@ -44,6 +44,18 @@ func (store *CustomerStore) FindDuplicates(ctx context.Context, input customers.
 	return result, nil
 }
 
+func (store *CustomerStore) CreateCustomer(ctx context.Context, actor auth.Actor, input customers.CustomerInput, requestID string) (id string, resultErr error) {
+	resultErr = store.transaction(ctx, func(queries *dbgen.Queries) error {
+		var err error
+		id, err = queries.InsertCustomer(ctx, customerParams(input))
+		if err != nil {
+			return err
+		}
+		return insertAudit(ctx, queries, actor, "customer.created", "customer", id, requestID, []string{"created"})
+	})
+	return id, resultErr
+}
+
 func (store *CustomerStore) CreateIntake(ctx context.Context, actor auth.Actor, input customers.IntakeInput, requestID string) (created customers.CreatedIntake, resultErr error) {
 	resultErr = store.transaction(ctx, func(queries *dbgen.Queries) error {
 		customerID, err := queries.InsertCustomer(ctx, customerParams(input.Customer))
