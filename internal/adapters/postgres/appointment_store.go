@@ -1144,8 +1144,11 @@ func loadDriverAvailabilitySnapshot(
 		})
 	}
 	return driver.Availability{
-		Profile: driver.Profile{ID: profileRow.DID, IsActive: profileRow.Active},
-		Rules:   rules, Exceptions: exceptions,
+		Profile: driver.Profile{
+			ID: profileRow.DID, IsActive: profileRow.Active, IsPrimary: profileRow.IsPrimary,
+			AvailabilityPolicy: driver.AvailabilityPolicy(profileRow.AvailabilityPolicy),
+		},
+		Rules: rules, Exceptions: exceptions,
 	}, nil
 }
 

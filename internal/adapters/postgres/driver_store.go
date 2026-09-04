@@ -33,7 +33,7 @@ func (s *DriverStore) ListProfiles(ctx context.Context) ([]driver.Profile, error
 		result = append(result, driver.Profile{
 			ID: row.DID, UserID: row.UserID, Username: row.Username, DisplayName: row.DisplayName,
 			Phone: row.Phone, Email: row.Email, IsActive: row.Active, CanCompleteJobs: row.CanCompleteJobs,
-			InternalNote: row.InternalNote, Version: row.Version,
+			InternalNote: row.InternalNote, IsPrimary: row.IsPrimary, AvailabilityPolicy: driver.AvailabilityPolicy(row.AvailabilityPolicy), Version: row.Version,
 			CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 		})
 	}
@@ -42,10 +42,14 @@ func (s *DriverStore) ListProfiles(ctx context.Context) ([]driver.Profile, error
 
 func (s *DriverStore) CreateProfile(ctx context.Context, actor auth.Actor, input driver.ProfileInput, requestID string) (id string, resultErr error) {
 	resultErr = withQueries(ctx, s.pool, func(queries *dbgen.Queries) error {
+		if err := demotePrimaryDrivers(ctx, queries, actor, input.IsPrimary, "", requestID); err != nil {
+			return err
+		}
 		var err error
 		id, err = queries.InsertDriverProfile(ctx, dbgen.InsertDriverProfileParams{
 			UserID: input.UserID, DisplayName: input.DisplayName, Phone: input.Phone, Email: input.Email,
 			CanCompleteJobs: input.CanCompleteJobs, InternalNote: input.InternalNote,
+			IsPrimary: input.IsPrimary, AvailabilityPolicy: string(input.AvailabilityPolicy),
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return driver.ErrNotFound
@@ -65,9 +69,13 @@ func (s *DriverStore) UpdateProfile(ctx context.Context, actor auth.Actor, id st
 		return driver.ErrNotFound
 	}
 	return withQueries(ctx, s.pool, func(queries *dbgen.Queries) error {
+		if err := demotePrimaryDrivers(ctx, queries, actor, input.IsPrimary, id, requestID); err != nil {
+			return err
+		}
 		rows, updateErr := queries.UpdateDriverProfile(ctx, dbgen.UpdateDriverProfileParams{
 			UserID: input.UserID, DisplayName: input.DisplayName, Phone: input.Phone, Email: input.Email,
 			CanCompleteJobs: input.CanCompleteJobs, InternalNote: input.InternalNote,
+			IsPrimary: input.IsPrimary, AvailabilityPolicy: string(input.AvailabilityPolicy),
 			ID: driverID, ExpectedVersion: version,
 		})
 		if updateErr != nil {
@@ -79,6 +87,19 @@ func (s *DriverStore) UpdateProfile(ctx context.Context, actor auth.Actor, id st
 		return insertAudit(ctx, queries, actor, "driver.updated", "driver", id, requestID,
 			[]string{"user_id", "display_name", "contact", "can_complete_jobs", "internal_note"})
 	})
+}
+
+func demotePrimaryDrivers(ctx context.Context, queries *dbgen.Queries, actor auth.Actor, newPrimary bool, excludedID string, requestID string) error {
+	ids, err := queries.DemoteOtherPrimaryDrivers(ctx, dbgen.DemoteOtherPrimaryDriversParams{NewPrimary: newPrimary, ExcludedID: excludedID})
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := insertAudit(ctx, queries, actor, "driver.updated", "driver", id, requestID, []string{"is_primary", "availability_policy"}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *DriverStore) DeactivateProfile(ctx context.Context, actor auth.Actor, id string, version int32, requestID string) error {
@@ -416,7 +437,7 @@ func (s *DriverStore) profile(ctx context.Context, id pgtype.UUID) (driver.Profi
 	return driver.Profile{
 		ID: row.DID, UserID: row.UserID, Username: row.Username, DisplayName: row.DisplayName,
 		Phone: row.Phone, Email: row.Email, IsActive: row.Active, CanCompleteJobs: row.CanCompleteJobs,
-		InternalNote: row.InternalNote, Version: row.Version,
+		InternalNote: row.InternalNote, IsPrimary: row.IsPrimary, AvailabilityPolicy: driver.AvailabilityPolicy(row.AvailabilityPolicy), Version: row.Version,
 		CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 	}, nil
 }

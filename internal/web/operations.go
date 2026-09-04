@@ -137,10 +137,16 @@ func deactivateDriver(service *driver.Service, logger *slog.Logger) http.Handler
 }
 
 func profileInput(request *http.Request) driver.ProfileInput {
+	isPrimary := request.Form.Get("is_primary") == "true"
+	policy := driver.PolicyExplicitDates
+	if isPrimary && request.Form.Get("check_availability") != "true" {
+		policy = driver.PolicyAssumedAvailable
+	}
 	return driver.ProfileInput{
 		UserID: request.Form.Get("user_id"), DisplayName: request.Form.Get("display_name"),
 		Phone: request.Form.Get("phone"), Email: request.Form.Get("email"),
 		CanCompleteJobs: request.Form.Get("can_complete_jobs") == "true", InternalNote: request.Form.Get("internal_note"),
+		IsPrimary: isPrimary, AvailabilityPolicy: policy,
 	}
 }
 

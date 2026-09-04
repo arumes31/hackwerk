@@ -30,7 +30,9 @@ func (q *Queries) ClearAvailabilityRulesForDay(ctx context.Context, arg ClearAva
 }
 
 const deactivateDriverProfile = `-- name: DeactivateDriverProfile :execrows
-UPDATE drivers SET active = false, version = version + 1, updated_at = now()
+UPDATE drivers SET active = false, is_primary = false,
+    availability_policy = CASE WHEN availability_policy = 'assumed_available' THEN 'explicit_dates' ELSE availability_policy END,
+    version = version + 1, updated_at = now()
 WHERE id = $1::uuid AND version = $2 AND active
 `
 
@@ -85,10 +87,47 @@ func (q *Queries) DeleteAvailabilityRule(ctx context.Context, arg DeleteAvailabi
 	return result.RowsAffected(), nil
 }
 
+const demoteOtherPrimaryDrivers = `-- name: DemoteOtherPrimaryDrivers :many
+UPDATE drivers
+SET is_primary = false,
+    availability_policy = CASE WHEN availability_policy = 'assumed_available' THEN 'explicit_dates' ELSE availability_policy END,
+    version = version + 1,
+    updated_at = now()
+WHERE is_primary AND $1::boolean
+  AND ($2::text = '' OR id <> $2::uuid)
+RETURNING id::text
+`
+
+type DemoteOtherPrimaryDriversParams struct {
+	NewPrimary bool
+	ExcludedID string
+}
+
+func (q *Queries) DemoteOtherPrimaryDrivers(ctx context.Context, arg DemoteOtherPrimaryDriversParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, demoteOtherPrimaryDrivers, arg.NewPrimary, arg.ExcludedID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getDriverProfile = `-- name: GetDriverProfile :one
 SELECT d.id::text, COALESCE(d.user_id::text, '')::text AS user_id, COALESCE(u.username::text, '')::text AS username,
        d.display_name, COALESCE(d.phone, '')::text AS phone, COALESCE(d.email::text, '')::text AS email,
        d.active, d.can_complete_jobs, COALESCE(d.internal_note, '')::text AS internal_note,
+       d.is_primary, d.availability_policy,
        d.version, d.created_at, d.updated_at
 FROM drivers d
 LEFT JOIN users u ON u.id = d.user_id
@@ -96,18 +135,20 @@ WHERE d.id = $1::uuid
 `
 
 type GetDriverProfileRow struct {
-	DID             string
-	UserID          string
-	Username        string
-	DisplayName     string
-	Phone           string
-	Email           string
-	Active          bool
-	CanCompleteJobs bool
-	InternalNote    string
-	Version         int32
-	CreatedAt       pgtype.Timestamptz
-	UpdatedAt       pgtype.Timestamptz
+	DID                string
+	UserID             string
+	Username           string
+	DisplayName        string
+	Phone              string
+	Email              string
+	Active             bool
+	CanCompleteJobs    bool
+	InternalNote       string
+	IsPrimary          bool
+	AvailabilityPolicy string
+	Version            int32
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
 }
 
 func (q *Queries) GetDriverProfile(ctx context.Context, id pgtype.UUID) (GetDriverProfileRow, error) {
@@ -123,6 +164,8 @@ func (q *Queries) GetDriverProfile(ctx context.Context, id pgtype.UUID) (GetDriv
 		&i.Active,
 		&i.CanCompleteJobs,
 		&i.InternalNote,
+		&i.IsPrimary,
+		&i.AvailabilityPolicy,
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -221,9 +264,10 @@ func (q *Queries) InsertAvailabilityRule(ctx context.Context, arg InsertAvailabi
 }
 
 const insertDriverProfile = `-- name: InsertDriverProfile :one
-INSERT INTO drivers (user_id, display_name, phone, email, can_complete_jobs, internal_note)
+INSERT INTO drivers (user_id, display_name, phone, email, can_complete_jobs, internal_note, is_primary, availability_policy)
 SELECT NULLIF($1::text, '')::uuid, $2, NULLIF($3::text, ''),
-       NULLIF($4::text, '')::citext, $5, NULLIF($6::text, '')
+       NULLIF($4::text, '')::citext, $5, NULLIF($6::text, ''),
+       $7, $8
 WHERE $1::text = '' OR EXISTS (
     SELECT 1 FROM users WHERE id = $1::uuid AND role = 'driver' AND active
 )
@@ -231,12 +275,14 @@ RETURNING id::text
 `
 
 type InsertDriverProfileParams struct {
-	UserID          string
-	DisplayName     string
-	Phone           string
-	Email           string
-	CanCompleteJobs bool
-	InternalNote    string
+	UserID             string
+	DisplayName        string
+	Phone              string
+	Email              string
+	CanCompleteJobs    bool
+	InternalNote       string
+	IsPrimary          bool
+	AvailabilityPolicy string
 }
 
 func (q *Queries) InsertDriverProfile(ctx context.Context, arg InsertDriverProfileParams) (string, error) {
@@ -247,6 +293,8 @@ func (q *Queries) InsertDriverProfile(ctx context.Context, arg InsertDriverProfi
 		arg.Email,
 		arg.CanCompleteJobs,
 		arg.InternalNote,
+		arg.IsPrimary,
+		arg.AvailabilityPolicy,
 	)
 	var id string
 	err := row.Scan(&id)
@@ -493,6 +541,7 @@ const listDriverProfiles = `-- name: ListDriverProfiles :many
 SELECT d.id::text, COALESCE(d.user_id::text, '')::text AS user_id, COALESCE(u.username::text, '')::text AS username,
        d.display_name, COALESCE(d.phone, '')::text AS phone, COALESCE(d.email::text, '')::text AS email,
        d.active, d.can_complete_jobs, COALESCE(d.internal_note, '')::text AS internal_note,
+       d.is_primary, d.availability_policy,
        d.version, d.created_at, d.updated_at
 FROM drivers d
 LEFT JOIN users u ON u.id = d.user_id
@@ -500,18 +549,20 @@ ORDER BY d.active DESC, lower(d.display_name), d.id
 `
 
 type ListDriverProfilesRow struct {
-	DID             string
-	UserID          string
-	Username        string
-	DisplayName     string
-	Phone           string
-	Email           string
-	Active          bool
-	CanCompleteJobs bool
-	InternalNote    string
-	Version         int32
-	CreatedAt       pgtype.Timestamptz
-	UpdatedAt       pgtype.Timestamptz
+	DID                string
+	UserID             string
+	Username           string
+	DisplayName        string
+	Phone              string
+	Email              string
+	Active             bool
+	CanCompleteJobs    bool
+	InternalNote       string
+	IsPrimary          bool
+	AvailabilityPolicy string
+	Version            int32
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
 }
 
 func (q *Queries) ListDriverProfiles(ctx context.Context) ([]ListDriverProfilesRow, error) {
@@ -533,6 +584,8 @@ func (q *Queries) ListDriverProfiles(ctx context.Context) ([]ListDriverProfilesR
 			&i.Active,
 			&i.CanCompleteJobs,
 			&i.InternalNote,
+			&i.IsPrimary,
+			&i.AvailabilityPolicy,
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -700,22 +753,25 @@ UPDATE drivers SET
     user_id = NULLIF($1::text, '')::uuid,
     display_name = $2, phone = NULLIF($3::text, ''),
     email = NULLIF($4::text, '')::citext, can_complete_jobs = $5,
-    internal_note = NULLIF($6::text, ''), version = drivers.version + 1, updated_at = now()
-WHERE drivers.id = $7::uuid AND drivers.version = $8 AND drivers.active
+    internal_note = NULLIF($6::text, ''), is_primary = $7,
+    availability_policy = $8, version = drivers.version + 1, updated_at = now()
+WHERE drivers.id = $9::uuid AND drivers.version = $10 AND drivers.active
   AND ($1::text = '' OR EXISTS (
       SELECT 1 FROM users WHERE id = $1::uuid AND role = 'driver' AND active
   ))
 `
 
 type UpdateDriverProfileParams struct {
-	UserID          string
-	DisplayName     string
-	Phone           string
-	Email           string
-	CanCompleteJobs bool
-	InternalNote    string
-	ID              pgtype.UUID
-	ExpectedVersion int32
+	UserID             string
+	DisplayName        string
+	Phone              string
+	Email              string
+	CanCompleteJobs    bool
+	InternalNote       string
+	IsPrimary          bool
+	AvailabilityPolicy string
+	ID                 pgtype.UUID
+	ExpectedVersion    int32
 }
 
 func (q *Queries) UpdateDriverProfile(ctx context.Context, arg UpdateDriverProfileParams) (int64, error) {
@@ -726,6 +782,8 @@ func (q *Queries) UpdateDriverProfile(ctx context.Context, arg UpdateDriverProfi
 		arg.Email,
 		arg.CanCompleteJobs,
 		arg.InternalNote,
+		arg.IsPrimary,
+		arg.AvailabilityPolicy,
 		arg.ID,
 		arg.ExpectedVersion,
 	)

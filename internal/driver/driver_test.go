@@ -156,6 +156,57 @@ func TestResolveAvailabilityOverrideOnlyChangesItsWindow(t *testing.T) {
 	}
 }
 
+func TestResolveAvailabilityAssumesPrimaryDriverIsAvailable(t *testing.T) {
+	service := testService(t, Availability{Profile: Profile{
+		ID: "driver-id", IsActive: true, IsPrimary: true, AvailabilityPolicy: PolicyAssumedAvailable,
+	}})
+	from := time.Date(2026, 9, 10, 8, 0, 0, 0, time.UTC)
+	to := from.Add(9 * time.Hour)
+
+	intervals, err := service.ResolveAvailability(t.Context(), adminActor(), "driver-id", from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(intervals) != 1 || intervals[0].Status != StatusAvailable || intervals[0].Source != SourcePolicy {
+		t.Fatalf("intervals = %#v", intervals)
+	}
+}
+
+func TestResolveAvailabilityExplicitDatesOnlyUsesAvailableOverrides(t *testing.T) {
+	from := time.Date(2026, 9, 10, 8, 0, 0, 0, time.UTC)
+	to := from.Add(9 * time.Hour)
+	service := testService(t, Availability{
+		Profile: Profile{ID: "driver-id", IsActive: true, AvailabilityPolicy: PolicyExplicitDates},
+		Rules: []Rule{{
+			ID: "legacy-rule", Weekday: 4, StartMinute: 8 * 60, EndMinute: 17 * 60,
+			ValidFrom: "2026-01-01", Status: RuleAvailable,
+		}},
+		Exceptions: []Exception{
+			{ID: "legacy-sick", Type: ExceptionSick, StartsAt: from, EndsAt: to},
+			{ID: "available-day", Type: ExceptionAvailableOverride, StartsAt: from.Add(2 * time.Hour), EndsAt: from.Add(5 * time.Hour)},
+		},
+	})
+
+	intervals, err := service.ResolveAvailability(t.Context(), adminActor(), "driver-id", from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(intervals) != 3 || intervals[0].Status != StatusUnavailable || intervals[1].Status != StatusAvailable || intervals[2].Status != StatusUnavailable {
+		t.Fatalf("intervals = %#v", intervals)
+	}
+	if intervals[1].SourceType != string(ExceptionAvailableOverride) {
+		t.Fatalf("available interval = %#v", intervals[1])
+	}
+}
+
+func TestProfileInputRejectsAssumedAvailabilityForCasualDriver(t *testing.T) {
+	input := validProfileInput()
+	input.AvailabilityPolicy = PolicyAssumedAvailable
+	if err := input.Validate(); !errors.Is(err, ErrValidation) {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func TestResolveAvailabilityNegativeExceptionWinsOverOverride(t *testing.T) {
 	start := time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC)
 	end := start.Add(5 * time.Hour)

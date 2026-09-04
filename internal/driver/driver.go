@@ -26,6 +26,7 @@ type RuleStatus string
 type Status string
 type ExceptionType string
 type Source string
+type AvailabilityPolicy string
 
 const (
 	RuleAvailable RuleStatus = "available"
@@ -45,30 +46,39 @@ const (
 	SourceRule      Source = "rule"
 	SourceException Source = "exception"
 	SourceInactive  Source = "inactive_driver"
+	SourcePolicy    Source = "policy"
+
+	PolicyLegacyRules      AvailabilityPolicy = "legacy_rules"
+	PolicyAssumedAvailable AvailabilityPolicy = "assumed_available"
+	PolicyExplicitDates    AvailabilityPolicy = "explicit_dates"
 )
 
 type ProfileInput struct {
-	UserID          string
-	DisplayName     string
-	Phone           string
-	Email           string
-	CanCompleteJobs bool
-	InternalNote    string
+	UserID             string
+	DisplayName        string
+	Phone              string
+	Email              string
+	CanCompleteJobs    bool
+	InternalNote       string
+	IsPrimary          bool
+	AvailabilityPolicy AvailabilityPolicy
 }
 
 type Profile struct {
-	ID              string
-	UserID          string
-	Username        string
-	DisplayName     string
-	Phone           string
-	Email           string
-	IsActive        bool
-	CanCompleteJobs bool
-	InternalNote    string
-	Version         int32
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID                 string
+	UserID             string
+	Username           string
+	DisplayName        string
+	Phone              string
+	Email              string
+	IsActive           bool
+	CanCompleteJobs    bool
+	InternalNote       string
+	IsPrimary          bool
+	AvailabilityPolicy AvailabilityPolicy
+	Version            int32
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type RuleInput struct {
@@ -225,6 +235,9 @@ func (s *Service) CreateRule(ctx context.Context, actor auth.Actor, driverID str
 	if err := input.Validate(); err != nil {
 		return "", err
 	}
+	if err := s.requireLegacyRules(ctx, driverID); err != nil {
+		return "", err
+	}
 	return s.store.CreateRule(ctx, actor, driverID, input, requestID)
 }
 
@@ -237,6 +250,9 @@ func (s *Service) UpdateRule(ctx context.Context, actor auth.Actor, driverID str
 		return ErrValidation
 	}
 	if err := input.Validate(); err != nil {
+		return err
+	}
+	if err := s.requireLegacyRules(ctx, driverID); err != nil {
 		return err
 	}
 	return s.store.UpdateRule(ctx, actor, driverID, id, version, input, requestID)
@@ -262,6 +278,9 @@ func (s *Service) DuplicateRule(ctx context.Context, actor auth.Actor, driverID,
 	data, err := s.store.Schedule(ctx, driverID)
 	if err != nil {
 		return "", err
+	}
+	if profilePolicy(data.Profile) != PolicyLegacyRules {
+		return "", ErrValidation
 	}
 	for _, rule := range data.Rules {
 		if rule.ID != id {
@@ -304,11 +323,17 @@ func (s *Service) CreateException(ctx context.Context, actor auth.Actor, driverI
 	if err := input.Validate(); err != nil {
 		return "", err
 	}
+	if err := s.requireExceptionPolicy(ctx, driverID, input.Type); err != nil {
+		return "", err
+	}
 	return s.store.CreateException(ctx, actor, driverID, input, requestID)
 }
 
 func (s *Service) CreateVacationPreset(ctx context.Context, actor auth.Actor, driverID, localDate string, workweek bool, internalNote, requestID string) error {
 	if err := authorizeAvailability(actor, driverID); err != nil {
+		return err
+	}
+	if err := s.requireLegacyRules(ctx, driverID); err != nil {
 		return err
 	}
 	start, err := time.ParseInLocation(time.DateOnly, strings.TrimSpace(localDate), s.location)
@@ -340,7 +365,44 @@ func (s *Service) UpdateException(ctx context.Context, actor auth.Actor, driverI
 	if err := input.Validate(); err != nil {
 		return err
 	}
+	if err := s.requireExceptionPolicy(ctx, driverID, input.Type); err != nil {
+		return err
+	}
 	return s.store.UpdateException(ctx, actor, driverID, id, version, input, requestID)
+}
+
+func (s *Service) requireLegacyRules(ctx context.Context, driverID string) error {
+	data, err := s.store.Schedule(ctx, driverID)
+	if err != nil {
+		return err
+	}
+	if profilePolicy(data.Profile) != PolicyLegacyRules {
+		return ErrValidation
+	}
+	return nil
+}
+
+func (s *Service) requireExceptionPolicy(ctx context.Context, driverID string, exceptionType ExceptionType) error {
+	data, err := s.store.Schedule(ctx, driverID)
+	if err != nil {
+		return err
+	}
+	switch profilePolicy(data.Profile) {
+	case PolicyLegacyRules:
+		return nil
+	case PolicyExplicitDates:
+		if exceptionType == ExceptionAvailableOverride {
+			return nil
+		}
+	}
+	return ErrValidation
+}
+
+func profilePolicy(profile Profile) AvailabilityPolicy {
+	if profile.AvailabilityPolicy == "" {
+		return PolicyLegacyRules
+	}
+	return profile.AvailabilityPolicy
 }
 
 func (s *Service) DeleteException(ctx context.Context, actor auth.Actor, driverID string, id string, version int32, requestID string) error {
@@ -413,7 +475,7 @@ func availabilityStatus(intervals []Interval) (Status, []string) {
 }
 
 func (i ProfileInput) Validate() error {
-	if i.DisplayName == "" || len([]rune(i.DisplayName)) > 200 || len([]rune(i.Phone)) > 64 || len([]rune(i.InternalNote)) > 4000 {
+	if i.DisplayName == "" || len([]rune(i.DisplayName)) > 200 || len([]rune(i.Phone)) > 64 || len([]rune(i.InternalNote)) > 4000 || !i.AvailabilityPolicy.Valid() || (i.AvailabilityPolicy == PolicyAssumedAvailable && !i.IsPrimary) {
 		return ErrValidation
 	}
 	if i.Email != "" {
@@ -423,6 +485,10 @@ func (i ProfileInput) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (p AvailabilityPolicy) Valid() bool {
+	return p == PolicyLegacyRules || p == PolicyAssumedAvailable || p == PolicyExplicitDates
 }
 
 func (i RuleInput) Validate() error {
@@ -534,6 +600,9 @@ func normalizeProfile(input *ProfileInput) {
 	input.Phone = strings.TrimSpace(input.Phone)
 	input.Email = strings.TrimSpace(input.Email)
 	input.InternalNote = strings.TrimSpace(input.InternalNote)
+	if input.AvailabilityPolicy == "" {
+		input.AvailabilityPolicy = PolicyExplicitDates
+	}
 }
 
 func normalizeRule(input *RuleInput) {
@@ -558,10 +627,20 @@ func (s *Service) resolve(data Availability, fromUTC time.Time, toUTC time.Time)
 		base.Reason = "Fahrerprofil ist inaktiv"
 		return []Interval{base}, nil
 	}
+	policy := data.Profile.AvailabilityPolicy
+	if policy == "" {
+		policy = PolicyLegacyRules
+	}
+	if policy == PolicyAssumedAvailable {
+		return []Interval{{
+			StartsAt: fromUTC, EndsAt: toUTC, Status: StatusAvailable, Source: SourcePolicy,
+			SourceType: string(policy), Reason: "Hauptfahrer standardmäßig verfügbar",
+		}}, nil
+	}
 	intervals := []Interval{base}
 	fromDate := localMidnight(fromUTC.In(s.location), s.location)
 	toDate := localMidnight(toUTC.Add(-time.Nanosecond).In(s.location), s.location)
-	for date := fromDate; !date.After(toDate); date = date.AddDate(0, 0, 1) {
+	for date := fromDate; policy != PolicyExplicitDates && !date.After(toDate); date = date.AddDate(0, 0, 1) {
 		dateText := date.Format(time.DateOnly)
 		for _, rule := range data.Rules {
 			if rule.Weekday != isoWeekday(date.Weekday()) || dateText < rule.ValidFrom || (rule.ValidUntil != "" && dateText > rule.ValidUntil) {
@@ -593,6 +672,9 @@ func (s *Service) resolve(data Availability, fromUTC time.Time, toUTC time.Time)
 		return data.Exceptions[i].ID < data.Exceptions[j].ID
 	})
 	for _, exception := range data.Exceptions {
+		if policy == PolicyExplicitDates && exception.Type != ExceptionAvailableOverride {
+			continue
+		}
 		start, end, err := s.exceptionRange(exception)
 		if err != nil {
 			return nil, err

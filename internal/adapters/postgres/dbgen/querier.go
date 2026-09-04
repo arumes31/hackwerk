@@ -61,6 +61,7 @@ type Querier interface {
 	DeleteWebAuthnCredentialsForUser(ctx context.Context, userID pgtype.UUID) error
 	DeleteWebAuthnRegistrationChallenge(ctx context.Context, arg DeleteWebAuthnRegistrationChallengeParams) (int64, error)
 	DeleteWebAuthnRegistrationChallengesForUser(ctx context.Context, userID pgtype.UUID) error
+	DemoteOtherPrimaryDrivers(ctx context.Context, arg DemoteOtherPrimaryDriversParams) ([]string, error)
 	DiscardOtherPlanningSuggestions(ctx context.Context, arg DiscardOtherPlanningSuggestionsParams) error
 	DriverCanCompleteAppointment(ctx context.Context, arg DriverCanCompleteAppointmentParams) (bool, error)
 	EnableTOTPCredential(ctx context.Context, userID pgtype.UUID) (int64, error)

@@ -46,7 +46,7 @@ templ Drivers(data DriversData) {
 				<details class="compact-create-panel">
 					<summary>+ Fahrerprofil anlegen</summary>
 					<form method="post" action="/admin/drivers" class="form-grid compact-form">
-						<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@profileFields(data.Users, "", "", "", "", false, "", "new")
+						<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@profileFields(data.Users, "", "", "", "", false, "", false, false, "new")
 						<button class="button" type="submit">Profil anlegen</button>
 					</form>
 				</details>
@@ -59,7 +59,7 @@ templ Drivers(data DriversData) {
 								<span data-label="Login">{ driverLoginLabel(item.Username) }</span>
 								<span data-label="Kontakt"><span>{ fallback(item.Phone) }</span><small>{ fallback(item.Email) }</small></span>
 								<span data-label="Recht">{ completionLabel(item.CanCompleteJobs) }</span>
-								<span data-label="Verfügbarkeit">{ fmt.Sprint(len(data.Overview[item.ID])) } Zeitfenster</span>
+								<span data-label="Verfügbarkeit">{ availabilityPolicyLabel(item) }</span>
 								<span class="compact-row__action">Öffnen</span>
 							</summary>
 							<div class="compact-row__details">
@@ -76,7 +76,7 @@ templ Drivers(data DriversData) {
 								</div>
 								if item.IsActive {
 									<form method="post" action={ "/admin/drivers/" + item.ID } class="form-grid compact-form">
-										<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.Version) }/>@profileFields(data.Users, item.UserID, item.DisplayName, item.Phone, item.Email, item.CanCompleteJobs, item.InternalNote, item.ID)
+										<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.Version) }/>@profileFields(data.Users, item.UserID, item.DisplayName, item.Phone, item.Email, item.CanCompleteJobs, item.InternalNote, item.IsPrimary, item.AvailabilityPolicy != driver.PolicyAssumedAvailable, item.ID)
 										<button class="button" type="submit">Profil speichern</button>
 									</form>
 									<form method="post" action={ "/admin/drivers/" + item.ID + "/deactivate" } class="compact-danger"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.Version) }/><button class="button button--danger" type="submit" data-confirm-message="Fahrerprofil wirklich deaktivieren? Es steht danach nicht mehr für neue Planungen zur Verfügung.">Profil deaktivieren</button></form>
@@ -90,7 +90,7 @@ templ Drivers(data DriversData) {
 	</html>
 }
 
-templ profileFields(users []auth.UserSummary, userID string, displayName string, phone string, email string, complete bool, note string, suffix string) {
+templ profileFields(users []auth.UserSummary, userID string, displayName string, phone string, email string, complete bool, note string, primary bool, checkAvailability bool, suffix string) {
 	<label for={ "driver-name-" + suffix }>Anzeigename</label><input id={ "driver-name-" + suffix } name="display_name" value={ displayName } maxlength="200" required/>
 	<label for={ "driver-user-" + suffix }>Loginzuordnung (optional)</label>
 	<select id={ "driver-user-" + suffix } name="user_id" aria-describedby={ "driver-user-help-" + suffix }>
@@ -103,6 +103,9 @@ templ profileFields(users []auth.UserSummary, userID string, displayName string,
 	</select><small id={ "driver-user-help-" + suffix }>„Kein Login“ trennt eine bestehende Zuordnung.</small>
 	<label for={ "driver-phone-" + suffix }>Telefon (optional)</label><input id={ "driver-phone-" + suffix } name="phone" type="tel" value={ phone } maxlength="64"/>
 	<label for={ "driver-email-" + suffix }>E-Mail (optional)</label><input id={ "driver-email-" + suffix } name="email" type="email" value={ email } maxlength="320"/>
+	<label class="check-label"><input name="is_primary" type="checkbox" value="true" checked?={ primary }/> Hauptfahrer</label>
+	<label class="check-label"><input name="check_availability" type="checkbox" value="true" checked?={ checkAvailability }/> Verfügbarkeit prüfen (beim Hauptfahrer optional)</label>
+	<small>Ohne Prüfung gilt der Hauptfahrer standardmäßig als verfügbar. Andere Fahrer tragen nur einzelne verfügbare Tage ein.</small>
 	<label class="check-label"><input name="can_complete_jobs" type="checkbox" value="true" checked?={ complete }/> darf Aufträge abschließen</label>
 	<label for={ "driver-note-" + suffix }>Interne Bemerkung</label><textarea id={ "driver-note-" + suffix } name="internal_note" maxlength="4000">{ note }</textarea>
 }
@@ -193,108 +196,149 @@ templ Availability(data AvailabilityData) {
 						}
 					</div>
 				</details>
-				<div class="operations-grid">
-					<section>
-						<h2>Wochenregeln</h2>
-						if len(data.Data.Rules) == 0 {
-							<div class="empty-state"><p>Noch keine Wochenregel. Der Fahrer gilt derzeit als nicht verfügbar.</p></div>
-						} else {
-							<div class="availability-weekday-list">
-								for weekday := 1; weekday <= 7; weekday++ {
-									if rules := rulesForWeekday(data.Data.Rules, weekday); len(rules) > 0 {
-										<section class="availability-weekday" data-availability-weekday={ fmt.Sprint(weekday) } aria-labelledby={ "availability-weekday-" + fmt.Sprint(weekday) }>
-											<div class="section-heading">
-												<div><p class="eyebrow">Wiederkehrend</p><h3 id={ "availability-weekday-" + fmt.Sprint(weekday) }>{ weekdayLabel(weekday) }</h3></div>
-												<form method="post" action={ data.BasePath + "/rules/clear-day" } class="action-row" data-clear-availability-day>
-													<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="weekday" value={ fmt.Sprint(weekday) }/>
-													for _, rule := range rules {
-														<input type="hidden" name="rule_id" value={ rule.ID }/><input type="hidden" name="rule_version" value={ fmt.Sprint(rule.Version) }/>
-													}
-													<button class="button button--danger" type="submit" data-confirm-message={ weekdayLabel(weekday) + " wirklich vollständig leeren?" }>Tag leeren</button>
-												</form>
-											</div>
-											<div class="card-list">
-												for _, rule := range rules {
-													<details class="edit-card" data-availability-rule data-weekday={ fmt.Sprint(rule.Weekday) } data-local-start={ driver.FormatLocalTime(rule.StartMinute) } data-local-end={ driver.FormatLocalTime(rule.EndMinute) } data-valid-from={ rule.ValidFrom } data-valid-until={ rule.ValidUntil }>
-														<summary>{ driver.FormatLocalTime(rule.StartMinute) }–{ driver.FormatLocalTime(rule.EndMinute) } · { ruleStatusLabel(rule.Status) }</summary>
-														<form method="post" action={ data.BasePath + "/rules/" + rule.ID } class="form-stack">
-															<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(rule.Version) }/>@ruleFields(rule)
-															<button class="button" type="submit">Regel speichern</button>
-														</form>
-														<form method="post" action={ data.BasePath + "/rules/" + rule.ID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(rule.Version) }/><button class="button button--danger" type="submit" data-confirm-message="Diese Wochenregel wirklich löschen?">Regel löschen</button></form>
-														<form method="post" action={ data.BasePath + "/rules/" + rule.ID + "/duplicate" } class="action-row">
-															<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
-															<label>
-																Für Tag
-																<select name="weekday">
-																	for value := 1; value <= 7; value++ {
-																		<option value={ fmt.Sprint(value) } selected?={ value == duplicateWeekday(rule.Weekday) }>{ weekdayLabel(value) }</option>
-																	}
-																</select>
-															</label>
-															<button class="button button--quiet" type="submit">Regel duplizieren</button>
-														</form>
-													</details>
-												}
-											</div>
-										</section>
-									}
-								}
-							</div>
-						}
-						<details class="compact-create-panel operation-create">
-							<summary>+ Wochenregel anlegen</summary>
-							<form method="post" action={ data.BasePath + "/rules" } class="form-stack" data-availability-rule-form>
-								<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@ruleFields(driver.Rule{Weekday: 1, StartMinute: 480, EndMinute: 1020, ValidFrom: time.Now().In(viennaLocation()).Format(time.DateOnly), Status: driver.RuleAvailable})
-								<div class="action-row" data-availability-presets><button type="button" class="button button--quiet" data-availability-preset="morning">Vormittag</button><button type="button" class="button button--quiet" data-availability-preset="afternoon">Nachmittag</button><button type="button" class="button button--quiet" data-availability-preset="day">Ganztag</button></div>
-								<p class="form-hint" data-availability-overlap-hint>HackWerk prüft Überschneidungen vor dem Speichern erneut. Überlappende Regeln werden abgewiesen.</p>
-								<button class="button" type="submit">Regel anlegen</button>
-							</form>
-						</details>
+				if data.Data.Profile.AvailabilityPolicy == driver.PolicyAssumedAvailable {
+					<section class="empty-state">
+						<h2>Keine Pflege nötig</h2>
+						<p>Der Hauptfahrer gilt standardmäßig als verfügbar. Die Prüfung kann im Fahrerprofil aktiviert werden.</p>
 					</section>
+				} else if data.Data.Profile.AvailabilityPolicy == driver.PolicyExplicitDates {
 					<section>
-						<h2>Ausnahmen</h2>
+						<h2>Verfügbare Tage</h2>
+						<p>Tragen Sie nur Tage ein, an denen Sie fahren können. Ohne Eintrag gelten Sie als nicht verfügbar.</p>
 						<div class="card-list">
-							for _, exception := range data.Data.Exceptions {
+							for _, exception := range availableExceptions(data.Data.Exceptions) {
 								<details class="edit-card">
-									<summary>{ exceptionTypeLabel(exception.Type) } · { exceptionRange(exception) }</summary>
+									<summary>Verfügbar · { exceptionRange(exception) }</summary>
 									if exception.IsAllDay {
 										<form method="post" action={ data.BasePath + "/exceptions/" + exception.ID } class="form-stack">
-											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(exception.Version) }/>@allDayExceptionFields(exception)
-											<button class="button" type="submit">Ausnahme speichern</button>
+											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(exception.Version) }/><input type="hidden" name="all_day" value="true"/><input type="hidden" name="type" value="available_override"/>
+											<label>Tag<input name="local_date" type="date" value={ exception.LocalDate } required/></label><label>Interne Bemerkung (optional)<textarea name="internal_note" maxlength="1000">{ exception.InternalNote }</textarea></label>
+											<button class="button" type="submit">Tag speichern</button>
 										</form>
 									} else {
 										<form method="post" action={ data.BasePath + "/exceptions/" + exception.ID } class="form-stack">
-											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(exception.Version) }/>@partialExceptionFields(exception)
-											<button class="button" type="submit">Ausnahme speichern</button>
+											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(exception.Version) }/><input type="hidden" name="type" value="available_override"/>
+											<div class="form-grid"><label>Beginn<input name="starts_at" type="datetime-local" value={ localDateTime(exception.StartsAt) } required/></label><label>Ende<input name="ends_at" type="datetime-local" value={ localDateTime(exception.EndsAt) } required/></label></div><label>Interne Bemerkung (optional)<textarea name="internal_note" maxlength="1000">{ exception.InternalNote }</textarea></label>
+											<button class="button" type="submit">Zeitfenster speichern</button>
 										</form>
 									}
-									<form method="post" action={ data.BasePath + "/exceptions/" + exception.ID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(exception.Version) }/><button class="button button--danger" type="submit" data-confirm-message="Diese Ausnahme wirklich löschen?">Ausnahme löschen</button></form>
+									<form method="post" action={ data.BasePath + "/exceptions/" + exception.ID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(exception.Version) }/><button class="button button--danger" type="submit" data-confirm-message="Diesen verfügbaren Zeitraum wirklich löschen?">Löschen</button></form>
 								</details>
 							}
-							if len(data.Data.Exceptions) == 0 {
-								<div class="empty-state"><p>Noch keine Ausnahmen.</p></div>
+							if len(availableExceptions(data.Data.Exceptions)) == 0 {
+								<div class="empty-state"><p>Noch kein verfügbarer Tag eingetragen.</p></div>
 							}
 						</div>
 						<div class="exception-create">
-							<details class="compact-create-panel"><summary>+ Urlaub-Preset</summary><form method="post" action={ data.BasePath + "/exceptions/vacation-preset" } class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label>Erster Urlaubstag<input type="date" name="local_date" value={ time.Now().In(viennaLocation()).Format(time.DateOnly) } required/></label><label class="check-label"><input type="checkbox" name="workweek" value="true"/> fünf Arbeitstage (Mo–Fr, Wochenenden überspringen)</label><label>Interne Bemerkung<textarea name="internal_note" maxlength="1000"></textarea></label><button class="button" type="submit">Urlaub anlegen</button></form></details>
-							<details class="compact-create-panel">
-								<summary>+ Ganztägige Ausnahme</summary>
-								<form method="post" action={ data.BasePath + "/exceptions" } class="form-stack">
-									<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@allDayExceptionFields(driver.Exception{Type: driver.ExceptionVacation, LocalDate: time.Now().In(viennaLocation()).Format(time.DateOnly)})
-									<button class="button" type="submit">Ganztägig anlegen</button>
-								</form>
-							</details>
-							<details class="compact-create-panel">
-								<summary>+ Zeitweise Ausnahme</summary>
-								<form method="post" action={ data.BasePath + "/exceptions" } class="form-stack">
-									<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@partialExceptionFields(driver.Exception{Type: driver.ExceptionUnavailable})
-									<button class="button" type="submit">Zeitweise anlegen</button>
-								</form>
-							</details>
+							<details class="compact-create-panel"><summary>+ Ganzen Tag verfügbar</summary><form method="post" action={ data.BasePath + "/exceptions" } class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="all_day" value="true"/><input type="hidden" name="type" value="available_override"/><label>Tag<input type="date" name="local_date" value={ time.Now().In(viennaLocation()).Format(time.DateOnly) } required/></label><label>Interne Bemerkung (optional)<textarea name="internal_note" maxlength="1000"></textarea></label><button class="button" type="submit">Tag eintragen</button></form></details>
+							<details class="compact-create-panel"><summary>+ Bestimmtes Zeitfenster</summary><form method="post" action={ data.BasePath + "/exceptions" } class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="type" value="available_override"/><div class="form-grid"><label>Beginn<input name="starts_at" type="datetime-local" required/></label><label>Ende<input name="ends_at" type="datetime-local" required/></label></div><label>Interne Bemerkung (optional)<textarea name="internal_note" maxlength="1000"></textarea></label><button class="button" type="submit">Zeitfenster eintragen</button></form></details>
 						</div>
 					</section>
-				</div>
+				} else {
+					<div class="form-alert" role="status"><strong>Bisherige Regeln aktiv.</strong> Beim nächsten Speichern des Fahrerprofils wird auf die vereinfachte Tagesauswahl umgestellt.</div>
+					<div class="operations-grid">
+						<section>
+							<h2>Wochenregeln</h2>
+							if len(data.Data.Rules) == 0 {
+								<div class="empty-state"><p>Noch keine Wochenregel. Der Fahrer gilt derzeit als nicht verfügbar.</p></div>
+							} else {
+								<div class="availability-weekday-list">
+									for weekday := 1; weekday <= 7; weekday++ {
+										if rules := rulesForWeekday(data.Data.Rules, weekday); len(rules) > 0 {
+											<section class="availability-weekday" data-availability-weekday={ fmt.Sprint(weekday) } aria-labelledby={ "availability-weekday-" + fmt.Sprint(weekday) }>
+												<div class="section-heading">
+													<div><p class="eyebrow">Wiederkehrend</p><h3 id={ "availability-weekday-" + fmt.Sprint(weekday) }>{ weekdayLabel(weekday) }</h3></div>
+													<form method="post" action={ data.BasePath + "/rules/clear-day" } class="action-row" data-clear-availability-day>
+														<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="weekday" value={ fmt.Sprint(weekday) }/>
+														for _, rule := range rules {
+															<input type="hidden" name="rule_id" value={ rule.ID }/><input type="hidden" name="rule_version" value={ fmt.Sprint(rule.Version) }/>
+														}
+														<button class="button button--danger" type="submit" data-confirm-message={ weekdayLabel(weekday) + " wirklich vollständig leeren?" }>Tag leeren</button>
+													</form>
+												</div>
+												<div class="card-list">
+													for _, rule := range rules {
+														<details class="edit-card" data-availability-rule data-weekday={ fmt.Sprint(rule.Weekday) } data-local-start={ driver.FormatLocalTime(rule.StartMinute) } data-local-end={ driver.FormatLocalTime(rule.EndMinute) } data-valid-from={ rule.ValidFrom } data-valid-until={ rule.ValidUntil }>
+															<summary>{ driver.FormatLocalTime(rule.StartMinute) }–{ driver.FormatLocalTime(rule.EndMinute) } · { ruleStatusLabel(rule.Status) }</summary>
+															<form method="post" action={ data.BasePath + "/rules/" + rule.ID } class="form-stack">
+																<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(rule.Version) }/>@ruleFields(rule)
+																<button class="button" type="submit">Regel speichern</button>
+															</form>
+															<form method="post" action={ data.BasePath + "/rules/" + rule.ID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(rule.Version) }/><button class="button button--danger" type="submit" data-confirm-message="Diese Wochenregel wirklich löschen?">Regel löschen</button></form>
+															<form method="post" action={ data.BasePath + "/rules/" + rule.ID + "/duplicate" } class="action-row">
+																<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
+																<label>
+																	Für Tag
+																	<select name="weekday">
+																		for value := 1; value <= 7; value++ {
+																			<option value={ fmt.Sprint(value) } selected?={ value == duplicateWeekday(rule.Weekday) }>{ weekdayLabel(value) }</option>
+																		}
+																	</select>
+																</label>
+																<button class="button button--quiet" type="submit">Regel duplizieren</button>
+															</form>
+														</details>
+													}
+												</div>
+											</section>
+										}
+									}
+								</div>
+							}
+							<details class="compact-create-panel operation-create">
+								<summary>+ Wochenregel anlegen</summary>
+								<form method="post" action={ data.BasePath + "/rules" } class="form-stack" data-availability-rule-form>
+									<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@ruleFields(driver.Rule{Weekday: 1, StartMinute: 480, EndMinute: 1020, ValidFrom: time.Now().In(viennaLocation()).Format(time.DateOnly), Status: driver.RuleAvailable})
+									<div class="action-row" data-availability-presets><button type="button" class="button button--quiet" data-availability-preset="morning">Vormittag</button><button type="button" class="button button--quiet" data-availability-preset="afternoon">Nachmittag</button><button type="button" class="button button--quiet" data-availability-preset="day">Ganztag</button></div>
+									<p class="form-hint" data-availability-overlap-hint>HackWerk prüft Überschneidungen vor dem Speichern erneut. Überlappende Regeln werden abgewiesen.</p>
+									<button class="button" type="submit">Regel anlegen</button>
+								</form>
+							</details>
+						</section>
+						<section>
+							<h2>Ausnahmen</h2>
+							<div class="card-list">
+								for _, exception := range data.Data.Exceptions {
+									<details class="edit-card">
+										<summary>{ exceptionTypeLabel(exception.Type) } · { exceptionRange(exception) }</summary>
+										if exception.IsAllDay {
+											<form method="post" action={ data.BasePath + "/exceptions/" + exception.ID } class="form-stack">
+												<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(exception.Version) }/>@allDayExceptionFields(exception)
+												<button class="button" type="submit">Ausnahme speichern</button>
+											</form>
+										} else {
+											<form method="post" action={ data.BasePath + "/exceptions/" + exception.ID } class="form-stack">
+												<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(exception.Version) }/>@partialExceptionFields(exception)
+												<button class="button" type="submit">Ausnahme speichern</button>
+											</form>
+										}
+										<form method="post" action={ data.BasePath + "/exceptions/" + exception.ID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(exception.Version) }/><button class="button button--danger" type="submit" data-confirm-message="Diese Ausnahme wirklich löschen?">Ausnahme löschen</button></form>
+									</details>
+								}
+								if len(data.Data.Exceptions) == 0 {
+									<div class="empty-state"><p>Noch keine Ausnahmen.</p></div>
+								}
+							</div>
+							<div class="exception-create">
+								<details class="compact-create-panel"><summary>+ Urlaub-Preset</summary><form method="post" action={ data.BasePath + "/exceptions/vacation-preset" } class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label>Erster Urlaubstag<input type="date" name="local_date" value={ time.Now().In(viennaLocation()).Format(time.DateOnly) } required/></label><label class="check-label"><input type="checkbox" name="workweek" value="true"/> fünf Arbeitstage (Mo–Fr, Wochenenden überspringen)</label><label>Interne Bemerkung<textarea name="internal_note" maxlength="1000"></textarea></label><button class="button" type="submit">Urlaub anlegen</button></form></details>
+								<details class="compact-create-panel">
+									<summary>+ Ganztägige Ausnahme</summary>
+									<form method="post" action={ data.BasePath + "/exceptions" } class="form-stack">
+										<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@allDayExceptionFields(driver.Exception{Type: driver.ExceptionVacation, LocalDate: time.Now().In(viennaLocation()).Format(time.DateOnly)})
+										<button class="button" type="submit">Ganztägig anlegen</button>
+									</form>
+								</details>
+								<details class="compact-create-panel">
+									<summary>+ Zeitweise Ausnahme</summary>
+									<form method="post" action={ data.BasePath + "/exceptions" } class="form-stack">
+										<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@partialExceptionFields(driver.Exception{Type: driver.ExceptionUnavailable})
+										<button class="button" type="submit">Zeitweise anlegen</button>
+									</form>
+								</details>
+							</div>
+						</section>
+					</div>
+				}
 			</main>@appFooter(data.Shell.Page)
 		</body>
 	</html>
@@ -344,6 +388,18 @@ func completionLabel(value bool) string {
 		return "darf Aufträge abschließen"
 	}
 	return "kein Abschlussrecht"
+}
+func availabilityPolicyLabel(value driver.Profile) string {
+	if value.IsPrimary && value.AvailabilityPolicy == driver.PolicyAssumedAvailable {
+		return "Hauptfahrer · standardmäßig verfügbar"
+	}
+	if value.IsPrimary {
+		return "Hauptfahrer · Prüfung aktiv"
+	}
+	if value.AvailabilityPolicy == driver.PolicyLegacyRules {
+		return "Bisherige Regeln"
+	}
+	return "Einzelne Tage"
 }
 func exclusivityLabel(value bool) string {
 	if value {
@@ -456,6 +512,15 @@ func exceptionRange(value driver.Exception) string {
 		return value.LocalDate + " (ganztägig)"
 	}
 	return localDateTime(value.StartsAt) + " bis " + localDateTime(value.EndsAt)
+}
+func availableExceptions(values []driver.Exception) []driver.Exception {
+	result := make([]driver.Exception, 0, len(values))
+	for _, value := range values {
+		if value.Type == driver.ExceptionAvailableOverride {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 func localDateTime(value time.Time) string {
 	if value.IsZero() {

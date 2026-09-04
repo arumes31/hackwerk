@@ -174,17 +174,19 @@ type Customer struct {
 }
 
 type Driver struct {
-	ID              pgtype.UUID
-	UserID          pgtype.UUID
-	DisplayName     string
-	Phone           *string
-	Email           *string
-	Active          bool
-	CanCompleteJobs bool
-	InternalNote    *string
-	Version         int32
-	CreatedAt       pgtype.Timestamptz
-	UpdatedAt       pgtype.Timestamptz
+	ID                 pgtype.UUID
+	UserID             pgtype.UUID
+	DisplayName        string
+	Phone              *string
+	Email              *string
+	Active             bool
+	CanCompleteJobs    bool
+	InternalNote       *string
+	Version            int32
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
+	IsPrimary          bool
+	AvailabilityPolicy string
 }
 
 type Job struct {

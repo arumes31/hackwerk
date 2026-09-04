@@ -2,6 +2,7 @@
 SELECT d.id::text, COALESCE(d.user_id::text, '')::text AS user_id, COALESCE(u.username::text, '')::text AS username,
        d.display_name, COALESCE(d.phone, '')::text AS phone, COALESCE(d.email::text, '')::text AS email,
        d.active, d.can_complete_jobs, COALESCE(d.internal_note, '')::text AS internal_note,
+       d.is_primary, d.availability_policy,
        d.version, d.created_at, d.updated_at
 FROM drivers d
 LEFT JOIN users u ON u.id = d.user_id
@@ -11,6 +12,7 @@ ORDER BY d.active DESC, lower(d.display_name), d.id;
 SELECT d.id::text, COALESCE(d.user_id::text, '')::text AS user_id, COALESCE(u.username::text, '')::text AS username,
        d.display_name, COALESCE(d.phone, '')::text AS phone, COALESCE(d.email::text, '')::text AS email,
        d.active, d.can_complete_jobs, COALESCE(d.internal_note, '')::text AS internal_note,
+       d.is_primary, d.availability_policy,
        d.version, d.created_at, d.updated_at
 FROM drivers d
 LEFT JOIN users u ON u.id = d.user_id
@@ -19,10 +21,21 @@ WHERE d.id = sqlc.arg(id)::uuid;
 -- name: LockDriverForAvailability :one
 SELECT id::text FROM drivers WHERE id=sqlc.arg(id)::uuid FOR UPDATE;
 
+-- name: DemoteOtherPrimaryDrivers :many
+UPDATE drivers
+SET is_primary = false,
+    availability_policy = CASE WHEN availability_policy = 'assumed_available' THEN 'explicit_dates' ELSE availability_policy END,
+    version = version + 1,
+    updated_at = now()
+WHERE is_primary AND sqlc.arg(new_primary)::boolean
+  AND (sqlc.arg(excluded_id)::text = '' OR id <> sqlc.arg(excluded_id)::uuid)
+RETURNING id::text;
+
 -- name: InsertDriverProfile :one
-INSERT INTO drivers (user_id, display_name, phone, email, can_complete_jobs, internal_note)
+INSERT INTO drivers (user_id, display_name, phone, email, can_complete_jobs, internal_note, is_primary, availability_policy)
 SELECT NULLIF(sqlc.arg(user_id)::text, '')::uuid, sqlc.arg(display_name), NULLIF(sqlc.arg(phone)::text, ''),
-       NULLIF(sqlc.arg(email)::text, '')::citext, sqlc.arg(can_complete_jobs), NULLIF(sqlc.arg(internal_note)::text, '')
+       NULLIF(sqlc.arg(email)::text, '')::citext, sqlc.arg(can_complete_jobs), NULLIF(sqlc.arg(internal_note)::text, ''),
+       sqlc.arg(is_primary), sqlc.arg(availability_policy)
 WHERE sqlc.arg(user_id)::text = '' OR EXISTS (
     SELECT 1 FROM users WHERE id = sqlc.arg(user_id)::uuid AND role = 'driver' AND active
 )
@@ -33,14 +46,17 @@ UPDATE drivers SET
     user_id = NULLIF(sqlc.arg(user_id)::text, '')::uuid,
     display_name = sqlc.arg(display_name), phone = NULLIF(sqlc.arg(phone)::text, ''),
     email = NULLIF(sqlc.arg(email)::text, '')::citext, can_complete_jobs = sqlc.arg(can_complete_jobs),
-    internal_note = NULLIF(sqlc.arg(internal_note)::text, ''), version = drivers.version + 1, updated_at = now()
+    internal_note = NULLIF(sqlc.arg(internal_note)::text, ''), is_primary = sqlc.arg(is_primary),
+    availability_policy = sqlc.arg(availability_policy), version = drivers.version + 1, updated_at = now()
 WHERE drivers.id = sqlc.arg(id)::uuid AND drivers.version = sqlc.arg(expected_version) AND drivers.active
   AND (sqlc.arg(user_id)::text = '' OR EXISTS (
       SELECT 1 FROM users WHERE id = sqlc.arg(user_id)::uuid AND role = 'driver' AND active
   ));
 
 -- name: DeactivateDriverProfile :execrows
-UPDATE drivers SET active = false, version = version + 1, updated_at = now()
+UPDATE drivers SET active = false, is_primary = false,
+    availability_policy = CASE WHEN availability_policy = 'assumed_available' THEN 'explicit_dates' ELSE availability_policy END,
+    version = version + 1, updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND version = sqlc.arg(expected_version) AND active;
 
 -- name: LockDriverProfile :one
