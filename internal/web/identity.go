@@ -13,6 +13,7 @@ import (
 	"example.invalid/hackplan/internal/auth"
 	dashboarddomain "example.invalid/hackplan/internal/dashboard"
 	"example.invalid/hackplan/internal/notification"
+	"example.invalid/hackplan/internal/planning"
 	"example.invalid/hackplan/web/templates"
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
@@ -52,7 +53,7 @@ func registerIdentityRoutes(router chi.Router, dependencies Dependencies, page t
 		protected.Use(requireAuthentication(page, dependencies.Logger))
 		protected.Use(requirePasswordChange(page, dependencies.Logger))
 		protected.Use(csrfProtection(identity, dependencies.Config.Auth.CSRFCookieName, page, dependencies.Logger))
-		protected.Get("/dashboard", dashboardPage(dependencies.Dashboard, dependencies.Notifications, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
+		protected.Get("/dashboard", dashboardPage(dependencies.Dashboard, dependencies.Notifications, dependencies.Routes, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 		protected.Get("/profile", profilePage(identity, dependencies, page))
 		protected.Post("/profile/details", updateOwnProfile(identity, dependencies, page))
 		protected.Post("/profile/email", requestProfileEmail(identity, dependencies, page))
@@ -286,7 +287,7 @@ func login(identity *auth.Service, dependencies Dependencies, page templates.Pag
 
 const genericLoginError = "Benutzername oder Passwort ist ungültig. Bitte versuchen Sie es später erneut."
 
-func dashboardPage(service *dashboarddomain.Service, notifications *notification.AdminService, page templates.PageData, csrfCookieName string, logger *slog.Logger) http.HandlerFunc {
+func dashboardPage(service *dashboarddomain.Service, notifications *notification.AdminService, routes *planning.RouteService, page templates.PageData, csrfCookieName string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		if service == nil {
 			render(response, request, templates.Error(page, http.StatusServiceUnavailable, "Übersicht nicht verfügbar", "Der Tagesüberblick kann derzeit nicht geladen werden."), http.StatusServiceUnavailable, logger)
@@ -305,6 +306,16 @@ func dashboardPage(service *dashboarddomain.Service, notifications *notification
 			return
 		}
 		data := templates.DashboardData{Shell: shell(request, page, csrfCookieName), View: value}
+		if session.Actor.Role == auth.RoleDriver && session.Actor.DriverID != "" && routes != nil {
+			available, routeErr := routes.OwnRouteAvailableForDate(request.Context(), session.Actor, value.Date)
+			switch routeErr {
+			case nil:
+				data.OwnRouteAvailable = available
+			default:
+				data.OwnRouteLookupFailed = true
+				logger.WarnContext(request.Context(), "dashboard own route unavailable", slog.String("error_code", "dashboard_own_route_unavailable"))
+			}
+		}
 		if value.Admin && notifications != nil && value.Counts.NotificationIssues > 0 {
 			data.NotificationIssues, err = notifications.Failed(request.Context(), session.Actor, notification.FailureAll, 5)
 			if err != nil {

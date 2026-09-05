@@ -66,6 +66,14 @@ func TestRouteStoreAssignsEveryStopAsProposalWithoutOutbox(t *testing.T) {
 	if chipperAssignments != 0 || assigned.ChipperResourceID != "" || assigned.ChipperName != "" {
 		t.Fatalf("optional chipper assignment count/route = %d/%#v", chipperAssignments, assigned)
 	}
+	overview, err := store.LoadRouteCandidates(fixture.ctx, nil)
+	if err != nil || len(overview) != 1 || overview[0].JobID != jobID || overview[0].UnavailableReason != "Bereits eingeplant" {
+		t.Fatalf("map overview after assignment = %#v, %v", overview, err)
+	}
+	selectable, err := store.LoadRouteCandidates(fixture.ctx, []string{jobID})
+	if err != nil || len(selectable) != 0 {
+		t.Fatalf("selectable candidates after assignment = %#v, %v", selectable, err)
+	}
 	var appointmentVersion int32
 	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT version FROM appointments WHERE id=$1", assigned.Stops[0].AppointmentID).Scan(&appointmentVersion); err != nil {
 		t.Fatal(err)
@@ -114,17 +122,21 @@ func TestRouteStoreAssignsEveryStopAsProposalWithoutOutbox(t *testing.T) {
 	if fixedAudit != 1 || noteAudit != 1 || fixedOutbox == 0 {
 		t.Fatalf("fixed audit/note audit/outbox = %d/%d/%d", fixedAudit, noteAudit, fixedOutbox)
 	}
-	overview, err := store.LoadRouteCandidates(fixture.ctx, nil)
-	if err != nil || len(overview) != 1 || overview[0].JobID != jobID || overview[0].UnavailableReason != "Bereits eingeplant" {
-		t.Fatalf("map overview after assignment = %#v, %v", overview, err)
-	}
-	selectable, err := store.LoadRouteCandidates(fixture.ctx, []string{jobID})
-	if err != nil || len(selectable) != 0 {
-		t.Fatalf("selectable candidates after assignment = %#v, %v", selectable, err)
+	overview, err = store.LoadRouteCandidates(fixture.ctx, nil)
+	if err != nil || len(overview) != 0 {
+		t.Fatalf("map overview after fixing = %#v, %v", overview, err)
 	}
 	latest, err := store.LatestAssignedRouteForDriver(fixture.ctx, fixture.driver1, "2026-09-01")
 	if err != nil || latest.ID != assigned.ID {
 		t.Fatalf("LatestAssignedRouteForDriver() = %q, %v", latest.ID, err)
+	}
+	available, err := store.AssignedRouteExistsForDriver(fixture.ctx, fixture.driver1, "2026-09-01")
+	if err != nil || !available {
+		t.Fatalf("AssignedRouteExistsForDriver() = %v, %v", available, err)
+	}
+	available, err = store.AssignedRouteExistsForDriver(fixture.ctx, fixture.driver1, "2026-09-02")
+	if err != nil || available {
+		t.Fatalf("AssignedRouteExistsForDriver() for empty day = %v, %v", available, err)
 	}
 }
 

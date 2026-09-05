@@ -275,29 +275,45 @@ document.querySelectorAll("[data-password-strength]").forEach((input) => {
 
 let installEvent;
 const installPrompt = document.querySelector("[data-install-prompt]");
+const installOpenButtons = Array.from(document.querySelectorAll("[data-install-open]"));
+const driverInstallEntry = document.querySelector('.site-header[data-actor-role="driver"]') !== null;
 const profileInstallButton = document.querySelector("[data-profile-install]");
 const profileInstallStatus = document.querySelector("[data-profile-install-status]");
-const hideInstallPrompt = () => {
+const firstInstallAction = installPrompt?.querySelector("[data-install-accept]");
+let installPromptReturnFocus;
+const restoreInstallPromptFocus = () => {
+  const target = installPromptReturnFocus;
+  installPromptReturnFocus = undefined;
+  if (!(target instanceof HTMLElement) || !target.isConnected) return;
+  window.requestAnimationFrame(() => target.focus({ preventScroll: true }));
+};
+const hideInstallPrompt = ({ restoreFocus = false } = {}) => {
+  const containedFocus = installPrompt?.contains(document.activeElement) === true;
   if (installPrompt) installPrompt.hidden = true;
+  if (restoreFocus && containedFocus) restoreInstallPromptFocus();
 };
 const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 const updateInstallState = () => {
   const installed = isStandalone();
   if (profileInstallStatus) profileInstallStatus.textContent = installed ? "Installiert" : installEvent ? "Installation unterstützt" : "In diesem Browser nicht verfügbar";
   if (profileInstallButton) profileInstallButton.hidden = installed || !installEvent;
+  installOpenButtons.forEach((button) => { button.hidden = installed || !installEvent; });
 };
-const offerInstallPrompt = () => {
+let installPromptPostponed = false;
+const offerInstallPrompt = ({ automatic = true, returnFocus } = {}) => {
   const dismissed = safePreferenceGet("hackwerk:install-dismissed") === "true";
-  if (!installEvent || dismissed || isStandalone() || !installPrompt || privacyNoticeVisible()) {
+  if (!installEvent || dismissed || isStandalone() || !installPrompt || privacyNoticeVisible() || (automatic && (driverInstallEntry || installPromptPostponed))) {
     hideInstallPrompt();
     return;
   }
+  installPromptReturnFocus = returnFocus instanceof HTMLElement ? returnFocus : document.activeElement;
   installPrompt.hidden = false;
+  if (!automatic) window.requestAnimationFrame(() => firstInstallAction?.focus({ preventScroll: true }));
   announce("HackWerk kann auf diesem Gerät installiert werden.");
 };
 const promptForInstall = async () => {
   if (!installEvent) {
-    hideInstallPrompt();
+    hideInstallPrompt({ restoreFocus: true });
     updateInstallState();
     return;
   }
@@ -310,6 +326,8 @@ const promptForInstall = async () => {
     await promptEvent.userChoice;
   } catch {
     announce("Die Installation konnte nicht geöffnet werden. Verwenden Sie bei Bedarf die Installationsfunktion des Browsers.");
+  } finally {
+    restoreInstallPromptFocus();
   }
 };
 
@@ -318,26 +336,36 @@ updateInstallState();
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   if (typeof event.prompt !== "function") return;
-	installEvent = event;
-	updateInstallState();
-	offerInstallPrompt();
+  installEvent = event;
+  updateInstallState();
+  offerInstallPrompt({ automatic: true });
 });
 window.addEventListener("hackwerk:privacy-notice", (event) => {
-	if (event.detail?.open) hideInstallPrompt();
-	else offerInstallPrompt();
+  if (event.detail?.open) hideInstallPrompt({ restoreFocus: true });
+  else offerInstallPrompt({ automatic: true });
 });
 installPrompt?.querySelector("[data-install-accept]")?.addEventListener("click", async () => {
   await promptForInstall();
 });
 profileInstallButton?.addEventListener("click", promptForInstall);
+installOpenButtons.forEach((button) => button.addEventListener("click", () => {
+  const dialog = button.closest("dialog");
+  const returnFocus = dialog instanceof HTMLDialogElement ? document.querySelector("[data-mobile-menu-open]") : button;
+  if (dialog instanceof HTMLDialogElement && dialog.open) dialog.close();
+  offerInstallPrompt({ automatic: false, returnFocus });
+}));
+installPrompt?.querySelector("[data-install-later]")?.addEventListener("click", () => {
+  installPromptPostponed = true;
+  hideInstallPrompt({ restoreFocus: true });
+});
 installPrompt?.querySelector("[data-install-dismiss]")?.addEventListener("click", () => {
-	safePreferenceSet("hackwerk:install-dismissed", "true");
-	hideInstallPrompt();
-	updateInstallState();
+  safePreferenceSet("hackwerk:install-dismissed", "true");
+  hideInstallPrompt({ restoreFocus: true });
+  updateInstallState();
 });
 window.addEventListener("appinstalled", () => {
   installEvent = undefined;
-  hideInstallPrompt();
+  hideInstallPrompt({ restoreFocus: true });
   updateInstallState();
 });
 
@@ -1268,6 +1296,7 @@ document.querySelector("[data-global-search-form]")?.addEventListener("submit", 
 const waitlistSelections = Array.from(document.querySelectorAll("[data-waitlist-select]"));
 const selectionCount = document.querySelector("[data-selection-count]");
 const selectionOpen = document.querySelector("[data-selection-open]");
+const selectionToolbar = document.querySelector("[data-waitlist-selection-toolbar]");
 function updateWaitlistSelection() {
   const selected = waitlistSelections.filter((input) => input.checked);
   if (selected.length > 20) {
@@ -1277,8 +1306,10 @@ function updateWaitlistSelection() {
   }
   if (selectionCount) selectionCount.textContent = `${selected.length} ausgewählt`;
   if (selectionOpen) selectionOpen.disabled = selected.length === 0;
+  if (selectionToolbar) selectionToolbar.hidden = selected.length === 0;
 }
 waitlistSelections.forEach((input) => input.addEventListener("change", updateWaitlistSelection));
+updateWaitlistSelection();
 selectionOpen?.addEventListener("click", () => {
   waitlistSelections.filter((input) => input.checked).forEach((input) => window.open(input.dataset.openHref, "_blank", "noopener"));
   announce("Ausgewählte Aufträge wurden nur lesend geöffnet. Es wurde keine Mehrfachmutation ausgeführt.");
@@ -1478,7 +1509,7 @@ async function appointmentDetail(event, loadedProps) {
     const preview = document.createElement("section");
     preview.className = "message-preview";
     const heading = document.createElement("h3"); heading.textContent = "Nachrichtenvorschau vor Fixierung / neuem Link";
-    const explanation = document.createElement("p"); explanation.textContent = "Nebenwirkungsfrei; [BESTÄTIGUNGSLINK] wird erst im Worker sicher ersetzt.";
+    const explanation = document.createElement("p"); explanation.textContent = "Diese Vorschau löst keinen Versand aus. Der sichere Bestätigungslink wird erst beim Versand eingesetzt.";
     const subject = document.createElement("p"); subject.textContent = `Betreff: ${props.message_preview.Subject || props.message_preview.subject || ""}`;
     const email = document.createElement("pre"); email.textContent = props.message_preview.Text || props.message_preview.text || "";
     const sms = document.createElement("pre"); sms.textContent = props.message_preview.SMS || props.message_preview.sms || "";
@@ -1506,6 +1537,10 @@ async function appointmentDetail(event, loadedProps) {
   const permalink = document.createElement("a"); permalink.className = "button button--quiet"; permalink.href = `/calendar?appointment=${encodeURIComponent(event.id)}`; permalink.textContent = "Terminlink"; detail.append(permalink);
   const fix = dialog.querySelector("[data-appointment-fix]");
   const cancel = dialog.querySelector("[data-appointment-cancel]");
+	const cancelField = dialog.querySelector("[data-appointment-cancel-field]");
+	const cancelReason = dialog.querySelector("[data-appointment-cancel-reason]");
+	const cancelLabel = dialog.querySelector("[data-appointment-cancel-label]");
+	const dangerTitle = dialog.querySelector("[data-appointment-danger-title]");
   const assignment = dialog.querySelector("[data-appointment-assignment]");
   const reschedule = dialog.querySelector("[data-appointment-reschedule]");
 	const swapPanel = dialog.querySelector("[data-appointment-swap-panel]");
@@ -1527,6 +1562,10 @@ async function appointmentDetail(event, loadedProps) {
   const needsWithoutNotificationReason = (canFix || canReschedule) && (props.notification_channels || []).length === 0;
   if (fix) fix.hidden = !canFix;
   if (cancel) cancel.hidden = !canCancel;
+	if (cancelField) cancelField.hidden = !canCancel;
+	if (cancelReason) cancelReason.required = canCancel && props.lifecycle === "fixed";
+	if (cancelLabel) cancelLabel.textContent = props.lifecycle === "fixed" ? "Absagegrund (erforderlich)" : "Absagegrund (optional)";
+	if (dangerTitle) dangerTitle.textContent = canCancel ? "Termin absagen" : "Absage rückgängig machen";
   if (assignment) {
     assignment.hidden = !canAssign;
     const selectedDrivers = new Set((props.drivers || []).map((item) => item.ID));
@@ -1726,7 +1765,7 @@ document.querySelector("[data-appointment-fix]")?.addEventListener("click", asyn
   clearAppointmentError();
   try {
     await previewAppointmentMutation(dialog.dataset.appointmentId, dialog.dataset.version, "fix", { without_notification_reason: reason }, dialog.querySelector("[data-appointment-csrf]").value);
-    if (!window.confirm(`Prüfliste gelesen: Termin mit den angezeigten Fahrern und Ressourcen fixieren? Versandvormerkung: ${channels}; ${targets}.`)) return;
+    if (!window.confirm(`Termin verbindlich fixieren? Zeit, Fahrer und Ressourcen werden reserviert. Die Kundeninformation wird über ${channels} für ${targets} zum Versand vorgemerkt.`)) return;
     await appointmentAction("fix", { without_notification_reason: reason });
   } catch (failure) { showAppointmentFailure(failure); }
 });
@@ -1746,10 +1785,17 @@ document.querySelector("[data-appointment-complete]")?.addEventListener("click",
 
 document.querySelector("[data-appointment-cancel]")?.addEventListener("click", async () => {
   const dialog = document.querySelector("[data-appointment-dialog]");
-  const reason = document.querySelector("[data-appointment-cancel-reason]")?.value || "";
+  const reasonInput = document.querySelector("[data-appointment-cancel-reason]");
+  const reason = reasonInput?.value || "";
+  if (reasonInput?.required && !reason.trim()) {
+    showAppointmentError("Bitte geben Sie einen Absagegrund an.", reasonInput);
+    return;
+  }
   const summary = dialog?.dataset.appointmentSummary || "diesen Termin";
-  const targets = dialog?.dataset.notificationTargets || "kein automatisches Versandziel";
-  if (!window.confirm(`${summary} wirklich absagen? Begründung: ${reason.trim() || "nicht angegeben"}. Versandziel: ${targets}.`)) return;
+  const consequence = dialog?.dataset.lifecycle === "fixed"
+    ? "Fahrer- und Ressourcenreservierungen werden aufgehoben und der Auftrag wird als abgebrochen geführt."
+    : "Der Vorschlag wird entfernt und der Auftrag kehrt in die Warteliste zurück.";
+  if (!window.confirm(`${summary} wirklich absagen? ${consequence} Begründung: ${reason.trim() || "nicht angegeben"}.`)) return;
   clearAppointmentError();
   try { await appointmentAction("cancel", { reason }); } catch (failure) { showAppointmentFailure(failure); }
 });
@@ -1763,7 +1809,7 @@ document.querySelector("[data-appointment-reopen]")?.addEventListener("click", a
     return;
   }
   const summary = dialog?.dataset.appointmentSummary || "Diesen abgesagten Termin";
-  if (!window.confirm(`${summary} als unverbindlichen Vorschlag wieder öffnen? Begründung: ${reason}. Es wird keine Nachricht versendet.`)) return;
+  if (!window.confirm(`${summary} als unverbindlichen Vorschlag wieder öffnen? Fahrer- und Ressourcenbelegung werden erneut geprüft. Alte Bestätigungslinks werden widerrufen; eine Nachricht wird nicht versendet. Begründung: ${reason}.`)) return;
   clearAppointmentError();
   try {
     await appointmentAction("reopen", {
@@ -1839,12 +1885,14 @@ async function calendarMutation(info, action, csrf) {
   });
 }
 
-const calendarOptions = document.querySelector(".calendar-options");
+const calendarWaitlistPanel = document.querySelector(".calendar-waitlist");
 const calendarCompactMedia = window.matchMedia("(max-width: 1050px)");
-if (calendarOptions) {
-  const syncCalendarOptions = () => { calendarOptions.open = !calendarCompactMedia.matches; };
-  syncCalendarOptions();
-  calendarCompactMedia.addEventListener("change", syncCalendarOptions);
+if (calendarWaitlistPanel) {
+  const syncCalendarDisclosures = () => {
+    calendarWaitlistPanel.open = !calendarCompactMedia.matches;
+  };
+  syncCalendarDisclosures();
+  calendarCompactMedia.addEventListener("change", syncCalendarDisclosures);
 }
 
 const calendarElement = document.querySelector("[data-calendar]");
@@ -1862,7 +1910,6 @@ if (calendarElement && window.FullCalendar) {
     ? { start: "prev,next", center: "title", end: "today,timeGridDay,dayGridMonth,listWeek" }
     : { start: "prev,next today", center: "title", end: "timeGridDay,timeGridWeek,dayGridMonth,listWeek" };
   const calendar = new FullCalendar.Calendar(calendarElement, {
-    themeSystem: "classic",
     locale: "de-AT",
     timeZone: "Europe/Vienna",
     firstDay: 1,
@@ -1888,12 +1935,18 @@ if (calendarElement && window.FullCalendar) {
     moreLinkText: (count) => `+${count} weitere`,
     headerToolbar: toolbarForWidth(compact),
     buttons: {
-      today: { text: "Heute" },
-      timeGridDay: { text: "Tag" },
-      timeGridWeek: { text: "Woche" },
-      dayGridMonth: { text: "Monat" },
-      listWeek: { text: "Agenda" },
+	  prev: { hint: "Vorheriger Zeitraum" },
+	  next: { hint: "Nächster Zeitraum" },
+      today: { text: "Heute", hint: "Heutigen Tag anzeigen" },
+      timeGridDay: { text: "Tag", hint: "Tagesansicht öffnen" },
+      timeGridWeek: { text: "Woche", hint: "Wochenansicht öffnen" },
+      dayGridMonth: { text: "Monat", hint: "Monatsansicht öffnen" },
+      listWeek: { text: "Agenda", hint: "Agendaansicht öffnen" },
     },
+    viewHint: "Ansicht $0 öffnen",
+	timedText: "Uhrzeit",
+    moreLinkHint: (count) => `${count} weitere Termine anzeigen`,
+    noEventsText: "Keine Termine in diesem Zeitraum",
     events(info, success, failure) {
       const url = new URL(calendarElement.dataset.eventSource, window.location.origin);
       url.searchParams.set("from", info.start.toISOString());
@@ -2093,6 +2146,17 @@ popoverMenus.forEach((menu) => {
 });
 
 const dashboardStarts = Array.from(document.querySelectorAll("[data-dashboard-start]"));
+const viennaCalendarDate = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Vienna",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const viennaCalendarDayNumber = (value) => {
+  const date = new Date(value);
+  const parts = Object.fromEntries(viennaCalendarDate.formatToParts(date).map((part) => [part.type, part.value]));
+  return Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day)) / 86400000;
+};
 function updateDashboardCountdown() {
   if (document.hidden || dashboardStarts.length === 0) return;
   document.querySelectorAll("[data-dashboard-countdown]").forEach((node) => node.remove());
@@ -2107,7 +2171,13 @@ function updateDashboardCountdown() {
   const label = document.createElement("small");
   label.dataset.dashboardCountdown = "true";
   label.className = "dashboard-countdown";
-  label.textContent = minutes < 60 ? `beginnt in ${minutes} Min.` : `beginnt in ${Math.floor(minutes / 60)} Std. ${minutes % 60} Min.`;
+  const calendarDays = viennaCalendarDayNumber(next.startsAt) - viennaCalendarDayNumber(now);
+  if (calendarDays >= 1) {
+    label.textContent = calendarDays === 1 ? "morgen" : `in ${calendarDays} Tagen`;
+  } else {
+    label.textContent = minutes < 60 ? `beginnt in ${minutes} Min.` : `beginnt in ${Math.floor(minutes / 60)} Std. ${minutes % 60} Min.`;
+  }
+  if (minutes <= 120) label.classList.add("dashboard-countdown--soon");
   next.node.parentElement?.append(label);
 }
 updateDashboardCountdown();
@@ -3533,8 +3603,23 @@ function routeMapNotice(context, message) {
   notice.textContent = message;
 }
 
-function markRouteMapUnavailable(canvas, message = "Die Routenkarte ist derzeit nicht verfügbar. Die geordnete Stoppliste bleibt vollständig nutzbar.") {
+function showRouteMapRetry(context) {
+  const retry = context?.querySelector("[data-route-map-retry]");
+  if (retry) retry.hidden = false;
+}
+
+function enableRouteMapReload(context) {
+  const retry = context?.querySelector("[data-route-map-retry]");
+  if (!retry || retry.dataset.routeMapReload === "true") return;
+  retry.dataset.routeMapReload = "true";
+  retry.addEventListener("click", () => window.location.reload());
+}
+
+function markRouteMapUnavailable(canvas, message = "Die Routenkarte ist derzeit nicht verfügbar. Die geordnete Stoppliste bleibt vollständig nutzbar.", reload = false) {
   if (!canvas) return;
+  const context = canvas.closest("[data-route-context]");
+  showRouteMapRetry(context);
+  if (reload) enableRouteMapReload(context);
   let fallback = canvas.querySelector("[data-map-fallback]");
   if (!fallback) {
     fallback = document.createElement("div");
@@ -3670,7 +3755,9 @@ function initializeRouteMap(canvas, maplibregl) {
   const visibleCandidates = candidates.filter((candidate) => !stopJobIDs.has(candidate.jobID));
   const filteredCandidates = () => visibleCandidates.filter((candidate) => !candidate.element.hidden);
   candidates.forEach((candidate) => {
-    const syncRow = () => candidate.element.classList.toggle("route-candidate--selected", candidate.checkbox.checked);
+    const syncRow = () => {
+      candidate.element.classList.toggle("route-candidate--selected", candidate.checkbox.checked);
+    };
     candidate.checkbox.addEventListener("change", syncRow);
     syncRow();
   });
@@ -3723,7 +3810,7 @@ function initializeRouteMap(canvas, maplibregl) {
     toolbar.className = "route-map-toolbar";
     toolbar.dataset.routeMapToolbar = "true";
     toolbar.setAttribute("aria-label", "Kartenwerkzeuge");
-    toolbar.innerHTML = '<button class="button button--quiet" type="button" data-route-map-start>Startort</button><button class="button button--quiet" type="button" data-route-map-fit>Alle Punkte</button><button class="button button--quiet" type="button" data-route-map-labels aria-pressed="true">Beschriftungen</button><button class="button button--quiet" type="button" data-route-map-retry>Karte erneut laden</button><span class="status-badge" data-route-map-count></span>';
+    toolbar.innerHTML = '<button class="button button--quiet" type="button" data-route-map-start>Startort</button><button class="button button--quiet" type="button" data-route-map-fit>Alle Punkte</button><button class="button button--quiet" type="button" data-route-map-labels aria-pressed="true">Beschriftungen</button><button class="button button--quiet" type="button" data-route-map-retry hidden>Karte erneut laden</button><span class="status-badge" data-route-map-count></span>';
     canvas.insertAdjacentElement("beforebegin", toolbar);
   }
   const startButton = toolbar.querySelector("[data-route-map-start]");
@@ -3743,7 +3830,8 @@ function initializeRouteMap(canvas, maplibregl) {
     event.currentTarget.setAttribute("aria-pressed", String(visible));
     announce(visible ? "Kartenbeschriftungen eingeblendet." : "Kartenbeschriftungen ausgeblendet.");
   });
-  toolbar.querySelector("[data-route-map-retry]")?.addEventListener("click", () => {
+  toolbar.querySelector("[data-route-map-retry]")?.addEventListener("click", (event) => {
+	event.currentTarget.hidden = true;
     routeMapNotice(context, "Kartenkacheln werden erneut geladen …");
     const streets = map.getSource("hackwerk-streets");
     if (typeof streets?.setTiles === "function") streets.setTiles([`${window.location.origin}/map/tiles/{z}/{x}/{y}`]);
@@ -3797,6 +3885,7 @@ function initializeRouteMap(canvas, maplibregl) {
   map.on("error", (event) => {
     const mapError = String(event?.error?.message || event?.message || "Kartenfehler");
     canvas.dataset.mapError = mapError;
+	showRouteMapRetry(context);
     if (event?.sourceId === "hackwerk-streets") {
       routeMapNotice(context, "Die Kartenkacheln sind vorübergehend nicht verfügbar. Startort, Auftrags-Pins und Auswahl bleiben bedienbar.");
       return;
@@ -4251,7 +4340,7 @@ if (jobLocationEditors.length || jobLocationPreviews.length || routeMapCanvases.
     routeMapCanvases.forEach((canvas) => {
       if (canvas.dataset.mapInitialized) return;
       canvas.dataset.mapInitialized = "true";
-      try { initializeRouteMap(canvas, maplibregl); } catch { markRouteMapUnavailable(canvas); }
+      try { initializeRouteMap(canvas, maplibregl); } catch { markRouteMapUnavailable(canvas, undefined, true); }
     });
     routeLocationMapCanvases.forEach((canvas) => {
       if (canvas.dataset.mapInitialized) return;
@@ -4277,7 +4366,7 @@ if (jobLocationEditors.length || jobLocationPreviews.length || routeMapCanvases.
   }).catch(() => {
     jobLocationEditors.forEach(initializeEditorFallback);
     document.querySelectorAll("[data-map-canvas], [data-map-preview]").forEach(markMapUnavailable);
-    routeMapCanvases.forEach((canvas) => markRouteMapUnavailable(canvas));
+    routeMapCanvases.forEach((canvas) => markRouteMapUnavailable(canvas, undefined, true));
     routeLocationMapCanvases.forEach((canvas) => markRouteLocationMapUnavailable(canvas));
   });
 }

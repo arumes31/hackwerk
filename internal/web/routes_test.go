@@ -19,11 +19,19 @@ import (
 )
 
 type routeHTTPStore struct {
-	candidates []planning.RouteCandidate
-	options    planning.RouteOptions
-	route      planning.RouteDraft
-	savedOrder []string
-	savedRoute planning.RouteDraft
+	candidates      []planning.RouteCandidate
+	options         planning.RouteOptions
+	route           planning.RouteDraft
+	availabilityErr error
+	savedOrder      []string
+	savedRoute      planning.RouteDraft
+}
+
+func (store *routeHTTPStore) AssignedRouteExistsForDriver(context.Context, string, string) (bool, error) {
+	if store.availabilityErr != nil {
+		return false, store.availabilityErr
+	}
+	return store.route.ID != "", nil
 }
 
 func (store *routeHTTPStore) LoadRouteCandidates(context.Context, []string) ([]planning.RouteCandidate, error) {
@@ -410,7 +418,11 @@ func TestRouteHTTPDraftMutationAndOwnRouteErrorFlows(t *testing.T) {
 	driverRouter, driverSession, driverCSRF := routeTestRouter(t, auth.RoleDriver, "driver-1", store)
 	missingOwnRoute := httptest.NewRecorder()
 	driverRouter.ServeHTTP(missingOwnRoute, authenticatedCustomerRequest(t, http.MethodGet, "/my-route?date=2026-08-27", nil, driverSession, driverCSRF))
-	if missingOwnRoute.Code != http.StatusOK || !strings.Contains(missingOwnRoute.Body.String(), "Keine zugewiesene Route") {
+	missingBody := missingOwnRoute.Body.String()
+	if missingOwnRoute.Code != http.StatusOK || !strings.Contains(missingBody, "Keine zugewiesene Route") ||
+		!strings.Contains(missingBody, "jeden Einsatz direkt aus der Übersicht navigieren") ||
+		strings.Contains(missingBody, "Sie können die Fahrreihenfolge Ihrer eigenen Route ändern") ||
+		!strings.Contains(missingBody, `<details class="route-day-shortcuts">`) {
 		t.Fatalf("missing own route=%d body=%s", missingOwnRoute.Code, missingOwnRoute.Body.String())
 	}
 

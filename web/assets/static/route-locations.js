@@ -296,6 +296,15 @@ routePlannerForms.forEach(form => {
   const jobs = Array.from(form.querySelectorAll("input[name='job_id']"));
   if (!feedback || !feedbackTitle || !feedbackList || jobs.length === 0) return;
 
+  const markerCount = form.querySelector("[data-route-marker-count]");
+  const updateRouteSelectionCount = () => {
+    const selected = jobs.filter(input => input.checked).length;
+    const available = jobs.filter(input => !input.disabled).length;
+    if (markerCount) markerCount.textContent = `${selected} ausgewählt · ${available} verfügbar`;
+  };
+  jobs.forEach(input => input.addEventListener("change", updateRouteSelectionCount));
+  updateRouteSelectionCount();
+
   const endpointProblem = (prefix, heading) => {
     const picker = form.querySelector(`[data-route-location-prefix="${prefix}"]`);
     const choice = picker?.querySelector("[data-route-location-choice]:checked");

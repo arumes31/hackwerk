@@ -3,18 +3,13 @@
 .mobile-app-bar,
 .mobile-primary-action,
 .driver-tour,
+.driver-mobile-availability,
 .admin-tour {
   display: none;
 }
 
 .calendar-read-only-compact {
   display: none;
-}
-
-@media (min-width: 1051px) {
-  .calendar-options > summary {
-    display: none;
-  }
 }
 
 @media (max-width: 1050px) {
@@ -293,6 +288,7 @@
   :root {
     --mobile-gutter: .55rem;
     --mobile-section-gap: .5rem;
+    --mobile-control-gap: .35rem;
     --mobile-card-radius: .75rem;
     --mobile-sticky-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));
   }
@@ -307,7 +303,6 @@
   }
 
   body:has(.mobile-bottom-nav) {
-    overflow-x: clip;
     background: var(--paper);
   }
 
@@ -328,8 +323,20 @@
     max-width: 100%;
   }
 
-  body:has(.mobile-bottom-nav) :where(h1, h2, h3, h4, p, dd, td, code) {
+  body:has(.mobile-bottom-nav) :where(h1, h2, h3, h4, p, dd, td) {
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
+
+  body:has(.mobile-bottom-nav) :where(code, [data-copy-value]) {
     overflow-wrap: anywhere;
+  }
+
+  body:has(.mobile-bottom-nav) .status-badge {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: break-word;
+    white-space: normal;
   }
 
   body:has(.mobile-bottom-nav) :where(a, button, input, select, summary, [tabindex]):focus {
@@ -500,12 +507,11 @@
     inset-block-end: calc(var(--mobile-sticky-bottom) + .65rem);
   }
 
-  /* Dashboard: glanceable metrics followed by one-column field cards. */
+  /* Dashboard: role-specific mobile projection followed by supporting context. */
   .dashboard-page[data-dashboard-role="admin"]:has(> .admin-tour) > .dashboard-intro {
     display: contents;
   }
 
-  .dashboard-page[data-dashboard-role="admin"]:has(> .admin-tour) > .dashboard-intro > div > :not(h1),
   .dashboard-page[data-dashboard-role="admin"]:has(> .admin-tour) > .dashboard-intro > .action-row,
   .dashboard-page[data-dashboard-role="admin"]:has(> .admin-tour) > .dashboard-control-bar {
     display: none;
@@ -525,10 +531,6 @@
 
   .dashboard-page[data-dashboard-role="admin"] {
     padding-top: .25rem;
-  }
-
-  .dashboard-page[data-dashboard-role="admin"] > .admin-tour ~ .dashboard-metrics {
-    margin-top: .5rem;
   }
 
   .dashboard-metrics {
@@ -555,6 +557,10 @@
 
   .dashboard-columns {
     gap: var(--mobile-section-gap);
+  }
+
+  .dashboard-page[data-dashboard-role="driver"] .dashboard-columns {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .dashboard-side {
@@ -587,6 +593,41 @@
     min-width: 0;
   }
 
+  .dashboard-page[data-dashboard-role="driver"] > .dashboard-intro {
+    display: contents;
+  }
+
+  .dashboard-page[data-dashboard-role="driver"] > .dashboard-intro h1 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .dashboard-page[data-dashboard-role="driver"] > .dashboard-intro .action-row,
+  .dashboard-page[data-dashboard-role="driver"] > .dashboard-columns > .dashboard-side {
+    display: none;
+  }
+
+  .driver-mobile-availability {
+    display: grid;
+    gap: .55rem;
+    padding: .8rem;
+    border-radius: var(--mobile-card-radius);
+    background: var(--surface);
+    box-shadow: 0 .35rem 1rem rgb(29 40 31 / 6%);
+  }
+
+  .driver-mobile-availability .section-heading,
+  .driver-mobile-availability .availability-row {
+    margin: 0;
+  }
+
   .dashboard-page[data-dashboard-role="admin"] [data-dashboard-projection="resource-groups"] {
     display: none;
   }
@@ -607,6 +648,25 @@
     margin-bottom: 0;
   }
 
+  .driver-tour__heading {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .driver-tour__quick-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .45rem;
+  }
+
+  .driver-tour__quick-actions .button {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    margin: 0;
+    justify-content: center;
+  }
+
   .driver-tour__heading h2,
   .driver-tour__heading p,
   .admin-tour__heading h2,
@@ -623,6 +683,7 @@
   }
 
   .driver-tour__route,
+  .driver-tour__availability,
   .admin-tour__calendar {
     min-width: 44px;
     min-height: 44px;
@@ -665,11 +726,6 @@
   }
 
   .admin-tour__date-nav small {
-    color: var(--muted);
-    font-size: .68rem;
-  }
-
-  .admin-tour__date-nav :where(.eyebrow, small) {
     display: none;
   }
 
@@ -809,8 +865,14 @@
     box-shadow: 0 .35rem 1rem rgb(29 40 31 / 6%);
   }
 
-  .driver-tour__appointment:has(.dashboard-countdown),
-  .admin-tour__appointment:has(.dashboard-countdown) {
+  .driver-tour__route-status {
+	margin: -.1rem 0 .65rem;
+	color: var(--muted);
+	font-size: .88rem;
+  }
+
+  .driver-tour__appointment:has(.dashboard-countdown--soon),
+  .admin-tour__appointment:has(.dashboard-countdown--soon) {
     border-color: var(--ochre);
     box-shadow: 0 0 0 2px var(--ochre), 0 .35rem 1rem rgb(29 40 31 / 8%);
   }
@@ -919,6 +981,21 @@
     grid-column: 1 / -1;
   }
 
+  .route-page .route-stop-contact-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .45rem;
+  }
+
+  .route-page .route-stop-contact-actions [data-route-navigation],
+  .route-page .route-stop-contact-actions [data-route-call] {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    margin: 0;
+    justify-content: center;
+  }
+
   .admin-tour__appointment-link {
     grid-column: 1 / -1;
   }
@@ -934,16 +1011,6 @@
     gap: var(--mobile-section-gap);
   }
 
-  body:has(.site-header[data-actor-role="admin"]) .calendar-page .calendar-board {
-    order: -1;
-  }
-
-  body:has(.site-header[data-actor-role="admin"]) .calendar-page .calendar-waitlist {
-    order: 1;
-    max-height: min(22rem, 45dvh);
-    overflow: auto;
-  }
-
   body:has(.site-header[data-actor-role="admin"]) .calendar-page .calendar-quick-controls {
     position: static;
     background: transparent;
@@ -954,6 +1021,47 @@
     position: static;
     max-height: none;
     overflow: visible;
+    padding: 0;
+  }
+
+  .calendar-waitlist > summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    padding: .45rem .65rem;
+    color: var(--moss);
+    cursor: pointer;
+    font-weight: 800;
+    list-style: none;
+  }
+
+  .calendar-waitlist > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .calendar-waitlist > summary::after {
+    content: "+";
+  }
+
+  .calendar-waitlist[open] > summary::after {
+    content: "−";
+  }
+
+  .calendar-waitlist > summary small {
+    margin-inline-start: auto;
+    color: var(--muted);
+    font-size: .75rem;
+    font-weight: 700;
+  }
+
+  .calendar-waitlist__body {
+    max-height: min(22rem, 45dvh);
+    padding: 0 .4rem .4rem;
+    border-top: 1px solid var(--line);
+    overflow: auto;
+    overscroll-behavior: contain;
   }
 
   .calendar-page .calendar-board,
@@ -967,9 +1075,7 @@
     align-items: center;
   }
 
-  body:has(.mobile-bottom-nav) .calendar-page .page-heading .eyebrow,
-  body:has(.mobile-bottom-nav) .calendar-page .page-heading p:not(.eyebrow),
-  .calendar-timezone-badge {
+  body:has(.mobile-bottom-nav) .calendar-page .page-heading p {
     display: none;
   }
 
@@ -1102,13 +1208,12 @@
   }
 
   .calendar-page .calendar-legend {
-    flex-wrap: nowrap;
+	flex-wrap: wrap;
     gap: .65rem;
     margin: 0 0 .25rem;
     padding-block: .1rem;
-    overflow-x: auto;
-    white-space: nowrap;
-    scrollbar-width: thin;
+	overflow-x: visible;
+	white-space: normal;
   }
 
   .calendar-page .calendar-edit-hint {
@@ -1270,7 +1375,33 @@
 
   /* Routes: next stop, ordered stops and map read as separate app surfaces. */
   .route-page .route-day-filter {
-    grid-template-columns: minmax(0, 1fr);
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: end;
+  }
+
+  .route-page .route-day-filter .button {
+	margin: 0;
+  }
+
+  .route-day-shortcuts > summary {
+	min-height: 44px;
+  }
+
+  .route-day-shortcuts {
+	width: 100%;
+  }
+
+  .route-day-presets {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	width: 100%;
+  }
+
+  .route-day-presets .button {
+	min-width: 0;
+	margin: 0;
+	padding-inline: .45rem;
+	white-space: normal;
   }
 
   .route-page .route-workspace {
@@ -1393,7 +1524,21 @@
   }
 
   [data-operation-page] .interval-list {
-    gap: .45rem;
+	gap: .45rem;
+  }
+
+  [data-operation-page] .availability-preview:not([open]) {
+	height: auto;
+	min-height: 46px;
+	overflow: visible;
+  }
+
+  [data-operation-page] .availability-preview:not([open]) > summary {
+	height: auto;
+	min-height: 44px;
+	overflow: visible;
+	text-overflow: clip;
+	white-space: normal;
   }
 
   /* Profile and users: one-column account cards with local sticky navigation. */
@@ -1581,12 +1726,17 @@
     display: grid;
   }
 
-  body:has(.site-header[data-actor-role="admin"]) .notifications-page .responsive-table td[data-label="Aktion"],
-  body:has(.site-header[data-actor-role="admin"]) .waitlist-page .waitlist-table td[data-label="Aktionen"] {
+  body:has(.site-header[data-actor-role="admin"]) .notifications-page .responsive-table td[data-label="Aktion"] {
     order: -1;
     margin-bottom: .35rem;
     padding-bottom: .55rem;
     border-bottom: 1px solid var(--line);
+  }
+
+  body:has(.site-header[data-actor-role="admin"]) .waitlist-page .waitlist-table td[data-label="Aktionen"] {
+    margin-top: .35rem;
+    padding-top: .55rem;
+    border-top: 1px solid var(--line);
   }
 
   body:has(.site-header[data-actor-role="admin"]) .notifications-page .responsive-table td[data-label="Aktion"]::before,
@@ -1634,7 +1784,7 @@
   .customer-list-toolbar {
     position: static;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: .4rem;
+    gap: var(--mobile-control-gap);
     padding: .4rem;
   }
 
@@ -1650,7 +1800,7 @@
     grid-column: 1 / -1;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: .35rem;
+    gap: var(--mobile-control-gap);
   }
 
   .customer-list-toolbar__search > input {
@@ -1750,6 +1900,12 @@
     align-items: center;
   }
 
+  .waitlist-page .waitlist-table td a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+
   body:has(.mobile-bottom-nav) .compact-filter-panel:not([open]) {
     height: 46px;
     overflow: hidden;
@@ -1761,7 +1917,21 @@
     padding-block: .35rem;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+	white-space: nowrap;
+  }
+
+  body:has(.mobile-bottom-nav) .availability-preview:not([open]) {
+	height: auto;
+	min-height: 46px;
+	overflow: visible;
+  }
+
+  body:has(.mobile-bottom-nav) .availability-preview:not([open]) > summary {
+	height: auto;
+	min-height: 44px;
+	overflow: visible;
+	text-overflow: clip;
+	white-space: normal;
   }
 
   .appointment-action-group,
@@ -1779,6 +1949,25 @@
 }
 
 @media (max-width: 520px) {
+	.waitlist-work-views {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		overflow: visible;
+	}
+
+	.waitlist-work-views > span {
+		grid-column: 1 / -1;
+	}
+
+	.waitlist-work-views .button {
+		width: 100%;
+		min-width: 0;
+		padding-inline: .35rem;
+		line-height: 1.1;
+		text-align: center;
+		white-space: normal;
+	}
+
   :where(.customer-page, .waitlist-page) .page-heading .eyebrow,
   :where(.customer-page, .waitlist-page) .page-heading p:not(.eyebrow) {
     display: none;
@@ -1792,6 +1981,19 @@
   body:has(.mobile-bottom-nav) .customer-page .page-heading > .action-row {
     width: auto;
   }
+}
+
+@media (max-width: 459px) {
+  .admin-tour__commands {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard-upcoming .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: .2rem;
+  }
+
 }
 
 @media (max-width: 360px) {
@@ -1828,6 +2030,18 @@
 
   .table-card .responsive-table td {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .waitlist-table td {
+    overflow-wrap: anywhere;
+  }
+
+  .waitlist-table .status-badge {
+    display: inline-block;
+    max-width: 100%;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }
 

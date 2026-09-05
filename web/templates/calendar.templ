@@ -78,39 +78,43 @@ templ Calendar(data CalendarData) {
 			@appHeader(data.Shell)
 			<main id="hauptinhalt" class="page calendar-page admin-work-page">
 				<div class="page-heading">
-					<div><p class="eyebrow">Zentrale Einsatzplanung</p><h1>Kalender</h1><p>Alle Fahrer sehen denselben Plan. Zeiten werden in Europe/Vienna angezeigt.</p></div>
+					<div><h1>Kalender</h1><p>Gemeinsamer Plan für alle Fahrer.</p></div>
 					<div class="badge-row calendar-heading-actions">
 						<a class="button button--quiet calendar-feed-button" href="/calendar/feeds">Kalender-Abo</a>
 						if data.Shell.Actor.Role == auth.RoleDriver {
 							<span class="status-badge" data-calendar-read-only aria-label="Nur lesen – Planung nur durch Administration"><span class="calendar-read-only-full">Nur lesen – Planung nur durch Administration</span><span class="calendar-read-only-compact" aria-hidden="true">Nur lesen · Admin plant</span></span>
 						}
-						<span class="status-badge calendar-timezone-badge">{ data.Timezone }</span>
 					</div>
 				</div>
+				if data.Shell.Actor.Role == auth.RoleAdmin {
+					@planningLifecycle("")
+				}
 				if data.Notice != "" {
 					<div class="calendar-message" role="status">{ data.Notice }</div>
 				}
 				<div class="calendar-layout">
 					if data.Shell.Actor.Role == auth.RoleAdmin {
-						<aside class="calendar-waitlist" aria-labelledby="calendar-waitlist-title">
-							<h2 id="calendar-waitlist-title">Warteliste</h2>
-							<p>Ziehen oder „Einplanen“ wählen. Beides erzeugt nur einen Vorschlag.</p>
-							<div data-calendar-waitlist>
-								for _, item := range data.Options.Waitlist {
-									<article class="calendar-waitlist-item" draggable="true" data-calendar-job={ item.JobID } data-job-id={ item.JobID } data-duration={ fmt.Sprint(item.EstimatedHackMinutes + item.EstimatedTransportMinutes) } data-title={ item.CustomerName + " · " + item.JobNumber } data-transport-mode={ item.TransportMode } data-external-confirmed={ fmt.Sprint(item.ExternalTransportConfirmed) }>
-										<strong>{ item.CustomerName }</strong><span>{ item.JobNumber } · { item.VolumeM3 } m³</span><small>{ item.Locality } · { calendarJobTypeLabel(item.JobType) }</small>
-										<a class="button button--quiet" href={ "/calendar/plan?job_id=" + url.QueryEscape(item.JobID) } data-plan-job={ item.JobID } data-duration={ fmt.Sprint(item.EstimatedHackMinutes + item.EstimatedTransportMinutes) } data-title={ item.CustomerName + " · " + item.JobNumber } data-transport-mode={ item.TransportMode } data-external-confirmed={ fmt.Sprint(item.ExternalTransportConfirmed) }>Einplanen</a>
-									</article>
-								}
-								if len(data.Options.Waitlist) == 0 {
-									<p class="empty-state">Keine aktiven Wartelistenaufträge.</p>
-								}
+						<details class="calendar-waitlist" aria-labelledby="calendar-waitlist-title" open>
+							<summary><span id="calendar-waitlist-title">Warteliste</span><small>{ fmt.Sprint(len(data.Options.Waitlist)) } offen</small></summary>
+							<div class="calendar-waitlist__body">
+								<p>Ziehen oder „Einplanen“ wählen. Beides erzeugt nur einen Vorschlag.</p>
+								<div data-calendar-waitlist>
+									for _, item := range data.Options.Waitlist {
+										<article class="calendar-waitlist-item" draggable="true" data-calendar-job={ item.JobID } data-job-id={ item.JobID } data-duration={ fmt.Sprint(item.EstimatedHackMinutes + item.EstimatedTransportMinutes) } data-title={ item.CustomerName + " · " + item.JobNumber } data-transport-mode={ item.TransportMode } data-external-confirmed={ fmt.Sprint(item.ExternalTransportConfirmed) }>
+											<strong>{ item.CustomerName }</strong><span>{ item.JobNumber } · { item.VolumeM3 } m³</span><small>{ item.Locality } · { calendarJobTypeLabel(item.JobType) }</small>
+											<a class="button button--quiet" href={ "/calendar/plan?job_id=" + url.QueryEscape(item.JobID) } data-plan-job={ item.JobID } data-duration={ fmt.Sprint(item.EstimatedHackMinutes + item.EstimatedTransportMinutes) } data-title={ item.CustomerName + " · " + item.JobNumber } data-transport-mode={ item.TransportMode } data-external-confirmed={ fmt.Sprint(item.ExternalTransportConfirmed) }>Einplanen</a>
+										</article>
+									}
+									if len(data.Options.Waitlist) == 0 {
+										<p class="empty-state">Keine aktiven Wartelistenaufträge.</p>
+									}
+								</div>
 							</div>
-						</aside>
+						</details>
 					}
 					<section class="calendar-board" aria-label="Terminplan">
-						<details class="calendar-options" open>
-							<summary>Datum &amp; Optionen</summary>
+						<details class="calendar-options">
+							<summary>Datum &amp; weitere Optionen</summary>
 							<div class="calendar-quick-controls" data-calendar-controls aria-label="Kalender schnell steuern">
 								<div class="calendar-control-group" role="group" aria-label="Schnell zu einem Zeitraum wechseln">
 									<button class="button button--quiet" type="button" data-calendar-jump="today">Heute</button>
@@ -118,8 +122,8 @@ templ Calendar(data CalendarData) {
 									<button class="button button--quiet" type="button" data-calendar-jump="next-week">Nächste Woche</button>
 								</div>
 								<div class="calendar-control-group calendar-control-group--date" role="group" aria-label="Datum und Wochenenden">
-									<label>Datum <input type="date" data-calendar-date aria-label="Kalenderdatum wählen"/></label>
-									<label class="check-label"><input type="checkbox" data-calendar-weekends checked/> Wochenende</label>
+									<label for="calendar-date">Datum</label><input id="calendar-date" name="calendar_date" type="date" data-calendar-date aria-label="Kalenderdatum wählen"/>
+									<label class="check-label" for="calendar-weekends"><input id="calendar-weekends" name="calendar_weekends" type="checkbox" data-calendar-weekends checked/> Wochenende</label>
 								</div>
 								<div class="calendar-control-group calendar-control-group--utilities" role="group" aria-label="Kalenderansicht verwenden">
 									<button class="button button--quiet" type="button" data-calendar-reload>Neu laden</button>
@@ -127,6 +131,9 @@ templ Calendar(data CalendarData) {
 									<button class="button button--quiet" type="button" data-print-page>Drucken</button>
 								</div>
 							</div>
+							if data.Shell.Actor.Role == auth.RoleAdmin {
+								<p class="calendar-edit-hint">Termin ziehen = verschieben · oberen/unteren Rand ziehen = Dauer ändern</p>
+							}
 						</details>
 						<div class="calendar-range-summary"><strong data-calendar-range>Datumsbereich wird geladen</strong><span data-calendar-freshness></span><span data-calendar-timezone>Anzeige: Europe/Vienna</span></div>
 						<div class="form-alert form-alert--warning" data-calendar-timezone-warning hidden></div>
@@ -135,9 +142,6 @@ templ Calendar(data CalendarData) {
 							<span><i class="appointment-badge--fixed" aria-hidden="true"></i> Fixiert</span>
 							<span><i class="appointment-badge--cancelled" aria-hidden="true"></i> Abgesagt</span>
 							<span><i class="calendar-legend__now" aria-hidden="true"></i> Aktuelle Zeit</span>
-							if data.Shell.Actor.Role == auth.RoleAdmin {
-								<span class="calendar-edit-hint">Termin ziehen = verschieben · oberen/unteren Rand ziehen = Dauer ändern</span>
-							}
 						</div>
 						<div class="calendar-message" role="status" aria-live="polite" data-calendar-message></div>
 						<div data-calendar data-event-source="/api/v1/calendar" data-csrf={ data.Shell.CSRFToken } data-editable={ fmt.Sprint(data.Shell.Actor.Role == auth.RoleAdmin) }></div>
@@ -166,7 +170,7 @@ templ Calendar(data CalendarData) {
 templ planningDialog(data CalendarData) {
 	<dialog class="planning-dialog" data-planning-dialog aria-labelledby="planning-dialog-title">
 		<form method="post" action="/calendar/plan" class="form-stack" data-planning-form aria-describedby="planning-safety-note">
-			<div class="dialog-heading"><div><p class="eyebrow">Unverbindlicher Vorschlag</p><h2 id="planning-dialog-title" data-planning-title>Auftrag einplanen</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Dialog schließen">×</button></div>
+			<div class="dialog-heading"><h2 id="planning-dialog-title" data-planning-title>Unverbindlichen Vorschlag planen</h2><button class="icon-button" type="button" data-dialog-close aria-label="Dialog schließen">×</button></div>
 			@planningFormFields(data.Options, PlanningFormValues{CSRFToken: data.Shell.CSRFToken}, PlanningFormError{}, false)
 			<div class="form-actions"><button class="button" type="submit">Vorschlag speichern</button><button class="button button--quiet" type="button" data-dialog-close>Abbrechen</button></div>
 			<p id="planning-safety-note" class="form-hint">Dieser Schritt fixiert keinen Termin und versendet keine Nachricht.</p>
@@ -182,7 +186,7 @@ templ CalendarPlan(data CalendarPlanData) {
 			@appHeader(data.Shell)
 			<main id="hauptinhalt" class="page calendar-plan-page admin-work-page">
 				<div class="page-heading">
-					<div><p class="eyebrow">Unverbindlicher Vorschlag</p><h1>Auftrag einplanen</h1><p>Vollständig ohne Drag-and-drop bedienbar.</p></div>
+					<div><h1>Unverbindlichen Vorschlag planen</h1></div>
 					<a class="button button--quiet" href="/calendar">Zurück zum Kalender</a>
 				</div>
 				<section class="form-card" aria-labelledby="calendar-plan-job-title">
@@ -319,7 +323,7 @@ func planningFieldErrorID(formError PlanningFormError, fieldID string) string {
 
 templ appointmentDialog(csrf string, admin bool, options appointment.PlanningOptions) {
 	<dialog class="planning-dialog" data-appointment-dialog aria-labelledby="appointment-dialog-title">
-		<div class="dialog-heading"><div><p class="eyebrow">Termindetail</p><h2 id="appointment-dialog-title" data-appointment-title>Termin</h2></div><button class="icon-button" type="button" data-appointment-close aria-label="Dialog schließen">×</button></div>
+		<div class="dialog-heading"><h2 id="appointment-dialog-title" data-appointment-title>Termin</h2><button class="icon-button" type="button" data-appointment-close aria-label="Dialog schließen">×</button></div>
 		<div data-appointment-detail></div>
 		<section class="appointment-preflight" data-appointment-preflight hidden aria-live="polite"></section>
 		<div class="appointment-actions" data-appointment-actions>
@@ -373,21 +377,21 @@ templ appointmentDialog(csrf string, admin bool, options appointment.PlanningOpt
 				}
 				<fieldset data-appointment-complete-panel hidden>
 					<legend>Auftrag abschließen</legend>
-					<label data-appointment-complete-override hidden>Begründung für vorzeitigen Abschluss<textarea data-appointment-complete-override-reason maxlength="1000" rows="2"></textarea></label>
+					<label for="appointment-complete-override-reason" data-appointment-complete-override hidden>Begründung für vorzeitigen Abschluss<textarea id="appointment-complete-override-reason" name="completion_override_reason" data-appointment-complete-override-reason maxlength="1000" rows="2"></textarea></label>
 					<button class="button" type="button" data-appointment-complete>Termin und Auftrag erledigen</button>
 					<p class="form-hint">Der Abschluss ist endgültig. Fahrer benötigen die Zuweisung, das Abschlussrecht und einen bereits begonnenen Termin.</p>
 				</fieldset>
 			</section>
 			if admin {
 				<section class="form-card appointment-action-group" data-appointment-action-group="danger" hidden>
-					<h3>Gefahrenbereich</h3>
-					<label>Absagegrund<input data-appointment-cancel-reason maxlength="1000"/></label><button class="button button--danger" type="button" data-appointment-cancel>Termin absagen</button>
+					<h3 data-appointment-danger-title>Termin absagen</h3>
+					<label data-appointment-cancel-field><span data-appointment-cancel-label>Absagegrund</span><input data-appointment-cancel-reason maxlength="1000"/></label><button class="button button--danger" type="button" data-appointment-cancel>Termin absagen</button>
 					<fieldset data-appointment-reopen-panel hidden>
 						<legend>Abgesagten Termin wieder öffnen</legend>
 						<label>Begründung<textarea data-appointment-reopen-reason maxlength="1000" rows="2" required></textarea></label>
 						<label>Begründung für Verfügbarkeits-Override (nur falls nötig)<textarea data-appointment-reopen-override maxlength="1000" rows="2"></textarea></label>
 						<button class="button button--quiet" type="button" data-appointment-reopen>Als Vorschlag wieder öffnen</button>
-						<p class="form-hint">Der Termin wird nicht fixiert und es wird keine Nachricht versendet.</p>
+						<p class="form-hint">Die Absage wird aufgehoben. Fahrer- und Ressourcenbelegung werden erneut geprüft; der Termin bleibt ein unverbindlicher Vorschlag. Alte Bestätigungslinks werden widerrufen, eine Nachricht wird nicht versendet.</p>
 					</fieldset>
 				</section>
 			}
@@ -418,7 +422,7 @@ templ AppointmentDetailPage(data AppointmentDetailData) {
 		<body>
 			@appHeader(data.Shell)
 			<main id="hauptinhalt" class="page appointment-detail-page admin-work-page" data-appointment-detail-page>
-				<div class="page-heading"><div><p class="eyebrow">Termindetail</p><h1>{ data.Detail.CustomerName } · { data.Detail.JobNumber }</h1><p>{ calendarLocalDateTime(data.Detail.StartsAt) }–{ calendarLocalTime(data.Detail.EndsAt) } · { AppointmentStatusLabel(data.Detail.Lifecycle, data.Detail.Confirmation) }</p></div><a class="button button--quiet" href="/calendar">Zurück zum Kalender</a></div>
+				<div class="page-heading"><div><h1>{ data.Detail.CustomerName } · { data.Detail.JobNumber }</h1><p>{ calendarLocalDateTime(data.Detail.StartsAt) }–{ calendarLocalTime(data.Detail.EndsAt) } · { AppointmentStatusLabel(data.Detail.Lifecycle, data.Detail.Confirmation) }</p></div><a class="button button--quiet" href="/calendar">Zurück zum Kalender</a></div>
 				if data.Notice != "" {
 					<div class="form-alert form-alert--success" role="status">{ data.Notice }</div>
 				}
@@ -485,7 +489,7 @@ templ AppointmentDetailPage(data AppointmentDetailData) {
 					</section>
 				}
 				if data.MessagePreview != nil {
-					<section class="form-card" aria-labelledby="appointment-message-preview-title"><p class="eyebrow">Nebenwirkungsfreie Vorschau</p><h2 id="appointment-message-preview-title">Nachricht vor Fixierung oder erneutem Link prüfen</h2><p>Es wird nichts versendet. Der echte Bestätigungslink wird erst im Worker rekonstruiert.</p><div class="form-grid"><div><h3>E-Mail</h3><p><strong>Betreff:</strong> { data.MessagePreview.Subject }</p><pre>{ data.MessagePreview.Text }</pre></div><div><h3>SMS</h3><p>{ fmt.Sprintf("%d Segment(e) · %s", data.MessagePreview.SMSSegments, data.MessagePreview.SMSEncoding) }</p><pre>{ data.MessagePreview.SMS }</pre></div></div></section>
+					<section class="form-card" aria-labelledby="appointment-message-preview-title"><h2 id="appointment-message-preview-title">Nachricht vor Fixierung oder erneutem Link prüfen</h2><p>Es wird nichts versendet. Der echte Bestätigungslink wird erst im Worker rekonstruiert.</p><div class="form-grid"><div><h3>E-Mail</h3><p><strong>Betreff:</strong> { data.MessagePreview.Subject }</p><pre>{ data.MessagePreview.Text }</pre></div><div><h3>SMS</h3><p>{ fmt.Sprintf("%d Segment(e) · %s", data.MessagePreview.SMSSegments, data.MessagePreview.SMSEncoding) }</p><pre>{ data.MessagePreview.SMS }</pre></div></div></section>
 				}
 				if data.CanReissueConfirmation || data.CanResetConfirmation {
 					<section class="form-card" aria-labelledby="appointment-confirmation-admin-title">

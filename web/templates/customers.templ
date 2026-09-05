@@ -1079,18 +1079,25 @@ templ Waitlist(data WaitlistData) {
 		<body>
 			@appHeader(data.Shell)
 			<main id="hauptinhalt" class="page compact-page waitlist-page">
-				<div class="page-heading"><div><p class="eyebrow">Arbeitsvorrat</p><h1>Warteliste</h1><p>Kompakte Dispositionsansicht. Die Position bleibt relativ zu Filtern, Priorität und Sortierung.</p></div><a class="button mobile-redundant-primary-action" href="/customers/new">Neuen Auftrag erfassen</a></div>
+				<div class="page-heading"><div><h1>Warteliste</h1><p>Offene Aufträge prüfen, vervollständigen und einplanen. Die Reihenfolge folgt den aktiven Filtern, der Priorität und Sortierung.</p></div><a class="button mobile-redundant-primary-action" href="/customers/new">Neuen Auftrag erfassen</a></div>
+				<nav class="waitlist-work-views" aria-label="Schnellansichten der Warteliste">
+					<span>Direkt zu</span>
+					<a class="button button--quiet" href="/waitlist?urgency=urgent&amp;sort=urgency&amp;direction=desc">Dringend</a>
+					<a class="button button--quiet" href="/waitlist?workflow=unplanned&amp;sort=workflow&amp;direction=asc">Noch ungeplant</a>
+					<a class="button button--quiet" href="/waitlist?incomplete=1&amp;sort=updated&amp;direction=desc">Daten prüfen</a>
+				</nav>
 				if data.Error != "" {
 					<div class="form-alert" role="alert">{ data.Error }</div>
 				}
 				<form id="waitlist-list-controls" method="post" action="/waitlist/search" class="customer-list-toolbar waitlist-list-toolbar">
 					<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="sort" value={ data.Filter.Sort }/><input type="hidden" name="direction" value={ data.Filter.Direction }/>
 					<div class="customer-list-toolbar__search">
-						<label for="waitlist-search" class="visually-hidden">Warteliste durchsuchen</label>
-						<input id="waitlist-search" name="q" type="search" value={ data.Filter.Query } placeholder="Kunde, Firma, Ort, Region oder Auftragsnummer" autocomplete="off" data-primary-search/>
+						<label class="waitlist-search-field" for="waitlist-search"><span>Warteliste durchsuchen</span><input id="waitlist-search" name="q" type="search" value={ data.Filter.Query } placeholder="z. B. Huber, Linz oder Auftragsnummer" autocomplete="off" data-primary-search/></label>
 						<output class="customer-result-count" for="waitlist-search">{ fmt.Sprint(data.Page.Total) } von { fmt.Sprint(data.Page.UnfilteredTotal) } Aufträgen</output>
 						<button class="button button--quiet" type="submit">Suchen</button>
-						<a class="button button--quiet" href="/waitlist">Zurücksetzen</a>
+						if waitlistHasFilters(data.Filter) {
+							<a class="button button--quiet" href="/waitlist">Zurücksetzen</a>
+						}
 					</div>
 					<div class="list-sort-controls" role="group" aria-label="Warteliste sortieren">
 						<label>Sortieren nach<select name="sort_choice"><option value="entered" selected?={ data.Filter.Sort == "entered" }>Eingang</option><option value="preferred" selected?={ data.Filter.Sort == "preferred" }>Wunschzeitraum</option><option value="urgency" selected?={ data.Filter.Sort == "urgency" }>Dringlichkeit</option><option value="volume" selected?={ data.Filter.Sort == "volume" }>Holzmenge</option><option value="duration" selected?={ data.Filter.Sort == "duration" }>Gesamtdauer</option><option value="region" selected?={ data.Filter.Sort == "region" }>Region</option><option value="customer" selected?={ data.Filter.Sort == "customer" }>Kunde</option><option value="workflow" selected?={ data.Filter.Sort == "workflow" }>Planungsstand</option><option value="updated" selected?={ data.Filter.Sort == "updated" }>Zuletzt geändert</option></select></label>
@@ -1120,7 +1127,6 @@ templ Waitlist(data WaitlistData) {
 				</form>
 				if waitlistHasFilters(data.Filter) {
 					<div class="action-row waitlist-filter-chips" aria-label="Aktive Filter">
-						<span class="status-badge">Aktive Filter</span>
 						if data.Filter.JobType != "" {
 							@waitlistFilterChip(data, "type", "Typ")
 						}
@@ -1179,18 +1185,20 @@ templ Waitlist(data WaitlistData) {
 								<form method="post" action={ "/waitlist/filter-favorites/" + favorite.ID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit" aria-label={ "Filterfavorit " + favorite.Name + " löschen" }>×</button></form>
 							}
 						</div>
-						<form method="post" action="/waitlist/filter-favorites" class="filter-bar compact-filter waitlist-save-filter">
-							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@waitlistHiddenFilter(data.Filter)
-							<label>Aktuelle Filter speichern<input name="name" maxlength="60" required placeholder="z. B. Region Nord"/></label><button class="button button--quiet" type="submit">Als Favorit speichern</button>
-						</form>
+						if waitlistHasSavableFilters(data.Filter) {
+							<form method="post" action="/waitlist/filter-favorites" class="filter-bar compact-filter waitlist-save-filter">
+								<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@waitlistHiddenFilter(data.Filter)
+								<label>Aktuelle Filter speichern<input name="name" maxlength="60" required placeholder="z. B. Region Nord"/></label><button class="button button--quiet" type="submit">Als Favorit speichern</button>
+							</form>
+						}
 					</div>
 				</details>
 				if len(data.Page.Items) > 0 {
-					<div class="action-row selection-toolbar" data-waitlist-selection-toolbar><strong data-selection-count>0 ausgewählt</strong><button class="button button--quiet" type="button" data-selection-open disabled>Ausgewählte Aufträge nacheinander öffnen</button><small>Maximal 20; keine Termine werden fixiert, abgesagt oder benachrichtigt.</small></div>
+					<div class="action-row selection-toolbar" data-waitlist-selection-toolbar hidden><strong data-selection-count>0 ausgewählt</strong><button class="button button--quiet" type="button" data-selection-open disabled>Ausgewählte Aufträge nacheinander öffnen</button><small>Maximal 20; keine Termine werden fixiert, abgesagt oder benachrichtigt.</small></div>
 					<div class="table-card compact-table-wrap">
 						<table class="compact-table responsive-table waitlist-table">
 							<caption class="visually-hidden">Warteliste mit Auftrag, Kunde, Menge, Dauer, Wunsch, Planungsreife und Aktionen.</caption>
-							<thead><tr><th>Auswahl</th><th aria-sort={ waitlistAriaSort(data.Filter, "entered") }><button class={ waitlistTableSortClass(data.Filter, "entered") } type="submit" name="order" value={ waitlistSortOrder(data.Filter, "entered") } form="waitlist-list-controls">Auftrag { waitlistSortMark(data.Filter, "entered") }</button></th><th aria-sort={ waitlistAriaSort(data.Filter, "customer") }><button class={ waitlistTableSortClass(data.Filter, "customer") } type="submit" name="order" value={ waitlistSortOrder(data.Filter, "customer") } form="waitlist-list-controls">Kunde { waitlistSortMark(data.Filter, "customer") }</button></th><th aria-sort={ waitlistAriaSort(data.Filter, "volume") }><button class={ waitlistTableSortClass(data.Filter, "volume") } type="submit" name="order" value={ waitlistSortOrder(data.Filter, "volume") } form="waitlist-list-controls">Menge / Dauer { waitlistSortMark(data.Filter, "volume") }</button></th><th aria-sort={ waitlistAriaSort(data.Filter, "region") }><button class={ waitlistTableSortClass(data.Filter, "region") } type="submit" name="order" value={ waitlistSortOrder(data.Filter, "region") } form="waitlist-list-controls">Region / Wunsch { waitlistSortMark(data.Filter, "region") }</button></th><th aria-sort={ waitlistAriaSort(data.Filter, "workflow") }><button class={ waitlistTableSortClass(data.Filter, "workflow") } type="submit" name="order" value={ waitlistSortOrder(data.Filter, "workflow") } form="waitlist-list-controls">Nächster Schritt { waitlistSortMark(data.Filter, "workflow") }</button></th><th>Reife / Prio</th><th>Aktionen</th></tr></thead>
+							<thead><tr><th>Auswahl</th><th aria-sort={ waitlistAriaSort(data.Filter, "entered") }><button class={ waitlistTableSortClass(data.Filter, "entered") } type="submit" name="order" value={ waitlistSortOrder(data.Filter, "entered") } form="waitlist-list-controls">Auftrag { waitlistSortMark(data.Filter, "entered") }</button></th><th aria-sort={ waitlistAriaSort(data.Filter, "customer") }><button class={ waitlistTableSortClass(data.Filter, "customer") } type="submit" name="order" value={ waitlistSortOrder(data.Filter, "customer") } form="waitlist-list-controls">Kunde { waitlistSortMark(data.Filter, "customer") }</button></th><th aria-sort={ waitlistAriaSort(data.Filter, "volume") }><button class={ waitlistTableSortClass(data.Filter, "volume") } type="submit" name="order" value={ waitlistSortOrder(data.Filter, "volume") } form="waitlist-list-controls">Menge / Dauer { waitlistSortMark(data.Filter, "volume") }</button></th><th aria-sort={ waitlistAriaSort(data.Filter, "region") }><button class={ waitlistTableSortClass(data.Filter, "region") } type="submit" name="order" value={ waitlistSortOrder(data.Filter, "region") } form="waitlist-list-controls">Region / Wunsch { waitlistSortMark(data.Filter, "region") }</button></th><th aria-sort={ waitlistAriaSort(data.Filter, "workflow") }><button class={ waitlistTableSortClass(data.Filter, "workflow") } type="submit" name="order" value={ waitlistSortOrder(data.Filter, "workflow") } form="waitlist-list-controls">Nächster Schritt { waitlistSortMark(data.Filter, "workflow") }</button></th><th>Planungsstand / Priorität</th><th>Aktionen</th></tr></thead>
 							<tbody>
 								for _, item := range data.Page.Items {
 									<tr data-job-id={ item.JobID } data-record-id={ item.JobID }>
@@ -1243,7 +1251,7 @@ templ Waitlist(data WaitlistData) {
 												</ul>
 											}
 										</td>
-										<td data-label="Reife / Prio">
+										<td data-label="Planungsstand / Priorität">
 											<strong>{ fmt.Sprint(item.Completeness) } %</strong><progress max="100" value={ fmt.Sprint(item.Completeness) } aria-label={ fmt.Sprintf("Vollständigkeit %d Prozent", item.Completeness) }></progress><small>Priorität { fmt.Sprint(item.ManualPriority) }</small>
 											if item.PriorityReason != "" {
 												<small>Grund: { item.PriorityReason }</small>
@@ -1266,7 +1274,7 @@ templ Waitlist(data WaitlistData) {
 														if data.Shell.Actor.Role == auth.RoleAdmin {
 															<a class="button button--quiet" href={ "/planning?job_id=" + url.QueryEscape(item.JobID) + "&return_to=" + url.QueryEscape("/waitlist?"+waitlistQuery(data.Filter)) }>Vorschläge</a>
 															<form method="post" action={ "/waitlist/" + item.WaitlistID + "/priority" } class="inline-form compact-priority"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.WaitlistVersion) }/><label>Priorität<input name="priority" type="number" min="-100" max="100" value={ fmt.Sprint(item.ManualPriority) }/></label><label>Kurzer Grund<input name="reason" maxlength="240" value={ item.PriorityReason } required?={ item.ManualPriority != 0 }/></label><button class="button button--quiet" type="submit">Speichern</button></form>
-															<form method="post" action={ "/waitlist/" + item.WaitlistID + "/remove" } data-confirm-message={ "Auftrag " + item.JobNumber + " aus der Warteliste entfernen? Der Auftrag bleibt erhalten, muss aber erneut eingeordnet werden." }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.WaitlistVersion) }/><input type="hidden" name="reason" value="other"/><button class="button button--danger" type="submit">Entfernen</button></form>
+															<form method="post" action={ "/waitlist/" + item.WaitlistID + "/remove" } data-confirm-message={ "Auftrag " + item.JobNumber + " aus der Warteliste entfernen? Der Auftrag bleibt erhalten, muss aber erneut eingeordnet werden." }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(item.WaitlistVersion) }/><input type="hidden" name="reason" value="other"/><button class="button button--danger" type="submit">Aus Warteliste entfernen</button></form>
 														}
 													</div>
 												</details>
@@ -1571,6 +1579,10 @@ func waitlistQuery(filter customers.WaitlistFilter) string {
 }
 func waitlistHasFilters(filter customers.WaitlistFilter) bool {
 	return filter.Query != "" || filter.JobType != "" || filter.Region != "" || filter.Urgency != "" || filter.PreferredMonth != "" || filter.Workflow != "" || filter.DurationGroup != "" || filter.MissingLocation || filter.DurationIssue || filter.Overdue || filter.Unassigned || filter.TransportPending || filter.Incomplete
+}
+
+func waitlistHasSavableFilters(filter customers.WaitlistFilter) bool {
+	return filter.JobType != "" || filter.Region != "" || filter.Urgency != "" || filter.PreferredMonth != "" || filter.Workflow != "" || filter.DurationGroup != "" || filter.MissingLocation || filter.DurationIssue || filter.Overdue || filter.Unassigned || filter.TransportPending || filter.Incomplete
 }
 func waitlistFilterCount(filter customers.WaitlistFilter) int {
 	count := 0

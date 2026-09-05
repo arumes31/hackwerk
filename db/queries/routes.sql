@@ -210,6 +210,14 @@ WHERE driver_id=sqlc.arg(driver_id)::uuid AND status='assigned'
 ORDER BY departure_at DESC, id DESC
 LIMIT 1;
 
+-- name: AssignedRouteExistsForDriver :one
+SELECT EXISTS (
+  SELECT 1
+  FROM route_drafts
+  WHERE driver_id=sqlc.arg(driver_id)::uuid AND status='assigned'
+    AND (departure_at AT TIME ZONE 'Europe/Vienna')::date=sqlc.arg(local_date)::date
+);
+
 -- name: ListDraftRouteIDsForDate :many
 SELECT id::text
 FROM route_drafts

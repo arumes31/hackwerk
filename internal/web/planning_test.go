@@ -126,6 +126,7 @@ func TestPlanningHTTPUsesSectionNavigationAndExplainsEmptyRun(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, body)
 	}
 	for _, wanted := range []string{
+		`aria-label="Planungsablauf"`,
 		`<nav aria-label="Abschnitte der Planungswerkbank">`,
 		`href="#planung-vorschlaege" data-planning-step="3"`,
 		"Berechnung abgeschlossen",
@@ -136,7 +137,7 @@ func TestPlanningHTTPUsesSectionNavigationAndExplainsEmptyRun(t *testing.T) {
 			t.Fatalf("empty planning run missing %q: %s", wanted, body)
 		}
 	}
-	for _, forbidden := range []string{`aria-label="Planungsfortschritt"`, `aria-current="step"`, `aria-disabled="true"`, `id="planung-uebernahme"`} {
+	for _, forbidden := range []string{`aria-label="Planungsfortschritt"`, `aria-disabled="true"`, `id="planung-uebernahme"`} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("empty planning run retained wizard-only markup %q: %s", forbidden, body)
 		}
@@ -175,11 +176,11 @@ func TestPlanningHTTPShowsReasonsAndWarningsBeforeHeuristicScore(t *testing.T) {
 	}
 	reasonAt := strings.Index(body, "Fahrer Anna verfügbar")
 	warningAt := strings.Index(body, "Fahrzeit basiert auf Luftlinie")
-	scoreAt := strings.Index(body, "<strong>Heuristische Bewertung:</strong>")
+	scoreAt := strings.Index(body, "<strong>Bewertung:</strong>")
 	if reasonAt < 0 || warningAt < 0 || scoreAt < 0 || reasonAt > scoreAt || warningAt > scoreAt {
 		t.Fatalf("explanation must precede heuristic score: reason=%d warning=%d score=%d body=%s", reasonAt, warningAt, scoreAt, body)
 	}
-	for _, wanted := range []string{"78.4 / 100", `href="#planung-uebernahme" data-planning-step="4"`, `<option value="rank">Heuristische Bewertung</option>`} {
+	for _, wanted := range []string{"78.4 / 100", `href="#planung-uebernahme" data-planning-step="4"`, `<option value="rank">Bewertung</option>`} {
 		if !strings.Contains(body, wanted) {
 			t.Fatalf("planning suggestion missing %q: %s", wanted, body)
 		}

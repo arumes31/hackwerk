@@ -125,37 +125,37 @@ func TestMobileAppStylesDefineIndependentShellContracts(t *testing.T) {
 	}
 	css := string(stylesheet)
 	for name, contract := range map[string]string{
-		"mobile breakpoint":            "@media (max-width: 1050px)",
-		"standalone display mode":      "@media (display-mode: standalone)",
-		"stable navigation":            ".mobile-bottom-nav",
-		"separate primary action":      ".mobile-primary-action",
-		"safe area":                    "env(safe-area-inset-bottom)",
-		"context actions":              ".mobile-context-actions",
-		"admin role-scoped workspaces": `body:has(.site-header[data-actor-role="admin"])`,
-		"authenticated app canvas":     "body:has(.mobile-bottom-nav) .page",
-		"calendar app surface":         ".calendar-page .calendar-board",
-		"planning action sheet":        ".planning-page .planning-selection",
-		"route field cards":            ".route-page .route-stop-card",
-		"operations directory":         "[data-operation-page] .compact-list",
-		"profile app cards":            ".profile-page .profile-card",
-		"user directory":               ".users-page .user-card",
-		"voice workflow":               ".voice-capture",
-		"calendar feed management":     ".feed-layout",
-		"notification mobile records":  ".table-card .responsive-table",
-		"admin calendar first":         ".calendar-page .calendar-board",
-		"admin saved locations first":  ".route-location-list",
-		"admin notification actions":   `.notifications-page .responsive-table td[data-label="Aktion"]`,
-		"admin appointment actions":    ".appointment-detail-page > .form-card:first-of-type > .action-row",
-		"sticky action nav clearance":  "bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + .5625rem)",
-		"sticky action scroll reserve": "scroll-margin-block-end: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + .75rem)",
-		"narrow phone guard":           "@media (max-width: 360px)",
+		"mobile breakpoint":             "@media (max-width: 1050px)",
+		"standalone display mode":       "@media (display-mode: standalone)",
+		"stable navigation":             ".mobile-bottom-nav",
+		"separate primary action":       ".mobile-primary-action",
+		"safe area":                     "env(safe-area-inset-bottom)",
+		"context actions":               ".mobile-context-actions",
+		"admin role-scoped workspaces":  `body:has(.site-header[data-actor-role="admin"])`,
+		"authenticated app canvas":      "body:has(.mobile-bottom-nav) .page",
+		"calendar app surface":          ".calendar-page .calendar-board",
+		"planning action sheet":         ".planning-page .planning-selection",
+		"route field cards":             ".route-page .route-stop-card",
+		"operations directory":          "[data-operation-page] .compact-list",
+		"profile app cards":             ".profile-page .profile-card",
+		"user directory":                ".users-page .user-card",
+		"voice workflow":                ".voice-capture",
+		"calendar feed management":      ".feed-layout",
+		"notification mobile records":   ".table-card .responsive-table",
+		"collapsible calendar waitlist": ".calendar-waitlist > summary",
+		"admin saved locations first":   ".route-location-list",
+		"admin notification actions":    `.notifications-page .responsive-table td[data-label="Aktion"]`,
+		"admin appointment actions":     ".appointment-detail-page > .form-card:first-of-type > .action-row",
+		"sticky action nav clearance":   "bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + .5625rem)",
+		"sticky action scroll reserve":  "scroll-margin-block-end: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + .75rem)",
+		"narrow phone guard":            "@media (max-width: 360px)",
 	} {
 		if !strings.Contains(css, contract) {
 			t.Errorf("%s contract is missing from mobile app stylesheet", name)
 		}
 	}
-	if !regexp.MustCompile(`(?s)body:has\(\.mobile-bottom-nav\)\s*\{[^}]*overflow-x:\s*clip`).MatchString(css) {
-		t.Fatal("mobile app canvas does not guard narrow viewports against horizontal page overflow")
+	if regexp.MustCompile(`(?s)body:has\(\.mobile-bottom-nav\)\s*\{[^}]*overflow-x:\s*clip`).MatchString(css) {
+		t.Fatal("mobile app canvas must not clip page overflow and focused controls globally")
 	}
 	if strings.Contains(css, ".mobile-admin-nav") {
 		t.Fatal("mobile stylesheet must not define a second admin navigation")
@@ -166,6 +166,7 @@ func TestMobileAppStylesDefineIndependentShellContracts(t *testing.T) {
 	for name, contract := range map[string]string{
 		"compact app bar":             `--mobile-app-bar-height: 54px`,
 		"compact section rhythm":      `--mobile-section-gap: .5rem`,
+		"semantic control rhythm":     `--mobile-control-gap: .35rem`,
 		"combined dashboard commands": `.admin-tour__commands`,
 		"compact search placement":    `.customer-list-toolbar__search > input`,
 		"unpadded disclosure shell":   `body:has(.mobile-bottom-nav) .compact-filter-panel`,
@@ -183,6 +184,24 @@ func TestMobileAppStylesDefineIndependentShellContracts(t *testing.T) {
 	if !regexp.MustCompile(`(?s)\.calendar-page \.calendar-toolbar-button\s*,\s*\.calendar-page \.fc \.fc-button\s*\{[^}]*min-width:\s*44px[^}]*min-height:\s*44px`).MatchString(css) {
 		t.Fatal("calendar library toolbar buttons must retain 44px touch targets across the full mobile shell")
 	}
+	if regexp.MustCompile(`(?s)\.calendar-page \.calendar-board\s*\{[^}]*order:\s*-1`).MatchString(css) {
+		t.Fatal("mobile calendar must not reverse the waitlist and board visual order")
+	}
+	if !regexp.MustCompile(`(?s)\.calendar-waitlist > summary\s*\{[^}]*min-height:\s*44px[^}]*display:\s*flex`).MatchString(css) {
+		t.Fatal("mobile calendar waitlist needs a full-size disclosure control")
+	}
+	if !regexp.MustCompile(`(?s)body:has\(\.mobile-bottom-nav\) :where\(h1, h2, h3, h4, p, dd, td\)\s*\{[^}]*overflow-wrap:\s*break-word`).MatchString(css) {
+		t.Fatal("mobile prose must wrap at word boundaries before breaking individual words")
+	}
+	if !regexp.MustCompile(`(?s)\.waitlist-list-toolbar > \.list-sort-controls\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)`).MatchString(css) {
+		t.Fatal("narrow waitlist controls must keep sorting fields and their action in one compact row")
+	}
+	if !regexp.MustCompile(`(?s)body:has\(\.mobile-bottom-nav\) \.status-badge\s*\{[^}]*max-width:\s*100%[^}]*overflow-wrap:\s*break-word`).MatchString(css) {
+		t.Fatal("mobile status badges must wrap inside their owning record instead of widening the page")
+	}
+	if !regexp.MustCompile(`(?s)\.waitlist-page \.waitlist-table td a\s*\{[^}]*min-height:\s*44px`).MatchString(css) {
+		t.Fatal("mobile waitlist record links must remain full-size touch targets")
+	}
 	if !regexp.MustCompile(`(?s)\.customer-page \.customer-name-link\s*\{[^}]*min-width:\s*44px[^}]*min-height:\s*44px`).MatchString(css) {
 		t.Fatal("customer names must remain 44px touch targets even when their labels are short")
 	}
@@ -195,6 +214,75 @@ func TestMobileAppStylesDefineIndependentShellContracts(t *testing.T) {
 	}
 	if !strings.Contains(string(application), "bottom: calc(var(--mobile-nav-height) + .5625rem + env(safe-area-inset-bottom))") {
 		t.Fatal("base responsive rules override the mobile sticky-action clearance")
+	}
+	if !strings.Contains(string(application), "--z-skip-link:") || !regexp.MustCompile(`(?s)\.skip-link\s*\{[^}]*z-index:\s*var\(--z-skip-link\)`).Match(application) {
+		t.Fatal("focused skip link must use its own layer above the sticky application header")
+	}
+	if !regexp.MustCompile(`(?s)\.dashboard-page \.section-heading a\s*\{[^}]*min-height:\s*44px`).Match(application) || !regexp.MustCompile(`(?s)\.dashboard-appointment__body h3 a\s*\{[^}]*min-height:\s*44px`).Match(application) {
+		t.Fatal("dashboard schedule and panel links must remain full-size touch targets")
+	}
+	if !regexp.MustCompile(`(?s)\.dashboard-core\s*\{[^}]*min-width:\s*0`).Match(application) {
+		t.Fatal("dashboard day plan, exceptions and metrics must share an independent primary column")
+	}
+	for _, obsolete := range []string{
+		`.dashboard-side .dashboard-attention`,
+		`.dashboard-side .dashboard-notification-issue`,
+		`.dashboard-intro .eyebrow`,
+		`.dashboard-date-nav .eyebrow`,
+		`.dashboard-attention .eyebrow`,
+		`.calendar-page .page-heading .eyebrow`,
+	} {
+		if strings.Contains(string(application), obsolete) {
+			t.Errorf("application stylesheet still contains obsolete selector %q", obsolete)
+		}
+	}
+	if strings.Contains(css, `.dashboard-page[data-dashboard-role="admin"] > .admin-tour ~ .dashboard-metrics`) {
+		t.Fatal("mobile stylesheet still targets the metrics at their obsolete pre-column location")
+	}
+	source, err := os.ReadFile("src/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(source), "calendarWaitlistPanel") || !strings.Contains(string(source), "calendarWaitlistPanel.open = !calendarCompactMedia.matches") {
+		t.Fatal("calendar waitlist must start expanded on desktop and compact on the mobile shell")
+	}
+}
+
+func TestOperationalLayoutKeepsSupportContentReadable(t *testing.T) {
+	t.Parallel()
+
+	application, err := Files.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	appCSS := string(application)
+	if !regexp.MustCompile(`(?s)html\s*\{[^}]*min-width:\s*0[^}]*max-width:\s*100%`).MatchString(appCSS) ||
+		!regexp.MustCompile(`(?s)body\s*\{[^}]*max-width:\s*100%`).MatchString(appCSS) {
+		t.Fatal("the application canvas must fit inside a 320px viewport even when a classic scrollbar takes space")
+	}
+	if !regexp.MustCompile(`(?s)\.calendar-waitlist > summary\s*\{[^}]*min-height:\s*44px[^}]*display:\s*flex`).MatchString(appCSS) {
+		t.Fatal("desktop calendar waitlist needs a visible, full-size group heading")
+	}
+	if regexp.MustCompile(`(?s)\.metric-card small\s*\{[^}]*text-overflow:\s*ellipsis`).MatchString(appCSS) ||
+		regexp.MustCompile(`(?s)\.metric-card small\s*\{[^}]*white-space:\s*nowrap`).MatchString(appCSS) {
+		t.Fatal("dashboard metric labels must not truncate operational wording")
+	}
+	if !regexp.MustCompile(`(?s)\.metric-card small\s*\{[^}]*overflow-wrap:\s*break-word`).MatchString(appCSS) {
+		t.Fatal("dashboard metric labels must wrap long German wording")
+	}
+	if !regexp.MustCompile(`(?s)@media \(max-width: 1500px\).*\.calendar-quick-controls\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto`).MatchString(appCSS) {
+		t.Fatal("calendar controls must split before the waitlist makes their workspace overlap")
+	}
+
+	mobile, err := Files.ReadFile("static/mobile-app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`(?s)@media \(max-width: 459px\).*\.admin-tour__commands\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)`).Match(mobile) {
+		t.Fatal("narrow admin dashboard commands must use no more than two readable controls per row")
+	}
+	if !regexp.MustCompile(`(?s)@media \(max-width: 459px\).*\.dashboard-upcoming \.section-heading\s*\{[^}]*flex-direction:\s*column`).Match(mobile) {
+		t.Fatal("narrow dashboard capacity headings must keep their planning disclaimer inside the page")
 	}
 }
 
@@ -268,6 +356,25 @@ func TestRoleSpecificTourProjectionsAreMobileOnlyAndCountdownTargetsTheVisibleSc
 	} {
 		if !strings.Contains(javascript, contract) {
 			t.Errorf("dashboard countdown does not preserve visible-projection contract %q", contract)
+		}
+	}
+}
+
+func TestDriverRouteLinksRemainTouchSized(t *testing.T) {
+	t.Parallel()
+
+	stylesheet, err := Files.ReadFile("static/mobile-app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(stylesheet)
+	if !regexp.MustCompile(`(?s)@media \(max-width: 1050px\).*\.dashboard-page\[data-dashboard-role="driver"\]\s+\.dashboard-columns\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)`).MatchString(css) {
+		t.Fatal("driver tablet dashboard must reclaim the desktop availability column")
+	}
+	for _, selector := range []string{`[data-route-navigation]`, `[data-route-call]`} {
+		pattern := regexp.MustCompile(`(?s)@media \(max-width: 1050px\).*` + regexp.QuoteMeta(selector) + `[^\{]*\{[^}]*min-height:\s*44px`)
+		if !pattern.MatchString(css) {
+			t.Errorf("driver route control %s must remain at least 44px high on touch layouts", selector)
 		}
 	}
 }
@@ -347,7 +454,9 @@ func TestInstallPromptIsHiddenUntilBrowserOffersInstallation(t *testing.T) {
 		`announce("HackWerk kann auf diesem Gerät installiert werden.")`,
 		`privacyNoticeVisible()`,
 		`window.addEventListener("hackwerk:privacy-notice"`,
-		`else offerInstallPrompt();`,
+		`driverInstallEntry`,
+		`offerInstallPrompt({ automatic: false, returnFocus })`,
+		`querySelector("[data-install-later]")`,
 	} {
 		if !strings.Contains(javascript, contract) {
 			t.Errorf("install prompt script does not preserve %q", contract)
@@ -360,6 +469,55 @@ func TestInstallPromptIsHiddenUntilBrowserOffersInstallation(t *testing.T) {
 	}
 	if strings.Contains(javascript[dismissStart:installedStart], "installEvent = undefined") {
 		t.Fatal("dismissing the promotional install notice also disables the explicit profile installation")
+	}
+}
+
+func TestDriverMobilePolishContracts(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("src/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(source)
+	for _, contract := range []string{
+		`prev: { hint: "Vorheriger Zeitraum" }`,
+		`today: { text: "Heute", hint: "Heutigen Tag anzeigen" }`,
+		`timedText: "Uhrzeit"`,
+		`viewHint:`,
+		`viennaCalendarDayNumber`,
+		`formatToParts(date)`,
+		`calendarDays === 1 ? "morgen" : `,
+		`dashboard-countdown--soon`,
+		`installPromptReturnFocus`,
+		`firstInstallAction?.focus`,
+		`restoreInstallPromptFocus`,
+	} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("driver/calendar script is missing %q", contract)
+		}
+	}
+	if strings.Contains(javascript, `themeSystem: "classic"`) {
+		t.Fatal("FullCalendar must not receive the unsupported themeSystem option")
+	}
+	if strings.Contains(javascript, `Math.ceil(minutes / 1440)`) {
+		t.Fatal("dashboard day labels must use Europe/Vienna calendar days instead of fixed 24-hour buckets")
+	}
+
+	mobile, err := Files.ReadFile("static/mobile-app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(mobile)
+	for name, contract := range map[string]*regexp.Regexp{
+		"urgent countdown only":      regexp.MustCompile(`(?s):has\(\.dashboard-countdown--soon\)\s*\{[^}]*border-color:\s*var\(--ochre\)`),
+		"calendar legend wraps":      regexp.MustCompile(`(?s)\.calendar-page \.calendar-legend\s*\{[^}]*flex-wrap:\s*wrap`),
+		"availability summary wraps": regexp.MustCompile(`(?s)\.availability-preview:not\(\[open\]\)\s*>\s*summary\s*\{[^}]*white-space:\s*normal`),
+		"route shortcuts disclosed":  regexp.MustCompile(`(?s)\.route-day-shortcuts\s*>\s*summary\s*\{[^}]*min-height:\s*44px`),
+	} {
+		if !contract.MatchString(css) {
+			t.Errorf("%s contract is missing", name)
+		}
 	}
 }
 
@@ -497,6 +655,13 @@ func TestMobileMoreUsesNativeModalSheetContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 	css := string(stylesheet)
+	applicationStylesheet, err := Files.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(applicationStylesheet), ".calendar-options:not([open]) > .calendar-quick-controls { display: none; }") {
+		t.Fatal("closed calendar options must hide their secondary controls at every viewport")
+	}
 	for _, contract := range []string{
 		`.mobile-more__dialog::backdrop`,
 		`env(safe-area-inset-bottom) + .25rem`,
@@ -735,6 +900,88 @@ func TestWaitlistFilterActionsRemainTouchSized(t *testing.T) {
 	css := string(stylesheet)
 	if !strings.Contains(css, ".waitlist-filter-chips .button, .waitlist-regions .button, .waitlist-favorites .button { min-height: 44px;") {
 		t.Fatal("waitlist filter and favorite actions must remain at least 44px high")
+	}
+	if !strings.Contains(css, ".waitlist-work-views .button { min-height: 44px;") {
+		t.Fatal("waitlist quick views must remain at least 44px high")
+	}
+
+	mobileStylesheet, err := Files.ReadFile("static/mobile-app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(mobileStylesheet), ".waitlist-list-toolbar > .list-sort-controls > .button {\n    grid-column: 1 / -1;") {
+		t.Fatal("narrow waitlist sort action must not add a separate toolbar row")
+	}
+	if !strings.Contains(string(mobileStylesheet), ".waitlist-work-views {") || !strings.Contains(string(mobileStylesheet), "grid-template-columns: repeat(3, minmax(0, 1fr));") {
+		t.Fatal("phone waitlist quick views must fit within a three-column grid")
+	}
+	if !strings.Contains(string(mobileStylesheet), ".waitlist-table td {\n    overflow-wrap: anywhere;") {
+		t.Fatal("phone waitlist cell content must not widen the viewport")
+	}
+	if !strings.Contains(string(mobileStylesheet), ".waitlist-table .status-badge {\n    display: inline-block;\n    max-width: 100%;\n    min-width: 0;\n    white-space: normal;\n    overflow-wrap: anywhere;") {
+		t.Fatal("phone waitlist status badges must wrap instead of widening the viewport")
+	}
+}
+
+func TestAdminDesktopProgressiveDisclosureIsStateDriven(t *testing.T) {
+	t.Parallel()
+
+	source, err := os.ReadFile("src/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(source)
+	for _, contract := range []string{
+		`const selectionToolbar = document.querySelector("[data-waitlist-selection-toolbar]")`,
+		`selectionToolbar.hidden = selected.length === 0`,
+		`function showRouteMapRetry(context)`,
+		`function enableRouteMapReload(context)`,
+		`retry.addEventListener("click", () => window.location.reload())`,
+		`reasonInput?.required && !reason.trim()`,
+		`retry.hidden = false`,
+	} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("state-driven disclosure script is missing %q", contract)
+		}
+	}
+	if strings.Contains(javascript, `calendarOptions.open = !calendarCompactMedia.matches`) {
+		t.Fatal("calendar secondary options must not be forced open on desktop")
+	}
+	stylesheet, err := Files.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stylesheet), "html:not(.js) .waitlist-table :is(th, td):first-child { display: none; }") {
+		t.Fatal("no-JavaScript waitlist must not expose inert selection controls")
+	}
+}
+
+func TestRouteSelectionStatusDoesNotDependOnTheMap(t *testing.T) {
+	t.Parallel()
+
+	script, err := Files.ReadFile("static/route-locations.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(script)
+	for _, contract := range []string{
+		`const markerCount = form.querySelector("[data-route-marker-count]")`,
+		`const updateRouteSelectionCount = () => {`,
+		"`${selected} ausgewählt · ${available} verfügbar`",
+		`input.addEventListener("change", updateRouteSelectionCount)`,
+		`updateRouteSelectionCount();`,
+	} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("map-independent route selection status is missing %q", contract)
+		}
+	}
+
+	mobileStylesheet, err := Files.ReadFile("static/mobile-app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(mobileStylesheet), "@media (min-width: 1051px) {\n  .calendar-options > summary {\n    display: none;") {
+		t.Fatal("desktop calendar must expose the native summary for secondary options")
 	}
 }
 

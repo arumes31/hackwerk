@@ -248,13 +248,16 @@ templ Availability(data AvailabilityData) {
 											<section class="availability-weekday" data-availability-weekday={ fmt.Sprint(weekday) } aria-labelledby={ "availability-weekday-" + fmt.Sprint(weekday) }>
 												<div class="section-heading">
 													<div><p class="eyebrow">Wiederkehrend</p><h3 id={ "availability-weekday-" + fmt.Sprint(weekday) }>{ weekdayLabel(weekday) }</h3></div>
-													<form method="post" action={ data.BasePath + "/rules/clear-day" } class="action-row" data-clear-availability-day>
-														<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="weekday" value={ fmt.Sprint(weekday) }/>
-														for _, rule := range rules {
-															<input type="hidden" name="rule_id" value={ rule.ID }/><input type="hidden" name="rule_version" value={ fmt.Sprint(rule.Version) }/>
-														}
-														<button class="button button--danger" type="submit" data-confirm-message={ weekdayLabel(weekday) + " wirklich vollständig leeren?" }>Tag leeren</button>
-													</form>
+													<details class="availability-day-actions">
+														<summary>Tag verwalten</summary>
+														<form method="post" action={ data.BasePath + "/rules/clear-day" } data-clear-availability-day>
+															<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="weekday" value={ fmt.Sprint(weekday) }/>
+															for _, rule := range rules {
+																<input type="hidden" name="rule_id" value={ rule.ID }/><input type="hidden" name="rule_version" value={ fmt.Sprint(rule.Version) }/>
+															}
+															<button class="button button--quiet availability-day-clear" type="submit" data-confirm-message={ weekdayLabel(weekday) + " wirklich vollständig leeren?" }>Alle Zeiten löschen</button>
+														</form>
+													</details>
 												</div>
 												<div class="card-list">
 													for _, rule := range rules {

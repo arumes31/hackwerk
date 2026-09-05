@@ -1854,27 +1854,27 @@ func Availability(data AvailabilityData) templ.Component {
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 172, "</h3></div><form method=\"post\" action=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 172, "</h3></div><details class=\"availability-day-actions\"><summary>Tag verwalten</summary><form method=\"post\" action=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var106 templ.SafeURL
 						templ_7745c5c3_Var106, templ_7745c5c3_Err = templ.JoinURLErrs(data.BasePath + "/rules/clear-day")
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 251, Col: 76}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 253, Col: 77}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var106))
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 173, "\" class=\"action-row\" data-clear-availability-day><input type=\"hidden\" name=\"csrf_token\" value=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 173, "\" data-clear-availability-day><input type=\"hidden\" name=\"csrf_token\" value=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var107 string
 						templ_7745c5c3_Var107, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 252, Col: 81}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 254, Col: 82}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var107)
 						if templ_7745c5c3_Err != nil {
@@ -1887,7 +1887,7 @@ func Availability(data AvailabilityData) templ.Component {
 						var templ_7745c5c3_Var108 string
 						templ_7745c5c3_Var108, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(weekday))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 252, Col: 148}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 254, Col: 149}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var108)
 						if templ_7745c5c3_Err != nil {
@@ -1905,7 +1905,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var109 string
 							templ_7745c5c3_Var109, templ_7745c5c3_Err = templ.ResolveAttributeValue(rule.ID)
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 254, Col: 66}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 256, Col: 67}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var109)
 							if templ_7745c5c3_Err != nil {
@@ -1918,7 +1918,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var110 string
 							templ_7745c5c3_Var110, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(rule.Version))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 254, Col: 143}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 256, Col: 144}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var110)
 							if templ_7745c5c3_Err != nil {
@@ -1929,20 +1929,20 @@ func Availability(data AvailabilityData) templ.Component {
 								return templ_7745c5c3_Err
 							}
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "<button class=\"button button--danger\" type=\"submit\" data-confirm-message=\"")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "<button class=\"button button--quiet availability-day-clear\" type=\"submit\" data-confirm-message=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var111 string
 						templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.ResolveAttributeValue(weekdayLabel(weekday) + " wirklich vollständig leeren?")
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 256, Col: 145}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 258, Col: 168}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var111)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 180, "\">Tag leeren</button></form></div><div class=\"card-list\">")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 180, "\">Alle Zeiten löschen</button></form></details></div><div class=\"card-list\">")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -1954,7 +1954,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var112 string
 							templ_7745c5c3_Var112, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(rule.Weekday))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 261, Col: 103}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 264, Col: 103}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var112)
 							if templ_7745c5c3_Err != nil {
@@ -1967,7 +1967,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var113 string
 							templ_7745c5c3_Var113, templ_7745c5c3_Err = templ.ResolveAttributeValue(driver.FormatLocalTime(rule.StartMinute))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 261, Col: 165}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 264, Col: 165}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var113)
 							if templ_7745c5c3_Err != nil {
@@ -1980,7 +1980,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var114 string
 							templ_7745c5c3_Var114, templ_7745c5c3_Err = templ.ResolveAttributeValue(driver.FormatLocalTime(rule.EndMinute))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 261, Col: 223}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 264, Col: 223}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var114)
 							if templ_7745c5c3_Err != nil {
@@ -1993,7 +1993,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var115 string
 							templ_7745c5c3_Var115, templ_7745c5c3_Err = templ.ResolveAttributeValue(rule.ValidFrom)
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 261, Col: 258}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 264, Col: 258}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var115)
 							if templ_7745c5c3_Err != nil {
@@ -2006,7 +2006,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var116 string
 							templ_7745c5c3_Var116, templ_7745c5c3_Err = templ.ResolveAttributeValue(rule.ValidUntil)
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 261, Col: 295}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 264, Col: 295}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var116)
 							if templ_7745c5c3_Err != nil {
@@ -2019,7 +2019,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var117 string
 							templ_7745c5c3_Var117, templ_7745c5c3_Err = templ.JoinStringErrs(driver.FormatLocalTime(rule.StartMinute))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 262, Col: 66}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 265, Col: 66}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var117))
 							if templ_7745c5c3_Err != nil {
@@ -2032,7 +2032,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var118 string
 							templ_7745c5c3_Var118, templ_7745c5c3_Err = templ.JoinStringErrs(driver.FormatLocalTime(rule.EndMinute))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 262, Col: 111}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 265, Col: 111}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var118))
 							if templ_7745c5c3_Err != nil {
@@ -2045,7 +2045,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var119 string
 							templ_7745c5c3_Var119, templ_7745c5c3_Err = templ.JoinStringErrs(ruleStatusLabel(rule.Status))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 262, Col: 147}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 265, Col: 147}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var119))
 							if templ_7745c5c3_Err != nil {
@@ -2058,7 +2058,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var120 templ.SafeURL
 							templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.JoinURLErrs(data.BasePath + "/rules/" + rule.ID)
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 263, Col: 79}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 266, Col: 79}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var120))
 							if templ_7745c5c3_Err != nil {
@@ -2071,7 +2071,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var121 string
 							templ_7745c5c3_Var121, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 264, Col: 83}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 267, Col: 83}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var121)
 							if templ_7745c5c3_Err != nil {
@@ -2084,7 +2084,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var122 string
 							templ_7745c5c3_Var122, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(rule.Version))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 264, Col: 155}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 267, Col: 155}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var122)
 							if templ_7745c5c3_Err != nil {
@@ -2105,7 +2105,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var123 templ.SafeURL
 							templ_7745c5c3_Var123, templ_7745c5c3_Err = templ.JoinURLErrs(data.BasePath + "/rules/" + rule.ID + "/delete")
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 267, Col: 91}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 270, Col: 91}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var123))
 							if templ_7745c5c3_Err != nil {
@@ -2118,7 +2118,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var124 string
 							templ_7745c5c3_Var124, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 267, Col: 161}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 270, Col: 161}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var124)
 							if templ_7745c5c3_Err != nil {
@@ -2131,7 +2131,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var125 string
 							templ_7745c5c3_Var125, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(rule.Version))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 267, Col: 233}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 270, Col: 233}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var125)
 							if templ_7745c5c3_Err != nil {
@@ -2144,7 +2144,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var126 templ.SafeURL
 							templ_7745c5c3_Var126, templ_7745c5c3_Err = templ.JoinURLErrs(data.BasePath + "/rules/" + rule.ID + "/duplicate")
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 268, Col: 94}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 271, Col: 94}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var126))
 							if templ_7745c5c3_Err != nil {
@@ -2157,7 +2157,7 @@ func Availability(data AvailabilityData) templ.Component {
 							var templ_7745c5c3_Var127 string
 							templ_7745c5c3_Var127, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 269, Col: 83}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 272, Col: 83}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var127)
 							if templ_7745c5c3_Err != nil {
@@ -2175,7 +2175,7 @@ func Availability(data AvailabilityData) templ.Component {
 								var templ_7745c5c3_Var128 string
 								templ_7745c5c3_Var128, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(value))
 								if templ_7745c5c3_Err != nil {
-									return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 274, Col: 52}
+									return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 277, Col: 52}
 								}
 								_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var128)
 								if templ_7745c5c3_Err != nil {
@@ -2198,7 +2198,7 @@ func Availability(data AvailabilityData) templ.Component {
 								var templ_7745c5c3_Var129 string
 								templ_7745c5c3_Var129, templ_7745c5c3_Err = templ.JoinStringErrs(weekdayLabel(value))
 								if templ_7745c5c3_Err != nil {
-									return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 274, Col: 130}
+									return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 277, Col: 130}
 								}
 								_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var129))
 								if templ_7745c5c3_Err != nil {
@@ -2232,7 +2232,7 @@ func Availability(data AvailabilityData) templ.Component {
 			var templ_7745c5c3_Var130 templ.SafeURL
 			templ_7745c5c3_Var130, templ_7745c5c3_Err = templ.JoinURLErrs(data.BasePath + "/rules")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 290, Col: 61}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 293, Col: 61}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var130))
 			if templ_7745c5c3_Err != nil {
@@ -2245,7 +2245,7 @@ func Availability(data AvailabilityData) templ.Component {
 			var templ_7745c5c3_Var131 string
 			templ_7745c5c3_Var131, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 291, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 294, Col: 76}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var131)
 			if templ_7745c5c3_Err != nil {
@@ -2271,7 +2271,7 @@ func Availability(data AvailabilityData) templ.Component {
 				var templ_7745c5c3_Var132 string
 				templ_7745c5c3_Var132, templ_7745c5c3_Err = templ.JoinStringErrs(exceptionTypeLabel(exception.Type))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 303, Col: 55}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 306, Col: 55}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var132))
 				if templ_7745c5c3_Err != nil {
@@ -2284,7 +2284,7 @@ func Availability(data AvailabilityData) templ.Component {
 				var templ_7745c5c3_Var133 string
 				templ_7745c5c3_Var133, templ_7745c5c3_Err = templ.JoinStringErrs(exceptionRange(exception))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 303, Col: 88}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 306, Col: 88}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var133))
 				if templ_7745c5c3_Err != nil {
@@ -2302,7 +2302,7 @@ func Availability(data AvailabilityData) templ.Component {
 					var templ_7745c5c3_Var134 templ.SafeURL
 					templ_7745c5c3_Var134, templ_7745c5c3_Err = templ.JoinURLErrs(data.BasePath + "/exceptions/" + exception.ID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 305, Col: 85}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 308, Col: 85}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var134))
 					if templ_7745c5c3_Err != nil {
@@ -2315,7 +2315,7 @@ func Availability(data AvailabilityData) templ.Component {
 					var templ_7745c5c3_Var135 string
 					templ_7745c5c3_Var135, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 306, Col: 79}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 309, Col: 79}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var135)
 					if templ_7745c5c3_Err != nil {
@@ -2328,7 +2328,7 @@ func Availability(data AvailabilityData) templ.Component {
 					var templ_7745c5c3_Var136 string
 					templ_7745c5c3_Var136, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(exception.Version))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 306, Col: 156}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 309, Col: 156}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var136)
 					if templ_7745c5c3_Err != nil {
@@ -2354,7 +2354,7 @@ func Availability(data AvailabilityData) templ.Component {
 					var templ_7745c5c3_Var137 templ.SafeURL
 					templ_7745c5c3_Var137, templ_7745c5c3_Err = templ.JoinURLErrs(data.BasePath + "/exceptions/" + exception.ID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 310, Col: 85}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 313, Col: 85}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var137))
 					if templ_7745c5c3_Err != nil {
@@ -2367,7 +2367,7 @@ func Availability(data AvailabilityData) templ.Component {
 					var templ_7745c5c3_Var138 string
 					templ_7745c5c3_Var138, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 311, Col: 79}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 314, Col: 79}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var138)
 					if templ_7745c5c3_Err != nil {
@@ -2380,7 +2380,7 @@ func Availability(data AvailabilityData) templ.Component {
 					var templ_7745c5c3_Var139 string
 					templ_7745c5c3_Var139, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(exception.Version))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 311, Col: 156}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 314, Col: 156}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var139)
 					if templ_7745c5c3_Err != nil {
@@ -2406,7 +2406,7 @@ func Availability(data AvailabilityData) templ.Component {
 				var templ_7745c5c3_Var140 templ.SafeURL
 				templ_7745c5c3_Var140, templ_7745c5c3_Err = templ.JoinURLErrs(data.BasePath + "/exceptions/" + exception.ID + "/delete")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 315, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 318, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var140))
 				if templ_7745c5c3_Err != nil {
@@ -2419,7 +2419,7 @@ func Availability(data AvailabilityData) templ.Component {
 				var templ_7745c5c3_Var141 string
 				templ_7745c5c3_Var141, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 315, Col: 166}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 318, Col: 166}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var141)
 				if templ_7745c5c3_Err != nil {
@@ -2432,7 +2432,7 @@ func Availability(data AvailabilityData) templ.Component {
 				var templ_7745c5c3_Var142 string
 				templ_7745c5c3_Var142, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(exception.Version))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 315, Col: 243}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 318, Col: 243}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var142)
 				if templ_7745c5c3_Err != nil {
@@ -2456,7 +2456,7 @@ func Availability(data AvailabilityData) templ.Component {
 			var templ_7745c5c3_Var143 templ.SafeURL
 			templ_7745c5c3_Var143, templ_7745c5c3_Err = templ.JoinURLErrs(data.BasePath + "/exceptions/vacation-preset")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 323, Col: 154}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 326, Col: 154}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var143))
 			if templ_7745c5c3_Err != nil {
@@ -2469,7 +2469,7 @@ func Availability(data AvailabilityData) templ.Component {
 			var templ_7745c5c3_Var144 string
 			templ_7745c5c3_Var144, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 323, Col: 243}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 326, Col: 243}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var144)
 			if templ_7745c5c3_Err != nil {
@@ -2482,7 +2482,7 @@ func Availability(data AvailabilityData) templ.Component {
 			var templ_7745c5c3_Var145 string
 			templ_7745c5c3_Var145, templ_7745c5c3_Err = templ.ResolveAttributeValue(time.Now().In(viennaLocation()).Format(time.DateOnly))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 323, Col: 369}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 326, Col: 369}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var145)
 			if templ_7745c5c3_Err != nil {
@@ -2495,7 +2495,7 @@ func Availability(data AvailabilityData) templ.Component {
 			var templ_7745c5c3_Var146 templ.SafeURL
 			templ_7745c5c3_Var146, templ_7745c5c3_Err = templ.JoinURLErrs(data.BasePath + "/exceptions")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 326, Col: 67}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 329, Col: 67}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var146))
 			if templ_7745c5c3_Err != nil {
@@ -2508,7 +2508,7 @@ func Availability(data AvailabilityData) templ.Component {
 			var templ_7745c5c3_Var147 string
 			templ_7745c5c3_Var147, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 327, Col: 77}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 330, Col: 77}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var147)
 			if templ_7745c5c3_Err != nil {
@@ -2529,7 +2529,7 @@ func Availability(data AvailabilityData) templ.Component {
 			var templ_7745c5c3_Var148 templ.SafeURL
 			templ_7745c5c3_Var148, templ_7745c5c3_Err = templ.JoinURLErrs(data.BasePath + "/exceptions")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 333, Col: 67}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 336, Col: 67}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var148))
 			if templ_7745c5c3_Err != nil {
@@ -2542,7 +2542,7 @@ func Availability(data AvailabilityData) templ.Component {
 			var templ_7745c5c3_Var149 string
 			templ_7745c5c3_Var149, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Shell.CSRFToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 334, Col: 77}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 337, Col: 77}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var149)
 			if templ_7745c5c3_Err != nil {
@@ -2610,7 +2610,7 @@ func ruleFields(rule driver.Rule) templ.Component {
 			var templ_7745c5c3_Var151 string
 			templ_7745c5c3_Var151, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(value))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 353, Col: 38}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 356, Col: 38}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var151)
 			if templ_7745c5c3_Err != nil {
@@ -2633,7 +2633,7 @@ func ruleFields(rule driver.Rule) templ.Component {
 			var templ_7745c5c3_Var152 string
 			templ_7745c5c3_Var152, templ_7745c5c3_Err = templ.JoinStringErrs(weekdayLabel(value))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 353, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 356, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var152))
 			if templ_7745c5c3_Err != nil {
@@ -2671,7 +2671,7 @@ func ruleFields(rule driver.Rule) templ.Component {
 		var templ_7745c5c3_Var153 string
 		templ_7745c5c3_Var153, templ_7745c5c3_Err = templ.ResolveAttributeValue(driver.FormatLocalTime(rule.StartMinute))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 356, Col: 347}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 359, Col: 347}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var153)
 		if templ_7745c5c3_Err != nil {
@@ -2684,7 +2684,7 @@ func ruleFields(rule driver.Rule) templ.Component {
 		var templ_7745c5c3_Var154 string
 		templ_7745c5c3_Var154, templ_7745c5c3_Err = templ.ResolveAttributeValue(driver.FormatLocalTime(rule.EndMinute))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 356, Col: 459}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 359, Col: 459}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var154)
 		if templ_7745c5c3_Err != nil {
@@ -2697,7 +2697,7 @@ func ruleFields(rule driver.Rule) templ.Component {
 		var templ_7745c5c3_Var155 string
 		templ_7745c5c3_Var155, templ_7745c5c3_Err = templ.ResolveAttributeValue(rule.ValidFrom)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 356, Col: 556}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 359, Col: 556}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var155)
 		if templ_7745c5c3_Err != nil {
@@ -2710,7 +2710,7 @@ func ruleFields(rule driver.Rule) templ.Component {
 		var templ_7745c5c3_Var156 string
 		templ_7745c5c3_Var156, templ_7745c5c3_Err = templ.ResolveAttributeValue(rule.ValidUntil)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 356, Col: 667}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 359, Col: 667}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var156)
 		if templ_7745c5c3_Err != nil {
@@ -2723,7 +2723,7 @@ func ruleFields(rule driver.Rule) templ.Component {
 		var templ_7745c5c3_Var157 string
 		templ_7745c5c3_Var157, templ_7745c5c3_Err = templ.JoinStringErrs(rule.InternalNote)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 357, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 360, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var157))
 		if templ_7745c5c3_Err != nil {
@@ -2852,7 +2852,7 @@ func allDayExceptionFields(value driver.Exception) templ.Component {
 		var templ_7745c5c3_Var160 string
 		templ_7745c5c3_Var160, templ_7745c5c3_Err = templ.ResolveAttributeValue(value.LocalDate)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 366, Col: 81}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 369, Col: 81}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var160)
 		if templ_7745c5c3_Err != nil {
@@ -2865,7 +2865,7 @@ func allDayExceptionFields(value driver.Exception) templ.Component {
 		var templ_7745c5c3_Var161 string
 		templ_7745c5c3_Var161, templ_7745c5c3_Err = templ.JoinStringErrs(value.InternalNote)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 366, Col: 194}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 369, Col: 194}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var161))
 		if templ_7745c5c3_Err != nil {
@@ -2911,7 +2911,7 @@ func partialExceptionFields(value driver.Exception) templ.Component {
 		var templ_7745c5c3_Var163 string
 		templ_7745c5c3_Var163, templ_7745c5c3_Err = templ.ResolveAttributeValue(localDateTime(value.StartsAt))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 371, Col: 120}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 374, Col: 120}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var163)
 		if templ_7745c5c3_Err != nil {
@@ -2924,7 +2924,7 @@ func partialExceptionFields(value driver.Exception) templ.Component {
 		var templ_7745c5c3_Var164 string
 		templ_7745c5c3_Var164, templ_7745c5c3_Err = templ.ResolveAttributeValue(localDateTime(value.EndsAt))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 371, Col: 231}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 374, Col: 231}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var164)
 		if templ_7745c5c3_Err != nil {
@@ -2937,7 +2937,7 @@ func partialExceptionFields(value driver.Exception) templ.Component {
 		var templ_7745c5c3_Var165 string
 		templ_7745c5c3_Var165, templ_7745c5c3_Err = templ.JoinStringErrs(value.InternalNote)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 371, Col: 453}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/operations.templ`, Line: 374, Col: 453}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var165))
 		if templ_7745c5c3_Err != nil {

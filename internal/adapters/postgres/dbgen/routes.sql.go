@@ -11,6 +11,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const assignedRouteExistsForDriver = `-- name: AssignedRouteExistsForDriver :one
+SELECT EXISTS (
+  SELECT 1
+  FROM route_drafts
+  WHERE driver_id=$1::uuid AND status='assigned'
+    AND (departure_at AT TIME ZONE 'Europe/Vienna')::date=$2::date
+)
+`
+
+type AssignedRouteExistsForDriverParams struct {
+	DriverID  pgtype.UUID
+	LocalDate pgtype.Date
+}
+
+func (q *Queries) AssignedRouteExistsForDriver(ctx context.Context, arg AssignedRouteExistsForDriverParams) (bool, error) {
+	row := q.db.QueryRow(ctx, assignedRouteExistsForDriver, arg.DriverID, arg.LocalDate)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const deleteRouteStops = `-- name: DeleteRouteStops :exec
 DELETE FROM route_stops
 WHERE route_draft_id=$1::uuid

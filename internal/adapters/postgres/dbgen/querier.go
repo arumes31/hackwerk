@@ -15,6 +15,7 @@ type Querier interface {
 	AppointmentAssignmentsReady(ctx context.Context, arg AppointmentAssignmentsReadyParams) (bool, error)
 	ArchiveCustomer(ctx context.Context, arg ArchiveCustomerParams) (int64, error)
 	ArchiveJob(ctx context.Context, arg ArchiveJobParams) (int64, error)
+	AssignedRouteExistsForDriver(ctx context.Context, arg AssignedRouteExistsForDriverParams) (bool, error)
 	BumpAppointmentVersion(ctx context.Context, arg BumpAppointmentVersionParams) (int64, error)
 	CancelPendingEmailVerification(ctx context.Context, userID pgtype.UUID) (int64, error)
 	ClaimIdentityEmailOutbox(ctx context.Context, arg ClaimIdentityEmailOutboxParams) ([]ClaimIdentityEmailOutboxRow, error)

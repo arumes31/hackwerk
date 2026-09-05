@@ -148,6 +148,7 @@ type RouteStore interface {
 	LoadRouteOptions(context.Context) (RouteOptions, error)
 	SaveRouteDraft(context.Context, auth.Actor, SaveRouteDraftInput) (RouteDraft, error)
 	GetRoute(context.Context, string) (RouteDraft, error)
+	AssignedRouteExistsForDriver(context.Context, string, string) (bool, error)
 	LatestAssignedRouteForDriver(context.Context, string, string) (RouteDraft, error)
 	AssignRoute(context.Context, auth.Actor, AssignRouteInput) (RouteDraft, error)
 	SaveRouteOrder(context.Context, auth.Actor, SaveRouteOrderInput) (RouteDraft, error)
@@ -428,6 +429,17 @@ func (s *RouteService) OwnRouteForDate(ctx context.Context, actor auth.Actor, lo
 		return RouteDraft{}, auth.ErrForbidden
 	}
 	return route, nil
+}
+
+func (s *RouteService) OwnRouteAvailableForDate(ctx context.Context, actor auth.Actor, localDate string) (bool, error) {
+	if err := requireOwnRouteActor(actor, auth.PermissionRouteViewOwn); err != nil {
+		return false, err
+	}
+	localDate = strings.TrimSpace(localDate)
+	if _, err := time.Parse(time.DateOnly, localDate); err != nil {
+		return false, ErrValidation
+	}
+	return s.store.AssignedRouteExistsForDriver(ctx, actor.DriverID, localDate)
 }
 
 func (s *RouteService) ReorderOwn(ctx context.Context, actor auth.Actor, input ReorderOwnRouteInput) (RouteDraft, error) {

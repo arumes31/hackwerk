@@ -906,7 +906,7 @@ func TestFixAppointmentWithoutChipperRequiresConfirmationAndReason(t *testing.T)
 				t.Fatal(err)
 			}
 			_, err = service.FixAppointment(t.Context(), testAdmin(), FixInput{
-				MutateInput: MutateInput{ID: current.ID, ExpectedVersion: current.Version},
+				MutateInput:           MutateInput{ID: current.ID, ExpectedVersion: current.Version},
 				ConfirmWithoutChipper: test.confirmed,
 				MissingChipperReason:  test.reason,
 			})

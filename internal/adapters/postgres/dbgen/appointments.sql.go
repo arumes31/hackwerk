@@ -21,19 +21,22 @@ SELECT (
         SELECT 1 FROM appointment_drivers ad JOIN drivers d ON d.id=ad.driver_id
         WHERE ad.appointment_id=$1::uuid AND NOT d.active
     )
-    AND EXISTS (
-        SELECT 1 FROM appointment_resources ar JOIN resources r ON r.id=ar.resource_id
-        WHERE ar.appointment_id=$1::uuid AND ar.purpose='chipping'
-          AND r.resource_type='chipper' AND r.active
+    AND (
+        $2::boolean
+        OR EXISTS (
+            SELECT 1 FROM appointment_resources ar JOIN resources r ON r.id=ar.resource_id
+            WHERE ar.appointment_id=$1::uuid AND ar.purpose='chipping'
+              AND r.resource_type='chipper' AND r.active
+        )
     )
     AND NOT EXISTS (
         SELECT 1 FROM appointment_resources ar JOIN resources r ON r.id=ar.resource_id
         WHERE ar.appointment_id=$1::uuid AND NOT r.active
     )
     AND (
-        $2::text <> 'chipping_with_transport'
-        OR ($3::text='external' AND $4::boolean)
-        OR ($3::text='internal' AND EXISTS (
+        $3::text <> 'chipping_with_transport'
+        OR ($4::text='external' AND $5::boolean)
+        OR ($4::text='internal' AND EXISTS (
             SELECT 1 FROM appointment_resources ar JOIN resources r ON r.id=ar.resource_id
             WHERE ar.appointment_id=$1::uuid AND ar.purpose='transport'
               AND r.resource_type='transport_vehicle' AND r.active
@@ -44,6 +47,7 @@ SELECT (
 
 type AppointmentAssignmentsReadyParams struct {
 	AppointmentID              pgtype.UUID
+	AllowMissingChipper        bool
 	JobType                    string
 	TransportMode              string
 	ExternalTransportConfirmed bool
@@ -52,6 +56,7 @@ type AppointmentAssignmentsReadyParams struct {
 func (q *Queries) AppointmentAssignmentsReady(ctx context.Context, arg AppointmentAssignmentsReadyParams) (bool, error) {
 	row := q.db.QueryRow(ctx, appointmentAssignmentsReady,
 		arg.AppointmentID,
+		arg.AllowMissingChipper,
 		arg.JobType,
 		arg.TransportMode,
 		arg.ExternalTransportConfirmed,

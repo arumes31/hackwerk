@@ -252,7 +252,7 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 				tables:document.querySelectorAll('.users-page table').length,
 				smallTargets:targets.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<44||rect.height<44}).length,
 				headingSize:document.querySelector('.users-page h1').getBoundingClientRect().height,
-				directCalendarLinks:document.querySelectorAll(".primary-nav > a[href='/calendar']").length,
+				directCalendarLinks:document.querySelectorAll(".primary-nav a[href='/calendar']").length,
 				navigationFeedLinks:document.querySelectorAll(".site-header a[href='/calendar/feeds'],.mobile-bottom-nav a[href='/calendar/feeds']").length,
 				openManagementRows:document.querySelectorAll('details.user-manage[open]').length};
 		})()`, &usersLayout),

@@ -82,6 +82,42 @@ templ documentHeadWithAssets(data PageData, title string, firstStylePath string,
 	</head>
 }
 
+templ planningLifecycle(current string) {
+	<ol class="planning-lifecycle" aria-label="Planungsablauf">
+		<li
+			class={ planningLifecycleStepClass(current, "draft") }
+			if current == "draft" {
+				aria-current="step"
+			}
+		><span aria-hidden="true">1</span><strong>Entwurf</strong></li>
+		<li
+			class={ planningLifecycleStepClass(current, "proposal") }
+			if current == "proposal" {
+				aria-current="step"
+			}
+		><span aria-hidden="true">2</span><strong>Vorschlag</strong></li>
+		<li
+			class={ planningLifecycleStepClass(current, "fixed") }
+			if current == "fixed" {
+				aria-current="step"
+			}
+		><span aria-hidden="true">3</span><strong>Fixiert</strong></li>
+		<li
+			class={ planningLifecycleStepClass(current, "message") }
+			if current == "message" {
+				aria-current="step"
+			}
+		><span aria-hidden="true">4</span><strong>Nachricht</strong></li>
+	</ol>
+}
+
+func planningLifecycleStepClass(current string, step string) string {
+	if current == step {
+		return "planning-lifecycle__step planning-lifecycle__step--current"
+	}
+	return "planning-lifecycle__step"
+}
+
 templ Home(data PageData) {
 	<!DOCTYPE html>
 	<html lang="de-AT">

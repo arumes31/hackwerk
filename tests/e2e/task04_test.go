@@ -136,8 +136,8 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		RangeHeight, WarningHeight, LegendHeight, MessageHeight            float64
 		MinimumButtonGap, TallestWaitlistCard                              float64
 		SmallTargets, ControlRows                                          int
-		Overlap, PageOverflow, OptionsOpen, SummaryHidden                  bool
-		FirstControlFocused                                                bool
+		Overlap, PageOverflow, OptionsInitiallyOpen, SummaryHidden         bool
+		ControlsHiddenBeforeOpen, OptionsOpen, FirstControlFocused         bool
 	}
 	if err := chromedp.Run(browserContext,
 		chromedp.EmulateViewport(1440, 900),
@@ -148,6 +148,10 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		const options=page.querySelector('.calendar-options');
 		const summary=options.querySelector('summary');
 		const controls=page.querySelector('[data-calendar-controls]');
+		const optionsInitiallyOpen=options.open;
+		const summaryHidden=getComputedStyle(summary).display==='none';
+		const controlsHiddenBeforeOpen=getComputedStyle(controls).display==='none';
+		summary.click();
 		const firstControl=controls.querySelector('button');
 		firstControl.focus();
 		const groups=[...controls.querySelectorAll('.calendar-control-group')];
@@ -159,7 +163,7 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		const rects=groups.map(node=>node.getBoundingClientRect());
 		const overlap=rects.some((left,index)=>rects.slice(index+1).some(right=>left.left<right.right&&left.right>right.left&&left.top<right.bottom&&left.bottom>right.top));
 		const cards=[...page.querySelectorAll('.calendar-waitlist-item')].map(node=>node.getBoundingClientRect().height);
-		return {
+		const result={
 			PageWidth:page.getBoundingClientRect().width,
 			HeadingHeight:heading.getBoundingClientRect().height,
 			BoardTop:page.querySelector('.calendar-board').getBoundingClientRect().top,
@@ -179,17 +183,22 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 			},[]).length,
 			Overlap:overlap,
 			PageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth,
+			OptionsInitiallyOpen:optionsInitiallyOpen,
+			SummaryHidden:summaryHidden,
+			ControlsHiddenBeforeOpen:controlsHiddenBeforeOpen,
 			OptionsOpen:options.open,
-			SummaryHidden:getComputedStyle(summary).display==='none',
 			FirstControlFocused:document.activeElement===firstControl
 		};
+		options.open=false;
+		return result;
 	})()`, &compactCalendarAudit)); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
-	if compactCalendarAudit.PageWidth < 1380 || compactCalendarAudit.HeadingHeight > 115 || compactCalendarAudit.ControlsHeight > 76 ||
-		compactCalendarAudit.CalendarOffset > 255 || compactCalendarAudit.MinimumButtonGap < 6 || compactCalendarAudit.TallestWaitlistCard > 140 ||
-		compactCalendarAudit.SmallTargets != 0 || compactCalendarAudit.ControlRows != 1 || compactCalendarAudit.Overlap || compactCalendarAudit.PageOverflow ||
-		!compactCalendarAudit.OptionsOpen || !compactCalendarAudit.SummaryHidden || !compactCalendarAudit.FirstControlFocused {
+	if compactCalendarAudit.PageWidth < 1380 || compactCalendarAudit.HeadingHeight > 115 || compactCalendarAudit.ControlsHeight > 130 ||
+		compactCalendarAudit.CalendarOffset > 425 || compactCalendarAudit.MinimumButtonGap < 6 || compactCalendarAudit.TallestWaitlistCard > 140 ||
+		compactCalendarAudit.SmallTargets != 0 || compactCalendarAudit.ControlRows > 2 || compactCalendarAudit.Overlap || compactCalendarAudit.PageOverflow ||
+		compactCalendarAudit.OptionsInitiallyOpen || compactCalendarAudit.SummaryHidden || !compactCalendarAudit.ControlsHiddenBeforeOpen ||
+		!compactCalendarAudit.OptionsOpen || !compactCalendarAudit.FirstControlFocused {
 		t.Fatalf("compact calendar desktop audit = %+v", compactCalendarAudit)
 	}
 	var calendarLoadMessage string

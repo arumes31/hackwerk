@@ -328,7 +328,7 @@ func TestCalendarPlanningFallbackUsesRealLinkAndAdminOnlyForm(t *testing.T) {
 		`action="/calendar/plan"`, `name="csrf_token" value="` + csrfToken + `"`,
 		`name="job_id" value="` + testJobID + `"`, `id="planning-start"`,
 		`name="duration_minutes" value="240"`,
-		"Der Termin wird nicht fixiert", "Vollständig ohne Drag-and-drop bedienbar.",
+		"Unverbindlichen Vorschlag planen", "Der Termin wird nicht fixiert",
 	} {
 		if !strings.Contains(body, expected) {
 			t.Errorf("planning fallback missing %q in %q", expected, body)

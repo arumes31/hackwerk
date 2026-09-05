@@ -11,20 +11,30 @@ import (
 )
 
 type routeStoreFake struct {
-	candidates      []RouteCandidate
-	missing         []RouteMissingLocation
-	options         RouteOptions
-	route           RouteDraft
-	routes          map[string]RouteDraft
-	moved           SaveMovedDraftStopInput
-	savedDraft      SaveRouteDraftInput
-	savedOrder      SaveRouteOrderInput
-	assigned        AssignRouteInput
-	latestDriverID  string
-	latestLocalDate string
-	draftSaves      int
-	orderSaves      int
-	assignmentSaves int
+	candidates        []RouteCandidate
+	missing           []RouteMissingLocation
+	options           RouteOptions
+	route             RouteDraft
+	routes            map[string]RouteDraft
+	moved             SaveMovedDraftStopInput
+	savedDraft        SaveRouteDraftInput
+	savedOrder        SaveRouteOrderInput
+	assigned          AssignRouteInput
+	latestDriverID    string
+	latestLocalDate   string
+	available         bool
+	availabilityErr   error
+	availabilityCalls int
+	draftSaves        int
+	orderSaves        int
+	assignmentSaves   int
+}
+
+func (f *routeStoreFake) AssignedRouteExistsForDriver(_ context.Context, driverID, localDate string) (bool, error) {
+	f.latestDriverID = driverID
+	f.latestLocalDate = localDate
+	f.availabilityCalls++
+	return f.available, f.availabilityErr
 }
 
 func (f *routeStoreFake) LoadRouteCandidates(context.Context, []string) ([]RouteCandidate, error) {
@@ -527,6 +537,26 @@ func TestRouteServiceOwnRouteScopesToSessionDriver(t *testing.T) {
 	}
 	if store.latestDriverID != store.route.DriverID || store.latestLocalDate != "2026-09-01" {
 		t.Fatalf("latest route scope = %q/%q", store.latestDriverID, store.latestLocalDate)
+	}
+}
+
+func TestRouteServiceOwnRouteAvailabilityUsesScopedExistenceCheck(t *testing.T) {
+	t.Parallel()
+	store := &routeStoreFake{available: true}
+	service := newRouteTestService(t, store)
+
+	available, err := service.OwnRouteAvailableForDate(t.Context(), routeDriver("driver-1"), "2026-09-01")
+	if err != nil || !available {
+		t.Fatalf("OwnRouteAvailableForDate() = %v, %v", available, err)
+	}
+	if store.availabilityCalls != 1 || store.latestDriverID != "driver-1" || store.latestLocalDate != "2026-09-01" {
+		t.Fatalf("availability scope/calls = %q/%q/%d", store.latestDriverID, store.latestLocalDate, store.availabilityCalls)
+	}
+	if _, err := service.OwnRouteAvailableForDate(t.Context(), auth.Actor{UserID: "user", Role: auth.RoleDriver}, "2026-09-01"); !errors.Is(err, auth.ErrForbidden) {
+		t.Fatalf("profileless availability error = %v", err)
+	}
+	if _, err := service.OwnRouteAvailableForDate(t.Context(), routeDriver("driver-1"), "invalid"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("invalid availability date error = %v", err)
 	}
 }
 

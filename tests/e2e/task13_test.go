@@ -36,6 +36,11 @@ type e2ePageAudit struct {
 	TitleMissing             bool
 	ErrorPage                bool
 	Overflow                 bool
+	OverflowElements         []string
+	OverflowContainers       []string
+	ViewportWidth            float64
+	RootScrollWidth          float64
+	BodyScrollWidth          float64
 	MissingLandmarks         bool
 	H1Count                  int
 	DuplicateIDs             []string
@@ -334,12 +339,20 @@ func auditPagesAtViewport(t *testing.T, ctx context.Context, baseURL, name strin
 			(calendarExpected && audit.CalendarAssetCount != 5) || (!calendarExpected && audit.CalendarAssetCount != 0) {
 			t.Errorf("%s %s usability audit: %+v", name, path, audit)
 		}
-		if screenshotDir := os.Getenv("E2E_SCREENSHOT_DIR"); screenshotDir != "" && name == "admin-mobile-360" {
-			filename := map[string]string{
-				"/calendar?date=2026-08-25": "task13-mobile-calendar-top.png",
-				"/waitlist":                 "task13-mobile-waitlist-top.png",
-				"/customers":                "task13-mobile-customers-top.png",
-			}[path]
+		if screenshotDir := os.Getenv("E2E_SCREENSHOT_DIR"); screenshotDir != "" {
+			filename := map[string]map[string]string{
+				"admin-mobile-360": {
+					"/calendar?date=2026-08-25": "task13-mobile-calendar-top.png",
+					"/waitlist":                 "task13-mobile-waitlist-top.png",
+					"/customers":                "task13-mobile-customers-top.png",
+				},
+				"admin-desktop-1080p": {
+					"/calendar?date=2026-08-25": "task13-desktop-calendar.png",
+					"/waitlist":                 "task13-desktop-waitlist.png",
+					"/planning":                 "task13-desktop-planning.png",
+					"/planning/routes":          "task13-desktop-routes.png",
+				},
+			}[name][path]
 			if filename != "" {
 				var screenshot []byte
 				if err := chromedp.Run(ctx, chromedp.CaptureScreenshot(&screenshot)); err != nil {
@@ -390,7 +403,7 @@ const pageAuditScript = `(() => {
 		return Boolean(node.id && document.querySelector('label[for="'+CSS.escape(node.id)+'"]'));
 	};
 	const controls=[...document.querySelectorAll('input:not([type=hidden]):not([type=button]):not([type=submit]),select,textarea')].filter(visible);
-	const touchControls=[...document.querySelectorAll('button,a.button,.customer-name-link,summary,[role=button],.mobile-bottom-nav a,.nav-menu__panel a')].filter(visible);
+	const touchControls=[...document.querySelectorAll('button,a.button,.customer-name-link,summary,[role=button],.mobile-bottom-nav a,.nav-menu__panel a,[data-route-navigation],[data-route-call]')].filter(visible);
 	const checkboxLabels=[...document.querySelectorAll('input[type=checkbox],input[type=radio]')].filter(visible).map(input => input.closest('label') || (input.id && document.querySelector('label[for="'+CSS.escape(input.id)+'"]'))).filter(Boolean);
 	const ids=[...document.querySelectorAll('[id]')].map(node=>node.id).filter(Boolean);
 	const duplicateIDs=[...new Set(ids.filter((id,index)=>ids.indexOf(id)!==index))];
@@ -414,6 +427,8 @@ const pageAuditScript = `(() => {
 	const violatesNavigationClearance=(node,navigation)=>node.left<navigation.right&&node.right>navigation.left&&node.top<navigation.bottom&&node.bottom>navigation.top-7.5;
 	const rectOf=node=>{const rect=node.getBoundingClientRect();return {left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom,width:rect.width,height:rect.height}};
 	const stickyControls=[...document.querySelectorAll('.planning-selection,form[data-sticky-actions] > .form-actions,form[data-sticky-actions] > * > .form-actions:last-child,.route-sticky-navigation')].filter(visible);
+	const overflowElements=[...document.querySelectorAll('body *')].filter(visible).filter(node=>{const rect=node.getBoundingClientRect();return rect.left < -1 || rect.right > innerWidth + 1}).slice(0,20).map(node=>{const rect=node.getBoundingClientRect();return describe(node)+'@'+Math.round(rect.left)+'..'+Math.round(rect.right)});
+	const overflowContainers=[...document.querySelectorAll('body *')].filter(visible).filter(node=>node.scrollWidth > node.clientWidth + 1).slice(0,20).map(node=>describe(node)+'@'+node.clientWidth+'..'+node.scrollWidth+'/'+getComputedStyle(node).overflowX);
 	const appBar=document.querySelector('.mobile-app-bar');
 	const densityFailures=[];
 	const tooTall=(selector,max)=>{const node=document.querySelector(selector);if(node&&visible(node)&&node.getBoundingClientRect().height>max)densityFailures.push(selector+'='+Math.round(node.getBoundingClientRect().height)+'>'+max)};
@@ -450,6 +465,8 @@ const pageAuditScript = `(() => {
 	}
 	return {
 		Path:location.pathname, TitleMissing:document.title.trim()==='', ErrorPage:Boolean(document.querySelector('.error-page')),
+		OverflowElements:overflowElements,
+		OverflowContainers:overflowContainers, ViewportWidth:innerWidth, RootScrollWidth:document.documentElement.scrollWidth, BodyScrollWidth:document.body.scrollWidth,
 		Overflow:document.documentElement.scrollWidth>window.innerWidth+1,
 		MissingLandmarks:!document.querySelector('.skip-link')||!document.querySelector('header')||!document.querySelector('main')||!document.querySelector('footer')||document.documentElement.lang!=='de-AT',
 		H1Count:document.querySelectorAll('main h1').length, DuplicateIDs:duplicateIDs,

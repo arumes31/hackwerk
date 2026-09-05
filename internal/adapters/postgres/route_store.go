@@ -566,6 +566,21 @@ func (s *RouteStore) LatestAssignedRouteForDriver(ctx context.Context, driverID,
 	return s.GetRoute(ctx, id)
 }
 
+func (s *RouteStore) AssignedRouteExistsForDriver(ctx context.Context, driverID, localDate string) (bool, error) {
+	parsedDriverID, err := uuid(driverID)
+	if err != nil {
+		return false, planning.ErrNotFound
+	}
+	var date pgtype.Date
+	if err := date.Scan(localDate); err != nil || !date.Valid {
+		return false, planning.ErrValidation
+	}
+	return s.queries.AssignedRouteExistsForDriver(ctx, dbgen.AssignedRouteExistsForDriverParams{
+		DriverID:  parsedDriverID,
+		LocalDate: date,
+	})
+}
+
 type routeDraftValues struct {
 	actorID, driverID, chipperID pgtype.UUID
 	transportID                  string

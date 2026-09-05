@@ -34,11 +34,12 @@ templ Planning(data PlanningData) {
 		<body>
 			@appHeader(data.Shell)
 			<main id="hauptinhalt" class="page compact-page planning-page admin-work-page" data-planning-workbench data-planning-radius-latitude={ data.RadiusLatitude } data-planning-radius-longitude={ data.RadiusLongitude }>
-				<div class="page-heading"><div><p class="eyebrow">Disposition</p><h1>Planungswerkbank</h1><p>Aufträge auswählen, prüfen und als Einzelvorschlag oder Tagesroute bearbeiten. Jede Übernahme bleibt unverbindlich.</p></div><div class="action-row"><a class="button button--quiet" href={ data.ReturnTo }>Zurück zur Warteliste</a><span class="status-badge">Keine automatische Fixierung</span></div></div>
+				<div class="page-heading"><div><h1>Planungsvorschläge</h1><p>Vorschläge vergleichen und unverbindlich in den Kalender übernehmen.</p></div><div class="action-row"><a class="button button--quiet" href={ data.ReturnTo }>Zurück zur Warteliste</a></div></div>
+				@planningLifecycle("proposal")
 				if data.Error != "" {
 					<div class="form-alert" role="alert"><strong>Planung nicht möglich</strong><p>{ data.Error }</p><ul><li>Pflichtdaten und Haufenstandort prüfen</li><li>Fahrer-Verfügbarkeit und Ressourcen im Suchzeitraum prüfen</li><li>Transportmodus beziehungsweise externe Bestätigung prüfen</li></ul></div>
 				}
-				<nav class="planning-mode-tabs" aria-label="Planungsmodus"><a class="button" href="/planning" aria-current="page">Einzelauftrag</a><a class="button button--quiet" href="/planning/routes">Tagesroute</a><a class="button button--quiet" href="/availability">Kapazität</a></nav>
+				<nav class="planning-mode-tabs" aria-label="Planungsmodus"><a class="button" href="/planning" aria-current="page">Vorschläge</a><a class="button button--quiet" href="/planning/routes">Tagesrouten</a><a class="button button--quiet" href="/availability">Kapazität</a></nav>
 				<nav aria-label="Abschnitte der Planungswerkbank">
 					<ol class="planning-progress">
 						<li><a href="#planung-auftrag" data-planning-step="1"><span class="planning-progress__number" aria-hidden="true">1</span><span>Aufträge</span></a></li>
@@ -161,7 +162,7 @@ templ Planning(data PlanningData) {
 								<p>Im geprüften Zeitraum passt derzeit keine Kombination aus Zeit, Fahrer und Ressourcen. Prüfen Sie die Ausschlussgründe sowie die Auftragsdaten und berechnen Sie anschließend neu.</p>
 							</div>
 						} else {
-							<div class="planning-result-tools"><label>Sortieren<select data-suggestion-sort><option value="rank">Heuristische Bewertung</option><option value="travel">Fahrzeit</option><option value="start">Startzeit</option><option value="duration">Gesamtdauer</option></select></label><button class="button button--quiet" type="button" data-print-page>Vorschläge drucken</button><span class="form-hint">Bis zu zwei Optionen für den Direktvergleich markieren.</span></div>
+							<div class="planning-result-tools"><label>Sortieren<select data-suggestion-sort><option value="rank">Bewertung</option><option value="travel">Fahrzeit</option><option value="start">Startzeit</option><option value="duration">Gesamtdauer</option></select></label><button class="button button--quiet" type="button" data-print-page>Vorschläge drucken</button><span class="form-hint">Bis zu zwei Optionen für den Direktvergleich markieren.</span></div>
 							<div class="planning-comparison" data-suggestion-comparison hidden aria-live="polite"></div>
 							<div id="planung-uebernahme" class="planning-adoption-intro" tabindex="-1"><div><p class="eyebrow">Übernahme</p><h3>Option prüfen und übernehmen</h3></div><p>Die Übernahme revalidiert den aktuellen Datenstand und erzeugt ausschließlich einen unverbindlichen Terminvorschlag.</p></div>
 							<div class="suggestion-grid">
@@ -190,7 +191,7 @@ templ Planning(data PlanningData) {
 												</ul>
 											</div>
 										}
-										<p class="form-hint"><strong>Heuristische Bewertung:</strong> <span class="status-badge">{ fmt.Sprintf("%.1f / 100", item.Score) }</span> Die Gründe und Warnungen bleiben für die Entscheidung maßgeblich.</p>
+										<p class="form-hint"><strong>Bewertung:</strong> <span class="status-badge">{ fmt.Sprintf("%.1f / 100", item.Score) }</span> Die Gründe und Warnungen bleiben für die Entscheidung maßgeblich.</p>
 										<div class="action-row"><form method="post" action={ "/planning/suggestions/" + item.ID + "/adopt" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="return_to" value={ data.ReturnTo }/><input type="hidden" name="run_id" value={ data.Run.ID }/><input type="hidden" name="job_id" value={ data.Run.JobID }/><button class="button" type="submit" data-suggestion-adopt disabled?={ item.Status != "pending" || data.Run.Stale }>Vorschlag übernehmen</button></form><button class="button button--quiet" type="button" data-copy-suggestion>Erklärung kopieren</button><a class="button button--quiet" href={ "/calendar?date=" + item.StartsAt.In(viennaLocation()).Format(time.DateOnly) }>Im Kalender ansehen</a></div><small>Status: { planningStatus(item.Status) } · gültig bis { planningLocal(item.ExpiresAt) }</small>
 									</article>
 								}
