@@ -27,6 +27,8 @@ type driverHTTPStore struct {
 	target            string
 	rule              driver.RuleInput
 	schedule          driver.Availability
+	availabilityFrom  time.Time
+	availabilityTo    time.Time
 	clearedWeekday    int
 	clearedRefs       []driver.RuleRef
 	createdExceptions []driver.ExceptionInput
@@ -48,8 +50,9 @@ func (store *driverHTTPStore) Schedule(_ context.Context, target string) (driver
 	store.target = target
 	return store.schedule, nil
 }
-func (store *driverHTTPStore) Availability(_ context.Context, target string, _, _ time.Time, _, _ string) (driver.Availability, error) {
+func (store *driverHTTPStore) Availability(_ context.Context, target string, from, to time.Time, _, _ string) (driver.Availability, error) {
 	store.target = target
+	store.availabilityFrom, store.availabilityTo = from, to
 	return store.schedule, nil
 }
 func (store *driverHTTPStore) CreateRule(_ context.Context, _ auth.Actor, target string, input driver.RuleInput, _ string) (string, error) {
@@ -260,6 +263,48 @@ func TestAvailabilityAPIRedactsInternalNote(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), `"status":"unavailable"`) || !strings.Contains(response.Body.String(), `"source":"exception"`) {
 		t.Fatalf("missing minimal provenance: %s", response.Body.String())
+	}
+}
+
+func TestAvailabilityAPIAcceptsViennaDepartureTime(t *testing.T) {
+	store := defaultDriverHTTPStore()
+	store.schedule.Profile.IsPrimary = true
+	store.schedule.Profile.AvailabilityPolicy = driver.PolicyAssumedAvailable
+	router, sessionToken, csrfToken := operationsTestRouter(t, auth.RoleAdmin, "", store, &resourceHTTPStore{})
+	request := authenticatedCustomerRequest(t, http.MethodGet, "/api/v1/drivers/"+operationDriverID+"/availability?at=2026-09-06T07:00", nil, sessionToken, csrfToken)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	wantFrom := time.Date(2026, 9, 6, 5, 0, 0, 0, time.UTC)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"available"`) {
+		t.Fatalf("status = %d, body = %q", response.Code, response.Body.String())
+	}
+	if !store.availabilityFrom.Equal(wantFrom) || !store.availabilityTo.Equal(wantFrom.Add(time.Minute)) {
+		t.Fatalf("availability range = %s to %s, want %s to %s", store.availabilityFrom, store.availabilityTo, wantFrom, wantFrom.Add(time.Minute))
+	}
+}
+
+func TestAvailabilityAPIRejectsAmbiguousViennaDepartureTime(t *testing.T) {
+	store := defaultDriverHTTPStore()
+	router, sessionToken, csrfToken := operationsTestRouter(t, auth.RoleAdmin, "", store, &resourceHTTPStore{})
+	request := authenticatedCustomerRequest(t, http.MethodGet, "/api/v1/drivers/"+operationDriverID+"/availability?at=2026-10-25T02:30", nil, sessionToken, csrfToken)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "gültiger Wiener Zeitpunkt") || !store.availabilityFrom.IsZero() {
+		t.Fatalf("status = %d, range = %s to %s, body = %q", response.Code, store.availabilityFrom, store.availabilityTo, response.Body.String())
+	}
+}
+
+func TestAvailabilityAPIRejectsMixedRangeForms(t *testing.T) {
+	store := defaultDriverHTTPStore()
+	router, sessionToken, csrfToken := operationsTestRouter(t, auth.RoleAdmin, "", store, &resourceHTTPStore{})
+	request := authenticatedCustomerRequest(t, http.MethodGet, "/api/v1/drivers/"+operationDriverID+"/availability?at=2026-09-06T07:00&from=2026-09-06T05:00:00Z", nil, sessionToken, csrfToken)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "nicht gemeinsam") || !store.availabilityFrom.IsZero() {
+		t.Fatalf("status = %d, range = %s to %s, body = %q", response.Code, store.availabilityFrom, store.availabilityTo, response.Body.String())
 	}
 }
 

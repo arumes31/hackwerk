@@ -355,7 +355,7 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 				return availabilityErr
 			}
 			if !available {
-				return planning.ErrConflict
+				return planning.ErrNoCapacity
 			}
 			jobID, _ := uuid(stop.RsJobID)
 			appointmentID, insertErr := q.InsertAdoptedProposal(ctx, dbgen.InsertAdoptedProposalParams{

@@ -140,6 +140,73 @@ func TestRouteStoreAssignsEveryStopAsProposalWithoutOutbox(t *testing.T) {
 	}
 }
 
+func TestRouteStoreAssignmentAcceptsAssumedAvailableDriverWithoutRules(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	store := postgres.NewRouteStore(fixture.pool)
+	if _, err := fixture.pool.Exec(fixture.ctx, `UPDATE drivers
+		SET is_primary=true, availability_policy='assumed_available'
+		WHERE id=$1`, fixture.driver1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, "DELETE FROM availability_rules WHERE driver_id=$1", fixture.driver1); err != nil {
+		t.Fatal(err)
+	}
+
+	jobID := routeJob(t, fixture, "HW-ROUTE-ASSUMED", 48.21, 14.21)
+	candidates, err := store.LoadRouteCandidates(fixture.ctx, []string{jobID})
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("LoadRouteCandidates() = %#v, %v", candidates, err)
+	}
+	// Sunday deliberately has no legacy availability rule in the fixture.
+	departure := time.Date(2026, 9, 6, 5, 0, 0, 0, time.UTC)
+	draft, err := store.SaveRouteDraft(fixture.ctx, fixture.admin, planning.SaveRouteDraftInput{
+		Route: routeDraftForCandidates(fixture, departure, candidates, false), RequestID: "route-assumed-create",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assigned, err := store.AssignRoute(fixture.ctx, fixture.admin, planning.AssignRouteInput{
+		ID: draft.ID, ExpectedVersion: draft.Version, RequestID: "route-assumed-assign",
+	})
+	if err != nil {
+		t.Fatalf("AssignRoute() error = %v", err)
+	}
+	if assigned.Status != planning.RouteStatusAssigned || len(assigned.Stops) != 1 || assigned.Stops[0].AppointmentID == "" {
+		t.Fatalf("assigned route = %#v", assigned)
+	}
+}
+
+func TestRouteStoreAssignmentReportsUnavailableDriverAsCapacityError(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	store := postgres.NewRouteStore(fixture.pool)
+	if _, err := fixture.pool.Exec(fixture.ctx, `UPDATE drivers
+		SET availability_policy='explicit_dates'
+		WHERE id=$1`, fixture.driver1); err != nil {
+		t.Fatal(err)
+	}
+
+	jobID := routeJob(t, fixture, "HW-ROUTE-UNAVAILABLE", 48.21, 14.21)
+	candidates, err := store.LoadRouteCandidates(fixture.ctx, []string{jobID})
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("LoadRouteCandidates() = %#v, %v", candidates, err)
+	}
+	draft, err := store.SaveRouteDraft(fixture.ctx, fixture.admin, planning.SaveRouteDraftInput{
+		Route:     routeDraftForCandidates(fixture, time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC), candidates, false),
+		RequestID: "route-unavailable-create",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.AssignRoute(fixture.ctx, fixture.admin, planning.AssignRouteInput{
+		ID: draft.ID, ExpectedVersion: draft.Version, RequestID: "route-unavailable-assign",
+	})
+	if !errors.Is(err, planning.ErrNoCapacity) {
+		t.Fatalf("AssignRoute() error = %v, want no capacity", err)
+	}
+}
+
 func TestRouteStoreAssignmentRollsBackEveryProposalOnConflict(t *testing.T) {
 	fixture := newCalendarFixture(t)
 	store := postgres.NewRouteStore(fixture.pool)

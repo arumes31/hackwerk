@@ -54,6 +54,11 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	}
 	pool, identity, drivers, resources, appointments, driverID, chipperID, jobID, secondJobID, adminPassword, driverPassword := task04Application(t, databaseURL)
 	routeLocations, _ := e2eRouteLocations(t, pool)
+	if _, err := pool.Exec(t.Context(), `UPDATE drivers
+		SET is_primary=true, availability_policy='assumed_available'
+		WHERE id=$1`, driverID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(t.Context(), `UPDATE jobs
 		SET pile_latitude=CASE id WHEN $1 THEN 48.210000 ELSE 48.245000 END,
 		    pile_longitude=CASE id WHEN $1 THEN 14.210000 ELSE 14.265000 END,
@@ -252,6 +257,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	var routePresetAudit struct {
 		Actual, Expected []string
 	}
+	var driverAvailabilityShown bool
 	var candidateMarkerCount, startMarkerCount int
 	var smallDesktopTargets []string
 	desktopRouteContext, cancelDesktopRoute := context.WithTimeout(browser, 60*time.Second)
@@ -326,6 +332,8 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		chromedp.SetValue("select[name='driver_id']", driverID, chromedp.ByQuery),
 		chromedp.SetValue("input[name='departure_date']", "2026-09-01", chromedp.ByQuery),
 		chromedp.SetValue("input[name='departure_time']", "07:00", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector("select[name='driver_id'] option:checked")?.textContent.includes("· verfügbar")`, nil),
+		chromedp.Evaluate(`document.querySelector("select[name='driver_id'] option:checked")?.textContent.includes("· verfügbar")&&document.querySelector("[data-route-driver-availability-status]")?.textContent.includes("vollständige Route")`, &driverAvailabilityShown),
 		chromedp.Evaluate(`document.documentElement.scrollWidth > window.innerWidth`, &desktopOverflow),
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('button,a.button')).some(e=>e.getBoundingClientRect().height>0&&e.getBoundingClientRect().height<44)`, &smallDesktopTarget),
 		chromedp.Evaluate(`Array.from(document.querySelectorAll('button,a.button')).filter(e=>e.getBoundingClientRect().height>0&&e.getBoundingClientRect().height<44).map(e=>e.textContent.trim()+':'+Math.round(e.getBoundingClientRect().height))`, &smallDesktopTargets),
@@ -362,8 +370,8 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
 	cancelDesktopRouteResult()
-	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || startMarkerCount != 1 || !markerPresentation.TouchTarget || !markerPresentation.CompactHead || !markerPresentation.Pointed || markerPresentation.Scale == "" || !selectedByCard || !selectionFeedbackSpecific || !selectedMarkerState || !deselectedByKeyboard || !candidateSemantics || !selectedByMap || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate || !desktopLayout.BuilderWide || !desktopLayout.EndpointCardsReadable || !routeGeometryPresent || !routeStreetSource || !routeLineDrawn || !routeLineRendered || !routeLineAnnounced {
-		t.Fatalf("desktop route map-ready/admin/toolbar/presets/candidates/start/marker/card/selected/keyboard/semantics/map/overflow/small-target/layout/geometry/street/line/rendered/notice=%v/%v/%v/%v/%d/%d/%+v/%v/%v/%v/%v/%v/%v/%v/%+v/%v/%v/%v/%v/%v state=%q map-error=%q targets=%v", mapReady, adminRouteContext, mapToolbar, routeDatePresets, candidateMarkerCount, startMarkerCount, markerPresentation, selectedByCard, selectedMarkerState, deselectedByKeyboard, candidateSemantics, selectedByMap, desktopOverflow, smallDesktopTarget, desktopLayout, routeGeometryPresent, routeStreetSource, routeLineDrawn, routeLineRendered, routeLineAnnounced, routeLineState, mapError, smallDesktopTargets)
+	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || startMarkerCount != 1 || !markerPresentation.TouchTarget || !markerPresentation.CompactHead || !markerPresentation.Pointed || markerPresentation.Scale == "" || !selectedByCard || !selectionFeedbackSpecific || !selectedMarkerState || !deselectedByKeyboard || !candidateSemantics || !selectedByMap || !driverAvailabilityShown || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate || !desktopLayout.BuilderWide || !desktopLayout.EndpointCardsReadable || !routeGeometryPresent || !routeStreetSource || !routeLineDrawn || !routeLineRendered || !routeLineAnnounced {
+		t.Fatalf("desktop route map-ready/admin/toolbar/presets/candidates/start/marker/card/selected/keyboard/semantics/map/availability/overflow/small-target/layout/geometry/street/line/rendered/notice=%v/%v/%v/%v/%d/%d/%+v/%v/%v/%v/%v/%v/%v/%v/%v/%+v/%v/%v/%v/%v/%v state=%q map-error=%q targets=%v", mapReady, adminRouteContext, mapToolbar, routeDatePresets, candidateMarkerCount, startMarkerCount, markerPresentation, selectedByCard, selectedMarkerState, deselectedByKeyboard, candidateSemantics, selectedByMap, driverAvailabilityShown, desktopOverflow, smallDesktopTarget, desktopLayout, routeGeometryPresent, routeStreetSource, routeLineDrawn, routeLineRendered, routeLineAnnounced, routeLineState, mapError, smallDesktopTargets)
 	}
 
 	var routeText string

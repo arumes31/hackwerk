@@ -80,7 +80,7 @@ templ Routes(data RoutePageData) {
 				if !data.Own {
 					@planningLifecycle("draft")
 				}
-				if data.Error != "" {
+				if data.Error != "" && (data.Own || data.Route == nil) {
 					<div class="form-alert" role="alert">{ data.Error }</div>
 				}
 				if data.Own {
@@ -139,7 +139,7 @@ templ adminRoutePlanner(data RoutePageData) {
 			<div class="form-grid">
 				<label>
 					Fahrer
-					<select name="driver_id" required>
+					<select name="driver_id" data-route-driver-availability aria-describedby="route-driver-availability-status" required>
 						<option value="">Bitte wählen</option>@routeDriverOptions(data.Options.Drivers, data.Form.DriverID)
 					</select>
 				</label>
@@ -158,6 +158,7 @@ templ adminRoutePlanner(data RoutePageData) {
 				<label>Abfahrtsdatum<input name="departure_date" type="date" value={ routeDepartureDate(data.Departure) } data-route-day-filter required/></label>
 				<label>Abfahrtszeit<input name="departure_time" type="time" value={ routeDepartureTime(data.Departure) } required/></label>
 			</div>
+			<p id="route-driver-availability-status" class="form-hint" data-route-driver-availability-status aria-live="polite">Die Verfügbarkeit am Abfahrtszeitpunkt wird geladen. Die vollständige Route wird beim Zuweisen geprüft.</p>
 			<label class="check-label"><input type="checkbox" name="optimize" value="true" checked?={ !data.Form.Submitted || data.Form.Optimize }/> Reihenfolge nach Fahrzeit optimieren</label>
 			<div class="action-row" data-route-date-presets><button type="button" class="button button--quiet" data-route-date-preset="today">Heute</button><button type="button" class="button button--quiet" data-route-date-preset="tomorrow">Morgen</button><button type="button" class="button button--quiet" data-route-date-preset="business-day">Nächster Werktag</button></div>
 			<p class="form-hint">„Route berechnen“ erzeugt einen Entwurf. Eine Hackmaschine kann vor der späteren Fixierung im Kalender zugewiesen werden.</p>
@@ -185,7 +186,7 @@ templ adminRoutePlanner(data RoutePageData) {
 			<div class="route-map-toolbar" data-route-map-toolbar aria-label="Kartenwerkzeuge"><button type="button" class="button button--quiet" data-route-map-start>Startort</button><button type="button" class="button button--quiet" data-route-map-fit>Alle Punkte</button><button type="button" class="button button--quiet" data-route-map-labels aria-pressed="true">Beschriftungen</button><button type="button" class="button button--quiet" data-route-map-retry hidden>Karte erneut laden</button><span class="status-badge" data-route-map-count></span></div>
 			<div class="route-map" role="region" aria-label="Interaktive Karte der offenen Aufträge" data-route-map data-route-start-label={ routeStartLabel(data.Route) } data-route-start-latitude={ routeStartLatitude(data.Route) } data-route-start-longitude={ routeStartLongitude(data.Route) } data-route-end-label={ routeEndLabel(data.Route) } data-route-end-latitude={ routeEndLatitude(data.Route) } data-route-end-longitude={ routeEndLongitude(data.Route) } data-route-geometry={ routeGeometry(data.Route) } data-route-source={ routeSourceValue(data.Route) } data-route-arrows="true"><div class="map-fallback" data-map-fallback>Die Straßenkarte wird geladen. Die Auftragsliste bleibt nutzbar.</div></div>
 			if data.Route != nil {
-				@routeSummary(*data.Route, false, data.Shell.CSRFToken, time.Time{})
+				@routeSummary(*data.Route, false, data.Shell.CSRFToken, time.Time{}, data.Error)
 			}
 		</div>
 	</section>
@@ -310,7 +311,7 @@ templ ownRoute(data RoutePageData) {
 			</article>
 		}
 		<section class="route-workspace route-workspace--driver" data-route-context data-route-own="true">
-			@routeSummary(*data.Route, true, data.Shell.CSRFToken, data.RetrievedAt)
+			@routeSummary(*data.Route, true, data.Shell.CSRFToken, data.RetrievedAt, "")
 			<section class="route-map-panel route-own-map" aria-labelledby="route-own-map-heading">
 				@mapAssetData(data.Shell.Page)
 				<div class="section-heading"><div><p class="eyebrow">Ihre Fahrt</p><h2 id="route-own-map-heading">Karte für { planningDate(data.Route.Departure) }</h2></div><span class="status-badge">Zugewiesen</span></div>
@@ -320,7 +321,7 @@ templ ownRoute(data RoutePageData) {
 	}
 }
 
-templ routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, now time.Time) {
+templ routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, now time.Time, assignmentError string) {
 	<section class="route-summary route-stop-section" aria-labelledby={ "route-stops-heading-" + route.ID }>
 		<div class="section-heading">
 			<div><p class="eyebrow">{ route.DriverName }</p><h2 id={ "route-stops-heading-" + route.ID }>Stoppliste</h2></div>
@@ -369,6 +370,9 @@ templ routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, no
 				<p class="form-hint">Letzter Fahrabschnitt zum Endort: { routeDistance(leg.DistanceMeters) } · { routeDuration(leg.Duration) }</p>
 			}
 			<div class="visually-hidden" aria-live="polite" data-route-order-status></div>
+			if !reorder && route.Status == planning.RouteStatusDraft && assignmentError != "" {
+				<div class="form-alert" role="alert" data-route-assignment-error>{ assignmentError }</div>
+			}
 			if reorder {
 				<div class="route-reorder-panel" data-route-order-save>
 					<div class="section-heading"><div><p class="eyebrow">Fahrreihenfolge</p><h3>Reihenfolge prüfen und speichern</h3></div></div>
@@ -386,7 +390,7 @@ templ routeSummary(route planning.RouteDraft, reorder bool, csrfToken string, no
 
 templ routeDriverOptions(options []planning.RouteDriverOption, selectedID string) {
 	for _, option := range options {
-		<option value={ option.ID } selected?={ option.ID == selectedID }>{ option.Name }</option>
+		<option value={ option.ID } data-driver-name={ option.Name } selected?={ option.ID == selectedID }>{ option.Name }</option>
 	}
 }
 
