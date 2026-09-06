@@ -235,8 +235,11 @@ func (s *PlanningStore) Adopt(ctx context.Context, actor auth.Actor, suggestionI
 		driverAvailable, availabilityErr := q.PlanningDriverAvailable(ctx, dbgen.PlanningDriverAvailableParams{
 			DriverID: driverID, StartsAt: row.StartsAt, EndsAt: row.EndsAt,
 		})
-		if availabilityErr != nil || !driverAvailable {
-			return planning.ErrConflict
+		if availabilityErr != nil {
+			return availabilityErr
+		}
+		if !driverAvailable {
+			return planning.ErrNoCapacity
 		}
 		jobID, _ := uuid(row.RJobID)
 		created, insertErr := q.InsertAdoptedProposal(ctx, dbgen.InsertAdoptedProposalParams{JobID: jobID, StartsAt: row.StartsAt, EndsAt: row.EndsAt})

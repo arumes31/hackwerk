@@ -382,10 +382,9 @@ func availabilityAPI(service *driver.Service, logger *slog.Logger, admin bool) h
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
 		target := availabilityTarget(session.Actor, request, admin)
-		from, fromErr := time.Parse(time.RFC3339, request.URL.Query().Get("from"))
-		to, toErr := time.Parse(time.RFC3339, request.URL.Query().Get("to"))
-		if fromErr != nil || toErr != nil {
-			http.Error(response, "from und to müssen RFC3339-Zeitpunkte sein.", http.StatusBadRequest)
+		from, to, rangeErr := availabilityQueryRange(request)
+		if rangeErr != nil {
+			http.Error(response, rangeErr.Error(), http.StatusBadRequest)
 			return
 		}
 		intervals, err := service.ResolveAvailability(request.Context(), session.Actor, target, from.UTC(), to.UTC())
@@ -407,6 +406,30 @@ func availabilityAPI(service *driver.Service, logger *slog.Logger, admin bool) h
 		}
 		writeJSON(response, http.StatusOK, map[string]any{"driver_id": target, "timezone": "Europe/Vienna", "intervals": minimal})
 	}
+}
+
+func availabilityQueryRange(request *http.Request) (time.Time, time.Time, error) {
+	query := request.URL.Query()
+	if at := strings.TrimSpace(query.Get("at")); at != "" {
+		if strings.TrimSpace(query.Get("from")) != "" || strings.TrimSpace(query.Get("to")) != "" {
+			return time.Time{}, time.Time{}, errors.New("at darf nicht gemeinsam mit from oder to verwendet werden.")
+		}
+		location, err := time.LoadLocation("Europe/Vienna")
+		if err != nil {
+			return time.Time{}, time.Time{}, errors.New("at muss ein gültiger Wiener Zeitpunkt sein.")
+		}
+		from, err := driver.ParseLocalDateTime(at, location)
+		if err != nil {
+			return time.Time{}, time.Time{}, errors.New("at muss ein gültiger Wiener Zeitpunkt sein.")
+		}
+		return from, from.Add(time.Minute), nil
+	}
+	from, fromErr := time.Parse(time.RFC3339, query.Get("from"))
+	to, toErr := time.Parse(time.RFC3339, query.Get("to"))
+	if fromErr != nil || toErr != nil {
+		return time.Time{}, time.Time{}, errors.New("from und to müssen RFC3339-Zeitpunkte sein.")
+	}
+	return from.UTC(), to.UTC(), nil
 }
 
 func availabilityTarget(actor auth.Actor, request *http.Request, admin bool) string {

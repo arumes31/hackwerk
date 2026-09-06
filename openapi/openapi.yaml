@@ -993,11 +993,12 @@ paths:
   /api/v1/me/availability:
     get:
       operationId: resolveOwnAvailability
-      description: Liefert UTC-Intervalle für das Fahrerprofil der Session. Interne Notizen werden nie in das Overlay serialisiert.
+      description: Liefert UTC-Intervalle für das Fahrerprofil der Session. Entweder from und to oder der Wiener Ortszeitpunkt at wird angegeben. Interne Notizen werden nie in das Overlay serialisiert.
       security: [{ sessionCookie: [] }]
       parameters:
         - $ref: "#/components/parameters/AvailabilityFrom"
         - $ref: "#/components/parameters/AvailabilityTo"
+        - $ref: "#/components/parameters/AvailabilityAt"
       responses:
         "200":
           description: Normalisierte Intervalle samt minimaler Provenienz.
@@ -1005,17 +1006,19 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AvailabilityResponse" }
         "403": { description: Eigenes Fahrerprofil fehlt. }
+        "400": { description: Zeitraum oder Wiener Ortszeit syntaktisch beziehungsweise wegen DST ungültig. }
         "422": { description: Zeitraum ungültig oder länger als 90 Tage. }
   /api/v1/drivers/{driverID}/availability:
     parameters:
       - $ref: "#/components/parameters/DriverID"
     get:
       operationId: resolveDriverAvailability
-      description: Admin-Overlay eines Fahrerprofils; Fahrer können diesen Fremdpfad nicht verwenden.
+      description: Admin-Overlay eines Fahrerprofils; entweder from und to oder der Wiener Ortszeitpunkt at wird angegeben. Fahrer können diesen Fremdpfad nicht verwenden.
       security: [{ sessionCookie: [] }]
       parameters:
         - $ref: "#/components/parameters/AvailabilityFrom"
         - $ref: "#/components/parameters/AvailabilityTo"
+        - $ref: "#/components/parameters/AvailabilityAt"
       responses:
         "200":
           description: Normalisierte Intervalle samt minimaler Provenienz.
@@ -1023,6 +1026,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AvailabilityResponse" }
         "403": { description: Adminberechtigung fehlt. }
+        "400": { description: Zeitraum oder Wiener Ortszeit syntaktisch beziehungsweise wegen DST ungültig. }
         "422": { description: Zeitraum ungültig oder länger als 90 Tage. }
   /calendar:
     get:
@@ -1438,13 +1442,21 @@ components:
     AvailabilityFrom:
       name: from
       in: query
-      required: true
+      required: false
+      description: UTC-Start; gemeinsam mit to erforderlich, wenn at fehlt.
       schema: { type: string, format: date-time }
     AvailabilityTo:
       name: to
       in: query
-      required: true
+      required: false
+      description: UTC-Ende; gemeinsam mit from erforderlich, wenn at fehlt.
       schema: { type: string, format: date-time }
+    AvailabilityAt:
+      name: at
+      in: query
+      required: false
+      description: Einzelner Abfahrtszeitpunkt als lokale Europe/Vienna-Zeit; alternativ zu from und to.
+      schema: { type: string, pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$', example: '2026-09-06T07:00' }
     CalendarFrom:
       name: from
       in: query

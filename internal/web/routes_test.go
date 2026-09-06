@@ -88,7 +88,9 @@ func TestRouteHTTPAdminSeesRoutableJobsAndDriverCannotPlan(t *testing.T) {
 		!strings.Contains(body, `value="custom"`) || !strings.Contains(body, "Anderen Startort verwenden") ||
 		!strings.Contains(body, "Anderen Endort verwenden") || !strings.Contains(body, "Beim letzten Stopp") ||
 		!strings.Contains(body, "Hackmaschine (optional)") || strings.Contains(body, `name="chipper_resource_id" required`) ||
-		!strings.Contains(body, `data-route-admin="true"`) || !strings.Contains(body, "Aufträge ohne Haufenstandort") {
+		!strings.Contains(body, `data-route-admin="true"`) || !strings.Contains(body, "Aufträge ohne Haufenstandort") ||
+		!strings.Contains(body, `data-route-driver-availability`) || !strings.Contains(body, `data-driver-name="Anna Fahrerin"`) ||
+		!strings.Contains(body, `data-route-driver-availability-status`) || !strings.Contains(body, "vollständige Route") {
 		t.Fatalf("admin route page=%d %s", response.Code, response.Body.String())
 	}
 
@@ -380,7 +382,7 @@ func TestRouteHelperErrorAndComparisonMappings(t *testing.T) {
 	}{
 		{name: "forbidden", err: auth.ErrForbidden, status: http.StatusForbidden, body: "Berechtigung"},
 		{name: "conflict", err: planning.ErrConflict, status: http.StatusConflict, body: "geändert"},
-		{name: "capacity", err: planning.ErrNoCapacity, status: http.StatusUnprocessableEntity, body: "nicht verfügbar"},
+		{name: "capacity", err: planning.ErrNoCapacity, status: http.StatusUnprocessableEntity, body: "gewählte Fahrer"},
 		{name: "validation", err: planning.ErrValidation, status: http.StatusUnprocessableEntity, body: "vollständig"},
 		{name: "not found", err: planning.ErrNotFound, status: http.StatusNotFound, body: "nicht gefunden"},
 		{name: "location conflict", err: routelocation.ErrConflict, status: http.StatusConflict, body: "Start- oder Endort"},
@@ -395,6 +397,23 @@ func TestRouteHelperErrorAndComparisonMappings(t *testing.T) {
 				t.Fatalf("routeError(%v)=(%d,%q)", test.err, status, body)
 			}
 		})
+	}
+}
+
+func TestRouteHTTPShowsAssignmentErrorBesideAssignmentAction(t *testing.T) {
+	store := routeHTTPFixture()
+	store.route.Status = planning.RouteStatusDraft
+	router, session, csrf := routeTestRouter(t, auth.RoleAdmin, "", store)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, authenticatedCustomerRequest(t, http.MethodGet,
+		"/planning/routes?route_id=route-1&error=Der+gew%C3%A4hlte+Fahrer+ist+nicht+verf%C3%BCgbar.", nil, session, csrf))
+	body := response.Body.String()
+	formPosition := strings.Index(body, `form method="post" action="/planning/routes/route-1/assign"`)
+	errorPosition := strings.Index(body, "data-route-assignment-error")
+	actionPosition := strings.Index(body, "Route als Terminvorschläge zuweisen")
+	if response.Code != http.StatusOK || formPosition < 0 || errorPosition < formPosition || actionPosition < errorPosition ||
+		strings.Count(body, "Der gewählte Fahrer ist nicht verfügbar.") != 1 {
+		t.Fatalf("assignment error is not beside its action: status=%d body=%s", response.Code, body)
 	}
 }
 

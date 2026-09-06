@@ -200,27 +200,7 @@ SELECT s.id::text, s.run_id::text, s.starts_at, s.ends_at, s.driver_id::text,
        r.job_id::text, r.job_version, r.waitlist_version, r.expires_at,
        r.search_from, r.search_to, r.input_fingerprint,
        j.workflow_status, j.version AS current_job_version, w.version AS current_waitlist_version,
-       j.job_type, j.transport_mode, j.external_transport_confirmed,
-       CASE
-         WHEN EXISTS (
-           SELECT 1 FROM availability_exceptions e WHERE e.driver_id=s.driver_id AND e.exception_type='available_override'
-             AND ((e.all_day AND e.local_date=(s.starts_at AT TIME ZONE 'Europe/Vienna')::date)
-               OR (NOT e.all_day AND e.starts_at<=s.starts_at AND e.ends_at>=s.ends_at))
-         ) THEN true
-         WHEN EXISTS (
-           SELECT 1 FROM availability_exceptions e WHERE e.driver_id=s.driver_id AND e.exception_type<>'available_override'
-             AND ((e.all_day AND e.local_date=(s.starts_at AT TIME ZONE 'Europe/Vienna')::date)
-               OR (NOT e.all_day AND e.starts_at<s.ends_at AND e.ends_at>s.starts_at))
-         ) THEN false
-         ELSE EXISTS (
-           SELECT 1 FROM availability_rules ar WHERE ar.driver_id=s.driver_id AND ar.status='available'
-             AND ar.iso_weekday=EXTRACT(ISODOW FROM s.starts_at AT TIME ZONE 'Europe/Vienna')::smallint
-             AND ar.valid_from<=(s.starts_at AT TIME ZONE 'Europe/Vienna')::date
-             AND (ar.valid_until IS NULL OR ar.valid_until>=(s.starts_at AT TIME ZONE 'Europe/Vienna')::date)
-             AND ar.local_start<=(s.starts_at AT TIME ZONE 'Europe/Vienna')::time
-             AND ar.local_end>=(s.ends_at AT TIME ZONE 'Europe/Vienna')::time
-         )
-       END::boolean AS driver_available
+       j.job_type, j.transport_mode, j.external_transport_confirmed
 FROM planning_suggestions s
 JOIN planning_runs r ON r.id=s.run_id
 JOIN jobs j ON j.id=r.job_id
@@ -251,7 +231,6 @@ type GetPlanningSuggestionForUpdateRow struct {
 	JobType                    string
 	TransportMode              string
 	ExternalTransportConfirmed bool
-	DriverAvailable            bool
 }
 
 func (q *Queries) GetPlanningSuggestionForUpdate(ctx context.Context, id pgtype.UUID) (GetPlanningSuggestionForUpdateRow, error) {
@@ -279,7 +258,6 @@ func (q *Queries) GetPlanningSuggestionForUpdate(ctx context.Context, id pgtype.
 		&i.JobType,
 		&i.TransportMode,
 		&i.ExternalTransportConfirmed,
-		&i.DriverAvailable,
 	)
 	return i, err
 }
@@ -658,36 +636,51 @@ func (q *Queries) MarkPlanningSuggestionAdopted(ctx context.Context, arg MarkPla
 }
 
 const planningDriverAvailable = `-- name: PlanningDriverAvailable :one
-SELECT CASE
-    WHEN EXISTS (
-      SELECT 1 FROM availability_exceptions e WHERE e.driver_id=$1::uuid AND e.exception_type<>'available_override'
-        AND ((e.all_day AND e.local_date=($2::timestamptz AT TIME ZONE 'Europe/Vienna')::date)
-          OR (NOT e.all_day AND e.starts_at<$3::timestamptz AND e.ends_at>$2::timestamptz))
-    ) THEN false
-    WHEN EXISTS (
-      SELECT 1 FROM availability_exceptions e WHERE e.driver_id=$1::uuid AND e.exception_type='available_override'
-        AND ((e.all_day AND e.local_date=($2::timestamptz AT TIME ZONE 'Europe/Vienna')::date)
-          OR (NOT e.all_day AND e.starts_at<=$2::timestamptz AND e.ends_at>=$3::timestamptz))
-    ) THEN true
-    ELSE EXISTS (
-      SELECT 1 FROM availability_rules ar WHERE ar.driver_id=$1::uuid AND ar.status='available'
-        AND ar.iso_weekday=EXTRACT(ISODOW FROM $2::timestamptz AT TIME ZONE 'Europe/Vienna')::smallint
-        AND ar.valid_from<=($2::timestamptz AT TIME ZONE 'Europe/Vienna')::date
-        AND (ar.valid_until IS NULL OR ar.valid_until>=($2::timestamptz AT TIME ZONE 'Europe/Vienna')::date)
-        AND ar.local_start<=($2::timestamptz AT TIME ZONE 'Europe/Vienna')::time
-        AND ar.local_end>=($3::timestamptz AT TIME ZONE 'Europe/Vienna')::time
-    )
-END::boolean
+SELECT COALESCE((
+    SELECT CASE
+      WHEN NOT d.active THEN false
+      WHEN d.availability_policy='assumed_available' THEN true
+      WHEN d.availability_policy='explicit_dates' THEN EXISTS (
+        SELECT 1 FROM availability_exceptions e
+        WHERE e.driver_id=d.id AND e.exception_type='available_override'
+          AND ((e.all_day AND e.local_date=($1::timestamptz AT TIME ZONE 'Europe/Vienna')::date)
+            OR (NOT e.all_day AND e.starts_at<=$1::timestamptz AND e.ends_at>=$2::timestamptz))
+      )
+      WHEN EXISTS (
+        SELECT 1 FROM availability_exceptions e
+        WHERE e.driver_id=d.id AND e.exception_type<>'available_override'
+          AND ((e.all_day AND e.local_date=($1::timestamptz AT TIME ZONE 'Europe/Vienna')::date)
+            OR (NOT e.all_day AND e.starts_at<$2::timestamptz AND e.ends_at>$1::timestamptz))
+      ) THEN false
+      WHEN EXISTS (
+        SELECT 1 FROM availability_exceptions e
+        WHERE e.driver_id=d.id AND e.exception_type='available_override'
+          AND ((e.all_day AND e.local_date=($1::timestamptz AT TIME ZONE 'Europe/Vienna')::date)
+            OR (NOT e.all_day AND e.starts_at<=$1::timestamptz AND e.ends_at>=$2::timestamptz))
+      ) THEN true
+      ELSE EXISTS (
+        SELECT 1 FROM availability_rules ar
+        WHERE ar.driver_id=d.id AND ar.status='available'
+          AND ar.iso_weekday=EXTRACT(ISODOW FROM $1::timestamptz AT TIME ZONE 'Europe/Vienna')::smallint
+          AND ar.valid_from<=($1::timestamptz AT TIME ZONE 'Europe/Vienna')::date
+          AND (ar.valid_until IS NULL OR ar.valid_until>=($1::timestamptz AT TIME ZONE 'Europe/Vienna')::date)
+          AND ar.local_start<=($1::timestamptz AT TIME ZONE 'Europe/Vienna')::time
+          AND ar.local_end>=($2::timestamptz AT TIME ZONE 'Europe/Vienna')::time
+      )
+    END
+    FROM drivers d
+    WHERE d.id=$3::uuid
+), false)::boolean
 `
 
 type PlanningDriverAvailableParams struct {
-	DriverID pgtype.UUID
 	StartsAt pgtype.Timestamptz
 	EndsAt   pgtype.Timestamptz
+	DriverID pgtype.UUID
 }
 
 func (q *Queries) PlanningDriverAvailable(ctx context.Context, arg PlanningDriverAvailableParams) (bool, error) {
-	row := q.db.QueryRow(ctx, planningDriverAvailable, arg.DriverID, arg.StartsAt, arg.EndsAt)
+	row := q.db.QueryRow(ctx, planningDriverAvailable, arg.StartsAt, arg.EndsAt, arg.DriverID)
 	var column_1 bool
 	err := row.Scan(&column_1)
 	return column_1, err

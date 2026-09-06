@@ -290,6 +290,73 @@ document.querySelectorAll("[data-route-location-picker]").forEach(picker => {
 
 const routePlannerForms = Array.from(document.querySelectorAll("form[action='/planning/routes']"));
 routePlannerForms.forEach(form => {
+  const driverSelect = form.querySelector("[data-route-driver-availability]");
+  const driverAvailabilityStatus = form.querySelector("[data-route-driver-availability-status]");
+  const departureDate = form.elements.namedItem("departure_date");
+  const departureTime = form.elements.namedItem("departure_time");
+  const driverOptions = Array.from(driverSelect?.options || []).filter(option => option.value);
+  let availabilityController;
+
+  const updateDriverAvailability = async () => {
+    if (!driverSelect || !driverAvailabilityStatus) return;
+    if (driverOptions.length === 0) {
+      driverAvailabilityStatus.textContent = "Keine aktiven Fahrer für Routen verfügbar.";
+      return;
+    }
+    availabilityController?.abort();
+    const departure = `${String(departureDate?.value || "").trim()}T${String(departureTime?.value || "").trim()}`;
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(departure)) {
+      driverOptions.forEach(option => { option.textContent = option.dataset.driverName || option.textContent; });
+      driverAvailabilityStatus.textContent = "Abfahrtsdatum und -zeit wählen, um die Fahrerverfügbarkeit anzuzeigen. Die vollständige Route wird beim Zuweisen geprüft.";
+      return;
+    }
+
+    const controller = new AbortController();
+    availabilityController = controller;
+    driverAvailabilityStatus.textContent = "Fahrerverfügbarkeit wird geprüft.";
+    driverOptions.forEach(option => {
+      const name = option.dataset.driverName || option.textContent;
+      option.textContent = `${name} · wird geprüft`;
+    });
+
+    const results = await Promise.all(driverOptions.map(async option => {
+      const name = option.dataset.driverName || option.textContent;
+      try {
+        const response = await fetch(`/api/v1/drivers/${encodeURIComponent(option.value)}/availability?at=${encodeURIComponent(departure)}`, {
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("availability unavailable");
+        const payload = await response.json();
+        const intervals = Array.isArray(payload.intervals) ? payload.intervals : [];
+        const available = intervals.length > 0 && intervals.every(interval => interval.status === "available");
+        return { option, name, available, label: available ? "verfügbar" : "nicht verfügbar" };
+      } catch (error) {
+        if (controller.signal.aborted) return null;
+        return { option, name, available: false, unknown: true, label: "Status unbekannt" };
+      }
+    }));
+    if (controller.signal.aborted) return;
+
+    let availableCount = 0;
+    let unknownCount = 0;
+    results.filter(Boolean).forEach(({ option, name, available, unknown, label }) => {
+      option.textContent = `${name} · ${label}`;
+      if (available) availableCount += 1;
+      if (unknown) unknownCount += 1;
+    });
+    const driverNoun = driverOptions.length === 1 ? "Fahrer" : "Fahrern";
+    const availabilityVerb = availableCount === 1 ? "ist" : "sind";
+    const unknownNotice = unknownCount > 0 ? ` ${unknownCount} Status konnten nicht geladen werden.` : "";
+    driverAvailabilityStatus.textContent = `${availableCount} von ${driverOptions.length} ${driverNoun} ${availabilityVerb} um ${departureTime.value} verfügbar.${unknownNotice} Die vollständige Route wird beim Zuweisen geprüft.`;
+  };
+
+  for (const input of [departureDate, departureTime]) {
+    input?.addEventListener("change", updateDriverAvailability);
+  }
+  updateDriverAvailability();
+
   const feedback = form.querySelector("[data-route-form-feedback]");
   const feedbackTitle = feedback?.querySelector("[data-route-form-feedback-title]");
   const feedbackList = feedback?.querySelector("[data-route-form-feedback-list]");

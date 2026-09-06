@@ -482,7 +482,7 @@ func routeError(err error) (int, string) {
 	case errors.Is(err, planning.ErrConflict):
 		return http.StatusConflict, "Auftrag, Route oder Belegung hat sich geändert. Bitte Route neu laden und erneut prüfen."
 	case errors.Is(err, planning.ErrNoCapacity):
-		return http.StatusUnprocessableEntity, "Fahrer oder Ressourcen sind für mindestens einen Stopp nicht verfügbar."
+		return http.StatusUnprocessableEntity, "Der gewählte Fahrer ist im Zeitraum mindestens eines Stopps nicht verfügbar. Prüfen Sie die Fahrerverfügbarkeit oder wählen Sie einen anderen Fahrer beziehungsweise eine andere Abfahrtszeit."
 	case errors.Is(err, planning.ErrValidation):
 		return http.StatusUnprocessableEntity, "Bitte Aufträge, Fahrer, Ressource und Abfahrtszeit vollständig prüfen."
 	case errors.Is(err, planning.ErrNotFound):

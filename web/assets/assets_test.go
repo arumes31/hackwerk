@@ -985,6 +985,29 @@ func TestRouteSelectionStatusDoesNotDependOnTheMap(t *testing.T) {
 	}
 }
 
+func TestRouteDriverAvailabilityIsShownInTheDropdown(t *testing.T) {
+	t.Parallel()
+
+	script, err := Files.ReadFile("static/route-locations.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(script)
+	for _, contract := range []string{
+		`form.querySelector("[data-route-driver-availability]")`,
+		`option.dataset.driverName`,
+		`/availability?at=${encodeURIComponent(departure)}`,
+		`intervals.every(interval => interval.status === "available")`,
+		"option.textContent = `${name} · ${label}`",
+		`Die vollständige Route wird beim Zuweisen geprüft.`,
+		`AbortController`,
+	} {
+		if !strings.Contains(javascript, contract) {
+			t.Errorf("driver availability dropdown is missing %q", contract)
+		}
+	}
+}
+
 func TestMapLibreCSPWorkerUsesSupportedConfigurationAPI(t *testing.T) {
 	t.Parallel()
 
