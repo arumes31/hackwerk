@@ -14,9 +14,20 @@ import (
 	"example.invalid/hackplan/internal/customers"
 	"example.invalid/hackplan/internal/driver"
 	"example.invalid/hackplan/internal/planning"
+	"example.invalid/hackplan/internal/routelocation"
 )
 
 type integrationPlanningAvailability struct{ service *driver.Service }
+
+type integrationPlanningStart struct{ store *postgres.RouteLocationStore }
+
+func (s integrationPlanningStart) DefaultStart(ctx context.Context) (planning.Point, error) {
+	location, err := s.store.DefaultStart(ctx)
+	if err != nil {
+		return planning.Point{}, err
+	}
+	return planning.Point{Latitude: location.Latitude, Longitude: location.Longitude}, nil
+}
 
 func (a integrationPlanningAvailability) Resolve(ctx context.Context, actor auth.Actor, driverID string, from, to time.Time) ([]planning.Interval, error) {
 	values, err := a.service.ResolveAvailability(ctx, actor, driverID, from, to)
@@ -43,8 +54,13 @@ func planningFixtureService(t *testing.T, fixture calendarFixture, now time.Time
 	cfg := planning.DefaultConfig(location)
 	cfg.HorizonDays = 56
 	cfg.CandidateLimit = 2000
-	cfg.Depot = planning.Point{Latitude: 48.2, Longitude: 14.2}
-	service, err := planning.New(postgres.NewPlanningStore(fixture.pool), integrationPlanningAvailability{service: drivers}, planning.NewHaversineRouter(1.3, 55), cfg, func() time.Time { return now })
+	starts := postgres.NewRouteLocationStore(fixture.pool)
+	if _, err := starts.Create(fixture.ctx, fixture.admin, routelocation.Input{
+		Label: "Betriebshof", Address: "Teststraße 1", Latitude: 48.2, Longitude: 14.2, DefaultStart: true,
+	}, "planning-fixture"); err != nil {
+		t.Fatal(err)
+	}
+	service, err := planning.New(postgres.NewPlanningStore(fixture.pool), integrationPlanningAvailability{service: drivers}, planning.NewHaversineRouter(1.3, 55), cfg, func() time.Time { return now }, planning.WithDefaultStartProvider(integrationPlanningStart{store: starts}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,6 +74,40 @@ func planningJob(t *testing.T, fixture calendarFixture, number string) string {
 		t.Fatal(err)
 	}
 	return jobID
+}
+
+func TestPlanningRunWithoutSuggestionsRemainsLoadable(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	now := time.Date(2026, 8, 31, 4, 0, 0, 0, time.UTC)
+	jobID := planningJob(t, fixture, "HW-PLAN-EMPTY")
+	from, to := now.Add(time.Hour), now.Add(24*time.Hour)
+	store := postgres.NewPlanningStore(fixture.pool)
+	snapshot, err := store.LoadSnapshot(fixture.ctx, jobID, from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	location, err := time.LoadLocation("Europe/Vienna")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := planning.DefaultConfig(location)
+	run, err := store.SaveRun(fixture.ctx, fixture.admin, snapshot, from, to, nil, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ID == "" || run.JobID != jobID || run.Suggestions == nil || len(run.Suggestions) != 0 || run.HorizonDays != cfg.HorizonDays {
+		t.Fatalf("saved empty run = %#v", run)
+	}
+	loaded, err := store.ListRun(fixture.ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ID != run.ID || loaded.JobID != jobID || loaded.Suggestions == nil || len(loaded.Suggestions) != 0 || loaded.HorizonDays != cfg.HorizonDays {
+		t.Fatalf("loaded empty run = %#v", loaded)
+	}
+	if _, err := store.ListRun(fixture.ctx, "00000000-0000-0000-0000-000000000001"); !errors.Is(err, planning.ErrNotFound) {
+		t.Fatalf("missing run error = %v, want ErrNotFound", err)
+	}
 }
 
 func TestPlanningSuggestionAdoptionCreatesProposalWithoutOutbox(t *testing.T) {
@@ -224,7 +274,7 @@ func TestPlanningPerformanceBudgetWithRealisticDataset(t *testing.T) {
 	}
 	for index := 3; index <= 6; index++ {
 		var driverID string
-		if err := fixture.pool.QueryRow(fixture.ctx, "INSERT INTO drivers (display_name) VALUES ($1) RETURNING id::text", fmt.Sprintf("Fahrer %d", index)).Scan(&driverID); err != nil {
+		if err := fixture.pool.QueryRow(fixture.ctx, "INSERT INTO drivers (display_name, availability_policy) VALUES ($1, 'legacy_rules') RETURNING id::text", fmt.Sprintf("Fahrer %d", index)).Scan(&driverID); err != nil {
 			t.Fatal(err)
 		}
 		for weekday := 1; weekday <= 5; weekday++ {

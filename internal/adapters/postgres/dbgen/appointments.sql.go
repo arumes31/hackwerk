@@ -21,19 +21,22 @@ SELECT (
         SELECT 1 FROM appointment_drivers ad JOIN drivers d ON d.id=ad.driver_id
         WHERE ad.appointment_id=$1::uuid AND NOT d.active
     )
-    AND EXISTS (
-        SELECT 1 FROM appointment_resources ar JOIN resources r ON r.id=ar.resource_id
-        WHERE ar.appointment_id=$1::uuid AND ar.purpose='chipping'
-          AND r.resource_type='chipper' AND r.active
+    AND (
+        $2::boolean
+        OR EXISTS (
+            SELECT 1 FROM appointment_resources ar JOIN resources r ON r.id=ar.resource_id
+            WHERE ar.appointment_id=$1::uuid AND ar.purpose='chipping'
+              AND r.resource_type='chipper' AND r.active
+        )
     )
     AND NOT EXISTS (
         SELECT 1 FROM appointment_resources ar JOIN resources r ON r.id=ar.resource_id
         WHERE ar.appointment_id=$1::uuid AND NOT r.active
     )
     AND (
-        $2::text <> 'chipping_with_transport'
-        OR ($3::text='external' AND $4::boolean)
-        OR ($3::text='internal' AND EXISTS (
+        $3::text <> 'chipping_with_transport'
+        OR ($4::text='external' AND $5::boolean)
+        OR ($4::text='internal' AND EXISTS (
             SELECT 1 FROM appointment_resources ar JOIN resources r ON r.id=ar.resource_id
             WHERE ar.appointment_id=$1::uuid AND ar.purpose='transport'
               AND r.resource_type='transport_vehicle' AND r.active
@@ -44,6 +47,7 @@ SELECT (
 
 type AppointmentAssignmentsReadyParams struct {
 	AppointmentID              pgtype.UUID
+	AllowMissingChipper        bool
 	JobType                    string
 	TransportMode              string
 	ExternalTransportConfirmed bool
@@ -52,6 +56,7 @@ type AppointmentAssignmentsReadyParams struct {
 func (q *Queries) AppointmentAssignmentsReady(ctx context.Context, arg AppointmentAssignmentsReadyParams) (bool, error) {
 	row := q.db.QueryRow(ctx, appointmentAssignmentsReady,
 		arg.AppointmentID,
+		arg.AllowMissingChipper,
 		arg.JobType,
 		arg.TransportMode,
 		arg.ExternalTransportConfirmed,
@@ -206,7 +211,9 @@ SELECT a.id::text, a.job_id::text, j.job_number, a.lifecycle_status, a.confirmat
        a.starts_at, a.ends_at, a.buffer_before_minutes, a.buffer_after_minutes,
        COALESCE(a.availability_override_reason, '')::text AS availability_override_reason,
        a.version, j.workflow_status, j.job_type, j.transport_mode,
-       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes
+       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes,
+       COALESCE(j.preferred_start_date::text, '')::text AS preferred_start_date,
+       COALESCE(j.preferred_end_date::text, '')::text AS preferred_end_date, j.preference_mode
 FROM appointments a
 JOIN jobs j ON j.id = a.job_id
 WHERE a.id = $1::uuid
@@ -230,6 +237,9 @@ type GetAppointmentRow struct {
 	ExternalTransportConfirmed bool
 	EstimatedHackMinutes       int32
 	EstimatedTransportMinutes  int32
+	PreferredStartDate         string
+	PreferredEndDate           string
+	PreferenceMode             string
 }
 
 func (q *Queries) GetAppointment(ctx context.Context, id pgtype.UUID) (GetAppointmentRow, error) {
@@ -253,6 +263,9 @@ func (q *Queries) GetAppointment(ctx context.Context, id pgtype.UUID) (GetAppoin
 		&i.ExternalTransportConfirmed,
 		&i.EstimatedHackMinutes,
 		&i.EstimatedTransportMinutes,
+		&i.PreferredStartDate,
+		&i.PreferredEndDate,
+		&i.PreferenceMode,
 	)
 	return i, err
 }
@@ -346,7 +359,9 @@ SELECT a.id::text, a.job_id::text, a.lifecycle_status, a.confirmation_status,
        COALESCE(a.availability_override_reason, '')::text AS availability_override_reason,
        COALESCE(a.cancellation_reason, '')::text AS cancellation_reason,
        a.version, j.workflow_status, j.job_type, j.transport_mode,
-       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes
+       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes,
+       COALESCE(j.preferred_start_date::text, '')::text AS preferred_start_date,
+       COALESCE(j.preferred_end_date::text, '')::text AS preferred_end_date, j.preference_mode
 FROM appointments a
 JOIN jobs j ON j.id = a.job_id
 WHERE a.id = $1::uuid
@@ -371,6 +386,9 @@ type GetAppointmentForUpdateRow struct {
 	ExternalTransportConfirmed bool
 	EstimatedHackMinutes       int32
 	EstimatedTransportMinutes  int32
+	PreferredStartDate         string
+	PreferredEndDate           string
+	PreferenceMode             string
 }
 
 func (q *Queries) GetAppointmentForUpdate(ctx context.Context, id pgtype.UUID) (GetAppointmentForUpdateRow, error) {
@@ -394,6 +412,9 @@ func (q *Queries) GetAppointmentForUpdate(ctx context.Context, id pgtype.UUID) (
 		&i.ExternalTransportConfirmed,
 		&i.EstimatedHackMinutes,
 		&i.EstimatedTransportMinutes,
+		&i.PreferredStartDate,
+		&i.PreferredEndDate,
+		&i.PreferenceMode,
 	)
 	return i, err
 }
@@ -780,7 +801,8 @@ func (q *Queries) ListCalendarAppointments(ctx context.Context, arg ListCalendar
 
 const listWaitlistForPlanning = `-- name: ListWaitlistForPlanning :many
 SELECT w.id::text AS waitlist_id, j.id::text AS job_id, j.job_number,
-       j.job_type, j.volume_m3::text, j.estimated_hack_minutes,
+       j.job_type, j.transport_mode, j.external_transport_confirmed,
+       j.volume_m3::text, j.estimated_hack_minutes, j.estimated_transport_minutes,
        concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, ''))::text AS customer_name,
        c.locality
 FROM waitlist_entries w
@@ -791,14 +813,17 @@ ORDER BY w.manual_priority DESC, w.entered_at, w.id
 `
 
 type ListWaitlistForPlanningRow struct {
-	WaitlistID           string
-	JobID                string
-	JobNumber            string
-	JobType              string
-	JVolumeM3            string
-	EstimatedHackMinutes int32
-	CustomerName         string
-	Locality             string
+	WaitlistID                 string
+	JobID                      string
+	JobNumber                  string
+	JobType                    string
+	TransportMode              string
+	ExternalTransportConfirmed bool
+	JVolumeM3                  string
+	EstimatedHackMinutes       int32
+	EstimatedTransportMinutes  int32
+	CustomerName               string
+	Locality                   string
 }
 
 func (q *Queries) ListWaitlistForPlanning(ctx context.Context) ([]ListWaitlistForPlanningRow, error) {
@@ -815,8 +840,11 @@ func (q *Queries) ListWaitlistForPlanning(ctx context.Context) ([]ListWaitlistFo
 			&i.JobID,
 			&i.JobNumber,
 			&i.JobType,
+			&i.TransportMode,
+			&i.ExternalTransportConfirmed,
 			&i.JVolumeM3,
 			&i.EstimatedHackMinutes,
+			&i.EstimatedTransportMinutes,
 			&i.CustomerName,
 			&i.Locality,
 		); err != nil {

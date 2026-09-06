@@ -59,6 +59,38 @@ var driverPermissions = map[Permission]struct{}{
 	PermissionRouteReorderOwn:     {},
 }
 
+var applicationPermissions = map[Permission]struct{}{
+	PermissionDashboardView:       {},
+	PermissionCalendarViewAll:     {},
+	PermissionCustomerCreate:      {},
+	PermissionCustomerUpdate:      {},
+	PermissionCustomerArchive:     {},
+	PermissionJobCreate:           {},
+	PermissionJobUpdate:           {},
+	PermissionJobArchive:          {},
+	PermissionWaitlistAdd:         {},
+	PermissionWaitlistPrioritize:  {},
+	PermissionAppointmentPlan:     {},
+	PermissionAppointmentFix:      {},
+	PermissionAppointmentCancel:   {},
+	PermissionAppointmentComplete: {},
+	PermissionAvailabilityOwn:     {},
+	PermissionAvailabilityOther:   {},
+	PermissionResourceManage:      {},
+	PermissionDriverManage:        {},
+	PermissionUserManage:          {},
+	PermissionNotificationResend:  {},
+	PermissionPlanningView:        {},
+	PermissionPlanningAdopt:       {},
+	PermissionRoutePlan:           {},
+	PermissionRouteAssign:         {},
+	PermissionRouteViewOwn:        {},
+	PermissionRouteReorderOwn:     {},
+	PermissionSettingsManage:      {},
+	PermissionAuditView:           {},
+	PermissionCalendarFeedOwn:     {},
+}
+
 // Valid reports whether role is supported.
 func (role Role) Valid() bool {
 	return role == RoleAdmin || role == RoleDriver
@@ -67,7 +99,8 @@ func (role Role) Valid() bool {
 // Allows is deny-by-default. Administrators receive the closed application capability set.
 func (role Role) Allows(permission Permission) bool {
 	if role == RoleAdmin {
-		return permission != ""
+		_, allowed := applicationPermissions[permission]
+		return allowed
 	}
 	if role != RoleDriver {
 		return false

@@ -2,7 +2,7 @@ name: hackwerk
 
 services:
   postgres:
-    image: postgres:18.6-alpine
+    image: postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: hackplan_bootstrap
@@ -21,9 +21,10 @@ services:
     build: &hackwerk-build
       context: .
       args:
-        VERSION: dev
-        COMMIT: local
-        BUILD_TIME: local
+        VERSION: ${HACKWERK_VERSION:-dev}
+        RELEASE_VERSION: ${HACKWERK_RELEASE_VERSION:-dev}
+        COMMIT: ${HACKWERK_COMMIT:-local}
+        BUILD_TIME: ${HACKWERK_BUILD_TIME:-local}
     command: ["migrate", "up"]
     environment:
       APP_ENV: development
@@ -50,13 +51,30 @@ services:
       APP_ENV: development
       APP_BASE_URL: http://localhost:18533
       APP_LISTEN_ADDR: :18533
+      APP_ALLOWED_HOSTS: ${APP_ALLOWED_HOSTS:-*}
+      HTTP_READ_TIMEOUT: ${HTTP_READ_TIMEOUT:-2m}
+      HTTP_WRITE_TIMEOUT: ${HTTP_WRITE_TIMEOUT:-11m}
       DATABASE_URL: postgres://hackplan_app:development-only@postgres:5432/hackplan?sslmode=disable
       MAIL_ENABLED: ${MAIL_ENABLED:-false}
       SMS_ENABLED: ${SMS_ENABLED:-false}
+      BUSINESS_NAME: ${BUSINESS_NAME:-HackWerk – Betreiber noch nicht hinterlegt}
+      BUSINESS_ADDRESS: ${BUSINESS_ADDRESS:-Ladungsfähige Anschrift noch nicht hinterlegt}
+      BUSINESS_EMAIL: ${BUSINESS_EMAIL:-E-Mail-Adresse noch nicht hinterlegt}
+      BUSINESS_PHONE: ${BUSINESS_PHONE:-Telefonnummer noch nicht hinterlegt}
+      BUSINESS_LEGAL_FORM: ${BUSINESS_LEGAL_FORM:-Rechtsform noch nicht hinterlegt}
+      BUSINESS_REGISTRY_NUMBER: ${BUSINESS_REGISTRY_NUMBER:-Nicht vorhanden oder noch nicht hinterlegt}
+      BUSINESS_REGISTRY_COURT: ${BUSINESS_REGISTRY_COURT:-Nicht vorhanden oder noch nicht hinterlegt}
+      BUSINESS_VAT_ID: ${BUSINESS_VAT_ID:-Nicht vorhanden oder noch nicht hinterlegt}
+      BUSINESS_SUPERVISORY_AUTHORITY: ${BUSINESS_SUPERVISORY_AUTHORITY:-Zuständige Behörde noch nicht hinterlegt}
+      BUSINESS_CHAMBER: ${BUSINESS_CHAMBER:-Kammer/Fachgruppe noch nicht hinterlegt}
+      BUSINESS_TRADE_RULES: ${BUSINESS_TRADE_RULES:-Anwendbare gewerbe- oder berufsrechtliche Vorschriften noch nicht hinterlegt}
+      BUSINESS_DATA_PROTECTION_OFFICER: ${BUSINESS_DATA_PROTECTION_OFFICER:-Kein Datenschutzbeauftragter hinterlegt}
       DASHBOARD_HORIZON_DAYS: ${DASHBOARD_HORIZON_DAYS:-14}
       DASHBOARD_PENDING_AFTER: ${DASHBOARD_PENDING_AFTER:-15m}
       DASHBOARD_BUSINESS_OPEN: ${DASHBOARD_BUSINESS_OPEN:-07:00}
       DASHBOARD_BUSINESS_CLOSE: ${DASHBOARD_BUSINESS_CLOSE:-17:00}
+      WAITLIST_DURATION_REVIEW_MIN_MINUTES: ${WAITLIST_DURATION_REVIEW_MIN_MINUTES:-15}
+      WAITLIST_DURATION_REVIEW_MAX_MINUTES: ${WAITLIST_DURATION_REVIEW_MAX_MINUTES:-720}
       CALENDAR_UID_DOMAIN: ${CALENDAR_UID_DOMAIN:-hackwerk.local}
       CALENDAR_ENABLED: ${CALENDAR_ENABLED:-true}
       CALENDAR_NAME: ${CALENDAR_NAME:-HackWerk Termine}
@@ -78,8 +96,6 @@ services:
       PLANNING_SUGGESTION_TTL: ${PLANNING_SUGGESTION_TTL:-30m}
       PLANNING_BUSINESS_OPEN: ${PLANNING_BUSINESS_OPEN:-07:00}
       PLANNING_BUSINESS_CLOSE: ${PLANNING_BUSINESS_CLOSE:-17:00}
-      PLANNING_DEPOT_LATITUDE: ${PLANNING_DEPOT_LATITUDE:-48.2}
-      PLANNING_DEPOT_LONGITUDE: ${PLANNING_DEPOT_LONGITUDE:-14.2}
       PLANNING_HAVERSINE_ROAD_FACTOR: ${PLANNING_HAVERSINE_ROAD_FACTOR:-1.3}
       PLANNING_HAVERSINE_SPEED_KMH: ${PLANNING_HAVERSINE_SPEED_KMH:-55}
       PLANNING_WEIGHT_PREFERENCE: ${PLANNING_WEIGHT_PREFERENCE:-25}
@@ -96,9 +112,21 @@ services:
       MAP_TILE_TIMEOUT: ${MAP_TILE_TIMEOUT:-8s}
       MAP_TILE_MAX_RESPONSE_BYTES: ${MAP_TILE_MAX_RESPONSE_BYTES:-2097152}
       MAP_TILE_MAX_ZOOM: ${MAP_TILE_MAX_ZOOM:-19}
+      GEOCODING_ENABLED: ${GEOCODING_ENABLED:-false}
+      GEOCODING_SEARCH_URL: ${GEOCODING_SEARCH_URL:-}
+      GEOCODING_COUNTRY_CODES: ${GEOCODING_COUNTRY_CODES:-at}
+      GEOCODING_TIMEOUT: ${GEOCODING_TIMEOUT:-5s}
+      GEOCODING_MAX_RESPONSE_BYTES: ${GEOCODING_MAX_RESPONSE_BYTES:-262144}
+      GEOCODING_MAX_RESULTS: ${GEOCODING_MAX_RESULTS:-5}
+      GEOCODING_RATE_LIMIT_PER_MINUTE: ${GEOCODING_RATE_LIMIT_PER_MINUTE:-30}
+      GEOCODING_MIN_INTERVAL: ${GEOCODING_MIN_INTERVAL:-1s}
+      GEOCODING_CACHE_TTL: ${GEOCODING_CACHE_TTL:-24h}
+      GEOCODING_CACHE_ENTRIES: ${GEOCODING_CACHE_ENTRIES:-512}
       VOICE_ENABLED: ${VOICE_ENABLED:-false}
       VOICE_TRANSCRIBER: ${VOICE_TRANSCRIBER:-disabled}
       VOICE_EXTRACTOR: ${VOICE_EXTRACTOR:-rules}
+      VOICE_WHISPER_MODEL: ${VOICE_WHISPER_MODEL:-small}
+      VOICE_WHISPER_URL: ${VOICE_WHISPER_URL:-}
       VOICE_OPENAI_API_KEY: ${VOICE_OPENAI_API_KEY:-}
       VOICE_OPENAI_MODEL: ${VOICE_OPENAI_MODEL:-gpt-4o-mini-transcribe}
       VOICE_OPENAI_EXTRACTION_MODEL: ${VOICE_OPENAI_EXTRACTION_MODEL:-gpt-5-mini}
@@ -106,11 +134,12 @@ services:
       VOICE_MAX_DURATION: ${VOICE_MAX_DURATION:-90s}
       VOICE_MAX_BYTES: ${VOICE_MAX_BYTES:-15728640}
       VOICE_DRAFT_RETENTION: ${VOICE_DRAFT_RETENTION:-24h}
-      VOICE_PROVIDER_TIMEOUT: ${VOICE_PROVIDER_TIMEOUT:-30s}
+      VOICE_RECORDING_RETENTION: ${VOICE_RECORDING_RETENTION:-720h}
+      VOICE_PROVIDER_TIMEOUT: ${VOICE_PROVIDER_TIMEOUT:-10m}
       VOICE_MAX_RESPONSE_BYTES: ${VOICE_MAX_RESPONSE_BYTES:-1048576}
       VOICE_TEMP_DIR: ${VOICE_TEMP_DIR:-/tmp/hackwerk-voice}
       VOICE_RATE_LIMIT_PER_MINUTE: ${VOICE_RATE_LIMIT_PER_MINUTE:-10}
-      VOICE_CONCURRENT_PER_USER: ${VOICE_CONCURRENT_PER_USER:-2}
+      VOICE_CONCURRENT_PER_USER: ${VOICE_CONCURRENT_PER_USER:-1}
       VOICE_EXTERNAL_PROVIDER_NOTICE: ${VOICE_EXTERNAL_PROVIDER_NOTICE:-Bei aktivem externem Sprachdienst verlassen Audio und/oder Transkript zur Verarbeitung die HackWerk-Infrastruktur.}
     depends_on:
       migrate:
@@ -170,6 +199,12 @@ services:
       - no-new-privileges:true
     cap_drop: [ALL]
     networks: [backend, egress]
+    healthcheck:
+      test: ["CMD", "/hackwerk", "healthcheck", "worker"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 15s
     restart: unless-stopped
 
 volumes:

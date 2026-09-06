@@ -4,9 +4,11 @@ package e2e_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -14,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -24,7 +27,9 @@ import (
 	"example.invalid/hackplan/internal/config"
 	"example.invalid/hackplan/internal/customers"
 	"example.invalid/hackplan/internal/dashboard"
+	"example.invalid/hackplan/internal/geocode"
 	"example.invalid/hackplan/internal/web"
+	"example.invalid/hackplan/web/assets"
 	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -45,10 +50,12 @@ func TestTask02BrowserJourney(t *testing.T) {
 			SessionCookieName: "hackplan_session", CSRFCookieName: "hackplan_csrf",
 			SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour,
 		},
+		Geocoding: config.Geocoding{RateLimit: 30},
 	}
+	geocoder := &task02Geocoder{}
 	router, err := web.NewRouter(web.Dependencies{
 		Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pool,
-		Build: buildinfo.Info{Version: "e2e"}, Identity: identity, Customers: customerService, Dashboard: e2eDashboard(t, pool),
+		Build: buildinfo.Info{Version: "e2e"}, Identity: identity, Customers: customerService, Dashboard: e2eDashboard(t, pool), Geocoder: geocoder,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -82,6 +89,11 @@ func TestTask02BrowserJourney(t *testing.T) {
 
 	var rootLocation string
 	var transportInitiallyHidden bool
+	var nextWeekPreset struct {
+		Today string `json:"today"`
+		Start string `json:"start"`
+		End   string `json:"end"`
+	}
 	if err := chromedp.Run(browserContext,
 		chromedp.Navigate(server.URL+"/"),
 		chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery),
@@ -106,8 +118,89 @@ func TestTask02BrowserJourney(t *testing.T) {
 		chromedp.Click("[data-new-customer-panel] summary", chromedp.ByQuery),
 		chromedp.WaitVisible("form[action='/customers']", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector('[data-transport-field]').hidden`, &transportInitiallyHidden),
+		chromedp.Evaluate(`(() => {
+			const parts = new Intl.DateTimeFormat('sv-SE', {timeZone:'Europe/Vienna',year:'numeric',month:'2-digit',day:'2-digit'})
+				.formatToParts(new Date()).reduce((values, part) => ({...values, [part.type]:part.value}), {});
+			document.querySelector('[data-date-range-preset][data-start-offset="7"]').click();
+			return {
+				today: parts.year+'-'+parts.month+'-'+parts.day,
+				start: document.querySelector('[name="preferred_start"]').value,
+				end: document.querySelector('[name="preferred_end"]').value,
+			};
+		})()`, &nextWeekPreset),
 	); err != nil {
 		t.Fatalf("open customer intake: %s", browserDiagnostics(browserContext, err))
+	}
+	today, err := time.Parse(time.DateOnly, nextWeekPreset.Today)
+	if err != nil {
+		t.Fatalf("parse browser date %q: %v", nextWeekPreset.Today, err)
+	}
+	start, startErr := time.Parse(time.DateOnly, nextWeekPreset.Start)
+	end, endErr := time.Parse(time.DateOnly, nextWeekPreset.End)
+	if startErr != nil || endErr != nil || start.Sub(today) != 7*24*time.Hour || end.Sub(today) != 14*24*time.Hour {
+		t.Fatalf("next-week preset = %+v, parse errors = %v/%v", nextWeekPreset, startErr, endErr)
+	}
+	var locationFieldsUnchanged bool
+	if err := runBrowserStep(browserContext, "search address without taking location",
+		chromedp.Evaluate(`document.querySelector('.job-location-disclosure').open=true`, nil),
+		chromedp.WaitVisible("[data-location-search-input]", chromedp.ByQuery),
+		chromedp.Poll(`Boolean(document.querySelector('[data-job-location-editor]')?.dataset.mapInitialized)`, nil, chromedp.WithPollingTimeout(20*time.Second)),
+		chromedp.SetValue("[data-location-search-input]", "Waldstraße 9, Unterneukirchen", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('[data-location-search-submit]').click()`, nil),
+		chromedp.WaitVisible("[data-location-search-results] .location-search__result", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('[data-location-search-results] .location-search__result').click()`, nil),
+		chromedp.Poll(`document.querySelector('[data-location-search-status]').textContent.includes('Karte auf')`, nil, chromedp.WithPollingTimeout(5*time.Second)),
+		chromedp.Evaluate(`(() => {
+			const editor = document.querySelector('[data-job-location-editor]');
+			return ['[data-location-latitude]','[data-location-longitude]','[data-location-committed-latitude]','[data-location-committed-longitude]']
+				.every((selector) => editor.querySelector(selector).value === '');
+		})()`, &locationFieldsUnchanged),
+	); err != nil {
+		t.Fatalf("search address: %s", browserDiagnostics(browserContext, err))
+	}
+	if !locationFieldsUnchanged || geocoder.lastQuery() != "Waldstraße 9, Unterneukirchen" {
+		t.Fatalf("address search changed location=%v, query=%q", !locationFieldsUnchanged, geocoder.lastQuery())
+	}
+	var locationCommitted bool
+	if err := runBrowserStep(browserContext, "commit pile coordinates",
+		chromedp.SetValue("[data-job-location-editor] [data-location-latitude]", "48.216667", chromedp.ByQuery),
+		chromedp.SetValue("[data-job-location-editor] [data-location-longitude]", "13.900000", chromedp.ByQuery),
+		chromedp.Click("[data-job-location-editor] [data-location-commit]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const editor = document.querySelector('[data-job-location-editor]');
+			return editor.querySelector('[data-location-committed-latitude]').value === '48.216667'
+				&& editor.querySelector('[data-location-committed-longitude]').value === '13.900000'
+				&& editor.querySelector('[data-location-committed-source]').value === 'coordinates';
+		})()`, &locationCommitted),
+	); err != nil {
+		t.Fatalf("commit pile coordinates: %s", browserDiagnostics(browserContext, err))
+	}
+	if !locationCommitted {
+		t.Fatal("pile coordinates were not committed through the location editor")
+	}
+	var locationSearchOverflow, locationSearchTargetTooSmall bool
+	var locationOverflowElements string
+	if err := runBrowserStep(browserContext, "inspect mobile address search",
+		chromedp.EmulateViewport(360, 800),
+		chromedp.Evaluate(`document.documentElement.scrollWidth > document.documentElement.clientWidth + 1`, &locationSearchOverflow),
+		chromedp.Evaluate(`Array.from(document.querySelectorAll('body *')).map((element) => {
+			const box=element.getBoundingClientRect();
+			return {element, box};
+		}).filter(({box}) => box.right > window.innerWidth + 1 || box.left < -1)
+			.sort((a,b) => b.box.right-a.box.right).slice(0,5)
+			.map(({element,box}) => {
+				const parent=element.parentElement;
+				const parentBox=parent?.getBoundingClientRect();
+				return element.tagName+'.'+(element.className || '')+' right='+box.right.toFixed(0)+' width='+box.width.toFixed(0)
+					+' parent='+parent?.tagName+'.'+(parent?.className || '')+' parentWidth='+(parentBox?.width || 0).toFixed(0);
+			}).join('; ')+'; viewport='+window.innerWidth+' mobile='+matchMedia('(max-width: 760px)').matches`, &locationOverflowElements),
+		chromedp.Evaluate(`(() => { const box=document.querySelector('[data-location-search-submit]').getBoundingClientRect(); return box.width < 44 || box.height < 44; })()`, &locationSearchTargetTooSmall),
+		chromedp.EmulateViewport(1280, 900),
+	); err != nil {
+		t.Fatalf("inspect mobile address search: %s", browserDiagnostics(browserContext, err))
+	}
+	if locationSearchOverflow || locationSearchTargetTooSmall {
+		t.Fatalf("mobile address search overflow=%v, touch target too small=%v, elements=%s", locationSearchOverflow, locationSearchTargetTooSmall, locationOverflowElements)
 	}
 	var invalidSummaryFocused, invalidFieldsAssociated, invalidValuesRetained bool
 	if err := runBrowserStep(browserContext, "validate intake errors",
@@ -155,6 +248,37 @@ func TestTask02BrowserJourney(t *testing.T) {
 	); err != nil {
 		t.Fatalf("customer detail after intake: %s", browserDiagnostics(browserContext, err))
 	}
+	var compactDossierDesktop, compactDossierMobile bool
+	if err := runBrowserStep(browserContext, "inspect compact customer dossier",
+		chromedp.Evaluate(`(() => {
+			const overview=document.querySelector('.customer-overview-grid');
+			const edit=document.querySelector('.customer-edit-card');
+			edit.open=true;
+			const identity=document.querySelector('.customer-identity-grid');
+			const form=document.querySelector('.customer-record-form');
+			const visibleTargets=Array.from(form.querySelectorAll('input,select,button,a.button,summary')).filter((element)=>element.getClientRects().length);
+			return getComputedStyle(overview).alignItems==='start'
+				&& getComputedStyle(identity).gridTemplateColumns.trim().split(/\s+/).length>=3
+				&& form.getBoundingClientRect().height<500
+				&& !document.querySelector('.customer-address-extra').open
+				&& visibleTargets.every((element)=>element.getBoundingClientRect().height>=43.5);
+		})()`, &compactDossierDesktop),
+		chromedp.EmulateViewport(360, 800),
+		chromedp.Evaluate(`(() => {
+			const identity=document.querySelector('.customer-identity-grid');
+			const targets=Array.from(document.querySelectorAll('.customer-record-form input,.customer-record-form select,.customer-record-form button,.customer-record-form a.button,.customer-record-form summary')).filter((element)=>element.getClientRects().length);
+			return document.documentElement.scrollWidth<=document.documentElement.clientWidth+1
+				&& getComputedStyle(identity).gridTemplateColumns.trim().split(/\s+/).length===1
+				&& targets.every((element)=>element.getBoundingClientRect().height>=43.5);
+		})()`, &compactDossierMobile),
+		chromedp.EmulateViewport(1280, 900),
+		chromedp.Evaluate(`document.querySelector('.customer-edit-card').open=false`, nil),
+	); err != nil {
+		t.Fatalf("inspect compact customer dossier: %s", browserDiagnostics(browserContext, err))
+	}
+	if !compactDossierDesktop || !compactDossierMobile {
+		t.Fatalf("compact customer dossier desktop/mobile = %v/%v", compactDossierDesktop, compactDossierMobile)
+	}
 	if !transportInitiallyHidden {
 		t.Fatal("transport fields are visible for a chipping-only intake")
 	}
@@ -165,8 +289,21 @@ func TestTask02BrowserJourney(t *testing.T) {
 		JOIN waitlist_entries w ON w.job_id = j.id WHERE c.last_name = 'Huber'`).Scan(&customerID, &firstJobID, &firstWaitlistID); err != nil {
 		t.Fatal(err)
 	}
+	var jobEditFormIntact bool
+	jobEditFormSelector := "#job-" + firstJobID + " form[action='/jobs/" + firstJobID + "']"
+	if err := runBrowserStep(browserContext, "job edit form remains intact after enhancement",
+		chromedp.Evaluate(fmt.Sprintf(`document.querySelector(%q).open=true`, "#job-"+firstJobID), nil),
+		chromedp.Poll(fmt.Sprintf(`Boolean(document.querySelector(%q)?.querySelector('[name="volume_m3"]'))`, jobEditFormSelector), nil, chromedp.WithPollingTimeout(5*time.Second)),
+		chromedp.Evaluate(fmt.Sprintf(`Boolean(document.querySelector(%q)?.querySelector('[data-job-location-editor]'))`, jobEditFormSelector), &jobEditFormIntact),
+	); err != nil {
+		t.Fatalf("inspect job edit form: %s", browserDiagnostics(browserContext, err))
+	}
+	if !jobEditFormIntact {
+		t.Fatal("job edit form lost its location editor during enhancement")
+	}
 	var mapsURL string
-	var transportVisible, externalConfirmationVisible bool
+	var transportVisible, externalConfirmationVisible, compactJobFormMobile bool
+	var customerAddressDrafted, customerAddressControlMobile bool
 	var pickerHorizontalOverflow, pickerTouchTargetTooSmall bool
 	if err := chromedp.Run(browserContext,
 		chromedp.AttributeValue("a[href^='https://www.google.com/maps/search/']", "href", &mapsURL, nil, chromedp.ByQuery),
@@ -177,6 +314,34 @@ func TestTask02BrowserJourney(t *testing.T) {
 		chromedp.Evaluate(`(() => { const target=document.querySelector('[data-existing-customer-job]'); const box=target.getBoundingClientRect(); return box.width < 44 || box.height < 44; })()`, &pickerTouchTargetTooSmall),
 		chromedp.Click("a[href='/customers/"+customerID+"/jobs/new']", chromedp.ByQuery),
 		chromedp.WaitVisible("[data-job-type]", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('.job-location-disclosure').open=true`, nil),
+		chromedp.Click("[data-location-customer]", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-location-search-results] .location-search__result", chromedp.ByQuery),
+		chromedp.Click("[data-location-search-results] .location-search__result", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const editor=document.querySelector('[data-job-location-editor]');
+			return editor.querySelector('[data-location-latitude]').value==='46.710000'
+				&& editor.querySelector('[data-location-longitude]').value==='15.570000'
+				&& editor.querySelector('[data-location-committed-latitude]').value===''
+				&& editor.querySelector('[data-location-committed-source]').value==='';
+		})()`, &customerAddressDrafted),
+		chromedp.Evaluate(`(() => {
+			const button=document.querySelector('[data-location-customer]');
+			const box=button.getBoundingClientRect();
+			return box.width>=44 && box.height>=44
+				&& document.documentElement.scrollWidth<=document.documentElement.clientWidth+1;
+		})()`, &customerAddressControlMobile),
+		chromedp.Click("[data-location-clear]", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('.job-location-disclosure').open=false`, nil),
+		chromedp.Evaluate(`(() => {
+			const form=document.querySelector('.customer-job-workbench');
+			const targets=Array.from(form.querySelectorAll('input,select,button,summary')).filter((element)=>element.getClientRects().length);
+			return form.querySelectorAll('.job-core-section,.job-preference-section').length===2
+				&& !form.querySelector('.job-additional-disclosure').open
+				&& !form.querySelector('.job-location-disclosure').open
+				&& document.documentElement.scrollWidth<=document.documentElement.clientWidth+1
+				&& targets.every((element)=>element.getBoundingClientRect().height>=43.5);
+		})()`, &compactJobFormMobile),
 		chromedp.Evaluate(`(() => { const e=document.querySelector('[data-job-type]'); e.value='chipping_with_transport'; e.dispatchEvent(new Event('change',{bubbles:true})); return !document.querySelector('[data-transport-field]').hidden; })()`, &transportVisible),
 		chromedp.Evaluate(`(() => { const e=document.querySelector('[data-transport-mode]'); e.value='external'; e.dispatchEvent(new Event('change',{bubbles:true})); return !document.querySelector('[data-external-confirmation]').hidden; })()`, &externalConfirmationVisible),
 		chromedp.SetValue("[name='volume_m3']", "120", chromedp.ByQuery),
@@ -185,6 +350,7 @@ func TestTask02BrowserJourney(t *testing.T) {
 		chromedp.SetValue("[name='transport_trips']", "2", chromedp.ByQuery),
 		chromedp.Click("[name='external_confirmed']", chromedp.ByQuery),
 		chromedp.SetValue("[name='region']", "Unterneukirchen", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('.job-additional-disclosure').open=true`, nil),
 		chromedp.SetValue("[name='preference_text']", "Oktober", chromedp.ByQuery),
 		chromedp.Click("form[data-transport-form] button[type='submit']", chromedp.ByQuery),
 		chromedp.WaitVisible("details.compact-job-row:nth-of-type(2)", chromedp.ByQuery),
@@ -192,8 +358,8 @@ func TestTask02BrowserJourney(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(mapsURL, "https://www.google.com/maps/search/") || !transportVisible || !externalConfirmationVisible || pickerHorizontalOverflow || pickerTouchTargetTooSmall {
-		t.Fatalf("maps=%q transport=%v external=%v picker overflow=%v touch too small=%v", mapsURL, transportVisible, externalConfirmationVisible, pickerHorizontalOverflow, pickerTouchTargetTooSmall)
+	if !strings.HasPrefix(mapsURL, "https://www.google.com/maps/search/") || !transportVisible || !externalConfirmationVisible || !compactJobFormMobile || !customerAddressDrafted || !customerAddressControlMobile || pickerHorizontalOverflow || pickerTouchTargetTooSmall {
+		t.Fatalf("maps=%q transport=%v external=%v compact form=%v customer address draft=%v customer address mobile=%v picker overflow=%v touch too small=%v", mapsURL, transportVisible, externalConfirmationVisible, compactJobFormMobile, customerAddressDrafted, customerAddressControlMobile, pickerHorizontalOverflow, pickerTouchTargetTooSmall)
 	}
 
 	var jobCount int
@@ -216,7 +382,9 @@ func TestTask02BrowserJourney(t *testing.T) {
 		t.Fatalf("direct driver priority status = %d, want 403", forbiddenStatus)
 	}
 
-	var searchLocation, firstWaitlistText string
+	var searchLocation, waitlistLocation, firstWaitlistText, detailHref string
+	var customerToolbarHeight, waitlistToolbarHeight float64
+	var waitlistCopyButtonValid, waitlistCopyFeedbackValid bool
 	var horizontalOverflow bool
 	var screenshot []byte
 	if err := runBrowserStep(browserContext, "logout driver",
@@ -245,11 +413,33 @@ func TestTask02BrowserJourney(t *testing.T) {
 	if err := runBrowserStep(browserContext, "inspect search results",
 		chromedp.WaitVisible("form[action='/recent/customers/"+customerID+"']", chromedp.ByQuery),
 		chromedp.Location(&searchLocation),
+		chromedp.AttributeValue(".customer-name-link", "href", &detailHref, nil, chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector(".customer-list-toolbar").getBoundingClientRect().height`, &customerToolbarHeight),
 	); err != nil {
 		t.Fatalf("inspect customer search: %s", browserDiagnostics(browserContext, err))
 	}
+	if detailHref != "/customers/"+customerID || customerToolbarHeight > 64 {
+		t.Fatalf("customer detail href/toolbar height = %q/%.1f", detailHref, customerToolbarHeight)
+	}
+	if err := runBrowserStep(browserContext, "sort customer results",
+		chromedp.Click(".customer-table thead th:first-child .customer-table-sort", chromedp.ByQuery),
+		chromedp.WaitVisible(".customer-table th[aria-sort='ascending']", chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("customer sort: %s", browserDiagnostics(browserContext, err))
+	}
+	if err := runBrowserStep(browserContext, "filter customer results",
+		chromedp.Click(".customer-filter-menu > summary", chromedp.ByQuery),
+		chromedp.WaitVisible(".customer-filter-menu__panel", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector("#customer-list-controls [name='job_activity']").value="active"`, nil),
+		chromedp.Click(".customer-filter-actions button[type='submit']", chromedp.ByQuery),
+		chromedp.WaitVisible(".customer-filter-menu[open]", chromedp.ByQuery),
+		chromedp.WaitVisible(".customer-table tbody tr", chromedp.ByQuery),
+		chromedp.Location(&searchLocation),
+	); err != nil {
+		t.Fatalf("customer filter: %s", browserDiagnostics(browserContext, err))
+	}
 	if err := runBrowserStep(browserContext, "open customer detail",
-		chromedp.Evaluate(`document.querySelector("form[action='/recent/customers/`+customerID+`']").requestSubmit()`, nil),
+		chromedp.Click(".customer-name-link", chromedp.ByQuery),
 		chromedp.WaitVisible("details.edit-card summary", chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("open customer detail: %s", browserDiagnostics(browserContext, err))
@@ -261,6 +451,40 @@ func TestTask02BrowserJourney(t *testing.T) {
 		chromedp.Click("details.edit-card button[type='submit']", chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("submit customer edit: %s", browserDiagnostics(browserContext, err))
+	}
+	if err := runBrowserStep(browserContext, "open compact waitlist",
+		chromedp.WaitNotPresent("details.edit-card[open]", chromedp.ByQuery),
+		chromedp.Navigate(server.URL+"/waitlist"),
+		chromedp.WaitVisible("#waitlist-list-controls", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector(".waitlist-list-toolbar").getBoundingClientRect().height`, &waitlistToolbarHeight),
+		chromedp.Evaluate(`(()=>{const button=document.querySelector(".waitlist-copy-button");if(!button)return false;const icon=button.querySelector("svg.copy-icon--default");if(!icon)return false;const buttonBox=button.getBoundingClientRect();const iconBox=icon.getBoundingClientRect();const style=getComputedStyle(button);return button.textContent.trim()===""&&(button.getAttribute("aria-label")||"").endsWith(" kopieren")&&buttonBox.width>=44&&buttonBox.height>=44&&iconBox.width<=16.1&&iconBox.height<=16.1&&parseFloat(style.borderTopWidth)===0&&style.backgroundColor==="rgba(0, 0, 0, 0)"})()`, &waitlistCopyButtonValid),
+		chromedp.Click(".waitlist-copy-button", chromedp.ByQuery),
+		chromedp.WaitVisible(".waitlist-copy-button.is-copied", chromedp.ByQuery),
+		chromedp.Evaluate(`(()=>{const button=document.querySelector(".waitlist-copy-button.is-copied");return !!button&&button.textContent.trim()===""&&button.querySelectorAll("svg").length===2&&(button.getAttribute("aria-label")||"").endsWith(" kopiert")})()`, &waitlistCopyFeedbackValid),
+	); err != nil {
+		t.Fatalf("open compact waitlist: %s", browserDiagnostics(browserContext, err))
+	}
+	if err := runBrowserStep(browserContext, "search and sort compact waitlist",
+		chromedp.SetValue("#waitlist-search", "Huber", chromedp.ByQuery),
+		chromedp.Click("#waitlist-list-controls .customer-list-toolbar__search button[type='submit']", chromedp.ByQuery),
+		chromedp.WaitVisible(".waitlist-table tbody tr", chromedp.ByQuery),
+		chromedp.Click(".waitlist-table thead th:nth-child(4) .customer-table-sort", chromedp.ByQuery),
+		chromedp.WaitVisible(".waitlist-table th[aria-sort='descending']", chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("search and sort compact waitlist: %s", browserDiagnostics(browserContext, err))
+	}
+	if err := runBrowserStep(browserContext, "filter compact waitlist",
+		chromedp.Click(".waitlist-filter-menu > summary", chromedp.ByQuery),
+		chromedp.WaitVisible(".waitlist-filter-menu__panel", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector("#waitlist-list-controls [name='incomplete']").checked=true`, nil),
+		chromedp.Click(".waitlist-filter-menu .customer-filter-actions button[type='submit']", chromedp.ByQuery),
+		chromedp.WaitVisible(".waitlist-filter-chips", chromedp.ByQuery),
+		chromedp.Location(&waitlistLocation),
+	); err != nil {
+		t.Fatalf("filter compact waitlist: %s", browserDiagnostics(browserContext, err))
+	}
+	if strings.Contains(waitlistLocation, "q=") || waitlistToolbarHeight > 64 || !waitlistCopyButtonValid || !waitlistCopyFeedbackValid {
+		t.Fatalf("waitlist location/toolbar/copy button = %q/%.1f/%t/%t", waitlistLocation, waitlistToolbarHeight, waitlistCopyButtonValid, waitlistCopyFeedbackValid)
 	}
 	if err := runBrowserStep(browserContext, "mobile waitlist",
 		chromedp.WaitNotPresent("details.edit-card[open]", chromedp.ByQuery),
@@ -299,6 +523,215 @@ func TestTask02BrowserJourney(t *testing.T) {
 	}
 }
 
+func TestTask02LocationSearchWithoutMap(t *testing.T) {
+	appJavaScript, err := assets.Files.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/":
+			response.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = io.WriteString(response, `<!doctype html><html><body>
+<span hidden data-map-assets data-map-script="/missing-map.js" data-map-worker="/missing-worker.js" data-map-css="/missing-map.css" data-map-attribution="Kartendaten"></span>
+<form><input type="hidden" name="csrf_token" value="test-csrf">
+<section data-job-location-editor>
+  <div data-map-canvas tabindex="0"><p data-map-fallback hidden></p></div>
+  <span data-location-badge>Fehlt</span>
+  <input data-location-latitude><input data-location-longitude>
+  <input type="hidden" data-location-committed-latitude><input type="hidden" data-location-committed-longitude><input type="hidden" data-location-committed-source>
+  <input type="search" data-location-search-input><button type="button" data-location-search-submit>Suchen</button>
+  <p data-location-search-status></p><ul data-location-search-results hidden></ul>
+  <p data-location-message></p><a data-location-maps aria-disabled="true">In Google Maps öffnen</a><button type="button" data-location-commit>Standort übernehmen</button><button type="button" data-location-clear>Standort entfernen</button>
+</section></form><script src="/assets/app.js"></script></body></html>`)
+		case "/assets/app.js":
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = response.Write(appJavaScript)
+		case "/api/v1/geocoding/search":
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(response, `{"results":[{"label":"Waldstraße 9, Unterneukirchen","latitude":46.71,"longitude":15.57,"bounds":[46.70,46.72,15.56,15.58]}]}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	options := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(browserExecutable(t)), chromedp.Headless, chromedp.DisableGPU,
+		chromedp.NoSandbox, chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck,
+		chromedp.UserDataDir(browserProfileDir(t)), chromedp.WindowSize(1280, 900),
+	)
+	allocatorContext, cancelAllocator := chromedp.NewExecAllocator(context.Background(), options...)
+	t.Cleanup(cancelAllocator)
+	browserContext, cancelBrowser := chromedp.NewContext(allocatorContext)
+	t.Cleanup(cancelBrowser)
+	browserContext, cancelTimeout := context.WithTimeout(browserContext, 60*time.Second)
+	t.Cleanup(cancelTimeout)
+	t.Cleanup(func() { _ = chromedp.Cancel(browserContext) })
+
+	var draftPrepared, mapsLinkReady, committed, mapsLinkDisabled bool
+	if err := chromedp.Run(browserContext,
+		chromedp.Navigate(server.URL),
+		chromedp.WaitVisible("[data-map-fallback]:not([hidden])", chromedp.ByQuery),
+		chromedp.SetValue("[data-location-search-input]", "Waldstraße 9, Unterneukirchen", chromedp.ByQuery),
+		chromedp.Click("[data-location-search-submit]", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-location-search-results] .location-search__result", chromedp.ByQuery),
+		chromedp.Click("[data-location-search-results] .location-search__result", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const editor = document.querySelector('[data-job-location-editor]');
+			return editor.querySelector('[data-location-latitude]').value === '46.710000'
+				&& editor.querySelector('[data-location-longitude]').value === '15.570000'
+				&& editor.querySelector('[data-location-committed-latitude]').value === ''
+				&& editor.querySelector('[data-location-committed-longitude]').value === ''
+				&& editor.querySelector('[data-location-committed-source]').value === '';
+		})()`, &draftPrepared),
+		chromedp.Evaluate(`(() => {
+			const link = document.querySelector('[data-location-maps]');
+			return link.getAttribute('aria-disabled') === 'false'
+				&& link.href === 'https://www.google.com/maps/search/?api=1&query=46.710000%2C15.570000';
+		})()`, &mapsLinkReady),
+		chromedp.Click("[data-location-commit]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const editor = document.querySelector('[data-job-location-editor]');
+			return editor.querySelector('[data-location-committed-latitude]').value === '46.710000'
+				&& editor.querySelector('[data-location-committed-longitude]').value === '15.570000'
+				&& editor.querySelector('[data-location-committed-source]').value === 'coordinates';
+		})()`, &committed),
+		chromedp.Click("[data-location-clear]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const link = document.querySelector('[data-location-maps]');
+			return link.getAttribute('aria-disabled') === 'true' && !link.hasAttribute('href');
+		})()`, &mapsLinkDisabled),
+	); err != nil {
+		t.Fatalf("location fallback journey: %s", browserDiagnostics(browserContext, err))
+	}
+	if !draftPrepared || !mapsLinkReady || !committed || !mapsLinkDisabled {
+		t.Fatalf("fallback draft prepared=%v, maps link ready=%v, committed=%v, maps link disabled=%v", draftPrepared, mapsLinkReady, committed, mapsLinkDisabled)
+	}
+}
+
+func TestTask02CustomerAddressLocationSelectionWithoutStoredCoordinates(t *testing.T) {
+	appJavaScript, err := assets.Files.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/":
+			response.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = io.WriteString(response, `<!doctype html><html><body>
+<span hidden data-map-assets data-map-script="/missing-map.js" data-map-worker="/missing-worker.js" data-map-css="/missing-map.css" data-map-attribution="Kartendaten"></span>
+<form><input type="hidden" name="csrf_token" value="test-csrf">
+<div data-customer-fields>
+  <input name="street" value="Bräuerau 5a"><input name="postal_code" value="4162">
+  <input name="locality" value="Julbach"><input name="region" value="Rohrbach">
+</div>
+<section data-job-location-editor>
+  <div data-map-canvas tabindex="0"><p data-map-fallback hidden></p></div>
+  <span data-location-badge>Fehlt</span>
+  <input data-location-latitude><input data-location-longitude>
+  <input type="hidden" data-location-committed-latitude><input type="hidden" data-location-committed-longitude><input type="hidden" data-location-committed-source>
+  <input type="search" data-location-search-input><button type="button" data-location-search-submit>Suchen</button>
+  <p data-location-search-status></p><ul data-location-search-results hidden></ul>
+  <button type="button" data-location-customer>Kundenadresse wählen</button>
+  <p data-location-message></p><button type="button" data-location-commit>Standort übernehmen</button>
+</section></form><script src="/assets/app.js"></script></body></html>`)
+		case "/assets/app.js":
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = response.Write(appJavaScript)
+		case "/api/v1/geocoding/search":
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(response, `{"results":[{"label":"Bräuerau 5a, 4162 Julbach","latitude":48.658,"longitude":13.866,"bounds":[48.657,48.659,13.865,13.867]}]}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	options := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(browserExecutable(t)), chromedp.Headless, chromedp.DisableGPU,
+		chromedp.NoSandbox, chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck,
+		chromedp.UserDataDir(browserProfileDir(t)), chromedp.WindowSize(1280, 900),
+	)
+	allocatorContext, cancelAllocator := chromedp.NewExecAllocator(context.Background(), options...)
+	t.Cleanup(cancelAllocator)
+	browserContext, cancelBrowser := chromedp.NewContext(allocatorContext)
+	t.Cleanup(cancelBrowser)
+	browserContext, cancelTimeout := context.WithTimeout(browserContext, 60*time.Second)
+	t.Cleanup(cancelTimeout)
+	t.Cleanup(func() { _ = chromedp.Cancel(browserContext) })
+
+	var draftPrepared, committed, unavailableHandled, missingAddressHandled bool
+	if err := chromedp.Run(browserContext,
+		chromedp.Navigate(server.URL),
+		chromedp.WaitVisible("[data-map-fallback]:not([hidden])", chromedp.ByQuery),
+		chromedp.Click("[data-location-customer]", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-location-search-results] .location-search__result", chromedp.ByQuery),
+		chromedp.Click("[data-location-search-results] .location-search__result", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const editor = document.querySelector('[data-job-location-editor]');
+			return editor.querySelector('[data-location-latitude]').value === '48.658000'
+				&& editor.querySelector('[data-location-longitude]').value === '13.866000'
+				&& editor.querySelector('[data-location-committed-latitude]').value === ''
+				&& editor.querySelector('[data-location-committed-longitude]').value === ''
+				&& editor.querySelector('[data-location-committed-source]').value === '';
+		})()`, &draftPrepared),
+		chromedp.Click("[data-location-commit]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const editor = document.querySelector('[data-job-location-editor]');
+			return editor.querySelector('[data-location-committed-latitude]').value === '48.658000'
+				&& editor.querySelector('[data-location-committed-longitude]').value === '13.866000'
+				&& editor.querySelector('[data-location-committed-source]').value === 'customer_address';
+		})()`, &committed),
+		chromedp.Evaluate(`document.querySelector('[data-location-search-input]').disabled=true`, nil),
+		chromedp.Click("[data-location-customer]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const editor = document.querySelector('[data-job-location-editor]');
+			return editor.querySelector('[data-location-message]').textContent.includes('Adresssuche ist nicht konfiguriert')
+				&& editor.querySelector('[data-location-committed-source]').value === 'customer_address';
+		})()`, &unavailableHandled),
+		chromedp.Evaluate(`(() => {
+			document.querySelector('[data-location-search-input]').disabled=false;
+			document.querySelectorAll('[data-customer-fields] input').forEach((input) => {
+				input.value='';
+				input.dispatchEvent(new Event('input', {bubbles:true}));
+			});
+		})()`, nil),
+		chromedp.Click("[data-location-customer]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const editor = document.querySelector('[data-job-location-editor]');
+			return editor.querySelector('[data-location-message]').textContent.includes('Bitte zuerst eine Kundenadresse erfassen')
+				&& editor.querySelector('[data-location-committed-source]').value === 'customer_address';
+		})()`, &missingAddressHandled),
+	); err != nil {
+		t.Fatalf("customer address location journey: %s", browserDiagnostics(browserContext, err))
+	}
+	if !draftPrepared || !committed || !unavailableHandled || !missingAddressHandled {
+		t.Fatalf("customer address draft prepared=%v, committed=%v, unavailable=%v, missing address=%v", draftPrepared, committed, unavailableHandled, missingAddressHandled)
+	}
+}
+
+type task02Geocoder struct {
+	mu    sync.Mutex
+	query string
+}
+
+func (geocoder *task02Geocoder) Search(_ context.Context, query string) ([]geocode.Result, error) {
+	geocoder.mu.Lock()
+	geocoder.query = query
+	geocoder.mu.Unlock()
+	return []geocode.Result{{
+		Label: "Waldstraße 9, Unterneukirchen", Latitude: 46.71, Longitude: 15.57,
+		Bounds: [4]float64{46.70, 46.72, 15.56, 15.58},
+	}}, nil
+}
+
+func (geocoder *task02Geocoder) lastQuery() string {
+	geocoder.mu.Lock()
+	defer geocoder.mu.Unlock()
+	return geocoder.query
+}
+
 func e2eDashboard(t *testing.T, pool *pgxpool.Pool) *dashboard.Service {
 	t.Helper()
 	location, err := time.LoadLocation("Europe/Vienna")
@@ -315,7 +748,7 @@ func e2eDashboard(t *testing.T, pool *pgxpool.Pool) *dashboard.Service {
 }
 
 func runBrowserStep(ctx context.Context, name string, actions ...chromedp.Action) error {
-	stepContext, cancel := context.WithTimeout(ctx, 15*time.Second)
+	stepContext, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := chromedp.Run(stepContext, actions...); err != nil {
 		return fmt.Errorf("%s: %w", name, err)
@@ -343,21 +776,65 @@ func browserProfileDir(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			err = os.RemoveAll(directory)
-			if err == nil {
-				return
-			}
-			if time.Now().After(deadline) {
-				t.Errorf("remove browser profile %s: %v", directory, err)
-				return
-			}
-			time.Sleep(25 * time.Millisecond)
-		}
-	})
+	// Every caller obtains the profile while constructing allocator options and
+	// registers its browser/allocator cancellations afterwards. Cleanup is LIFO,
+	// so those cancellations are invoked before profile removal starts here.
+	t.Cleanup(func() { removeBrowserProfile(t, directory) })
 	return directory
+}
+
+func removeBrowserProfile(t *testing.T, directory string) {
+	t.Helper()
+	const (
+		removalTimeout = 20 * time.Second
+		maximumBackoff = 500 * time.Millisecond
+	)
+	backoff := 25 * time.Millisecond
+	deadline := time.Now().Add(removalTimeout)
+	for {
+		err := os.RemoveAll(directory)
+		if err == nil {
+			return
+		}
+		if !isTransientWindowsProfileLock(err) {
+			t.Errorf("remove browser profile %s: %v", directory, err)
+			return
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			t.Errorf("remove browser profile %s after %s: %v", directory, removalTimeout, err)
+			return
+		}
+		if backoff > remaining {
+			backoff = remaining
+		}
+		time.Sleep(backoff)
+		if backoff < maximumBackoff {
+			backoff = min(backoff*2, maximumBackoff)
+		}
+	}
+}
+
+func isTransientWindowsProfileLock(err error) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	const (
+		windowsSharingViolation syscall.Errno = 32
+		windowsLockViolation    syscall.Errno = 33
+	)
+	return errors.Is(err, windowsSharingViolation) || errors.Is(err, windowsLockViolation)
+}
+
+func TestBrowserProfileRemovalRetriesOnlyWindowsLockErrors(t *testing.T) {
+	sharingViolation := &os.PathError{Op: "remove", Path: "browser-profile", Err: syscall.Errno(32)}
+	if got, want := isTransientWindowsProfileLock(sharingViolation), runtime.GOOS == "windows"; got != want {
+		t.Fatalf("sharing violation retryable=%v want %v", got, want)
+	}
+	permissionDenied := &os.PathError{Op: "remove", Path: "browser-profile", Err: syscall.Errno(5)}
+	if isTransientWindowsProfileLock(permissionDenied) {
+		t.Fatal("non-transient permission error must not be retried")
+	}
 }
 
 func task02Application(t *testing.T, ctx context.Context, databaseURL string) (*pgxpool.Pool, *auth.Service, *customers.Service, string, string) {

@@ -213,7 +213,7 @@ templ loginOriginalScene() {
 					<path d="M-2 18 L-1 -25 L1 -25 L2 18 Z" fill="#e3e8e5"></path>
 					<circle cx="0" cy="-25" r="3" fill="#cfd6d2"></circle>
 					<g transform="translate(0, -25)">
-						<g class="wind-blade" style="animation-duration: 3.2s;">
+						<g class="wind-blade wind-blade--west">
 							<circle cx="0" cy="0" r="32" fill="none"></circle>
 							<path d="M0 0 L2 -32 L-2 -32 Z" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.5"></path>
 							<path d="M0 0 L28 14 L25 18 Z" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.5"></path>
@@ -227,7 +227,7 @@ templ loginOriginalScene() {
 					<path d="M-2 18 L-1 -25 L1 -25 L2 18 Z" fill="#e3e8e5"></path>
 					<circle cx="0" cy="-25" r="3" fill="#cfd6d2"></circle>
 					<g transform="translate(0, -25)">
-						<g class="wind-blade" style="animation-duration: 4.1s;">
+						<g class="wind-blade wind-blade--east">
 							<circle cx="0" cy="0" r="32" fill="none"></circle>
 							<path d="M0 0 L2 -32 L-2 -32 Z" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.5"></path>
 							<path d="M0 0 L28 14 L25 18 Z" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.5"></path>
@@ -300,10 +300,10 @@ templ loginOriginalScene() {
 				<g class="bird" transform="translate(32, -24)"><path d="M-6 0 C-3 -4 0 0 0 0 C0 0 3 -4 6 0" fill="none" stroke="#22331f" stroke-width="1.8"></path></g>
 			</g>
 			<!-- Floating Ambient Clouds -->
-			<g class="cloud-group" style="animation-duration: 65s;">
+			<g class="cloud-group cloud-group--near">
 				<path d="M20 30 Q30 15 45 25 Q55 10 70 20 Q85 15 95 30 Q105 40 90 50 Q75 55 50 50 Q25 55 15 45 Q5 35 20 30 Z" fill="rgba(255,255,255,0.45)"></path>
 			</g>
-			<g class="cloud-group" style="animation-duration: 90s; animation-delay: -35s;">
+			<g class="cloud-group cloud-group--far">
 				<path d="M30 40 Q45 20 65 32 Q80 15 100 28 Q120 20 135 40 Q150 55 130 70 Q105 75 70 70 Q35 75 20 60 Q5 50 30 40 Z" fill="rgba(255,255,255,0.35)"></path>
 			</g>
 		</svg>

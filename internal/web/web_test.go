@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,18 @@ import (
 type pinger struct{ err error }
 
 func (p pinger) Ping(context.Context) error { return p.err }
+
+type operationsPinger struct {
+	pinger
+	readyErr   error
+	workerErr  error
+	workerGood bool
+}
+
+func (p operationsPinger) Ready(context.Context, int64) error { return p.readyErr }
+func (p operationsPinger) WorkerHealthy(context.Context, time.Duration) (time.Time, bool, error) {
+	return time.Now().UTC(), p.workerGood, p.workerErr
+}
 
 func TestHealthEndpoints(t *testing.T) {
 	t.Parallel()
@@ -52,6 +65,123 @@ func TestHealthEndpoints(t *testing.T) {
 	}
 }
 
+func TestOperationalHealthAndServerConfiguration(t *testing.T) {
+	tests := []struct {
+		name   string
+		db     DatabasePinger
+		path   string
+		status int
+	}{
+		{name: "operations ready", db: operationsPinger{workerGood: true}, path: "/health/ready", status: http.StatusOK},
+		{name: "operations schema stale", db: operationsPinger{readyErr: errors.New("schema")}, path: "/health/ready", status: http.StatusServiceUnavailable},
+		{name: "worker ready", db: operationsPinger{workerGood: true}, path: "/health/worker", status: http.StatusOK},
+		{name: "worker stale", db: operationsPinger{}, path: "/health/worker", status: http.StatusServiceUnavailable},
+		{name: "worker error", db: operationsPinger{workerErr: errors.New("database")}, path: "/health/worker", status: http.StatusServiceUnavailable},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			testRouter(t, test.db).ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, test.path, nil))
+			if response.Code != test.status {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+
+	cfg := testConfig()
+	cfg.ListenAddr = "127.0.0.1:18533"
+	server := Server(cfg, http.NotFoundHandler())
+	if server.Addr != cfg.ListenAddr || server.ReadHeaderTimeout != cfg.HTTP.ReadHeaderTimeout || server.MaxHeaderBytes != cfg.HTTP.MaxHeaderBytes {
+		t.Fatalf("server=%#v", server)
+	}
+	metrics := MetricsServer(cfg, http.NotFoundHandler())
+	if metrics.Addr != cfg.Metrics.ListenAddr || metrics.ReadHeaderTimeout != 3*time.Second || metrics.MaxHeaderBytes != 64<<10 {
+		t.Fatalf("metrics=%#v", metrics)
+	}
+}
+
+func TestWebErrorsAndLocalHealthValidation(t *testing.T) {
+	for _, listener := range []string{"not-an-address", "example.com:8080", "127.0.0.1:"} {
+		if _, err := localHealthEndpoint(listener); err == nil {
+			t.Fatalf("localHealthEndpoint(%q) unexpectedly succeeded", listener)
+		}
+	}
+	if endpoint, err := localHealthEndpoint("[::]:8080"); err != nil || endpoint != "http://[::1]:8080/health/ready" {
+		t.Fatalf("ipv6 endpoint=%q err=%v", endpoint, err)
+	}
+	if err := Healthcheck(t.Context(), "invalid", "https://example.com", time.Second); err == nil {
+		t.Fatal("invalid listener healthcheck unexpectedly succeeded")
+	}
+	if err := Healthcheck(t.Context(), "127.0.0.1:18533", "https://user@example.com", time.Second); err == nil {
+		t.Fatal("credential-bearing public URL healthcheck unexpectedly succeeded")
+	}
+
+	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	panicResponse := httptest.NewRecorder()
+	recoverer(logger)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("test") })).ServeHTTP(panicResponse, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil))
+	if panicResponse.Code != http.StatusInternalServerError || !strings.Contains(panicResponse.Body.String(), "Fehlerreferenz") {
+		t.Fatalf("panic response=%d %s", panicResponse.Code, panicResponse.Body.String())
+	}
+	jsonResponse := httptest.NewRecorder()
+	writeJSON(jsonResponse, http.StatusOK, map[string]any{"unsupported": make(chan int)})
+	if jsonResponse.Code != http.StatusInternalServerError {
+		t.Fatalf("json response=%d %s", jsonResponse.Code, jsonResponse.Body.String())
+	}
+}
+
+func TestHealthcheckUsesLocalListenerAndPublicHostHeader(t *testing.T) {
+	t.Parallel()
+	hosts := make(chan string, 1)
+	router := testRouter(t, pinger{})
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		hosts <- request.Host
+		router.ServeHTTP(response, request)
+	}))
+	defer server.Close()
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Healthcheck(t.Context(), serverURL.Host, "https://example.com", time.Second); err != nil {
+		t.Fatalf("Healthcheck() error = %v", err)
+	}
+	if got := <-hosts; got != "example.com" {
+		t.Fatalf("healthcheck Host = %q, want %q", got, "example.com")
+	}
+}
+
+func TestHealthcheckClientDisablesProxyResolution(t *testing.T) {
+	t.Parallel()
+
+	client := loopbackHTTPClient(time.Second)
+
+	if client.Timeout != time.Second {
+		t.Fatalf("client timeout = %s, want %s", client.Timeout, time.Second)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("client transport = %T, want *http.Transport", client.Transport)
+	}
+	if transport.Proxy != nil {
+		t.Fatal("loopback healthcheck transport resolves proxies")
+	}
+	if transport == http.DefaultTransport {
+		t.Fatal("loopback healthcheck mutates the shared default transport")
+	}
+}
+
+func TestLocalHealthEndpointNormalizesUnspecifiedListener(t *testing.T) {
+	t.Parallel()
+	endpoint, err := localHealthEndpoint(":18533")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if endpoint != "http://127.0.0.1:18533/health/ready" {
+		t.Fatalf("localHealthEndpoint() = %q", endpoint)
+	}
+}
+
 func TestHomeAndNotFound(t *testing.T) {
 	t.Parallel()
 
@@ -66,6 +196,63 @@ func TestHomeAndNotFound(t *testing.T) {
 		if response.Header().Get("Content-Security-Policy") == "" {
 			t.Fatalf("%s has no content security policy", path)
 		}
+	}
+}
+
+func TestLegalPagesArePublicAndDoNotSetCookies(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig()
+	cfg.Business = config.Business{
+		Name: "HackWerk Testbetrieb", Address: "Testweg 1, 4020 Linz", Email: "datenschutz@example.test", Phone: "+43 1 234567",
+		LegalForm: "Einzelunternehmen", RegistryNumber: "FN 123456a", RegistryCourt: "Landesgericht Linz", VATID: "ATU12345678",
+		SupervisoryAuthority: "Bezirkshauptmannschaft Test", Chamber: "Wirtschaftskammer Test", TradeRules: "Gewerbeordnung",
+		DataProtectionOfficer: "Kein Datenschutzbeauftragter bestellt",
+	}
+	cfg.Auth = config.Auth{SessionCookieName: "test_session", CSRFCookieName: "test_csrf", SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour}
+	router, err := NewRouter(Dependencies{
+		Config: cfg, Logger: slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), Database: pinger{}, Build: buildinfo.Current(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name     string
+		path     string
+		contents []string
+	}{
+		{name: "imprint", path: "/impressum", contents: []string{"HackWerk Testbetrieb", "FN 123456a", "Impressum"}},
+		{name: "privacy", path: "/datenschutz", contents: []string{"Datenschutzinformation", "Automatisierte Entscheidungen", "Österreichischen Datenschutzbehörde", "mailto:datenschutz@example.test", "Stand: 29. August 2026"}},
+		{name: "cookies", path: "/cookies", contents: []string{"test_session", "test_csrf", "hackwerk:privacy-notice:v1", "Hinweisversion", "keine Analyse-"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, tt.path, nil))
+			if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-cache" {
+				t.Fatalf("status/cache = %d/%q", response.Code, response.Header().Get("Cache-Control"))
+			}
+			if response.Header().Get("Set-Cookie") != "" {
+				t.Fatalf("public legal page set a cookie: %q", response.Header().Get("Set-Cookie"))
+			}
+			for _, content := range tt.contents {
+				if !strings.Contains(response.Body.String(), content) {
+					t.Errorf("body does not contain %q", content)
+				}
+			}
+			for _, link := range []string{"/impressum", "/datenschutz", "/cookies", "data-privacy-notice"} {
+				if !strings.Contains(response.Body.String(), link) {
+					t.Errorf("body does not contain footer contract %q", link)
+				}
+			}
+			if !strings.Contains(response.Body.String(), `href="/cookies" data-privacy-notice-open`) {
+				t.Error("cookie notice control is not a usable no-JavaScript link")
+			}
+			if tt.name == "privacy" && strings.Contains(response.Body.String(), "@legalEmail") {
+				t.Error("privacy page renders the legal email component call as literal text")
+			}
+		})
 	}
 }
 

@@ -144,10 +144,17 @@ func (s *AppointmentStore) planConfirmationAt(
 	}); err != nil {
 		return err
 	}
+	snapshot, err := json.Marshal(map[string]string{
+		"customer_name": data.CustomerName, "job_type": data.JobType, "volume_m3": data.JVolumeM3,
+		"starts_at": data.StartsAt.Time.UTC().Format(time.RFC3339Nano), "ends_at": data.EndsAt.Time.UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		return err
+	}
 	for _, item := range targets {
 		notificationID, insertErr := queries.InsertNotification(ctx, dbgen.InsertNotificationParams{
 			AppointmentID: appointmentID, ConfirmationRequestID: requestUUID, Channel: string(item.channel),
-			RecipientSnapshot: item.recipient, TemplateVersion: notification.TemplateVersion, Parameters: []byte("{}"), MaxAttempts: item.maxAttempts,
+			RecipientSnapshot: item.recipient, TemplateVersion: notification.TemplateVersion, Parameters: snapshot, MaxAttempts: item.maxAttempts,
 		})
 		if insertErr != nil {
 			return insertErr
@@ -202,6 +209,115 @@ func (s *AppointmentStore) CreateDraft(ctx context.Context, actor auth.Actor, in
 	return s.Get(ctx, id)
 }
 
+func (s *AppointmentStore) Plan(ctx context.Context, actor auth.Actor, input appointment.PlanInput, overrideReason string) (appointment.Appointment, error) {
+	jobID, err := uuid(input.JobID)
+	if err != nil {
+		return appointment.Appointment{}, appointment.ErrNotFound
+	}
+	var id string
+	err = withQueries(ctx, s.pool, func(queries *dbgen.Queries) error {
+		if lockErr := queries.LockSchedulingMutation(ctx); lockErr != nil {
+			return lockErr
+		}
+		job, getErr := queries.GetPlanningJob(ctx, jobID)
+		if errors.Is(getErr, pgx.ErrNoRows) {
+			return appointment.ErrNotFound
+		}
+		if getErr != nil {
+			return getErr
+		}
+		if job.ArchivedAt.Valid || job.WaitlistID == "" || job.WorkflowStatus != "waitlist" {
+			return appointment.ErrTransition
+		}
+		created, insertErr := queries.InsertAppointmentDraft(ctx, dbgen.InsertAppointmentDraftParams{
+			JobID: jobID, StartsAt: timestamp(input.Time.StartsAt), EndsAt: timestamp(input.Time.EndsAt),
+			BufferBeforeMinutes: input.Time.BufferBeforeMinutes, BufferAfterMinutes: input.Time.BufferAfterMinutes,
+		})
+		if insertErr != nil {
+			return mapAppointmentError(insertErr)
+		}
+		id = created.ID
+		appointmentID, parseErr := uuid(id)
+		if parseErr != nil {
+			return parseErr
+		}
+		if err := queries.SetJobWorkflow(ctx, dbgen.SetJobWorkflowParams{WorkflowStatus: "planning", JobID: jobID}); err != nil {
+			return err
+		}
+		if err := insertAudit(ctx, queries, actor, "appointment.draft_created", "appointment", id, input.RequestID,
+			[]string{"job_id", "time_range", "buffer"}); err != nil {
+			return err
+		}
+		for _, driverID := range input.Assignments.DriverIDs {
+			parsed, parseErr := uuid(driverID)
+			if parseErr != nil {
+				return appointment.ErrValidation
+			}
+			rows, insertErr := queries.InsertAppointmentDriver(ctx, dbgen.InsertAppointmentDriverParams{
+				DriverID: parsed, IsPrimary: driverID == input.Assignments.PrimaryDriverID, AppointmentID: appointmentID,
+			})
+			if insertErr != nil {
+				return mapAppointmentError(insertErr)
+			}
+			if rows != 1 {
+				return appointment.ErrValidation
+			}
+		}
+		for _, assigned := range input.Assignments.Resources {
+			resourceID, parseErr := uuid(assigned.ID)
+			if parseErr != nil {
+				return appointment.ErrValidation
+			}
+			rows, insertErr := queries.InsertAppointmentResource(ctx, dbgen.InsertAppointmentResourceParams{
+				Purpose: string(assigned.Purpose), ResourceID: resourceID, AppointmentID: appointmentID,
+			})
+			if insertErr != nil {
+				return mapAppointmentError(insertErr)
+			}
+			if rows != 1 {
+				return appointment.ErrValidation
+			}
+		}
+		current, getErr := queries.GetAppointmentForUpdate(ctx, appointmentID)
+		if getErr != nil {
+			return getErr
+		}
+		if err := ensureAssignmentsReady(ctx, queries, appointmentID, current, input.Time.StartsAt, input.Time.EndsAt, overrideReason, false); err != nil {
+			return err
+		}
+		rows, bumpErr := queries.BumpAppointmentVersion(ctx, dbgen.BumpAppointmentVersionParams{ID: appointmentID, ExpectedVersion: created.Version})
+		if bumpErr != nil {
+			return mapAppointmentError(bumpErr)
+		}
+		if rows != 1 {
+			return appointment.ErrVersionConflict
+		}
+		if err := queries.SetAppointmentOverrideReason(ctx, dbgen.SetAppointmentOverrideReasonParams{Reason: overrideReason, ID: appointmentID}); err != nil {
+			return err
+		}
+		if err := insertAudit(ctx, queries, actor, "appointment.assignments_changed", "appointment", id, input.RequestID,
+			[]string{"drivers", "resources", "availability_override"}); err != nil {
+			return err
+		}
+		rows, proposalErr := queries.SetAppointmentProposal(ctx, dbgen.SetAppointmentProposalParams{ID: appointmentID, ExpectedVersion: created.Version + 1})
+		if proposalErr != nil {
+			return mapAppointmentError(proposalErr)
+		}
+		if rows != 1 {
+			return appointment.ErrVersionConflict
+		}
+		if err := refreshReservations(ctx, queries, appointmentID); err != nil {
+			return err
+		}
+		return insertAudit(ctx, queries, actor, "appointment.proposed", "appointment", id, input.RequestID,
+			[]string{"lifecycle_status", "reservations", "availability_override"})
+	})
+	if err != nil {
+		return appointment.Appointment{}, err
+	}
+	return s.Get(ctx, id)
+}
+
 func (s *AppointmentStore) Get(ctx context.Context, id string) (appointment.Appointment, error) {
 	appointmentID, err := uuid(id)
 	if err != nil {
@@ -217,6 +333,7 @@ func (s *AppointmentStore) Get(ctx context.Context, id string) (appointment.Appo
 	value := appointment.Appointment{
 		ID: row.AID, JobID: row.AJobID, JobNumber: row.JobNumber, JobWorkflow: row.WorkflowStatus,
 		JobType: row.JobType, TransportMode: row.TransportMode,
+		PreferredStartDate: row.PreferredStartDate, PreferredEndDate: row.PreferredEndDate, PreferenceMode: row.PreferenceMode,
 		Lifecycle: appointment.Lifecycle(row.LifecycleStatus), Confirmation: appointment.Confirmation(row.ConfirmationStatus),
 		StartsAt: row.StartsAt.Time.UTC(), EndsAt: row.EndsAt.Time.UTC(), BufferBeforeMinutes: row.BufferBeforeMinutes,
 		BufferAfterMinutes: row.BufferAfterMinutes, AvailabilityOverrideReason: row.AvailabilityOverrideReason,
@@ -257,9 +374,7 @@ func (s *AppointmentStore) Detail(ctx context.Context, id string) (appointment.D
 			CustomerID: row.CustomerID, CustomerName: row.CustomerName, Locality: row.Locality,
 			Street: row.Street, PostalCode: row.PostalCode, VolumeM3: row.JVolumeM3,
 			Latitude: row.Latitude, Longitude: row.Longitude,
-			MapsURL: customers.MapsURL(customers.CustomerInput{
-				Street: row.Street, PostalCode: row.PostalCode, Locality: row.Locality, CountryCode: "AT",
-			}),
+			MapsURL: appointmentMapsURL(row.Latitude, row.Longitude, row.Street, row.PostalCode, row.Locality),
 		},
 		Phone: row.Phone, Email: row.Email, NotificationPreference: row.NotificationPreference,
 	}
@@ -297,8 +412,11 @@ func (s *AppointmentStore) Assign(ctx context.Context, actor auth.Actor, input a
 		if getErr != nil {
 			return getErr
 		}
-		if current.Version != input.ExpectedVersion || !appointment.Lifecycle(current.LifecycleStatus).Editable() {
-			return appointment.ErrConflict
+		if current.Version != input.ExpectedVersion {
+			return appointment.ErrVersionConflict
+		}
+		if !appointment.Lifecycle(current.LifecycleStatus).Editable() {
+			return appointment.ErrTransition
 		}
 		if err := queries.DeleteAppointmentAssignments(ctx, appointmentID); err != nil {
 			return err
@@ -337,7 +455,7 @@ func (s *AppointmentStore) Assign(ctx context.Context, actor auth.Actor, input a
 			}
 		}
 		if current.LifecycleStatus != string(appointment.LifecycleDraft) {
-			if err := ensureAssignmentsReady(ctx, queries, appointmentID, current, current.StartsAt.Time.UTC(), current.EndsAt.Time.UTC(), input.Assignments.OverrideReason); err != nil {
+			if err := ensureAssignmentsReady(ctx, queries, appointmentID, current, current.StartsAt.Time.UTC(), current.EndsAt.Time.UTC(), input.Assignments.OverrideReason, false); err != nil {
 				return err
 			}
 		}
@@ -346,7 +464,7 @@ func (s *AppointmentStore) Assign(ctx context.Context, actor auth.Actor, input a
 			return mapAppointmentError(bumpErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := queries.SetAppointmentOverrideReason(ctx, dbgen.SetAppointmentOverrideReasonParams{Reason: input.Assignments.OverrideReason, ID: appointmentID}); err != nil {
 			return err
@@ -365,7 +483,7 @@ func (s *AppointmentStore) Propose(ctx context.Context, actor auth.Actor, input 
 		if current.LifecycleStatus != string(appointment.LifecycleDraft) {
 			return appointment.ErrTransition
 		}
-		if err := ensureAssignmentsReady(ctx, queries, id, current, current.StartsAt.Time.UTC(), current.EndsAt.Time.UTC(), overrideReason); err != nil {
+		if err := ensureAssignmentsReady(ctx, queries, id, current, current.StartsAt.Time.UTC(), current.EndsAt.Time.UTC(), overrideReason, false); err != nil {
 			return err
 		}
 		if err := queries.SetAppointmentOverrideReason(ctx, dbgen.SetAppointmentOverrideReasonParams{Reason: overrideReason, ID: id}); err != nil {
@@ -376,7 +494,7 @@ func (s *AppointmentStore) Propose(ctx context.Context, actor auth.Actor, input 
 			return mapAppointmentError(updateErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := refreshReservations(ctx, queries, id); err != nil {
 			return err
@@ -403,13 +521,13 @@ func (s *AppointmentStore) Reschedule(ctx context.Context, actor auth.Actor, inp
 			return mapAppointmentError(updateErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := queries.SetAppointmentOverrideReason(ctx, dbgen.SetAppointmentOverrideReasonParams{Reason: overrideReason, ID: id}); err != nil {
 			return err
 		}
 		if current.LifecycleStatus != string(appointment.LifecycleDraft) {
-			if err := ensureAssignmentsReady(ctx, queries, id, current, input.StartsAt.UTC(), input.EndsAt.UTC(), overrideReason); err != nil {
+			if err := ensureAssignmentsReady(ctx, queries, id, current, input.StartsAt.UTC(), input.EndsAt.UTC(), overrideReason, false); err != nil {
 				return err
 			}
 		}
@@ -439,7 +557,8 @@ func (s *AppointmentStore) Fix(ctx context.Context, actor auth.Actor, input appo
 		return appointment.Appointment{}, appointment.ErrValidation
 	}
 	err = s.mutate(ctx, input.ID, input.ExpectedVersion, func(queries *dbgen.Queries, id pgtype.UUID, current dbgen.GetAppointmentForUpdateRow) error {
-		if err := ensureAssignmentsReady(ctx, queries, id, current, current.StartsAt.Time.UTC(), current.EndsAt.Time.UTC(), current.AvailabilityOverrideReason); err != nil {
+		allowMissingChipper := input.ConfirmWithoutChipper && input.MissingChipperReason != ""
+		if err := ensureAssignmentsReady(ctx, queries, id, current, current.StartsAt.Time.UTC(), current.EndsAt.Time.UTC(), current.AvailabilityOverrideReason, allowMissingChipper); err != nil {
 			return err
 		}
 		rows, updateErr := queries.SetAppointmentFixed(ctx, dbgen.SetAppointmentFixedParams{
@@ -449,7 +568,7 @@ func (s *AppointmentStore) Fix(ctx context.Context, actor auth.Actor, input appo
 			return mapAppointmentError(updateErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := refreshReservations(ctx, queries, id); err != nil {
 			return err
@@ -461,14 +580,28 @@ func (s *AppointmentStore) Fix(ctx context.Context, actor auth.Actor, input appo
 		if err := queries.RemoveWaitlistScheduled(ctx, jobID); err != nil {
 			return err
 		}
+		if allowMissingChipper {
+			if _, err := queries.InsertJobNote(ctx, dbgen.InsertJobNoteParams{
+				JobID: jobID, AuthorUserID: actorID,
+				Body: "Termin ohne Hackmaschine fixiert: " + input.MissingChipperReason,
+			}); err != nil {
+				return err
+			}
+			if err := insertAudit(ctx, queries, actor, "job.note_added", "job", current.AJobID, input.RequestID, []string{"note"}); err != nil {
+				return err
+			}
+		}
 		if err := insertAppointmentEvent(ctx, queries, "appointment.fixed", id, input.ExpectedVersion+1); err != nil {
 			return err
 		}
 		if err := s.planConfirmation(ctx, queries, id, input.WithoutNotificationReason, "appointment fixed"); err != nil {
 			return err
 		}
-		return insertAudit(ctx, queries, actor, "appointment.fixed", "appointment", input.ID, input.RequestID,
-			[]string{"lifecycle_status", "confirmation_status", "reservations", "confirmation_request", "notifications", "notification_override", "outbox"})
+		changedFields := []string{"lifecycle_status", "confirmation_status", "reservations", "confirmation_request", "notifications", "notification_override", "outbox"}
+		if allowMissingChipper {
+			changedFields = append(changedFields, "missing_chipper_override")
+		}
+		return insertAudit(ctx, queries, actor, "appointment.fixed", "appointment", input.ID, input.RequestID, changedFields)
 	})
 	if err != nil {
 		return appointment.Appointment{}, err
@@ -489,7 +622,7 @@ func (s *AppointmentStore) Cancel(ctx context.Context, actor auth.Actor, input a
 			return mapAppointmentError(updateErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := refreshReservations(ctx, queries, id); err != nil {
 			return err
@@ -532,6 +665,7 @@ func (s *AppointmentStore) Reopen(ctx context.Context, actor auth.Actor, input a
 			current.StartsAt.Time.UTC(),
 			current.EndsAt.Time.UTC(),
 			input.OverrideReason,
+			false,
 		); err != nil {
 			return err
 		}
@@ -544,7 +678,7 @@ func (s *AppointmentStore) Reopen(ctx context.Context, actor auth.Actor, input a
 			return mapAppointmentError(updateErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := refreshReservations(ctx, queries, id); err != nil {
 			return err
@@ -602,7 +736,7 @@ func (s *AppointmentStore) Complete(ctx context.Context, actor auth.Actor, input
 			return mapAppointmentError(updateErr)
 		}
 		if rows != 1 {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := refreshReservations(ctx, queries, id); err != nil {
 			return err
@@ -647,8 +781,11 @@ func (s *AppointmentStore) ListCalendar(ctx context.Context, fromUTC, toUTC time
 			CustomerID: row.CustomerID, CustomerName: row.CustomerName, Locality: row.Locality,
 			Street: row.Street, PostalCode: row.PostalCode, VolumeM3: row.JVolumeM3,
 			Latitude: row.Latitude, Longitude: row.Longitude,
-			MapsURL: customers.MapsURL(customers.CustomerInput{Street: row.Street, PostalCode: row.PostalCode, Locality: row.Locality, CountryCode: "AT"}),
+			MapsURL: customers.PointMapsURL(parseFloat(row.Latitude), parseFloat(row.Longitude)),
 		})
+		if result[len(result)-1].MapsURL == "" {
+			result[len(result)-1].MapsURL = customers.MapsURL(customers.CustomerInput{Street: row.Street, PostalCode: row.PostalCode, Locality: row.Locality, CountryCode: "AT"})
+		}
 		index[row.AID] = len(result) - 1
 	}
 	if len(ids) == 0 {
@@ -673,6 +810,13 @@ func (s *AppointmentStore) ListCalendar(ctx context.Context, fromUTC, toUTC time
 		})
 	}
 	return result, nil
+}
+
+func appointmentMapsURL(latitude, longitude, street, postalCode, locality string) string {
+	if link := customers.PointMapsURL(parseFloat(latitude), parseFloat(longitude)); link != "" {
+		return link
+	}
+	return customers.MapsURL(customers.CustomerInput{Street: street, PostalCode: postalCode, Locality: locality, CountryCode: "AT"})
 }
 
 func (s *AppointmentStore) PlanningOptions(ctx context.Context) (appointment.PlanningOptions, error) {
@@ -701,7 +845,8 @@ func (s *AppointmentStore) PlanningOptions(ctx context.Context) (appointment.Pla
 	for _, row := range waitlistRows {
 		result.Waitlist = append(result.Waitlist, appointment.WaitlistItem{
 			WaitlistID: row.WaitlistID, JobID: row.JobID, JobNumber: row.JobNumber, JobType: row.JobType,
-			VolumeM3: row.JVolumeM3, EstimatedHackMinutes: row.EstimatedHackMinutes,
+			TransportMode: row.TransportMode, ExternalTransportConfirmed: row.ExternalTransportConfirmed,
+			VolumeM3: row.JVolumeM3, EstimatedHackMinutes: row.EstimatedHackMinutes, EstimatedTransportMinutes: row.EstimatedTransportMinutes,
 			CustomerName: row.CustomerName, Locality: row.Locality,
 		})
 	}
@@ -763,8 +908,11 @@ func (s *AppointmentStore) Swap(ctx context.Context, actor auth.Actor, input app
 			locked[id], parsed[id] = row, value
 		}
 		first, second := locked[input.FirstID], locked[input.SecondID]
-		if first.Version != input.FirstVersion || second.Version != input.SecondVersion || !swapLifecycle(first.LifecycleStatus) || !swapLifecycle(second.LifecycleStatus) {
-			return appointment.ErrConflict
+		if first.Version != input.FirstVersion || second.Version != input.SecondVersion {
+			return appointment.ErrVersionConflict
+		}
+		if !swapLifecycle(first.LifecycleStatus) || !swapLifecycle(second.LifecycleStatus) {
+			return appointment.ErrTransition
 		}
 		for _, value := range []struct {
 			id      string
@@ -775,7 +923,7 @@ func (s *AppointmentStore) Swap(ctx context.Context, actor auth.Actor, input app
 				return mapAppointmentError(prepareErr)
 			}
 			if rows != 1 {
-				return appointment.ErrConflict
+				return appointment.ErrVersionConflict
 			}
 			if err := refreshReservations(ctx, queries, parsed[value.id]); err != nil {
 				return err
@@ -793,7 +941,7 @@ func (s *AppointmentStore) Swap(ctx context.Context, actor auth.Actor, input app
 				return mapAppointmentError(updateErr)
 			}
 			if rows != 1 {
-				return appointment.ErrConflict
+				return appointment.ErrVersionConflict
 			}
 		}
 		for _, value := range []struct {
@@ -805,7 +953,7 @@ func (s *AppointmentStore) Swap(ctx context.Context, actor auth.Actor, input app
 				return mapAppointmentError(restoreErr)
 			}
 			if rows != 1 {
-				return appointment.ErrConflict
+				return appointment.ErrVersionConflict
 			}
 			if err := refreshReservations(ctx, queries, parsed[value.id]); err != nil {
 				return err
@@ -862,7 +1010,7 @@ func (s *AppointmentStore) mutate(ctx context.Context, id string, expectedVersio
 			return getErr
 		}
 		if current.Version != expectedVersion {
-			return appointment.ErrConflict
+			return appointment.ErrVersionConflict
 		}
 		if err := operation(queries, appointmentID, current); err != nil {
 			return mapAppointmentError(err)
@@ -912,6 +1060,7 @@ func ensureAssignmentsReady(
 	current dbgen.GetAppointmentForUpdateRow,
 	startsAt, endsAt time.Time,
 	overrideReason string,
+	allowMissingChipper bool,
 ) error {
 	driverIDs, err := queries.LockAppointmentDrivers(ctx, id)
 	if err != nil {
@@ -922,7 +1071,7 @@ func ensureAssignmentsReady(
 	}
 	ready, err := queries.AppointmentAssignmentsReady(ctx, dbgen.AppointmentAssignmentsReadyParams{
 		AppointmentID: id, JobType: current.JobType, TransportMode: current.TransportMode,
-		ExternalTransportConfirmed: current.ExternalTransportConfirmed,
+		ExternalTransportConfirmed: current.ExternalTransportConfirmed, AllowMissingChipper: allowMissingChipper,
 	})
 	if err != nil {
 		return err
@@ -1013,8 +1162,11 @@ func loadDriverAvailabilitySnapshot(
 		})
 	}
 	return driver.Availability{
-		Profile: driver.Profile{ID: profileRow.DID, IsActive: profileRow.Active},
-		Rules:   rules, Exceptions: exceptions,
+		Profile: driver.Profile{
+			ID: profileRow.DID, IsActive: profileRow.Active, IsPrimary: profileRow.IsPrimary,
+			AvailabilityPolicy: driver.AvailabilityPolicy(profileRow.AvailabilityPolicy),
+		},
+		Rules: rules, Exceptions: exceptions,
 	}, nil
 }
 
@@ -1074,7 +1226,7 @@ func uuidSlice(values []string) ([]pgtype.UUID, error) {
 }
 
 func mapAppointmentError(err error) error {
-	if errors.Is(err, appointment.ErrConflict) || errors.Is(err, appointment.ErrNotFound) ||
+	if errors.Is(err, appointment.ErrConflict) || errors.Is(err, appointment.ErrVersionConflict) || errors.Is(err, appointment.ErrNotFound) ||
 		errors.Is(err, appointment.ErrTransition) || errors.Is(err, appointment.ErrValidation) {
 		return err
 	}

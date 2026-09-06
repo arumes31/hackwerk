@@ -27,17 +27,18 @@ INSERT INTO customers (
 INSERT INTO jobs (
     job_number, customer_id, job_type, volume_m3, estimated_hack_minutes,
     estimated_transport_minutes, transport_trip_count, transport_mode, external_transport_confirmed,
-    preferred_start_date, preferred_end_date, preference_text, urgency, region, source,
-    pile_latitude, pile_longitude, pile_location_source, pile_location_updated_at
+    preferred_start_date, preferred_end_date, preference_mode, preference_text, urgency, region, source,
+    pile_latitude, pile_longitude, pile_location_source, pile_location_updated_at, transport_partner_id
 ) VALUES (
     sqlc.arg(job_number), sqlc.arg(customer_id)::uuid, sqlc.arg(job_type), sqlc.arg(volume_m3)::numeric,
     sqlc.arg(estimated_hack_minutes), sqlc.arg(estimated_transport_minutes), sqlc.arg(transport_trip_count),
     sqlc.arg(transport_mode), sqlc.arg(external_transport_confirmed),
     NULLIF(sqlc.arg(preferred_start_date)::text, '')::date, NULLIF(sqlc.arg(preferred_end_date)::text, '')::date,
-    NULLIF(sqlc.arg(preference_text)::text, ''), sqlc.arg(urgency), NULLIF(sqlc.arg(region)::text, ''), sqlc.arg(source),
+    sqlc.arg(preference_mode), NULLIF(sqlc.arg(preference_text)::text, ''), sqlc.arg(urgency), NULLIF(sqlc.arg(region)::text, ''), sqlc.arg(source),
     NULLIF(sqlc.arg(pile_latitude)::text, '')::numeric, NULLIF(sqlc.arg(pile_longitude)::text, '')::numeric,
     NULLIF(sqlc.arg(pile_location_source)::text, ''),
-    CASE WHEN NULLIF(sqlc.arg(pile_latitude)::text, '') IS NULL THEN NULL ELSE now() END
+    CASE WHEN NULLIF(sqlc.arg(pile_latitude)::text, '') IS NULL THEN NULL ELSE now() END,
+    NULLIF(sqlc.arg(transport_partner_id)::text, '')::uuid
 ) RETURNING id::text;
 
 -- name: InsertWaitlistEntry :one
@@ -71,6 +72,46 @@ WHERE (sqlc.arg(include_archived)::boolean OR c.archived_at IS NULL)
       (sqlc.arg(search_phone)::text <> '' AND c.phone_normalized = sqlc.arg(search_phone)::text) OR
       EXISTS (SELECT 1 FROM jobs sj WHERE sj.customer_id = c.id AND sj.job_number ILIKE '%' || sqlc.arg(search)::text || '%')
   )
+  AND (
+      NOT sqlc.arg(missing_contact)::boolean OR
+      (NULLIF(btrim(COALESCE(c.phone_raw, '')), '') IS NULL AND NULLIF(btrim(COALESCE(c.email::text, '')), '') IS NULL)
+  )
+  AND (
+      NOT sqlc.arg(incomplete_address)::boolean OR
+      NOT (
+          NULLIF(btrim(COALESCE(c.address_freeform, '')), '') IS NOT NULL OR
+          (
+              NULLIF(btrim(c.street), '') IS NOT NULL AND
+              NULLIF(btrim(c.postal_code), '') IS NOT NULL AND
+              NULLIF(btrim(c.locality), '') IS NOT NULL
+          )
+      )
+  )
+  AND (
+      sqlc.arg(job_activity)::text = '' OR
+      (
+          sqlc.arg(job_activity)::text = 'active' AND
+          EXISTS (
+              SELECT 1 FROM jobs aj
+              WHERE aj.customer_id = c.id AND aj.archived_at IS NULL
+                AND aj.workflow_status IN ('waitlist','planning','scheduled')
+          )
+      ) OR
+      (
+          sqlc.arg(job_activity)::text = 'none' AND
+          NOT EXISTS (
+              SELECT 1 FROM jobs aj
+              WHERE aj.customer_id = c.id AND aj.archived_at IS NULL
+                AND aj.workflow_status IN ('waitlist','planning','scheduled')
+          )
+      )
+  )
+  AND (
+      sqlc.arg(notification_filter)::text = '' OR
+      c.notification_preference = sqlc.arg(notification_filter)::text
+  )
+  AND (sqlc.arg(locality_filter)::text = '' OR c.locality ILIKE '%' || sqlc.arg(locality_filter)::text || '%')
+  AND (sqlc.arg(region_filter)::text = '' OR c.region ILIKE '%' || sqlc.arg(region_filter)::text || '%')
 GROUP BY c.id
 ORDER BY
   CASE WHEN sqlc.arg(sort)::text='name' AND sqlc.arg(direction)::text='asc' THEN lower(c.last_name) END ASC,
@@ -92,7 +133,47 @@ WHERE (sqlc.arg(include_archived)::boolean OR c.archived_at IS NULL)
       concat_ws(' ', c.first_name, c.last_name, c.company_name, c.locality) ILIKE '%' || sqlc.arg(search)::text || '%' OR
       (sqlc.arg(search_phone)::text <> '' AND c.phone_normalized = sqlc.arg(search_phone)::text) OR
       EXISTS (SELECT 1 FROM jobs sj WHERE sj.customer_id = c.id AND sj.job_number ILIKE '%' || sqlc.arg(search)::text || '%')
-  );
+  )
+  AND (
+      NOT sqlc.arg(missing_contact)::boolean OR
+      (NULLIF(btrim(COALESCE(c.phone_raw, '')), '') IS NULL AND NULLIF(btrim(COALESCE(c.email::text, '')), '') IS NULL)
+  )
+  AND (
+      NOT sqlc.arg(incomplete_address)::boolean OR
+      NOT (
+          NULLIF(btrim(COALESCE(c.address_freeform, '')), '') IS NOT NULL OR
+          (
+              NULLIF(btrim(c.street), '') IS NOT NULL AND
+              NULLIF(btrim(c.postal_code), '') IS NOT NULL AND
+              NULLIF(btrim(c.locality), '') IS NOT NULL
+          )
+      )
+  )
+  AND (
+      sqlc.arg(job_activity)::text = '' OR
+      (
+          sqlc.arg(job_activity)::text = 'active' AND
+          EXISTS (
+              SELECT 1 FROM jobs aj
+              WHERE aj.customer_id = c.id AND aj.archived_at IS NULL
+                AND aj.workflow_status IN ('waitlist','planning','scheduled')
+          )
+      ) OR
+      (
+          sqlc.arg(job_activity)::text = 'none' AND
+          NOT EXISTS (
+              SELECT 1 FROM jobs aj
+              WHERE aj.customer_id = c.id AND aj.archived_at IS NULL
+                AND aj.workflow_status IN ('waitlist','planning','scheduled')
+          )
+      )
+  )
+  AND (
+      sqlc.arg(notification_filter)::text = '' OR
+      c.notification_preference = sqlc.arg(notification_filter)::text
+  )
+  AND (sqlc.arg(locality_filter)::text = '' OR c.locality ILIKE '%' || sqlc.arg(locality_filter)::text || '%')
+  AND (sqlc.arg(region_filter)::text = '' OR c.region ILIKE '%' || sqlc.arg(region_filter)::text || '%');
 
 -- name: GetCustomer :one
 SELECT id::text, first_name, last_name, COALESCE(company_name, '')::text AS company_name,
@@ -131,11 +212,15 @@ SELECT id::text, job_number, job_type, volume_m3::text, estimated_hack_minutes,
        estimated_transport_minutes, transport_trip_count, transport_mode,
        external_transport_confirmed, COALESCE(to_char(preferred_start_date, 'YYYY-MM-DD'), '')::text AS preferred_start_date,
        COALESCE(to_char(preferred_end_date, 'YYYY-MM-DD'), '')::text AS preferred_end_date,
-       COALESCE(preference_text, '')::text AS preference_text, urgency, COALESCE(region, '')::text AS region,
+       preference_mode, COALESCE(preference_text, '')::text AS preference_text, urgency, COALESCE(region, '')::text AS region,
        source, workflow_status, received_at, archived_at, version,
        COALESCE(pile_latitude::text, '')::text AS pile_latitude,
        COALESCE(pile_longitude::text, '')::text AS pile_longitude,
-       COALESCE(pile_location_source, '')::text AS pile_location_source
+       COALESCE(pile_location_source, '')::text AS pile_location_source,
+       COALESCE(transport_partner_id::text, '')::text AS transport_partner_id,
+       COALESCE((SELECT tp.name FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_name,
+       COALESCE((SELECT tp.partner_type FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_type,
+       COALESCE((SELECT a.id::text FROM appointments a WHERE a.job_id=jobs.id AND a.lifecycle_status IN ('proposal','fixed') ORDER BY a.starts_at DESC, a.id DESC LIMIT 1), '')::text AS active_appointment_id
 FROM jobs WHERE customer_id = sqlc.arg(customer_id)::uuid
 ORDER BY received_at DESC, id DESC;
 
@@ -152,17 +237,32 @@ SELECT id::text, customer_id::text, job_number, job_type, volume_m3::text,
        transport_mode, external_transport_confirmed,
        COALESCE(to_char(preferred_start_date, 'YYYY-MM-DD'), '')::text AS preferred_start_date,
        COALESCE(to_char(preferred_end_date, 'YYYY-MM-DD'), '')::text AS preferred_end_date,
-       COALESCE(preference_text, '')::text AS preference_text, urgency,
+       preference_mode, COALESCE(preference_text, '')::text AS preference_text, urgency,
        COALESCE(region, '')::text AS region, source, workflow_status, received_at,
        archived_at, version,
        COALESCE(pile_latitude::text, '')::text AS pile_latitude,
        COALESCE(pile_longitude::text, '')::text AS pile_longitude,
-       COALESCE(pile_location_source, '')::text AS pile_location_source
+       COALESCE(pile_location_source, '')::text AS pile_location_source,
+       COALESCE(transport_partner_id::text, '')::text AS transport_partner_id,
+       COALESCE((SELECT tp.name FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_name,
+       COALESCE((SELECT tp.partner_type FROM transport_partners tp WHERE tp.id=jobs.transport_partner_id), '')::text AS transport_partner_type
 FROM jobs WHERE id = sqlc.arg(id)::uuid;
 
 -- name: LockJobForArchive :one
 SELECT version, workflow_status FROM jobs
 WHERE id=sqlc.arg(id)::uuid AND archived_at IS NULL
+FOR UPDATE;
+
+-- name: LockJobForUpdate :one
+SELECT version, workflow_status, job_type, volume_m3::text
+FROM jobs
+WHERE id=sqlc.arg(id)::uuid AND archived_at IS NULL
+FOR UPDATE;
+
+-- name: LockFixedAppointmentForJobUpdate :one
+SELECT id::text, starts_at, ends_at
+FROM appointments
+WHERE job_id=sqlc.arg(job_id)::uuid AND lifecycle_status='fixed'
 FOR UPDATE;
 
 -- name: JobHasActiveAppointment :one
@@ -224,7 +324,8 @@ LIMIT sqlc.arg(result_limit);
 
 -- name: ListWaitlistFilterFavorites :many
 SELECT id::text, name, job_type, region, urgency, preferred_month, workflow,
-       missing_location, duration_issue, sort_key, sort_direction
+       missing_location, duration_issue, duration_group, overdue, unassigned,
+       transport_pending, incomplete, sort_key, sort_direction
 FROM waitlist_filter_favorites
 WHERE user_id=sqlc.arg(user_id)::uuid
 ORDER BY updated_at DESC, id;
@@ -241,14 +342,19 @@ SELECT EXISTS (
 -- name: UpsertWaitlistFilterFavorite :exec
 INSERT INTO waitlist_filter_favorites
     (id, user_id, name, job_type, region, urgency, preferred_month, workflow,
-     missing_location, duration_issue, sort_key, sort_direction)
+     missing_location, duration_issue, duration_group, overdue, unassigned,
+     transport_pending, incomplete, sort_key, sort_direction)
 VALUES (gen_random_uuid(), sqlc.arg(user_id)::uuid, sqlc.arg(name), sqlc.arg(job_type),
         sqlc.arg(region), sqlc.arg(urgency), sqlc.arg(preferred_month), sqlc.arg(workflow),
-        sqlc.arg(missing_location), sqlc.arg(duration_issue), sqlc.arg(sort_key), sqlc.arg(sort_direction))
+        sqlc.arg(missing_location), sqlc.arg(duration_issue), sqlc.arg(duration_group),
+        sqlc.arg(overdue), sqlc.arg(unassigned), sqlc.arg(transport_pending), sqlc.arg(incomplete),
+        sqlc.arg(sort_key), sqlc.arg(sort_direction))
 ON CONFLICT (user_id, lower(name)) DO UPDATE SET
     job_type=excluded.job_type, region=excluded.region, urgency=excluded.urgency,
     preferred_month=excluded.preferred_month, workflow=excluded.workflow,
     missing_location=excluded.missing_location, duration_issue=excluded.duration_issue,
+    duration_group=excluded.duration_group, overdue=excluded.overdue,
+    unassigned=excluded.unassigned, transport_pending=excluded.transport_pending, incomplete=excluded.incomplete,
     sort_key=excluded.sort_key, sort_direction=excluded.sort_direction, updated_at=now();
 
 -- name: DeleteWaitlistFilterFavorite :execrows
@@ -295,15 +401,17 @@ UPDATE jobs SET
     external_transport_confirmed = sqlc.arg(external_transport_confirmed),
     preferred_start_date = NULLIF(sqlc.arg(preferred_start_date)::text, '')::date,
     preferred_end_date = NULLIF(sqlc.arg(preferred_end_date)::text, '')::date,
+    preference_mode = sqlc.arg(preference_mode),
     preference_text = NULLIF(sqlc.arg(preference_text)::text, ''), urgency = sqlc.arg(urgency),
     region = NULLIF(sqlc.arg(region)::text, ''), source = sqlc.arg(source),
     pile_latitude = NULLIF(sqlc.arg(pile_latitude)::text, '')::numeric,
     pile_longitude = NULLIF(sqlc.arg(pile_longitude)::text, '')::numeric,
     pile_location_source = NULLIF(sqlc.arg(pile_location_source)::text, ''),
     pile_location_updated_at = CASE WHEN NULLIF(sqlc.arg(pile_latitude)::text, '') IS NULL THEN NULL ELSE now() END,
+    transport_partner_id = NULLIF(sqlc.arg(transport_partner_id)::text, '')::uuid,
     version = version + 1, updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND version = sqlc.arg(expected_version)
-  AND archived_at IS NULL AND workflow_status IN ('waitlist', 'planning');
+  AND archived_at IS NULL AND workflow_status IN ('waitlist', 'planning', 'scheduled');
 
 -- name: ArchiveJob :execrows
 UPDATE jobs SET archived_at = now(), workflow_status = 'cancelled', version = version + 1, updated_at = now()
@@ -319,11 +427,14 @@ UPDATE customers SET archived_at = now(), version = version + 1, updated_at = no
 WHERE id = sqlc.arg(id)::uuid AND version = sqlc.arg(expected_version) AND archived_at IS NULL;
 
 -- name: ListWaitlist :many
-SELECT w.id::text AS waitlist_id, w.job_id::text, w.entered_at, w.manual_priority, w.version AS waitlist_version,
-       j.job_number, j.job_type, j.volume_m3::text, j.estimated_hack_minutes, j.transport_mode,
+SELECT w.id::text AS waitlist_id, w.job_id::text, w.entered_at, w.manual_priority,
+       w.priority_reason, w.version AS waitlist_version,
+       j.job_number, j.job_type, j.volume_m3::text, j.estimated_hack_minutes, j.estimated_transport_minutes,
+       (j.estimated_hack_minutes+j.estimated_transport_minutes)::integer AS total_minutes,
+       j.transport_mode, j.external_transport_confirmed,
        COALESCE(to_char(j.preferred_start_date, 'YYYY-MM-DD'), '')::text AS preferred_start_date,
        COALESCE(to_char(j.preferred_end_date, 'YYYY-MM-DD'), '')::text AS preferred_end_date,
-       COALESCE(j.preference_text, '')::text AS preference_text, j.urgency,
+       j.preference_mode, COALESCE(j.preference_text, '')::text AS preference_text, j.urgency,
        COALESCE(w.region_snapshot, '')::text AS region,
        c.id::text AS customer_id, c.first_name, c.last_name, COALESCE(c.company_name, '')::text AS company_name, c.locality,
        COALESCE((SELECT n.body FROM job_notes n WHERE n.job_id = j.id ORDER BY n.created_at DESC, n.id DESC LIMIT 1), '')::text AS note_excerpt,
@@ -332,7 +443,16 @@ SELECT w.id::text AS waitlist_id, w.job_id::text, w.entered_at, w.manual_priorit
             WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
             ELSE 'unplanned' END::text AS workflow_status,
        j.updated_at, j.pile_latitude IS NOT NULL AND j.pile_longitude IS NOT NULL AS has_pile_location,
-       EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed'))::boolean AS has_active_appointment
+       (COALESCE(j.pile_location_source::text, '') <> '')::boolean AS has_pile_source,
+       (j.preferred_end_date IS NOT NULL AND j.preferred_end_date < (now() AT TIME ZONE 'Europe/Vienna')::date)::boolean AS overdue,
+       EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed'))::boolean AS has_active_appointment,
+       EXISTS (SELECT 1 FROM appointments a JOIN appointment_drivers ad ON ad.appointment_id=a.id WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed'))::boolean AS has_internal_assignment,
+       CASE c.notification_preference
+         WHEN 'email' THEN c.email IS NOT NULL
+         WHEN 'sms' THEN c.phone_normalized IS NOT NULL
+         WHEN 'both' THEN c.email IS NOT NULL OR c.phone_normalized IS NOT NULL
+         ELSE false
+       END::boolean AS has_contact
 FROM waitlist_entries w
 JOIN jobs j ON j.id = w.job_id
 JOIN customers c ON c.id = j.customer_id
@@ -347,7 +467,24 @@ WHERE w.removed_at IS NULL AND j.archived_at IS NULL AND c.archived_at IS NULL
        WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
        ELSE 'unplanned' END)
   AND (NOT sqlc.arg(missing_location)::boolean OR j.pile_latitude IS NULL OR j.pile_longitude IS NULL)
-  AND (NOT sqlc.arg(duration_issue)::boolean OR j.estimated_hack_minutes<15 OR j.estimated_hack_minutes>720)
+  AND (NOT sqlc.arg(duration_issue)::boolean OR j.estimated_hack_minutes+j.estimated_transport_minutes<sqlc.arg(duration_review_min)::integer OR j.estimated_hack_minutes+j.estimated_transport_minutes>sqlc.arg(duration_review_max)::integer)
+  AND (NOT sqlc.arg(overdue)::boolean OR (j.preferred_end_date IS NOT NULL AND j.preferred_end_date < (now() AT TIME ZONE 'Europe/Vienna')::date))
+  AND (NOT sqlc.arg(unassigned)::boolean OR NOT EXISTS (SELECT 1 FROM appointments a JOIN appointment_drivers ad ON ad.appointment_id=a.id WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed')))
+  AND (NOT sqlc.arg(transport_pending)::boolean OR (j.job_type='chipping_with_transport' AND (j.transport_mode='undecided' OR (j.transport_mode='external' AND NOT j.external_transport_confirmed))))
+  AND (NOT sqlc.arg(incomplete)::boolean OR
+       j.pile_latitude IS NULL OR j.pile_longitude IS NULL OR COALESCE(j.pile_location_source, '') = '' OR
+       COALESCE(w.region_snapshot, '') = '' OR
+       j.estimated_hack_minutes+j.estimated_transport_minutes<sqlc.arg(duration_review_min)::integer OR
+       j.estimated_hack_minutes+j.estimated_transport_minutes>sqlc.arg(duration_review_max)::integer OR
+       (j.preference_mode='window' AND (j.preferred_start_date IS NULL OR j.preferred_end_date IS NULL)) OR
+       (j.job_type='chipping_with_transport' AND (j.transport_mode='undecided' OR (j.transport_mode='external' AND NOT j.external_transport_confirmed))) OR
+       NOT CASE c.notification_preference
+         WHEN 'email' THEN c.email IS NOT NULL
+         WHEN 'sms' THEN c.phone_normalized IS NOT NULL
+         WHEN 'both' THEN c.email IS NOT NULL OR c.phone_normalized IS NOT NULL
+         ELSE false
+       END)
+  AND (sqlc.arg(duration_group)::text='' OR sqlc.arg(duration_group)::text=CASE WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=120 THEN 'short' WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=360 THEN 'medium' ELSE 'long' END)
 ORDER BY
   CASE WHEN sqlc.arg(sort)::text = 'entered' AND sqlc.arg(direction)::text = 'asc' THEN w.entered_at END ASC,
   CASE WHEN sqlc.arg(sort)::text = 'entered' AND sqlc.arg(direction)::text = 'desc' THEN w.entered_at END DESC,
@@ -361,10 +498,18 @@ ORDER BY
   CASE WHEN sqlc.arg(sort)::text = 'region' AND sqlc.arg(direction)::text = 'desc' THEN lower(w.region_snapshot) END DESC,
   CASE WHEN sqlc.arg(sort)::text = 'customer' AND sqlc.arg(direction)::text = 'asc' THEN lower(concat_ws(' ', c.company_name, c.last_name, c.first_name)) END ASC,
   CASE WHEN sqlc.arg(sort)::text = 'customer' AND sqlc.arg(direction)::text = 'desc' THEN lower(concat_ws(' ', c.company_name, c.last_name, c.first_name)) END DESC,
-  CASE WHEN sqlc.arg(sort)::text = 'workflow' AND sqlc.arg(direction)::text = 'asc' THEN j.workflow_status END ASC,
-  CASE WHEN sqlc.arg(sort)::text = 'workflow' AND sqlc.arg(direction)::text = 'desc' THEN j.workflow_status END DESC,
+  CASE WHEN sqlc.arg(sort)::text = 'workflow' AND sqlc.arg(direction)::text = 'asc' THEN CASE
+       WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='fixed') THEN 'scheduled'
+       WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
+       ELSE 'unplanned' END END ASC,
+  CASE WHEN sqlc.arg(sort)::text = 'workflow' AND sqlc.arg(direction)::text = 'desc' THEN CASE
+       WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='fixed') THEN 'scheduled'
+       WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
+       ELSE 'unplanned' END END DESC,
   CASE WHEN sqlc.arg(sort)::text = 'updated' AND sqlc.arg(direction)::text = 'asc' THEN j.updated_at END ASC,
   CASE WHEN sqlc.arg(sort)::text = 'updated' AND sqlc.arg(direction)::text = 'desc' THEN j.updated_at END DESC,
+  CASE WHEN sqlc.arg(sort)::text = 'duration' AND sqlc.arg(direction)::text = 'asc' THEN j.estimated_hack_minutes+j.estimated_transport_minutes END ASC,
+  CASE WHEN sqlc.arg(sort)::text = 'duration' AND sqlc.arg(direction)::text = 'desc' THEN j.estimated_hack_minutes+j.estimated_transport_minutes END DESC,
   w.manual_priority DESC, w.entered_at, w.id
 LIMIT sqlc.arg(page_size) OFFSET sqlc.arg(page_offset);
 
@@ -382,11 +527,71 @@ WHERE w.removed_at IS NULL AND j.archived_at IS NULL AND c.archived_at IS NULL
        WHEN EXISTS (SELECT 1 FROM appointments a WHERE a.job_id=j.id AND a.lifecycle_status='proposal') THEN 'proposal'
        ELSE 'unplanned' END)
   AND (NOT sqlc.arg(missing_location)::boolean OR j.pile_latitude IS NULL OR j.pile_longitude IS NULL)
-  AND (NOT sqlc.arg(duration_issue)::boolean OR j.estimated_hack_minutes<15 OR j.estimated_hack_minutes>720);
+  AND (NOT sqlc.arg(duration_issue)::boolean OR j.estimated_hack_minutes+j.estimated_transport_minutes<sqlc.arg(duration_review_min)::integer OR j.estimated_hack_minutes+j.estimated_transport_minutes>sqlc.arg(duration_review_max)::integer)
+  AND (NOT sqlc.arg(overdue)::boolean OR (j.preferred_end_date IS NOT NULL AND j.preferred_end_date < (now() AT TIME ZONE 'Europe/Vienna')::date))
+  AND (NOT sqlc.arg(unassigned)::boolean OR NOT EXISTS (SELECT 1 FROM appointments a JOIN appointment_drivers ad ON ad.appointment_id=a.id WHERE a.job_id=j.id AND a.lifecycle_status IN ('proposal','fixed')))
+  AND (NOT sqlc.arg(transport_pending)::boolean OR (j.job_type='chipping_with_transport' AND (j.transport_mode='undecided' OR (j.transport_mode='external' AND NOT j.external_transport_confirmed))))
+  AND (NOT sqlc.arg(incomplete)::boolean OR
+       j.pile_latitude IS NULL OR j.pile_longitude IS NULL OR COALESCE(j.pile_location_source, '') = '' OR
+       COALESCE(w.region_snapshot, '') = '' OR
+       j.estimated_hack_minutes+j.estimated_transport_minutes<sqlc.arg(duration_review_min)::integer OR
+       j.estimated_hack_minutes+j.estimated_transport_minutes>sqlc.arg(duration_review_max)::integer OR
+       (j.preference_mode='window' AND (j.preferred_start_date IS NULL OR j.preferred_end_date IS NULL)) OR
+       (j.job_type='chipping_with_transport' AND (j.transport_mode='undecided' OR (j.transport_mode='external' AND NOT j.external_transport_confirmed))) OR
+       NOT CASE c.notification_preference
+         WHEN 'email' THEN c.email IS NOT NULL
+         WHEN 'sms' THEN c.phone_normalized IS NOT NULL
+         WHEN 'both' THEN c.email IS NOT NULL OR c.phone_normalized IS NOT NULL
+         ELSE false
+       END)
+  AND (sqlc.arg(duration_group)::text='' OR sqlc.arg(duration_group)::text=CASE WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=120 THEN 'short' WHEN j.estimated_hack_minutes+j.estimated_transport_minutes<=360 THEN 'medium' ELSE 'long' END);
 
 -- name: UpdateWaitlistPriority :execrows
-UPDATE waitlist_entries SET manual_priority = sqlc.arg(priority), version = version + 1
+UPDATE waitlist_entries SET manual_priority = sqlc.arg(priority), priority_reason = sqlc.arg(reason), version = version + 1
 WHERE id = sqlc.arg(id)::uuid AND version = sqlc.arg(expected_version) AND removed_at IS NULL;
+
+-- name: CountActiveWaitlist :one
+SELECT count(*) FROM waitlist_entries w
+JOIN jobs j ON j.id=w.job_id
+JOIN customers c ON c.id=j.customer_id
+WHERE w.removed_at IS NULL AND j.archived_at IS NULL AND c.archived_at IS NULL;
+
+-- name: SearchWorkspace :many
+WITH matches AS (
+    SELECT 'customer'::text AS kind, c.id::text AS id, ''::text AS parent_id,
+           concat_ws(' ', NULLIF(c.first_name,''), NULLIF(c.last_name,''), NULLIF(c.company_name,''))::text AS title,
+           concat_ws(' · ', NULLIF(c.locality,''), NULLIF(c.region,''))::text AS subtitle,
+           c.updated_at AS ranked_at
+    FROM customers c
+    WHERE c.archived_at IS NULL
+      AND concat_ws(' ', c.first_name, c.last_name, c.company_name, c.locality, c.region) ILIKE '%' || sqlc.arg(search)::text || '%'
+    ORDER BY c.updated_at DESC, c.id
+    LIMIT 8
+), job_matches AS (
+    SELECT 'job'::text AS kind, j.id::text AS id, c.id::text AS parent_id,
+           j.job_number::text AS title,
+           concat_ws(' · ', concat_ws(' ', NULLIF(c.first_name,''), NULLIF(c.last_name,''), NULLIF(c.company_name,'')), NULLIF(c.locality,''))::text AS subtitle,
+           j.updated_at AS ranked_at
+    FROM jobs j JOIN customers c ON c.id=j.customer_id
+    WHERE j.archived_at IS NULL AND c.archived_at IS NULL
+      AND concat_ws(' ', j.job_number, c.first_name, c.last_name, c.company_name, c.locality) ILIKE '%' || sqlc.arg(search)::text || '%'
+    ORDER BY j.updated_at DESC, j.id
+    LIMIT 8
+), appointment_matches AS (
+    SELECT 'appointment'::text AS kind, a.id::text AS id, c.id::text AS parent_id,
+           concat_ws(' · ', j.job_number, concat_ws(' ', NULLIF(c.first_name,''), NULLIF(c.last_name,''), NULLIF(c.company_name,'')))::text AS title,
+           to_char(a.starts_at AT TIME ZONE 'Europe/Vienna', 'DD.MM.YYYY HH24:MI')::text AS subtitle,
+           a.updated_at AS ranked_at
+    FROM appointments a JOIN jobs j ON j.id=a.job_id JOIN customers c ON c.id=j.customer_id
+    WHERE a.lifecycle_status IN ('draft','proposal','fixed') AND j.archived_at IS NULL AND c.archived_at IS NULL
+      AND concat_ws(' ', j.job_number, c.first_name, c.last_name, c.company_name, c.locality) ILIKE '%' || sqlc.arg(search)::text || '%'
+    ORDER BY a.updated_at DESC, a.id
+    LIMIT 8
+)
+SELECT kind, id, parent_id, title, subtitle
+FROM (SELECT * FROM matches UNION ALL SELECT * FROM job_matches UNION ALL SELECT * FROM appointment_matches) all_matches
+ORDER BY ranked_at DESC, kind, id
+LIMIT 24;
 
 -- name: RemoveWaitlistEntry :execrows
 UPDATE waitlist_entries SET removed_at = now(), removed_reason = sqlc.arg(reason), version = version + 1

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"example.invalid/hackplan/internal/appointment"
 	"example.invalid/hackplan/internal/auth"
 	"example.invalid/hackplan/internal/config"
+	"example.invalid/hackplan/internal/customers"
 	"example.invalid/hackplan/internal/driver"
 	"example.invalid/hackplan/internal/resource"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -92,8 +94,157 @@ func TestCalendarReservationsAndAtomicFix(t *testing.T) {
 		MutateInput: appointment.MutateInput{ID: fixed.ID, ExpectedVersion: fixed.Version, RequestID: "stale"},
 		StartsAt:    start.Add(48 * time.Hour), EndsAt: start.Add(51 * time.Hour),
 	})
-	if !errors.Is(err, appointment.ErrConflict) {
-		t.Fatalf("stale move error = %v, want conflict", err)
+	if !errors.Is(err, appointment.ErrVersionConflict) {
+		t.Fatalf("stale move error = %v, want version conflict", err)
+	}
+}
+
+func TestPlanFromWaitlistCommitsProposalAtomicallyAndRollsBackLateConflict(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	start := time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC)
+	plan := func(jobID, driverID, requestID string) (appointment.Appointment, error) {
+		return fixture.service.PlanFromWaitlist(fixture.ctx, fixture.admin, appointment.PlanInput{
+			CreateDraftInput: appointment.CreateDraftInput{
+				JobID: jobID, RequestID: requestID,
+				Time: appointment.TimeInput{StartsAt: start, EndsAt: start.Add(90 * time.Minute)},
+			},
+			Assignments: appointment.AssignmentInput{
+				DriverIDs: []string{driverID}, PrimaryDriverID: driverID,
+				Resources: []appointment.ResourceAssignment{{ID: fixture.chipper1, Purpose: appointment.PurposeChipping}},
+			},
+		})
+	}
+
+	jobID := fixture.job(t, "HW-2026-ATOMIC-PLAN")
+	proposed, err := plan(jobID, fixture.driver1, "atomic-plan-success")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lifecycle, workflow string
+	var drivers, resources, audits, outbox int
+	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT a.lifecycle_status, j.workflow_status,
+		(SELECT count(*) FROM appointment_drivers WHERE appointment_id=a.id),
+		(SELECT count(*) FROM appointment_resources WHERE appointment_id=a.id),
+		(SELECT count(*) FROM audit_events WHERE object_id=a.id::text),
+		(SELECT count(*) FROM outbox_events WHERE aggregate_id=a.id)
+		FROM appointments a JOIN jobs j ON j.id=a.job_id WHERE a.id=$1`, proposed.ID).
+		Scan(&lifecycle, &workflow, &drivers, &resources, &audits, &outbox); err != nil {
+		t.Fatal(err)
+	}
+	if lifecycle != "proposal" || workflow != "planning" || drivers != 1 || resources != 1 || audits != 3 || outbox != 0 {
+		t.Fatalf("atomic plan state=%s/%s drivers=%d resources=%d audits=%d outbox=%d", lifecycle, workflow, drivers, resources, audits, outbox)
+	}
+
+	failedJobID := fixture.job(t, "HW-2026-ATOMIC-ROLLBACK")
+	var auditBefore int
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM audit_events").Scan(&auditBefore); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := plan(failedJobID, fixture.driver2, "atomic-plan-conflict"); !errors.Is(err, appointment.ErrConflict) {
+		t.Fatalf("conflicting atomic plan error=%v want conflict", err)
+	}
+	var appointmentCount, auditAfter, activeWaitlist int
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT workflow_status FROM jobs WHERE id=$1", failedJobID).Scan(&workflow); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM appointments WHERE job_id=$1", failedJobID).Scan(&appointmentCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM waitlist_entries WHERE job_id=$1 AND removed_at IS NULL", failedJobID).Scan(&activeWaitlist); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM audit_events").Scan(&auditAfter); err != nil {
+		t.Fatal(err)
+	}
+	if workflow != "waitlist" || appointmentCount != 0 || activeWaitlist != 1 || auditAfter != auditBefore {
+		t.Fatalf("rollback state workflow=%s appointments=%d waitlist=%d audits=%d/%d", workflow, appointmentCount, activeWaitlist, auditAfter, auditBefore)
+	}
+}
+
+func TestScheduledJobEditPreservesAndRevalidatesFixedAppointment(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	start := time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC)
+	jobID := fixture.job(t, "HW-2026-EDIT-FIXED")
+	proposed := fixture.proposal(t, jobID, fixture.driver1, fixture.chipper1, start, 3*time.Hour)
+	fixed, err := fixture.service.FixAppointment(fixture.ctx, fixture.admin, appointment.FixInput{MutateInput: appointment.MutateInput{
+		ID: proposed.ID, ExpectedVersion: proposed.Version, RequestID: "fix-before-job-edit",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var customerID string
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT customer_id::text FROM jobs WHERE id=$1", jobID).Scan(&customerID); err != nil {
+		t.Fatal(err)
+	}
+	customerService, err := customers.NewService(postgres.NewCustomerStore(fixture.pool))
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := customerService.CustomerDetail(fixture.ctx, fixture.admin, customerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latitude, longitude := 46.712345, 15.56789
+	update := customers.UpdateJobInput{
+		ID: jobID, ExpectedVersion: detail.Jobs[0].Version, RequestID: "edit-scheduled-job",
+		Job: customers.JobInput{
+			JobType: customers.JobTypeChippingOnly, VolumeM3: "42.50", EstimatedHackMinutes: 90,
+			TransportMode: customers.TransportNone, PreferredStartDate: "2026-09-01", PreferredEndDate: "2026-09-30",
+			PreferenceText: "Zufahrt vorher prüfen", Urgency: customers.UrgencyHigh, Region: "Süd", Source: customers.SourceEmail,
+			PileLatitude: &latitude, PileLongitude: &longitude, PileLocationSource: customers.PileSourceMapPin,
+		},
+	}
+	if err := customerService.UpdateJob(fixture.ctx, fixture.admin, update); err != nil {
+		t.Fatalf("update compatible scheduled job: %v", err)
+	}
+
+	var lifecycle, workflow, confirmation, volume, region, source, pileSource string
+	var appointmentStart, appointmentEnd, driverFrom, driverTo, resourceFrom, resourceTo time.Time
+	var hackMinutes, activeConfirmations int
+	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT a.lifecycle_status,j.workflow_status,a.confirmation_status,
+		j.volume_m3::text,j.estimated_hack_minutes,j.region,j.source,j.pile_location_source,
+		a.starts_at,a.ends_at,ad.reserved_starts_at,ad.reserved_ends_at,ar.reserved_starts_at,ar.reserved_ends_at,
+		(SELECT count(*) FROM confirmation_requests cr WHERE cr.appointment_id=a.id AND cr.status='active')
+		FROM appointments a JOIN jobs j ON j.id=a.job_id
+		JOIN appointment_drivers ad ON ad.appointment_id=a.id
+		JOIN appointment_resources ar ON ar.appointment_id=a.id
+		WHERE a.id=$1`, fixed.ID).Scan(
+		&lifecycle, &workflow, &confirmation, &volume, &hackMinutes, &region, &source, &pileSource,
+		&appointmentStart, &appointmentEnd, &driverFrom, &driverTo, &resourceFrom, &resourceTo, &activeConfirmations,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if lifecycle != "fixed" || workflow != "scheduled" || confirmation != "not_requested" || volume != "42.50" || hackMinutes != 90 ||
+		region != "Süd" || source != "email" || pileSource != "map_pin" || !appointmentStart.Equal(start) || !appointmentEnd.Equal(start.Add(3*time.Hour)) ||
+		!driverFrom.Equal(start) || !driverTo.Equal(start.Add(3*time.Hour)) || !resourceFrom.Equal(start) || !resourceTo.Equal(start.Add(3*time.Hour)) || activeConfirmations != 0 {
+		t.Fatalf("scheduled edit state = lifecycle=%s workflow=%s confirmation=%s volume=%s minutes=%d region=%s source=%s pile=%s appointment=%s..%s driver=%s..%s resource=%s..%s active confirmations=%d",
+			lifecycle, workflow, confirmation, volume, hackMinutes, region, source, pileSource, appointmentStart, appointmentEnd, driverFrom, driverTo, resourceFrom, resourceTo, activeConfirmations)
+	}
+	appointmentDetail, err := fixture.service.AppointmentDetail(fixture.ctx, fixture.admin, fixed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(appointmentDetail.MapsURL, "46.712345%2C15.567890") {
+		t.Fatalf("appointment navigation does not prefer updated pile location: %q", appointmentDetail.MapsURL)
+	}
+
+	refreshed, err := customerService.CustomerDetail(fixture.ctx, fixture.admin, customerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tooLong := update
+	tooLong.ExpectedVersion = refreshed.Jobs[0].Version
+	tooLong.Job.EstimatedHackMinutes = 181
+	if err := customerService.UpdateJob(fixture.ctx, fixture.admin, tooLong); !errors.Is(err, customers.ErrConflict) {
+		t.Fatalf("oversized scheduled job update error = %v, want conflict", err)
+	}
+	missingTransport := update
+	missingTransport.ExpectedVersion = refreshed.Jobs[0].Version
+	missingTransport.Job.JobType = customers.JobTypeChippingWithTransport
+	missingTransport.Job.TransportMode = customers.TransportInternal
+	missingTransport.Job.EstimatedTransportMinutes = 30
+	if err := customerService.UpdateJob(fixture.ctx, fixture.admin, missingTransport); !errors.Is(err, customers.ErrConflict) {
+		t.Fatalf("scheduled internal transport without resource error = %v, want conflict", err)
 	}
 }
 
@@ -213,7 +364,7 @@ func TestConcurrentFixIsIdempotentByVersionAndAtomic(t *testing.T) {
 	for err := range results {
 		if err == nil {
 			successes++
-		} else if errors.Is(err, appointment.ErrConflict) {
+		} else if errors.Is(err, appointment.ErrVersionConflict) {
 			conflicts++
 		} else {
 			t.Fatalf("parallel fix error = %v", err)
@@ -462,7 +613,7 @@ func TestSwapProposalWindowsIsAtomicAndNotificationFree(t *testing.T) {
 	if outboxCount != 0 {
 		t.Fatalf("swap created %d outbox events", outboxCount)
 	}
-	if _, err := fixture.service.SwapAppointments(fixture.ctx, fixture.admin, appointment.SwapInput{FirstID: first.ID, SecondID: second.ID, FirstVersion: first.Version, SecondVersion: second.Version}); !errors.Is(err, appointment.ErrConflict) {
+	if _, err := fixture.service.SwapAppointments(fixture.ctx, fixture.admin, appointment.SwapInput{FirstID: first.ID, SecondID: second.ID, FirstVersion: first.Version, SecondVersion: second.Version}); !errors.Is(err, appointment.ErrVersionConflict) {
 		t.Fatalf("stale swap error = %v", err)
 	}
 }
@@ -491,7 +642,7 @@ func newCalendarFixture(t *testing.T) calendarFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, "TRUNCATE outbox_events, appointments, waitlist_entries, jobs, customers, availability_exceptions, availability_rules, resources, audit_events, auth_rate_limits, sessions, drivers, users RESTART IDENTITY CASCADE"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE route_locations, outbox_events, appointments, waitlist_entries, jobs, customers, availability_exceptions, availability_rules, resources, audit_events, auth_rate_limits, sessions, drivers, users RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatal(err)
 	}
 	admin := auth.Actor{Role: auth.RoleAdmin, DisplayName: "Admin"}
@@ -499,7 +650,7 @@ func newCalendarFixture(t *testing.T) calendarFixture {
 		t.Fatal(err)
 	}
 	var driver1, driver2 string
-	if err := pool.QueryRow(ctx, "INSERT INTO drivers (display_name) VALUES ('Franz'), ('Maria') RETURNING id::text").Scan(&driver1); err != nil {
+	if err := pool.QueryRow(ctx, "INSERT INTO drivers (display_name, availability_policy) VALUES ('Franz', 'legacy_rules'), ('Maria', 'legacy_rules') RETURNING id::text").Scan(&driver1); err != nil {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(ctx, "SELECT id::text FROM drivers WHERE display_name='Maria'").Scan(&driver2); err != nil {

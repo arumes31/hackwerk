@@ -15,7 +15,15 @@ snapshot() {
 }
 
 snapshot >"$before"
-"${MAKE:-make}" generate
+if command -v "${MAKE:-make}" >/dev/null 2>&1; then
+  "${MAKE:-make}" generate
+else
+  go tool minify --quiet --type js --output web/assets/static/app.js web/assets/src/app.js
+  go tool minify --quiet --type js --output web/assets/static/login-background.js web/assets/src/login-background.js
+  go tool minify --quiet --type js --output web/assets/static/login-background-loader.js web/assets/src/login-background-loader.js
+  go tool templ generate
+  go tool sqlc generate -f db/sqlc.yaml
+fi
 snapshot >"$after"
 
 if ! diff -u "$before" "$after"; then

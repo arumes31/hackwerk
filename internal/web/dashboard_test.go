@@ -13,6 +13,7 @@ import (
 
 	"example.invalid/hackplan/internal/auth"
 	"example.invalid/hackplan/internal/dashboard"
+	"example.invalid/hackplan/internal/planning"
 	"example.invalid/hackplan/web/templates"
 )
 
@@ -52,7 +53,7 @@ func TestDashboardPageSeparatesAdminAndDriverDetails(t *testing.T) {
 			actor := auth.Actor{UserID: "user", DisplayName: "Interner Nutzer", Role: auth.Role(test.role), DriverID: test.driverID}
 			request = request.WithContext(context.WithValue(request.Context(), sessionContextKey{}, auth.Session{Actor: actor}))
 			response := httptest.NewRecorder()
-			dashboardPage(service, nil, page, "csrf", logger).ServeHTTP(response, request)
+			dashboardPage(service, nil, nil, page, "csrf", logger).ServeHTTP(response, request)
 			body := response.Body.String()
 			if response.Code != http.StatusOK {
 				t.Fatalf("status = %d body=%s", response.Code, body)
@@ -79,7 +80,7 @@ func TestDashboardPageRendersRecoverableReadFailure(t *testing.T) {
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/dashboard", nil)
 	request = request.WithContext(context.WithValue(request.Context(), sessionContextKey{}, auth.Session{Actor: auth.Actor{UserID: "admin", DisplayName: "Admin", Role: auth.RoleAdmin}}))
 	response := httptest.NewRecorder()
-	dashboardPage(service, nil, templates.PageData{AppName: "HackWerk"}, "csrf", slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))).ServeHTTP(response, request)
+	dashboardPage(service, nil, nil, templates.PageData{AppName: "HackWerk"}, "csrf", slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))).ServeHTTP(response, request)
 	if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), "Heute erneut laden") || strings.Contains(response.Body.String(), "database unavailable") {
 		t.Fatalf("recoverable dashboard failure = %d %s", response.Code, response.Body.String())
 	}
@@ -93,8 +94,53 @@ func TestDashboardPageRejectsInvalidDate(t *testing.T) {
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/dashboard?date=unbegrenzt", nil)
 	request = request.WithContext(context.WithValue(request.Context(), sessionContextKey{}, auth.Session{Actor: auth.Actor{UserID: "admin", DisplayName: "Admin", Role: auth.RoleAdmin}}))
 	response := httptest.NewRecorder()
-	dashboardPage(service, nil, templates.PageData{AppName: "HackWerk"}, "csrf", slog.Default()).ServeHTTP(response, request)
+	dashboardPage(service, nil, nil, templates.PageData{AppName: "HackWerk"}, "csrf", slog.Default()).ServeHTTP(response, request)
 	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "außerhalb") {
 		t.Fatalf("invalid date response = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestDashboardPageOffersOwnRouteOnlyWhenOneIsAssignedForTheSelectedDay(t *testing.T) {
+	location, _ := time.LoadLocation("Europe/Vienna")
+	dashboardService, err := dashboard.New(dashboardStoreStub{}, dashboard.Config{
+		Location: location, HorizonDays: 14, PendingAfter: 15 * time.Minute, BusinessOpen: "07:00", BusinessClose: "17:00",
+	}, func() time.Time { return time.Date(2026, 8, 25, 10, 0, 0, 0, location) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	newRouteService := func(store *routeHTTPStore) *planning.RouteService {
+		t.Helper()
+		router := planning.NewHaversineRouter(1.3, 55)
+		service, routeErr := planning.NewRouteService(store, router, router, planning.DefaultRouteConfig())
+		if routeErr != nil {
+			t.Fatal(routeErr)
+		}
+		return service
+	}
+	renderDashboard := func(routes *planning.RouteService) string {
+		t.Helper()
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/dashboard?date=2026-08-25", nil)
+		request = request.WithContext(context.WithValue(request.Context(), sessionContextKey{}, auth.Session{Actor: auth.Actor{
+			UserID: "user", DisplayName: "Anna", Role: auth.RoleDriver, DriverID: "driver-1",
+		}}))
+		response := httptest.NewRecorder()
+		dashboardPage(dashboardService, nil, routes, templates.PageData{AppName: "HackWerk"}, "csrf", slog.Default()).ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+
+	assigned := renderDashboard(newRouteService(routeHTTPFixture()))
+	if !strings.Contains(assigned, `href="/my-route?date=2026-08-25"`) {
+		t.Fatal("assigned driver route must be offered on the dashboard")
+	}
+	missing := renderDashboard(newRouteService(&routeHTTPStore{}))
+	if strings.Contains(missing, `href="/my-route?date=2026-08-25"`) || !strings.Contains(missing, "Navigation direkt beim nächsten Einsatz starten") {
+		t.Fatal("missing route must not produce a dead-end dashboard action")
+	}
+	unavailable := renderDashboard(newRouteService(&routeHTTPStore{availabilityErr: errors.New("database unavailable")}))
+	if !strings.Contains(unavailable, `href="/my-route?date=2026-08-25"`) || !strings.Contains(unavailable, "Routenstatus konnte nicht geprüft werden") || strings.Contains(unavailable, "Keine gespeicherte Route") {
+		t.Fatal("route lookup failure must remain distinguishable and recoverable")
 	}
 }

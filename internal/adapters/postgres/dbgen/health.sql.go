@@ -131,7 +131,7 @@ const upsertWorkerHeartbeat = `-- name: UpsertWorkerHeartbeat :exec
 INSERT INTO worker_heartbeats (worker_id, started_at, heartbeat_at, status)
 VALUES ($1, $2::timestamptz, $3::timestamptz, $4)
 ON CONFLICT (worker_id) DO UPDATE
-SET heartbeat_at=EXCLUDED.heartbeat_at, status=EXCLUDED.status
+SET started_at=EXCLUDED.started_at, heartbeat_at=EXCLUDED.heartbeat_at, status=EXCLUDED.status
 `
 
 type UpsertWorkerHeartbeatParams struct {
@@ -181,4 +181,17 @@ func (q *Queries) VoiceMetricCounts(ctx context.Context) ([]VoiceMetricCountsRow
 		return nil, err
 	}
 	return items, nil
+}
+
+const workerHeartbeatByID = `-- name: WorkerHeartbeatByID :one
+SELECT heartbeat_at
+FROM worker_heartbeats
+WHERE worker_id=$1 AND status='running'
+`
+
+func (q *Queries) WorkerHeartbeatByID(ctx context.Context, workerID string) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, workerHeartbeatByID, workerID)
+	var heartbeat_at pgtype.Timestamptz
+	err := row.Scan(&heartbeat_at)
+	return heartbeat_at, err
 }

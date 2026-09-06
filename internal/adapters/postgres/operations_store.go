@@ -58,6 +58,21 @@ func (store *OperationsStore) WorkerHealthy(ctx context.Context, staleAfter time
 	return heartbeat, time.Since(heartbeat) <= staleAfter, nil
 }
 
+func (store *OperationsStore) WorkerHealthyByID(ctx context.Context, workerID string, staleAfter time.Duration) (time.Time, bool, error) {
+	value, err := store.queries.WorkerHeartbeatByID(ctx, workerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if !value.Valid || value.InfinityModifier != 0 {
+		return time.Time{}, false, nil
+	}
+	heartbeat := value.Time.UTC()
+	return heartbeat, time.Since(heartbeat) <= staleAfter, nil
+}
+
 func (store *OperationsStore) Collect(ctx context.Context) (observability.Snapshot, error) {
 	row, err := store.queries.OperationalSnapshot(ctx)
 	if err != nil {

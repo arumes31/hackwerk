@@ -7,6 +7,7 @@ import (
 	"math"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"example.invalid/hackplan/internal/adapters/postgres/dbgen"
@@ -223,7 +224,7 @@ func (s *RouteStore) SaveRouteDraft(ctx context.Context, actor auth.Actor, input
 			return err
 		}
 		return insertAudit(ctx, q, actor, action, "route_draft", route.ID, input.RequestID,
-			[]string{"driver_id", "resource_ids", "departure_at", "depot", "routing_metrics", "stops"})
+			[]string{"driver_id", "resource_ids", "departure_at", "route_endpoints", "routing_metrics", "stops"})
 	})
 	if resultErr != nil {
 		return planning.RouteDraft{}, resultErr
@@ -309,18 +310,46 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 		if len(stops) == 0 || len(stops) != len(storedStops) {
 			return planning.ErrConflict
 		}
+		var inboundTravelSeconds int64
+		for _, stop := range stops {
+			inboundTravelSeconds += int64(stop.TravelDurationSeconds)
+		}
+		if inboundTravelSeconds > int64(draft.DurationSeconds) {
+			return planning.ErrConflict
+		}
+		returnBufferMinutes, bufferErr := routeTravelBufferMinutes(int64(draft.DurationSeconds) - inboundTravelSeconds)
+		if bufferErr != nil {
+			return bufferErr
+		}
 		driverID, _ := uuid(draft.RdDriverID)
-		chipperID, _ := uuid(draft.RdChipperResourceID)
+		var chipperID pgtype.UUID
+		if draft.RdChipperResourceID != "" {
+			chipperID, _ = uuid(draft.RdChipperResourceID)
+		}
 		var transportID pgtype.UUID
 		if draft.TransportResourceID != "" {
 			transportID, _ = uuid(draft.TransportResourceID)
 		}
-		for _, stop := range stops {
-			if err := validateRouteStopForAssignment(stop); err != nil {
+		reservationCursor := draft.DepartureAt.Time
+		for index, stop := range stops {
+			if err := validateRouteStopForAssignment(stop, transportID.Valid); err != nil {
 				return err
 			}
+			beforeMinutes, bufferErr := routeTravelBufferMinutes(int64(stop.TravelDurationSeconds))
+			if bufferErr != nil {
+				return bufferErr
+			}
+			reservedStartsAt := stop.PlannedStartsAt.Time.Add(-time.Duration(beforeMinutes) * time.Minute)
+			if !reservedStartsAt.Equal(reservationCursor) {
+				return planning.ErrConflict
+			}
+			afterMinutes := int32(0)
+			if index == len(stops)-1 {
+				afterMinutes = returnBufferMinutes
+			}
+			reservedEndsAt := stop.PlannedEndsAt.Time.Add(time.Duration(afterMinutes) * time.Minute)
 			available, availabilityErr := q.PlanningDriverAvailable(ctx, dbgen.PlanningDriverAvailableParams{
-				DriverID: driverID, StartsAt: stop.PlannedStartsAt, EndsAt: stop.PlannedEndsAt,
+				DriverID: driverID, StartsAt: timestamp(reservedStartsAt), EndsAt: timestamp(reservedEndsAt),
 			})
 			if availabilityErr != nil {
 				return availabilityErr
@@ -331,6 +360,7 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 			jobID, _ := uuid(stop.RsJobID)
 			appointmentID, insertErr := q.InsertAdoptedProposal(ctx, dbgen.InsertAdoptedProposalParams{
 				JobID: jobID, StartsAt: stop.PlannedStartsAt, EndsAt: stop.PlannedEndsAt,
+				BufferBeforeMinutes: beforeMinutes, BufferAfterMinutes: afterMinutes,
 			})
 			if insertErr != nil {
 				return mapRouteError(insertErr)
@@ -345,19 +375,18 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 			if rows != 1 {
 				return planning.ErrConflict
 			}
-			rows, insertErr = q.InsertAppointmentResource(ctx, dbgen.InsertAppointmentResourceParams{
-				AppointmentID: appointmentUUID, ResourceID: chipperID, Purpose: "chipping",
-			})
-			if insertErr != nil {
-				return mapRouteError(insertErr)
-			}
-			if rows != 1 {
-				return planning.ErrConflict
-			}
-			if stop.JobType == "chipping_with_transport" && stop.TransportMode == "internal" {
-				if !transportID.Valid {
+			if chipperID.Valid {
+				rows, insertErr = q.InsertAppointmentResource(ctx, dbgen.InsertAppointmentResourceParams{
+					AppointmentID: appointmentUUID, ResourceID: chipperID, Purpose: "chipping",
+				})
+				if insertErr != nil {
+					return mapRouteError(insertErr)
+				}
+				if rows != 1 {
 					return planning.ErrConflict
 				}
+			}
+			if transportID.Valid {
 				rows, insertErr = q.InsertAppointmentResource(ctx, dbgen.InsertAppointmentResourceParams{
 					AppointmentID: appointmentUUID, ResourceID: transportID, Purpose: "transport",
 				})
@@ -368,15 +397,17 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 					return planning.ErrConflict
 				}
 			}
-			ready, readyErr := q.AppointmentAssignmentsReady(ctx, dbgen.AppointmentAssignmentsReadyParams{
-				AppointmentID: appointmentUUID, JobType: stop.JobType, TransportMode: stop.TransportMode,
-				ExternalTransportConfirmed: stop.ExternalTransportConfirmed,
-			})
-			if readyErr != nil {
-				return readyErr
-			}
-			if !ready {
-				return planning.ErrConflict
+			if chipperID.Valid {
+				ready, readyErr := q.AppointmentAssignmentsReady(ctx, dbgen.AppointmentAssignmentsReadyParams{
+					AppointmentID: appointmentUUID, JobType: stop.JobType, TransportMode: stop.TransportMode,
+					ExternalTransportConfirmed: stop.ExternalTransportConfirmed, AllowMissingChipper: false,
+				})
+				if readyErr != nil {
+					return readyErr
+				}
+				if !ready {
+					return planning.ErrConflict
+				}
 			}
 			if err := q.SetJobWorkflow(ctx, dbgen.SetJobWorkflowParams{WorkflowStatus: "planning", JobID: jobID}); err != nil {
 				return err
@@ -391,6 +422,7 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 			if rows != 1 {
 				return planning.ErrConflict
 			}
+			reservationCursor = stop.PlannedEndsAt.Time
 		}
 		rows, setErr := q.SetRouteDraftAssigned(ctx, dbgen.SetRouteDraftAssignedParams{
 			ID: routeID, ExpectedVersion: input.ExpectedVersion,
@@ -408,6 +440,20 @@ func (s *RouteStore) AssignRoute(ctx context.Context, actor auth.Actor, input pl
 		return planning.RouteDraft{}, resultErr
 	}
 	return s.GetRoute(ctx, input.ID)
+}
+
+func routeTravelBufferMinutes(seconds int64) (int32, error) {
+	if seconds < 0 {
+		return 0, planning.ErrConflict
+	}
+	minutes := seconds / 60
+	if seconds%60 != 0 {
+		minutes++
+	}
+	if minutes > math.MaxInt32 {
+		return 0, planning.ErrConflict
+	}
+	return int32(minutes), nil
 }
 
 func (s *RouteStore) SaveRouteOrder(ctx context.Context, actor auth.Actor, input planning.SaveRouteOrderInput) (planning.RouteDraft, error) {
@@ -520,12 +566,29 @@ func (s *RouteStore) LatestAssignedRouteForDriver(ctx context.Context, driverID,
 	return s.GetRoute(ctx, id)
 }
 
+func (s *RouteStore) AssignedRouteExistsForDriver(ctx context.Context, driverID, localDate string) (bool, error) {
+	parsedDriverID, err := uuid(driverID)
+	if err != nil {
+		return false, planning.ErrNotFound
+	}
+	var date pgtype.Date
+	if err := date.Scan(localDate); err != nil || !date.Valid {
+		return false, planning.ErrValidation
+	}
+	return s.queries.AssignedRouteExistsForDriver(ctx, dbgen.AssignedRouteExistsForDriverParams{
+		DriverID:  parsedDriverID,
+		LocalDate: date,
+	})
+}
+
 type routeDraftValues struct {
 	actorID, driverID, chipperID pgtype.UUID
 	transportID                  string
 	departure                    pgtype.Timestamptz
+	startLabel                   string
 	startLatitude                pgtype.Numeric
 	startLongitude               pgtype.Numeric
+	endLabel                     string
 	endLatitude                  pgtype.Numeric
 	endLongitude                 pgtype.Numeric
 	routingSource                string
@@ -543,9 +606,12 @@ func prepareRouteDraftValues(actor auth.Actor, route planning.RouteDraft) (route
 	if err != nil {
 		return routeDraftValues{}, planning.ErrValidation
 	}
-	chipperID, err := uuid(route.ChipperResourceID)
-	if err != nil {
-		return routeDraftValues{}, planning.ErrValidation
+	var chipperID pgtype.UUID
+	if route.ChipperResourceID != "" {
+		chipperID, err = uuid(route.ChipperResourceID)
+		if err != nil {
+			return routeDraftValues{}, planning.ErrValidation
+		}
 	}
 	if route.TransportResourceID != "" {
 		if _, err := uuid(route.TransportResourceID); err != nil {
@@ -582,6 +648,7 @@ func prepareRouteDraftValues(actor auth.Actor, route planning.RouteDraft) (route
 	return routeDraftValues{
 		actorID: actorID, driverID: driverID, chipperID: chipperID,
 		transportID: route.TransportResourceID, departure: timestamp(route.Departure.UTC()),
+		startLabel: strings.TrimSpace(route.StartLabel), endLabel: strings.TrimSpace(route.EndLabel),
 		startLatitude: startLatitude, startLongitude: startLongitude,
 		endLatitude: endLatitude, endLongitude: endLongitude,
 		routingSource: route.Directions.Source, distanceMeters: distance,
@@ -593,7 +660,9 @@ func (v routeDraftValues) insertParams() dbgen.InsertRouteDraftParams {
 	return dbgen.InsertRouteDraftParams{
 		ActorUserID: v.actorID, DriverID: v.driverID, ChipperResourceID: v.chipperID,
 		TransportResourceID: v.transportID, DepartureAt: v.departure,
+		StartLabel:    v.startLabel,
 		StartLatitude: v.startLatitude, StartLongitude: v.startLongitude,
+		EndLabel:    v.endLabel,
 		EndLatitude: v.endLatitude, EndLongitude: v.endLongitude,
 		RoutingSource: v.routingSource, DistanceMeters: v.distanceMeters,
 		DurationSeconds: v.durationSeconds, RouteGeometry: v.geometry,
@@ -604,7 +673,9 @@ func (v routeDraftValues) updateParams(id pgtype.UUID, version int32) dbgen.Upda
 	return dbgen.UpdateRouteDraftParams{
 		ActorUserID: v.actorID, DriverID: v.driverID, ChipperResourceID: v.chipperID,
 		TransportResourceID: v.transportID, DepartureAt: v.departure,
+		StartLabel:    v.startLabel,
 		StartLatitude: v.startLatitude, StartLongitude: v.startLongitude,
+		EndLabel:    v.endLabel,
 		EndLatitude: v.endLatitude, EndLongitude: v.endLongitude,
 		RoutingSource: v.routingSource, DistanceMeters: v.distanceMeters,
 		DurationSeconds: v.durationSeconds, RouteGeometry: v.geometry,
@@ -663,20 +734,25 @@ func lockRouteSelections(ctx context.Context, q *dbgen.Queries, route planning.R
 	if !driverReady {
 		return planning.ErrConflict
 	}
-	resourceTexts := []string{route.ChipperResourceID}
+	resourceTexts := make([]string, 0, 2)
+	if route.ChipperResourceID != "" {
+		resourceTexts = append(resourceTexts, route.ChipperResourceID)
+	}
 	if route.TransportResourceID != "" {
 		resourceTexts = append(resourceTexts, route.TransportResourceID)
 	}
 	resourceIDs, err := uuidSlice(resourceTexts)
-	if err != nil || route.ChipperResourceID == route.TransportResourceID {
+	if err != nil || (route.ChipperResourceID != "" && route.ChipperResourceID == route.TransportResourceID) {
 		return planning.ErrValidation
 	}
-	locked, err := q.LockPlanningResources(ctx, resourceIDs)
-	if err != nil {
-		return err
-	}
-	if len(locked) != len(resourceIDs) {
-		return planning.ErrConflict
+	if len(resourceIDs) > 0 {
+		locked, lockErr := q.LockPlanningResources(ctx, resourceIDs)
+		if lockErr != nil {
+			return lockErr
+		}
+		if len(locked) != len(resourceIDs) {
+			return planning.ErrConflict
+		}
 	}
 	resources, err := q.ListRouteResources(ctx)
 	if err != nil {
@@ -686,7 +762,7 @@ func lockRouteSelections(ctx context.Context, q *dbgen.Queries, route planning.R
 	for _, resource := range resources {
 		types[resource.ID] = resource.ResourceType
 	}
-	if types[route.ChipperResourceID] != "chipper" {
+	if route.ChipperResourceID != "" && types[route.ChipperResourceID] != "chipper" {
 		return planning.ErrConflict
 	}
 	if route.TransportResourceID != "" && types[route.TransportResourceID] != "transport_vehicle" {
@@ -695,14 +771,25 @@ func lockRouteSelections(ctx context.Context, q *dbgen.Queries, route planning.R
 	return nil
 }
 
-func validateRouteStopForAssignment(stop dbgen.LockRouteStopsForAssignmentRow) error {
+func validateRouteStopForAssignment(stop dbgen.LockRouteStopsForAssignmentRow, hasTransportResource bool) error {
 	if stop.ArchivedAt.Valid || stop.WaitlistID == "" || stop.JobVersion != stop.CurrentJobVersion ||
 		stop.WaitlistVersion != stop.CurrentWaitlistVersion ||
 		(stop.WorkflowStatus != "waitlist" && stop.WorkflowStatus != "planning") ||
 		stop.Latitude == "" || stop.Longitude == "" || !stop.PlannedEndsAt.Time.After(stop.PlannedStartsAt.Time) {
 		return planning.ErrConflict
 	}
-	return nil
+	switch stop.JobType {
+	case "chipping_only":
+		return nil
+	case "chipping_with_transport":
+		if stop.TransportMode == "internal" && hasTransportResource {
+			return nil
+		}
+		if stop.TransportMode == "external" && stop.ExternalTransportConfirmed {
+			return nil
+		}
+	}
+	return planning.ErrConflict
 }
 
 func validateRouteOrder(stored []dbgen.ListRouteStopsRow, stops []planning.RouteStop, order []string) error {
@@ -764,7 +851,7 @@ func getRoute(ctx context.Context, q *dbgen.Queries, id pgtype.UUID) (planning.R
 		ID: row.RdID, DriverID: row.RdDriverID, ChipperResourceID: row.RdChipperResourceID,
 		TransportResourceID: row.TransportResourceID,
 		DriverName:          row.DriverName, ChipperName: row.ChipperName, TransportName: row.TransportName,
-		Status:  planning.RouteStatus(row.Status),
+		Status: planning.RouteStatus(row.Status), StartLabel: row.StartLabel, EndLabel: row.EndLabel,
 		Version: row.Version, Departure: row.DepartureAt.Time.UTC(),
 		Start: planning.Point{Latitude: startLatitude, Longitude: startLongitude},
 		End:   planning.Point{Latitude: endLatitude, Longitude: endLongitude},
@@ -879,8 +966,18 @@ func routeMetrics(value planning.RouteDirections) (int32, int32, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	duration, err := durationSeconds(value.Duration)
-	return distance, duration, err
+	var duration int64
+	for _, leg := range value.Legs {
+		seconds, secondsErr := durationSeconds(leg.Duration)
+		if secondsErr != nil {
+			return 0, 0, secondsErr
+		}
+		duration += int64(seconds)
+		if duration > math.MaxInt32 {
+			return 0, 0, planning.ErrValidation
+		}
+	}
+	return distance, int32(duration), nil
 }
 
 func nonnegativeInt32(value int) (int32, error) {
@@ -894,7 +991,7 @@ func durationSeconds(value time.Duration) (int32, error) {
 	if value < 0 {
 		return 0, planning.ErrValidation
 	}
-	seconds := math.Round(value.Seconds())
+	seconds := math.Ceil(value.Seconds())
 	if seconds > math.MaxInt32 {
 		return 0, planning.ErrValidation
 	}

@@ -6,10 +6,85 @@ info:
 servers:
   - url: http://localhost:18533
 paths:
+  /search:
+    post:
+      operationId: searchWorkspace
+      description: Authentifizierte, rollenbasierte Navigation über Kunden, Aufträge und aktive Termine. Der Suchtext bleibt im POST-Body, wird nicht gespeichert und die Antwort ist immer `no-store`.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [csrf_token, q]
+              properties:
+                csrf_token: { type: string, writeOnly: true }
+                q: { type: string, minLength: 2, maxLength: 120 }
+      responses:
+        "200":
+          description: Höchstens 24 navigierende Treffer, jeweils maximal acht pro Objektart.
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    maxItems: 24
+                    items: { $ref: "#/components/schemas/WorkspaceSearchResult" }
+            text/html: { schema: { type: string } }
+        "403": { description: Session, Rolle oder CSRF ungültig. }
+        "422": { description: Suchtext ist zu kurz oder zu lang. }
+  /api/v1/geocoding/search:
+    post:
+      operationId: searchGeocodingCandidates
+      description: Sucht über den statisch konfigurierten Geocoding-Dienst nach Kartenpositionen. Speichert weder Suchtext noch Treffer; die Browserauswahl übernimmt Adresse und Koordinaten nur gemeinsam in den lokalen Formularentwurf.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [query]
+              properties:
+                query: { type: string, minLength: 3, maxLength: 200 }
+      responses:
+        "200":
+          description: Höchstens die konfigurierte Anzahl prüfbarer Kartentreffer; keine serverseitige Mutation.
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    maxItems: 10
+                    items: { $ref: "#/components/schemas/GeocodingResult" }
+        "403": { description: Session, Rolle oder CSRF ungültig. }
+        "422": { description: Suchtext ist zu kurz oder zu lang. }
+        "429": { description: Adresssuchlimit erreicht. }
+        "502": { description: Konfigurierter Geocoding-Dienst nicht verfügbar; manuelle Karte bleibt nutzbar. }
   /api/v1/voice/drafts:
     post:
       operationId: createVoiceDraft
-      description: Validiert und verarbeitet eine begrenzte Audiodatei zu einem eigentümergebundenen, ablaufenden Review-Entwurf. Legt weder Kunde, Auftrag, Wartelisteneintrag noch Termin an.
+      description: Validiert eine begrenzte Audiodatei und speichert sie atomar als eigentümergebundenen Queue-Entwurf. Die asynchrone Verarbeitung legt weder Kunde, Auftrag, Wartelisteneintrag noch Termin an.
       security: [{ sessionCookie: [] }]
       parameters:
         - name: X-CSRF-Token
@@ -23,13 +98,14 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [audio, duration_ms]
+              required: [idempotency_key, audio, duration_ms]
               properties:
+                idempotency_key: { type: string, minLength: 16, maxLength: 128, description: Eigentümergebundener Wiederholungsschlüssel; serverseitig wird ausschließlich SHA-256 persistiert. }
                 audio: { type: string, format: binary, description: WebM, Ogg, WAV oder MP4; serverseitig auf Container und Größe geprüft. }
                 duration_ms: { type: integer, minimum: 1, maximum: 90000 }
       responses:
-        "201":
-          description: Review-Entwurf oder sicher fehlgeschlagener Entwurf erzeugt; Audio wurde nach dem Versuch gelöscht.
+        "202":
+          description: Aufnahme sicher zur asynchronen Verarbeitung angenommen.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/VoiceDraftCreated" }
@@ -39,6 +115,82 @@ paths:
         "422": { description: Datei ist leer oder die angegebene Dauer ungültig. }
         "429": { description: Benutzerbezogenes Rate- oder Parallelitätslimit erreicht. }
         "503": { description: Spracheingabe administrativ deaktiviert. }
+  /api/v1/voice/drafts/{draftID}:
+    get:
+      operationId: getVoiceDraftStatus
+      description: Liefert dem Besitzer ausschließlich Status und Version seines Entwurfs für das begrenzte Browser-Polling.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: draftID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Aktueller Entwurfsstatus.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status, version]
+                properties:
+                  status: { type: string, enum: [recorded, transcribing, needs_review, failed, committed, expired] }
+                  version: { type: integer, minimum: 1 }
+        "403": { description: Session oder Rolle ungültig. }
+        "404": { description: Entwurf fehlt oder gehört einem anderen Benutzer. }
+  /voice/upload:
+    post:
+      operationId: createVoiceDraftNative
+      description: JavaScript-freier, serverseitig begrenzter Datei-Upload. Prüft Same-Origin sowie den sessiongebundenen CSRF-Formwert und leitet ausschließlich zu einem Review-Entwurf weiter.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [csrf_token, idempotency_key, audio, duration_seconds]
+              properties:
+                csrf_token: { type: string }
+                idempotency_key: { type: string, minLength: 16, maxLength: 128, description: Eigentümergebundener Wiederholungsschlüssel; serverseitig wird ausschließlich SHA-256 persistiert. }
+                audio: { type: string, format: binary, description: WebM, Ogg, WAV oder MP4; serverseitig auf Container und Größe geprüft. }
+                duration_seconds: { type: integer, minimum: 1, maximum: 90 }
+      responses:
+        "303": { description: Audio gelöscht; Weiterleitung zur menschlichen Entwurfsprüfung. }
+        "403": { description: Session, Same-Origin oder CSRF ungültig. }
+        "413": { description: Upload überschreitet das konfigurierte Limit. }
+        "415": { description: Container oder MIME-Typ wird nicht unterstützt; Formular bleibt nutzbar. }
+        "422": { description: Datei ist leer oder die angegebene Dauer ungültig; Formular bleibt nutzbar. }
+        "429": { description: Benutzerbezogenes Rate- oder Parallelitätslimit erreicht. }
+        "503": { description: Spracheingabe administrativ deaktiviert. }
+  /voice/drafts/{draftID}/retranscribe:
+    post:
+      operationId: retryVoiceDraftTranscription
+      description: Reiht einen fehlgeschlagenen, nicht abgelaufenen Entwurf seines Besitzers genau einmal erneut zur Transkription ein. Erzeugt weiterhin nur einen prüfbaren Entwurf.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: draftID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [csrf_token, version]
+              properties:
+                csrf_token: { type: string }
+                version: { type: integer, minimum: 1 }
+      responses:
+        "303": { description: Neuverarbeitung eingereiht; Weiterleitung zum Entwurf. }
+        "403": { description: Session, Besitzer oder CSRF ungültig. }
+        "409": { description: Status, Version, Ablauf oder einmaliges Retry-Limit erlauben keine Neuverarbeitung. }
+        "422": { description: Entwurfs-ID oder Version ungültig. }
   /api/v1/planning/suggestions:
     post:
       operationId: createPlanningSuggestions
@@ -89,7 +241,7 @@ paths:
           application/x-www-form-urlencoded:
             schema:
               type: object
-              required: [job_id, driver_id, chipper_resource_id, departure_date, departure_time, csrf_token]
+              required: [job_id, driver_id, chipper_resource_id, departure_date, departure_time, start_selection, end_selection, csrf_token]
               properties:
                 job_id: { type: array, minItems: 1, maxItems: 23, items: { type: string, format: uuid } }
                 fixed_job_id: { type: array, maxItems: 23, items: { type: string, format: uuid }, description: Ausgewählte Stopps, deren relative Position bei Optimierung fixiert bleibt. }
@@ -99,13 +251,66 @@ paths:
                 departure_date: { type: string, format: date, description: Lokales Datum in Europe/Vienna. }
                 departure_time: { type: string, pattern: "^[0-2][0-9]:[0-5][0-9]$", description: Lokale Uhrzeit in Europe/Vienna. }
                 optimize: { type: boolean, default: true }
-                end_at_last_stop: { type: boolean, default: false, description: Route endet am letzten Stopp statt wieder am Depot. }
+                start_selection: { type: string, description: "Gespeicherter Ort als saved:<uuid> oder immer verfügbare individuelle Auswahl custom." }
+                end_selection: { type: string, description: "Gespeicherter Ort als saved:<uuid>, individuelle Auswahl custom oder last_stop." }
+                start_location_id: { type: string, format: uuid, description: Bei gespeicherter Auswahl serverseitig mit Auswahl und Version abgeglichen. }
+                start_location_version: { type: integer, minimum: 1 }
+                end_location_id: { type: string, format: uuid, description: Bei gespeicherter Auswahl serverseitig mit Auswahl und Version abgeglichen. }
+                end_location_version: { type: integer, minimum: 1 }
+                start_custom_label: { type: string, maxLength: 120 }
+                start_custom_address: { type: string, maxLength: 500 }
+                start_custom_confirmed: { type: boolean, description: Muss für einen individuellen Startort ausdrücklich true sein. }
+                end_custom_label: { type: string, maxLength: 120 }
+                end_custom_address: { type: string, maxLength: 500 }
+                end_custom_confirmed: { type: boolean, description: Muss für einen individuellen Endort ausdrücklich true sein. }
+                start_latitude: { type: number, minimum: -90, maximum: 90 }
+                start_longitude: { type: number, minimum: -180, maximum: 180 }
+                end_latitude: { type: number, minimum: -90, maximum: 90 }
+                end_longitude: { type: number, minimum: -180, maximum: 180 }
                 csrf_token: { type: string }
       responses:
         "303": { description: Routenentwurf berechnet. }
         "403": { description: Nur Administratoren dürfen Routen planen. }
         "409": { description: Auftrags- oder Wartelistendaten wurden parallel verändert. }
         "422": { description: Auswahl, Standort oder Routingdaten ungültig. }
+  /settings/route-locations:
+    get:
+      operationId: getRouteLocationSettings
+      description: Zeigt Administratoren aktive und deaktivierte Routenorte sowie die aktuellen Standard-Vorauswahlen.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Serverseitig gerenderte Routenort-Einstellungen. }
+        "403": { description: Nur Administratoren dürfen Routenorte verwalten. }
+    post:
+      operationId: createRouteLocation
+      description: Speichert einen ausdrücklich bestätigten Routenort und setzt optional atomar den Standard für Start und/oder Ende.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Routenort gespeichert. }
+        "403": { description: Nur Administratoren dürfen Routenorte verwalten. }
+        "422": { description: Bezeichnung, Adresse, Koordinaten oder Bestätigung ungültig. }
+  /settings/route-locations/{routeLocationID}:
+    post:
+      operationId: updateRouteLocation
+      description: Aktualisiert einen aktiven Routenort mit optimistischer Versionierung und optionaler Standard-Vorauswahl.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: routeLocationID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "303": { description: Routenort aktualisiert. }
+        "409": { description: Routenort wurde parallel geändert. }
+        "422": { description: Änderung wurde nicht ausdrücklich bestätigt oder ist ungültig. }
+  /settings/route-locations/{routeLocationID}/deactivate:
+    post:
+      operationId: deactivateRouteLocation
+      description: Deaktiviert einen Routenort. Das Entfernen eines aktuellen Standards verlangt eine zusätzliche Bestätigung.
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: routeLocationID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "303": { description: Routenort deaktiviert. }
+        "409": { description: Routenort wurde parallel geändert. }
+        "422": { description: Bestätigung zum Entfernen des Standards fehlt. }
   /planning/routes/{routeID}/assign:
     post:
       operationId: assignRouteDraft
@@ -248,9 +453,49 @@ paths:
                 username: { type: string }
                 password: { type: string, format: password, writeOnly: true }
       responses:
-        "303": { description: Anmeldung erfolgreich; opaque Session wurde rotiert. }
+        "303": { description: Anmeldung erfolgreich; neue opaque Session wurde angelegt oder der zweite Faktor wird angefordert. }
         "401": { description: Generische ungültige Zugangsdaten. }
         "429": { description: Loginlimit erreicht, mit derselben generischen sichtbaren Meldung. }
+  /login/mfa:
+    get:
+      operationId: getSecondFactor
+      security: [{ mfaCookie: [] }]
+      responses:
+        "200": { description: Zweiter Login-Schritt mit den eingerichteten TOTP-, Passkey- und Recovery-Optionen. }
+        "303": { description: Challenge fehlt oder ist abgelaufen; zurück zur Anmeldung. }
+    post:
+      operationId: completeSecondFactor
+      security: [{ mfaCookie: [] }]
+      description: Verbraucht einen gültigen TOTP- oder Recovery-Code atomar und erzeugt erst danach eine reguläre Sitzung.
+      responses:
+        "303": { description: Zweiter Faktor gültig; neue parallele Sitzung angelegt. }
+        "401": { description: Generischer Fehler ohne Preisgabe von Faktor- oder Kontostatus. }
+  /login/mfa/passkey/options:
+    post:
+      operationId: beginPasskeyLogin
+      security: [{ mfaCookie: [] }]
+      responses:
+        "200": { description: Kurzlebige, serverseitig gebundene WebAuthn-Assertion-Optionen. }
+        "401": { description: Challenge ungültig oder Passkey nicht verfügbar. }
+  /login/mfa/passkey/finish:
+    post:
+      operationId: finishPasskeyLogin
+      security: [{ mfaCookie: [] }]
+      responses:
+        "200": { description: Assertion einmalig akzeptiert und reguläre Sitzung angelegt. }
+        "401": { description: Assertion generisch abgelehnt. }
+  /profil/email/bestaetigen:
+    get:
+      operationId: verifyOwnEmailChange
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "303": { description: Einmaliger Link akzeptiert; neue normalisierte E-Mail-Adresse aktiv. }
+        "410": { description: Link abgelaufen. }
+        "422": { description: Link ungültig oder bereits verwendet. }
   /logout:
     post:
       operationId: postLogout
@@ -271,6 +516,92 @@ paths:
         "303": { description: Passwort geändert und bestehende Sessions widerrufen. }
         "403": { description: CSRF-Prüfung fehlgeschlagen. }
         "422": { description: Passwortpolicy oder Bestätigung ungültig. }
+  /profile:
+    get:
+      operationId: getOwnProfile
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Eigenes Profil mit Identität, E-Mail-Status, Sicherheitsmethoden, Recovery-Code-Anzahl, aktiven Sitzungen und Systemstatus. }
+        "401": { description: Anmeldung erforderlich. }
+  /profile/details:
+    post:
+      operationId: updateOwnProfile
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Anzeigename, Anrede und dienstliche Telefonnummer normalisiert, versioniert und auditiert gespeichert. }
+        "403": { description: CSRF-Prüfung fehlgeschlagen. }
+        "409": { description: Profilversion veraltet. }
+        "422": { description: Eingabe ungültig. }
+  /profile/email:
+    post:
+      operationId: requestOwnEmailChange
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Ausstehende Adresse und Transactional-Outbox-Ereignis atomar angelegt; aktive Adresse unverändert. }
+        "403": { description: CSRF-Prüfung fehlgeschlagen. }
+        "422": { description: Adresse ungültig oder mit der aktiven Adresse identisch. }
+  /profile/email/resend:
+    post:
+      operationId: resendOwnEmailVerification
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Neuer zeitlich begrenzter Link in der Outbox vorgemerkt. }
+        "429": { description: Begrenztes Resend-Intervall noch nicht erreicht. }
+  /profile/email/cancel:
+    post:
+      operationId: cancelOwnEmailChange
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Eigene ausstehende Änderung abgebrochen. }
+        "409": { description: Keine abbrechbare Änderung vorhanden. }
+  /profile/security/passkeys/options:
+    post:
+      operationId: beginOwnPasskeyRegistration
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Kurzlebige WebAuthn-Registrierungsoptionen, an Benutzer und aktuelle Sitzung gebunden. }
+        "403": { description: CSRF-Prüfung fehlgeschlagen. }
+  /profile/security/passkeys/finish:
+    post:
+      operationId: finishOwnPasskeyRegistration
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Passkey registriert; falls nötig einmalig sichtbare Recovery-Codes enthalten. }
+        "403": { description: CSRF-Prüfung fehlgeschlagen. }
+        "422": { description: Challenge abgelaufen oder WebAuthn-Antwort ungültig. }
+  /profile/sessions/{sessionID}/revoke:
+    parameters:
+      - name: sessionID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: revokeOwnSession
+      description: Widerruft ausschließlich eine Sitzung des angemeldeten Benutzers; fremde IDs werden nicht aufgelöst.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Sitzung widerrufen. }
+        "404": { description: Sitzung nicht aktiv oder nicht dem Benutzer zugeordnet. }
+  /profile/sessions/revoke-all:
+    post:
+      operationId: revokeAllOwnSessions
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Alle Sitzungen einschließlich der aktuellen atomar widerrufen. }
+  /admin/users/{userID}/reset-security:
+    parameters:
+      - name: userID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: resetUserSecurity
+      description: Kontrollierter, auditierter Admin-Recovery nach Identitätsprüfung; entfernt Faktoren und Recovery-Codes, widerruft Sitzungen und erzwingt Passwortänderung.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "303": { description: Sicherheitszugang atomar zurückgesetzt. }
+        "403": { description: Benutzerverwaltung oder CSRF fehlt. }
+        "409": { description: Benutzer-Version veraltet. }
   /admin/users:
     get:
       operationId: listUsers
@@ -350,6 +681,41 @@ paths:
       responses:
         "200": { description: Suchergebnis nach Name, Firma, Ort, Telefon oder Auftragsnummer. }
         "403": { description: Berechtigung oder CSRF fehlt. }
+  /customers/customer-only:
+    post:
+      operationId: createCustomerOnly
+      description: Erzeugt bewusst nur eine Kundenakte, ohne Auftrag oder Wartelisteneintrag.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/CustomerOnlyForm" }
+      responses:
+        "303": { description: Kundenakte angelegt; Redirect zur Kundenakte, optional mit Dublettenhinweis. }
+        "403": { description: Berechtigung oder CSRF fehlt. }
+        "422": { description: Kundenangaben fachlich ungültig. }
+  /transport-partners:
+    get:
+      operationId: listTransportPartners
+      description: Zeigt berechtigten Administratoren und Fahrern die wiederverwendbaren aktiven Transportpartner.
+      security: [{ sessionCookie: [] }]
+      responses:
+        "200": { description: Serverseitig gerenderte Liste mit Person/Firma, Name und optionalen Kontaktdaten. }
+        "403": { description: Berechtigung fehlt. }
+    post:
+      operationId: createTransportPartner
+      description: Erfasst einen von Fahrerprofilen und Fahrzeugressourcen getrennten Transportpartner.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: "#/components/schemas/TransportPartnerForm" }
+      responses:
+        "303": { description: Transportpartner angelegt und zur Liste weitergeleitet. }
+        "403": { description: Berechtigung oder CSRF fehlt. }
+        "422": { description: Art oder Name ungültig beziehungsweise bereits aktiv vergeben. }
   /customers/{customerID}:
     parameters:
       - $ref: "#/components/parameters/CustomerID"
@@ -418,9 +784,9 @@ paths:
                 - $ref: "#/components/schemas/JobForm"
                 - $ref: "#/components/schemas/VersionForm"
       responses:
-        "303": { description: Auftrag aktualisiert. }
+        "303": { description: Offener Auftrag einschließlich Einsatzort aktualisiert. Bei scheduled bleiben Terminzeit und Reservierungen unverändert; geänderte kundenrelevante Daten widerrufen die alte Bestätigung ohne automatischen Neuversand. }
         "403": { description: Berechtigung oder CSRF fehlt. }
-        "409": { description: Erwartete Version ist veraltet oder Auftrag nicht mehr bearbeitbar. }
+        "409": { description: Erwartete Version ist veraltet, Auftrag nicht mehr offen oder neue Dauer/Transportdaten sind mit dem fixierten Termin beziehungsweise seinen Ressourcen unvereinbar. }
         "422": { description: Auftrag fachlich ungültig. }
   /jobs/{jobID}/archive:
     parameters:
@@ -565,7 +931,7 @@ paths:
   /availability:
     get:
       operationId: getOwnAvailability
-      description: Mobile HTML-Verwaltung der eigenen Wochenregeln und Ausnahmen; das Zielprofil stammt ausschließlich aus der Session.
+      description: Mobile HTML-Verwaltung gemäß Profilrichtlinie; Aushilfsfahrer erfassen nur einzelne verfügbare Tage/Zeitfenster, das Zielprofil stammt ausschließlich aus der Session.
       security: [{ sessionCookie: [] }]
       responses:
         "200": { description: Wochenplan, Ausnahmen und normalisierte 14-Tage-Vorschau in Europe/Vienna. }
@@ -591,7 +957,7 @@ paths:
   /availability/exceptions/vacation-preset:
     post:
       operationId: createOwnVacationPreset
-      description: Erzeugt Abwesenheitsausnahmen für einen Tag oder eine Arbeitswoche in Europe/Vienna.
+      description: Erzeugt ausschließlich für bestehende Profile im Übergangsmodus Abwesenheitsausnahmen für einen Tag oder eine Arbeitswoche in Europe/Vienna.
       security: [{ sessionCookie: [] }]
       responses:
         "303": { description: Urlaubsausnahmen gespeichert. }
@@ -725,6 +1091,38 @@ paths:
               schema: { $ref: "#/components/schemas/AppointmentDetail" }
         "403": { description: Kalenderberechtigung fehlt. }
         "404": { description: Termin nicht gefunden. }
+  /api/v1/appointments/{appointmentID}/preview:
+    parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
+    post:
+      operationId: previewAppointmentMutation
+      description: Nebenwirkungsfreie Admin-Prüfung vor Move, Resize, Assignment oder Fixierung. Eine Abweichung vom Kunden-Wunschzeitraum erscheint als nicht blockierende Warnung. Mutation und PostgreSQL-Reservierungsconstraints prüfen beim anschließenden Schreiben erneut.
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: true
+              required: [csrf_token, version, action]
+              properties:
+                csrf_token: { type: string, writeOnly: true }
+                version: { type: integer, minimum: 1 }
+                action: { type: string, enum: [assign, move, resize, fix] }
+                starts_at: { type: string, format: date-time }
+                ends_at: { type: string, format: date-time }
+                without_notification_reason: { type: string, maxLength: 1000 }
+      responses:
+        "200":
+          description: Pass/Fail-Prüfliste, Alt/Neu-Zeit, Zeitanteile und datensparsame Konflikte; keine Speicherung oder Benachrichtigung.
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppointmentPreflight" }
+        "403": { description: Nur Administratoren dürfen Terminmutationen prüfen. }
+        "404": { description: Termin nicht gefunden. }
+        "422": { description: Aktion, Version, Zeit oder Zuweisung ungültig. }
   /api/v1/appointments/{appointmentID}/move:
     parameters: [{ $ref: "#/components/parameters/AppointmentID" }]
     post:
@@ -1068,13 +1466,30 @@ components:
       required: true
       schema: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
   schemas:
+    GeocodingResult:
+      type: object
+      additionalProperties: false
+      required: [label, latitude, longitude, bounds]
+      properties:
+        label: { type: string, maxLength: 500 }
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+        bounds:
+          type: array
+          minItems: 4
+          maxItems: 4
+          prefixItems:
+            - { type: number, minimum: -90, maximum: 90, description: Süd }
+            - { type: number, minimum: -90, maximum: 90, description: Nord }
+            - { type: number, minimum: -180, maximum: 180, description: West }
+            - { type: number, minimum: -180, maximum: 180, description: Ost }
     VoiceDraftCreated:
       type: object
       additionalProperties: false
       required: [draft_id, status, location]
       properties:
         draft_id: { type: string, format: uuid }
-        status: { type: string, enum: [needs_review, failed] }
+        status: { type: string, enum: [recorded] }
         location: { type: string, pattern: "^/voice/drafts/[0-9a-f-]+$" }
     CalendarEvent:
       type: object
@@ -1096,7 +1511,7 @@ components:
     AppointmentDetail:
       type: object
       additionalProperties: false
-      required: [id, job_id, customer_id, title, start, end, lifecycle, status_label, locality, volume_m3, drivers, resources, notes, maps_url, phone, email, notification_preference, notification_channels, notification_targets, notification_warning, notification_suggestion, notification_requires_override, notifications, version, can_complete, complete_requires_override, can_fix, can_cancel, can_reopen, can_reschedule, can_swap, can_reissue, can_reset_confirmation]
+      required: [id, job_id, customer_id, title, start, end, lifecycle, status_label, locality, volume_m3, drivers, resources, notes, maps_url, phone, email, notification_preference, notification_channels, notification_targets, notification_warning, notification_suggestion, notification_requires_override, notifications, version, working_minutes, transport_minutes, buffer_before_minutes, buffer_after_minutes, can_complete, complete_requires_override, can_fix, can_cancel, can_reopen, can_assign, can_reschedule, can_swap, can_reissue, can_reset_confirmation]
       properties:
         id: { type: string, format: uuid }
         job_id: { type: string, format: uuid }
@@ -1139,15 +1554,68 @@ components:
         notification_requires_override: { type: boolean }
         notifications: { type: array, items: { $ref: "#/components/schemas/NotificationStatus" } }
         version: { type: integer, minimum: 1 }
+        working_minutes: { type: integer, minimum: 0 }
+        transport_minutes: { type: integer, minimum: 0 }
+        buffer_before_minutes: { type: integer, minimum: 0 }
+        buffer_after_minutes: { type: integer, minimum: 0 }
+        message_preview: { $ref: "#/components/schemas/NotificationTemplatePreview", description: "Ausschließlich für Administratoren; ohne Roh-Token und ohne Nebenwirkung." }
         can_complete: { type: boolean, description: Der angemeldete Akteur darf diesen fixierten Termin unter den aktuellen Zeit-, Zuweisungs- und Fahrerprofilregeln abschließen. }
         complete_requires_override: { type: boolean, description: Ein Administrator muss den Abschluss vor Terminbeginn begründen. }
         can_fix: { type: boolean }
         can_cancel: { type: boolean }
         can_reopen: { type: boolean }
+        can_assign: { type: boolean }
         can_reschedule: { type: boolean, description: Admin darf den editierbaren Termin per Dialog ohne Drag-and-drop verschieben oder in der Dauer ändern. }
         can_swap: { type: boolean }
         can_reissue: { type: boolean }
         can_reset_confirmation: { type: boolean }
+    WorkspaceSearchResult:
+      type: object
+      additionalProperties: false
+      required: [kind, id, title, href]
+      properties:
+        kind: { type: string, enum: [customer, job, appointment] }
+        id: { type: string, format: uuid }
+        parent_id: { type: string, format: uuid }
+        title: { type: string }
+        subtitle: { type: string }
+        href: { type: string, description: Rollenberechtigtes internes Navigationsziel. }
+    NotificationTemplatePreview:
+      type: object
+      additionalProperties: false
+      required: [subject, text, sms, sms_encoding, sms_segments]
+      properties:
+        subject: { type: string }
+        text: { type: string, description: "Enthält ausschließlich den Marker `[BESTÄTIGUNGSLINK]`, niemals einen Roh-Token." }
+        sms: { type: string, description: "Enthält ausschließlich den Marker `[BESTÄTIGUNGSLINK]`, niemals einen Roh-Token." }
+        sms_encoding: { type: string, enum: [GSM-7, UCS-2] }
+        sms_segments: { type: integer, minimum: 0 }
+    AppointmentPreflight:
+      type: object
+      additionalProperties: false
+      required: [current_starts_at, current_ends_at, proposed_starts_at, proposed_ends_at, working_minutes, transport_minutes, buffer_before_minutes, buffer_after_minutes, checks, conflicts]
+      properties:
+        current_starts_at: { type: string, format: date-time }
+        current_ends_at: { type: string, format: date-time }
+        proposed_starts_at: { type: string, format: date-time }
+        proposed_ends_at: { type: string, format: date-time }
+        working_minutes: { type: integer, minimum: 0 }
+        transport_minutes: { type: integer, minimum: 0 }
+        buffer_before_minutes: { type: integer, minimum: 0 }
+        buffer_after_minutes: { type: integer, minimum: 0 }
+        checks:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, label, detail, passed, severity]
+            properties:
+              key: { type: string }
+              label: { type: string }
+              detail: { type: string }
+              passed: { type: boolean }
+              severity: { type: string, enum: [blocking, warning, info] }
+        conflicts: { type: array, items: { type: object, additionalProperties: true } }
     NotificationStatus:
       type: object
       additionalProperties: false
@@ -1207,7 +1675,7 @@ components:
         starts_at: { type: string, format: date-time }
         ends_at: { type: string, format: date-time }
         status: { type: string, enum: [available, limited, unavailable] }
-        source: { type: string, enum: [none, rule, exception, inactive_driver] }
+        source: { type: string, enum: [none, rule, exception, policy, inactive_driver] }
         source_type: { type: string }
         reason: { type: string, description: Minimierter deutscher Grund ohne interne Bemerkung. }
     AvailabilityResponse:
@@ -1271,6 +1739,7 @@ components:
         transport_duration: { type: string, description: Minuten oder Stunden:Minuten. }
         transport_trips: { type: integer, minimum: 0 }
         transport_mode: { type: string, enum: [none, internal, external, undecided] }
+        transport_partner_id: { type: string, format: uuid, description: Optionaler aktiver Partner; bei chipping_only unzulässig. }
         external_confirmed: { type: boolean, default: false }
         preferred_start: { type: string, format: date }
         preferred_end: { type: string, format: date }
@@ -1283,8 +1752,30 @@ components:
       allOf:
         - $ref: "#/components/schemas/CustomerFields"
         - $ref: "#/components/schemas/JobForm"
+    CustomerOnlyForm:
+      allOf:
+        - $ref: "#/components/schemas/CustomerFields"
+        - type: object
+          required: [csrf_token]
+          properties:
+            csrf_token: { type: string, writeOnly: true }
+    TransportPartnerForm:
+      type: object
+      additionalProperties: false
+      required: [csrf_token, partner_type, name]
+      properties:
+        csrf_token: { type: string, writeOnly: true }
+        partner_type: { type: string, enum: [person, company] }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        phone: { type: string, maxLength: 64 }
+        address: { type: string, maxLength: 1000 }
+        internal_note: { type: string, maxLength: 2000 }
   securitySchemes:
     sessionCookie:
       type: apiKey
       in: cookie
       name: hackwerk_session
+    mfaCookie:
+      type: apiKey
+      in: cookie
+      name: hackwerk_mfa

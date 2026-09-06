@@ -66,7 +66,21 @@ func TestRouteMetricConversionsRejectOverflowAndRoundProviderDurations(t *testin
 	if got, err := durationSeconds(time.Second + 600*time.Millisecond); err != nil || got != 2 {
 		t.Fatalf("durationSeconds() = %d, %v, want 2, nil", got, err)
 	}
+	if got, err := durationSeconds(time.Second + 100*time.Millisecond); err != nil || got != 2 {
+		t.Fatalf("durationSeconds() = %d, %v, want 2, nil", got, err)
+	}
 	if got, err := durationSeconds(90 * time.Second); err != nil || got != 90 {
 		t.Fatalf("durationSeconds() = %d, %v, want 90, nil", got, err)
+	}
+	distance, duration, err := routeMetrics(planning.RouteDirections{
+		DistanceMeters: 123,
+		Duration:       2*time.Second + 200*time.Millisecond,
+		Legs: []planning.RouteLeg{
+			{Duration: time.Second + 100*time.Millisecond},
+			{Duration: time.Second + 100*time.Millisecond},
+		},
+	})
+	if err != nil || distance != 123 || duration != 4 {
+		t.Fatalf("routeMetrics() = %d, %d, %v, want 123, 4, nil", distance, duration, err)
 	}
 }

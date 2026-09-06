@@ -66,13 +66,13 @@ ORDER BY resource_type, lower(name), id;
 -- name: InsertRouteDraft :one
 INSERT INTO route_drafts (
     actor_user_id, driver_id, chipper_resource_id, transport_resource_id,
-    departure_at, start_latitude, start_longitude, end_latitude, end_longitude,
+    departure_at, start_label, start_latitude, start_longitude, end_label, end_latitude, end_longitude,
     routing_source, distance_meters, duration_seconds, route_geometry
 ) VALUES (
-    sqlc.arg(actor_user_id)::uuid, sqlc.arg(driver_id)::uuid, sqlc.arg(chipper_resource_id)::uuid,
+    sqlc.arg(actor_user_id)::uuid, sqlc.arg(driver_id)::uuid, sqlc.narg(chipper_resource_id)::uuid,
     NULLIF(sqlc.arg(transport_resource_id)::text, '')::uuid,
-    sqlc.arg(departure_at)::timestamptz, sqlc.arg(start_latitude)::numeric,
-    sqlc.arg(start_longitude)::numeric, sqlc.arg(end_latitude)::numeric,
+    sqlc.arg(departure_at)::timestamptz, sqlc.arg(start_label), sqlc.arg(start_latitude)::numeric,
+    sqlc.arg(start_longitude)::numeric, sqlc.arg(end_label), sqlc.arg(end_latitude)::numeric,
     sqlc.arg(end_longitude)::numeric, sqlc.arg(routing_source),
     sqlc.arg(distance_meters), sqlc.arg(duration_seconds), sqlc.arg(route_geometry)::jsonb
 )
@@ -93,11 +93,13 @@ RETURNING id::text;
 UPDATE route_drafts
 SET actor_user_id=sqlc.arg(actor_user_id)::uuid,
     driver_id=sqlc.arg(driver_id)::uuid,
-    chipper_resource_id=sqlc.arg(chipper_resource_id)::uuid,
+    chipper_resource_id=sqlc.narg(chipper_resource_id)::uuid,
     transport_resource_id=NULLIF(sqlc.arg(transport_resource_id)::text, '')::uuid,
     departure_at=sqlc.arg(departure_at)::timestamptz,
+    start_label=sqlc.arg(start_label),
     start_latitude=sqlc.arg(start_latitude)::numeric,
     start_longitude=sqlc.arg(start_longitude)::numeric,
+    end_label=sqlc.arg(end_label),
     end_latitude=sqlc.arg(end_latitude)::numeric,
     end_longitude=sqlc.arg(end_longitude)::numeric,
     routing_source=sqlc.arg(routing_source),
@@ -114,16 +116,17 @@ WHERE route_draft_id=sqlc.arg(route_draft_id)::uuid;
 
 -- name: GetRouteDraft :one
 SELECT rd.id::text, rd.actor_user_id::text, rd.driver_id::text, d.display_name AS driver_name,
-       rd.chipper_resource_id::text, chipper.name AS chipper_name,
+       COALESCE(rd.chipper_resource_id::text, '')::text AS rd_chipper_resource_id,
+       COALESCE(chipper.name, '')::text AS chipper_name,
        COALESCE(rd.transport_resource_id::text, '')::text AS transport_resource_id,
        COALESCE(transport.name, '')::text AS transport_name,
-       rd.departure_at, rd.start_latitude::text, rd.start_longitude::text,
-       rd.end_latitude::text, rd.end_longitude::text, rd.status, rd.routing_source,
+       rd.departure_at, rd.start_label, rd.start_latitude::text, rd.start_longitude::text,
+       rd.end_label, rd.end_latitude::text, rd.end_longitude::text, rd.status, rd.routing_source,
        rd.distance_meters, rd.duration_seconds, rd.route_geometry, rd.assigned_at,
        rd.version, rd.created_at, rd.updated_at
 FROM route_drafts rd
 JOIN drivers d ON d.id=rd.driver_id
-JOIN resources chipper ON chipper.id=rd.chipper_resource_id
+LEFT JOIN resources chipper ON chipper.id=rd.chipper_resource_id
 LEFT JOIN resources transport ON transport.id=rd.transport_resource_id
 WHERE rd.id=sqlc.arg(id)::uuid;
 
@@ -146,16 +149,17 @@ WHERE rs.route_draft_id=sqlc.arg(route_draft_id)::uuid
 ORDER BY rs.position, rs.id;
 
 -- name: LockRouteDraft :one
-SELECT rd.id::text, rd.driver_id::text, rd.chipper_resource_id::text,
+SELECT rd.id::text, rd.driver_id::text,
+       COALESCE(rd.chipper_resource_id::text, '')::text AS rd_chipper_resource_id,
        COALESCE(rd.transport_resource_id::text, '')::text AS transport_resource_id,
-       rd.status, rd.version
+       rd.departure_at, rd.duration_seconds, rd.status, rd.version
 FROM route_drafts rd
 WHERE rd.id=sqlc.arg(id)::uuid
 FOR UPDATE;
 
 -- name: LockRouteStopsForAssignment :many
 SELECT rs.id::text, rs.job_id::text, rs.job_version, rs.waitlist_version, rs.position,
-       rs.planned_starts_at, rs.planned_ends_at,
+       rs.travel_duration_seconds, rs.planned_starts_at, rs.planned_ends_at,
        j.version AS current_job_version, j.workflow_status, j.archived_at,
        j.job_type, j.transport_mode, j.external_transport_confirmed,
        COALESCE(j.pile_latitude::text, '')::text AS latitude,
@@ -205,6 +209,14 @@ WHERE driver_id=sqlc.arg(driver_id)::uuid AND status='assigned'
   AND (departure_at AT TIME ZONE 'Europe/Vienna')::date=sqlc.arg(local_date)::date
 ORDER BY departure_at DESC, id DESC
 LIMIT 1;
+
+-- name: AssignedRouteExistsForDriver :one
+SELECT EXISTS (
+  SELECT 1
+  FROM route_drafts
+  WHERE driver_id=sqlc.arg(driver_id)::uuid AND status='assigned'
+    AND (departure_at AT TIME ZONE 'Europe/Vienna')::date=sqlc.arg(local_date)::date
+);
 
 -- name: ListDraftRouteIDsForDate :many
 SELECT id::text

@@ -20,6 +20,8 @@ type Urgency string
 type Source string
 type NotificationPreference string
 type PileLocationSource string
+type PreferenceMode string
+type TransportPartnerType string
 
 const (
 	JobTypeChippingOnly          JobType                = "chipping_only"
@@ -45,6 +47,11 @@ const (
 	PileSourceCustomerAddress    PileLocationSource     = "customer_address"
 	PileSourceDeviceLocation     PileLocationSource     = "device_location"
 	PileSourceCoordinates        PileLocationSource     = "coordinates"
+	PreferenceFixed              PreferenceMode         = "fixed"
+	PreferenceWindow             PreferenceMode         = "window"
+	PreferenceFlexible           PreferenceMode         = "flexible"
+	TransportPartnerPerson       TransportPartnerType   = "person"
+	TransportPartnerCompany      TransportPartnerType   = "company"
 )
 
 var ErrValidation = errors.New("customers: validation failed")
@@ -66,12 +73,14 @@ type JobInput struct {
 	TransportMode                        TransportMode
 	ExternalTransportConfirmed           bool
 	PreferredStartDate, PreferredEndDate string
+	PreferenceMode                       PreferenceMode
 	PreferenceText                       string
 	Urgency                              Urgency
 	Region                               string
 	Source                               Source
 	PileLatitude, PileLongitude          *float64
 	PileLocationSource                   PileLocationSource
+	TransportPartnerID                   string
 }
 
 const (
@@ -126,6 +135,10 @@ func (input CustomerInput) Validate() error {
 }
 
 func (input JobInput) Validate() error {
+	preferenceMode := input.PreferenceMode
+	if preferenceMode == "" {
+		preferenceMode = PreferenceWindow
+	}
 	volume, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(input.VolumeM3), ",", "."), 64)
 	if err != nil || volume <= 0 || volume > 99999999 || math.IsNaN(volume) || math.IsInf(volume, 0) {
 		return fmt.Errorf("%w: invalid volume", ErrValidation)
@@ -136,7 +149,7 @@ func (input JobInput) Validate() error {
 	if !input.JobType.Valid() || !input.TransportMode.Valid() || !input.Urgency.Valid() || !input.Source.Valid() {
 		return fmt.Errorf("%w: invalid selection", ErrValidation)
 	}
-	if input.JobType == JobTypeChippingOnly && (input.EstimatedTransportMinutes != 0 || input.TransportTripCount != 0 || input.TransportMode != TransportNone || input.ExternalTransportConfirmed) {
+	if input.JobType == JobTypeChippingOnly && (input.EstimatedTransportMinutes != 0 || input.TransportTripCount != 0 || input.TransportMode != TransportNone || input.ExternalTransportConfirmed || strings.TrimSpace(input.TransportPartnerID) != "") {
 		return fmt.Errorf("%w: transport values on chipping-only job", ErrValidation)
 	}
 	if input.JobType == JobTypeChippingWithTransport &&
@@ -167,10 +180,17 @@ func (input JobInput) Validate() error {
 	}
 	start, startErr := parseOptionalDate(input.PreferredStartDate)
 	end, endErr := parseOptionalDate(input.PreferredEndDate)
-	if startErr != nil || endErr != nil || (!start.IsZero() && !end.IsZero() && end.Before(start)) {
+	if startErr != nil || endErr != nil || (!start.IsZero() && !end.IsZero() && end.Before(start)) || !preferenceMode.Valid() {
 		return fmt.Errorf("%w: invalid preferred date range", ErrValidation)
 	}
+	if preferenceMode == PreferenceFixed && (start.IsZero() || end.IsZero() || !start.Equal(end)) {
+		return fmt.Errorf("%w: fixed preference requires exact date", ErrValidation)
+	}
 	return nil
+}
+
+func (value TransportPartnerType) Valid() bool {
+	return value == TransportPartnerPerson || value == TransportPartnerCompany
 }
 
 func (value JobType) Valid() bool {
@@ -191,6 +211,9 @@ func (value NotificationPreference) Valid() bool {
 func (value PileLocationSource) Valid() bool {
 	return value == PileSourceMapPin || value == PileSourceCustomerAddress ||
 		value == PileSourceDeviceLocation || value == PileSourceCoordinates
+}
+func (value PreferenceMode) Valid() bool {
+	return value == PreferenceFixed || value == PreferenceWindow || value == PreferenceFlexible
 }
 
 func PointMapsURL(latitude, longitude *float64) string {
@@ -280,15 +303,16 @@ func MapsURL(customer CustomerInput) string {
 }
 
 type WaitlistFilter struct {
-	Query, JobType, Region, Urgency, PreferredMonth, Workflow, Sort, Direction string
-	MissingLocation, DurationIssue                                             bool
-	Page, PageSize                                                             int
+	Query, JobType, Region, Urgency, PreferredMonth, Workflow, DurationGroup, Sort, Direction string
+	MissingLocation, DurationIssue, Overdue, Unassigned, TransportPending, Incomplete         bool
+	Page, PageSize                                                                            int
+	DurationReviewMinMinutes, DurationReviewMaxMinutes                                        int32
 }
 
 func (filter *WaitlistFilter) Normalize() {
 	allowedSort := map[string]bool{
 		"entered": true, "preferred": true, "urgency": true, "volume": true,
-		"region": true, "customer": true, "workflow": true, "updated": true,
+		"region": true, "customer": true, "workflow": true, "updated": true, "duration": true,
 	}
 	if !allowedSort[filter.Sort] {
 		filter.Sort = "entered"
@@ -318,13 +342,20 @@ func (filter *WaitlistFilter) Normalize() {
 	if filter.Workflow != "unplanned" && filter.Workflow != "proposal" && filter.Workflow != "scheduled" {
 		filter.Workflow = ""
 	}
+	if filter.DurationGroup != "short" && filter.DurationGroup != "medium" && filter.DurationGroup != "long" {
+		filter.DurationGroup = ""
+	}
 }
 
 // DurationNeedsReview centralizes the intentionally conservative duration
 // signal used by list filters. Values remain valid domain data; the flag only
 // asks a human to check unusually short or long estimates.
 func DurationNeedsReview(minutes int32) bool {
-	return minutes < 15 || minutes > 12*60
+	return DurationNeedsReviewWithin(minutes, 15, 12*60)
+}
+
+func DurationNeedsReviewWithin(minutes, minimum, maximum int32) bool {
+	return minutes < minimum || minutes > maximum
 }
 
 func parseOptionalDate(value string) (time.Time, error) {

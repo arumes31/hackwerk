@@ -20,17 +20,19 @@ const (
 )
 
 var (
-	ErrAvailability = errors.New("appointment: driver unavailable")
-	ErrConflict     = errors.New("appointment: reservation conflict")
-	ErrNotFound     = errors.New("appointment: not found")
-	ErrNotification = errors.New("appointment: no reachable notification channel")
-	ErrTransition   = errors.New("appointment: invalid transition")
-	ErrValidation   = errors.New("appointment: validation failed")
+	ErrAvailability    = errors.New("appointment: driver unavailable")
+	ErrConflict        = errors.New("appointment: reservation conflict")
+	ErrVersionConflict = errors.New("appointment: version conflict")
+	ErrNotFound        = errors.New("appointment: not found")
+	ErrNotification    = errors.New("appointment: no reachable notification channel")
+	ErrTransition      = errors.New("appointment: invalid transition")
+	ErrValidation      = errors.New("appointment: validation failed")
 )
 
 type Lifecycle string
 type Confirmation string
 type Purpose string
+type PreflightSeverity string
 
 const (
 	LifecycleDraft     Lifecycle = "draft"
@@ -49,6 +51,10 @@ const (
 	PurposeTransport Purpose = "transport"
 	PurposeTrailer   Purpose = "trailer"
 	PurposeOther     Purpose = "other"
+
+	PreflightBlocking PreflightSeverity = "blocking"
+	PreflightWarning  PreflightSeverity = "warning"
+	PreflightInfo     PreflightSeverity = "info"
 )
 
 type TimeInput struct {
@@ -84,6 +90,7 @@ type AssignedResource struct {
 
 type Appointment struct {
 	ID, JobID, JobNumber, JobWorkflow, JobType, TransportMode string
+	PreferredStartDate, PreferredEndDate, PreferenceMode      string
 	Lifecycle                                                 Lifecycle
 	Confirmation                                              Confirmation
 	StartsAt, EndsAt                                          time.Time
@@ -131,7 +138,9 @@ type PlanningResource struct {
 type WaitlistItem struct {
 	WaitlistID, JobID, JobNumber, JobType, VolumeM3 string
 	CustomerName, Locality                          string
-	EstimatedHackMinutes                            int32
+	EstimatedHackMinutes, EstimatedTransportMinutes int32
+	TransportMode                                   string
+	ExternalTransportConfirmed                      bool
 }
 
 type PlanningOptions struct {
@@ -155,6 +164,157 @@ type ConflictResolution struct {
 	Alternatives                       []Alternative
 }
 
+type PreflightCheck struct {
+	Key      string            `json:"key"`
+	Label    string            `json:"label"`
+	Detail   string            `json:"detail"`
+	Passed   bool              `json:"passed"`
+	Severity PreflightSeverity `json:"severity"`
+}
+
+type PreflightInput struct {
+	AppointmentID, Action string
+	ExpectedVersion       int32
+	StartsAt, EndsAt      time.Time
+	Assignments           *AssignmentInput
+}
+
+type Preflight struct {
+	CurrentStartsAt     time.Time        `json:"current_starts_at"`
+	CurrentEndsAt       time.Time        `json:"current_ends_at"`
+	ProposedStartsAt    time.Time        `json:"proposed_starts_at"`
+	ProposedEndsAt      time.Time        `json:"proposed_ends_at"`
+	WorkingMinutes      int32            `json:"working_minutes"`
+	TransportMinutes    int32            `json:"transport_minutes"`
+	BufferBeforeMinutes int32            `json:"buffer_before_minutes"`
+	BufferAfterMinutes  int32            `json:"buffer_after_minutes"`
+	Checks              []PreflightCheck `json:"checks"`
+	Conflicts           []Conflict       `json:"conflicts"`
+}
+
+func (s *Service) PreviewMutation(ctx context.Context, actor auth.Actor, input PreflightInput) (Preflight, error) {
+	if err := actor.Require(auth.PermissionAppointmentPlan); err != nil {
+		return Preflight{}, err
+	}
+	input.AppointmentID = strings.TrimSpace(input.AppointmentID)
+	if input.AppointmentID == "" || input.ExpectedVersion < 1 {
+		return Preflight{}, ErrValidation
+	}
+	current, err := s.store.Get(ctx, input.AppointmentID)
+	if err != nil {
+		return Preflight{}, err
+	}
+	startsAt, endsAt := input.StartsAt, input.EndsAt
+	if startsAt.IsZero() && endsAt.IsZero() {
+		startsAt, endsAt = current.StartsAt, current.EndsAt
+	}
+	if validateTime(TimeInput{StartsAt: startsAt, EndsAt: endsAt}) != nil {
+		return Preflight{}, ErrValidation
+	}
+	candidate := current
+	candidate.StartsAt, candidate.EndsAt = startsAt, endsAt
+	if input.Assignments != nil {
+		assignments := *input.Assignments
+		normalizeAssignments(&assignments)
+		if err := assignments.Validate(); err != nil {
+			return Preflight{}, err
+		}
+		candidate, err = s.assignmentSnapshot(ctx, candidate, assignments)
+		if err != nil {
+			return Preflight{}, err
+		}
+	}
+	result := Preflight{
+		CurrentStartsAt: current.StartsAt, CurrentEndsAt: current.EndsAt,
+		ProposedStartsAt: startsAt, ProposedEndsAt: endsAt,
+		WorkingMinutes: current.EstimatedHackMinutes, TransportMinutes: current.EstimatedTransportMinutes,
+		BufferBeforeMinutes: current.BufferBeforeMinutes, BufferAfterMinutes: current.BufferAfterMinutes,
+		Checks: make([]PreflightCheck, 0, 8),
+	}
+	result.Checks = append(result.Checks,
+		PreflightCheck{Key: "version", Label: "Terminversion", Passed: current.Version == input.ExpectedVersion, Severity: PreflightBlocking, Detail: "Aktueller Stand wird beim Speichern erneut geprüft."},
+		PreflightCheck{Key: "job", Label: "Auftrag", Passed: strings.TrimSpace(current.JobID) != "", Severity: PreflightBlocking, Detail: current.JobNumber},
+		PreflightCheck{Key: "time", Label: "Zeit und Dauer", Passed: endsAt.After(startsAt) && endsAt.Sub(startsAt) >= time.Duration(current.EstimatedHackMinutes+current.EstimatedTransportMinutes)*time.Minute, Severity: PreflightBlocking, Detail: "Arbeits-, Transport- und Pufferzeit sind getrennt ausgewiesen."},
+	)
+	result.Checks = append(result.Checks, customerPreferenceCheck(candidate, startsAt))
+	primaryDriver := false
+	for _, assigned := range candidate.Drivers {
+		primaryDriver = primaryDriver || assigned.Primary
+	}
+	chipper := false
+	transport := validateAppointmentTransport(candidate) == nil
+	driverIDs := make([]string, 0, len(candidate.Drivers))
+	for _, assigned := range candidate.Drivers {
+		driverIDs = append(driverIDs, assigned.ID)
+	}
+	resourceIDs := make([]string, 0, len(candidate.Resources))
+	for _, assigned := range candidate.Resources {
+		chipper = chipper || assigned.Purpose == PurposeChipping
+		if assigned.Exclusive {
+			resourceIDs = append(resourceIDs, assigned.ID)
+		}
+	}
+	result.Checks = append(result.Checks,
+		PreflightCheck{Key: "driver", Label: "Primärfahrer", Passed: primaryDriver, Severity: PreflightBlocking, Detail: "Mindestens ein Fahrer und genau ein Primärfahrer."},
+		PreflightCheck{Key: "chipper", Label: "Hackressource", Passed: chipper, Severity: PreflightWarning, Detail: chipperPreflightDetail(chipper)},
+		PreflightCheck{Key: "transport", Label: "Transport", Passed: transport, Severity: PreflightBlocking, Detail: "Interner Transport benötigt ein Transportmittel; externer Transport muss bestätigt sein."},
+	)
+	from, to := reservationRange(candidate, startsAt, endsAt)
+	availabilityPassed := true
+	for _, assigned := range candidate.Drivers {
+		status, _, availabilityErr := s.availability.IsAvailable(ctx, actor, assigned.ID, from, to)
+		if availabilityErr != nil {
+			if errors.Is(availabilityErr, driver.ErrNotFound) {
+				availabilityPassed = false
+				continue
+			}
+			return Preflight{}, availabilityErr
+		}
+		if status != driver.StatusAvailable {
+			availabilityPassed = false
+		}
+	}
+	conflicts, err := s.store.ListConflicts(ctx, from, to, driverIDs, resourceIDs, current.ID)
+	if err != nil {
+		return Preflight{}, err
+	}
+	result.Conflicts = conflicts
+	result.Checks = append(result.Checks,
+		PreflightCheck{Key: "availability", Label: "Fahrerverfügbarkeit", Passed: availabilityPassed, Severity: PreflightBlocking, Detail: "Abweichungen benötigen eine Admin-Begründung."},
+		PreflightCheck{Key: "conflicts", Label: "Konflikte", Passed: len(conflicts) == 0, Severity: PreflightBlocking, Detail: fmt.Sprintf("%d betroffene Belegung(en)", len(conflicts))},
+	)
+	return result, nil
+}
+
+func customerPreferenceCheck(candidate Appointment, startsAt time.Time) PreflightCheck {
+	check := PreflightCheck{
+		Key: "customer_preference", Label: "Kundenwunsch", Passed: true, Severity: PreflightInfo,
+		Detail: "Kein fester Wunschzeitraum hinterlegt.",
+	}
+	if candidate.PreferenceMode == "flexible" || candidate.PreferredStartDate == "" || candidate.PreferredEndDate == "" {
+		return check
+	}
+	location, err := time.LoadLocation("Europe/Vienna")
+	if err != nil {
+		return check
+	}
+	localDate := startsAt.In(location).Format(time.DateOnly)
+	start, startErr := time.Parse(time.DateOnly, candidate.PreferredStartDate)
+	end, endErr := time.Parse(time.DateOnly, candidate.PreferredEndDate)
+	if startErr != nil || endErr != nil {
+		return check
+	}
+	period := start.Format("02.01.") + "–" + end.Format("02.01.2006")
+	if localDate >= candidate.PreferredStartDate && localDate <= candidate.PreferredEndDate {
+		check.Detail = "Der Termin liegt im Kundenwunsch " + period + "."
+		return check
+	}
+	check.Passed = false
+	check.Severity = PreflightWarning
+	check.Detail = "Kunde möchte einen anderen Zeitraum (" + period + ")."
+	return check
+}
+
 type SwapInput struct {
 	FirstID, SecondID           string
 	FirstVersion, SecondVersion int32
@@ -164,6 +324,13 @@ type SwapInput struct {
 type CreateDraftInput struct {
 	JobID, RequestID string
 	Time             TimeInput
+}
+
+// PlanInput is the complete, still-unfixed planning mutation. Stores must
+// persist draft creation, assignments, and proposal transition atomically.
+type PlanInput struct {
+	CreateDraftInput
+	Assignments AssignmentInput
 }
 
 type MutateInput struct {
@@ -209,9 +376,12 @@ type CompleteInput struct {
 type FixInput struct {
 	MutateInput
 	WithoutNotificationReason string
+	MissingChipperReason      string
+	ConfirmWithoutChipper     bool
 }
 
 type Store interface {
+	Plan(context.Context, auth.Actor, PlanInput, string) (Appointment, error)
 	CreateDraft(context.Context, auth.Actor, CreateDraftInput) (Appointment, error)
 	Get(context.Context, string) (Appointment, error)
 	Assign(context.Context, auth.Actor, AssignInput) (Appointment, error)
@@ -305,8 +475,11 @@ func (s *Service) SwapAppointments(ctx context.Context, actor auth.Actor, input 
 	if err != nil {
 		return nil, err
 	}
-	if first.Version != input.FirstVersion || second.Version != input.SecondVersion || !swapEligible(first.Lifecycle) || !swapEligible(second.Lifecycle) {
-		return nil, ErrConflict
+	if first.Version != input.FirstVersion || second.Version != input.SecondVersion {
+		return nil, ErrVersionConflict
+	}
+	if !swapEligible(first.Lifecycle) || !swapEligible(second.Lifecycle) {
+		return nil, ErrTransition
 	}
 	firstFrom, firstTo := reservationRange(first, second.StartsAt, second.StartsAt.Add(first.EndsAt.Sub(first.StartsAt)))
 	secondFrom, secondTo := reservationRange(second, first.StartsAt, first.StartsAt.Add(second.EndsAt.Sub(second.StartsAt)))
@@ -352,6 +525,62 @@ func (s *Service) CreateDraftFromWaitlist(ctx context.Context, actor auth.Actor,
 	return s.store.CreateDraft(ctx, actor, input)
 }
 
+// PlanFromWaitlist validates the full proposal before asking the store to
+// commit the complete plan as one transaction. No draft is exposed if any
+// phase fails or the request is cancelled.
+func (s *Service) PlanFromWaitlist(ctx context.Context, actor auth.Actor, input PlanInput) (Appointment, error) {
+	if err := actor.Require(auth.PermissionAppointmentPlan); err != nil {
+		return Appointment{}, err
+	}
+	input.JobID = strings.TrimSpace(input.JobID)
+	normalizeAssignments(&input.Assignments)
+	if input.JobID == "" || validateTime(input.Time) != nil {
+		return Appointment{}, ErrValidation
+	}
+	if err := input.Assignments.Validate(); err != nil {
+		return Appointment{}, err
+	}
+	options, err := s.store.PlanningOptions(ctx)
+	if err != nil {
+		return Appointment{}, err
+	}
+	var item WaitlistItem
+	found := false
+	for _, candidate := range options.Waitlist {
+		if candidate.JobID == input.JobID {
+			item, found = candidate, true
+			break
+		}
+	}
+	if !found {
+		return Appointment{}, ErrNotFound
+	}
+	prospective := Appointment{
+		JobID: item.JobID, JobNumber: item.JobNumber, JobType: item.JobType,
+		TransportMode: item.TransportMode, ExternalTransportConfirmed: item.ExternalTransportConfirmed,
+		EstimatedHackMinutes: item.EstimatedHackMinutes, EstimatedTransportMinutes: item.EstimatedTransportMinutes,
+		StartsAt: input.Time.StartsAt, EndsAt: input.Time.EndsAt,
+		BufferBeforeMinutes: input.Time.BufferBeforeMinutes, BufferAfterMinutes: input.Time.BufferAfterMinutes,
+	}
+	prospective, err = assignmentSnapshot(prospective, input.Assignments, options)
+	if err != nil {
+		return Appointment{}, err
+	}
+	if err := validateAppointmentAssignments(prospective); err != nil {
+		return Appointment{}, err
+	}
+	required := time.Duration(prospective.EstimatedHackMinutes+prospective.EstimatedTransportMinutes) * time.Minute
+	if input.Time.EndsAt.Sub(input.Time.StartsAt) < required {
+		return Appointment{}, ErrValidation
+	}
+	from, to := reservationRange(prospective, prospective.StartsAt, prospective.EndsAt)
+	override, err := s.checkAvailability(ctx, actor, prospective.Drivers, from, to, input.Assignments.OverrideReason)
+	if err != nil {
+		return Appointment{}, err
+	}
+	return s.store.Plan(ctx, actor, input, override)
+}
+
 func (s *Service) AssignDriversAndResources(ctx context.Context, actor auth.Actor, input AssignInput) (Appointment, error) {
 	if err := actor.Require(auth.PermissionAppointmentPlan); err != nil {
 		return Appointment{}, err
@@ -367,8 +596,11 @@ func (s *Service) AssignDriversAndResources(ctx context.Context, actor auth.Acto
 	if err != nil {
 		return Appointment{}, err
 	}
-	if current.Version != input.ExpectedVersion || !current.Lifecycle.Editable() {
-		return Appointment{}, ErrConflict
+	if current.Version != input.ExpectedVersion {
+		return Appointment{}, ErrVersionConflict
+	}
+	if !current.Lifecycle.Editable() {
+		return Appointment{}, ErrTransition
 	}
 	candidate, err := s.assignmentSnapshot(ctx, current, input.Assignments)
 	if err != nil {
@@ -395,8 +627,11 @@ func (s *Service) ProposeAppointment(ctx context.Context, actor auth.Actor, inpu
 	if err != nil {
 		return Appointment{}, err
 	}
-	if current.Version != input.ExpectedVersion || current.Lifecycle != LifecycleDraft {
-		return Appointment{}, ErrConflict
+	if current.Version != input.ExpectedVersion {
+		return Appointment{}, ErrVersionConflict
+	}
+	if current.Lifecycle != LifecycleDraft {
+		return Appointment{}, ErrTransition
 	}
 	if err := validateAppointmentAssignments(current); err != nil {
 		return Appointment{}, err
@@ -432,8 +667,11 @@ func (s *Service) reschedule(ctx context.Context, actor auth.Actor, input MoveIn
 	if err != nil {
 		return Appointment{}, err
 	}
-	if current.Version != input.ExpectedVersion || !current.Lifecycle.Editable() {
-		return Appointment{}, ErrConflict
+	if current.Version != input.ExpectedVersion {
+		return Appointment{}, ErrVersionConflict
+	}
+	if !current.Lifecycle.Editable() {
+		return Appointment{}, ErrTransition
 	}
 	availableFrom, availableTo := reservationRange(current, input.StartsAt, input.EndsAt)
 	override, err := s.checkAvailability(ctx, actor, current.Drivers, availableFrom, availableTo, input.OverrideReason)
@@ -451,18 +689,28 @@ func (s *Service) FixAppointment(ctx context.Context, actor auth.Actor, input Fi
 		return Appointment{}, err
 	}
 	input.WithoutNotificationReason = strings.TrimSpace(input.WithoutNotificationReason)
-	if len([]rune(input.WithoutNotificationReason)) > 1000 {
+	input.MissingChipperReason = strings.TrimSpace(input.MissingChipperReason)
+	if len([]rune(input.WithoutNotificationReason)) > 1000 || len([]rune(input.MissingChipperReason)) > 1000 {
 		return Appointment{}, ErrValidation
 	}
 	current, err := s.store.Get(ctx, input.ID)
 	if err != nil {
 		return Appointment{}, err
 	}
-	if current.Version != input.ExpectedVersion || current.Lifecycle != LifecycleProposal {
-		return Appointment{}, ErrConflict
+	if current.Version != input.ExpectedVersion {
+		return Appointment{}, ErrVersionConflict
 	}
-	if err := validateAppointmentAssignments(current); err != nil {
+	if current.Lifecycle != LifecycleProposal {
+		return Appointment{}, ErrTransition
+	}
+	if err := validateAppointmentAssignmentsWithoutChipper(current); err != nil {
 		return Appointment{}, err
+	}
+	if hasChippingResource(current) {
+		input.ConfirmWithoutChipper = false
+		input.MissingChipperReason = ""
+	} else if !input.ConfirmWithoutChipper || input.MissingChipperReason == "" {
+		return Appointment{}, fmt.Errorf("%w: missing chipper confirmation and reason required", ErrValidation)
 	}
 	availableFrom, availableTo := reservationRange(current, current.StartsAt, current.EndsAt)
 	if _, err := s.checkAvailability(ctx, actor, current.Drivers, availableFrom, availableTo, current.AvailabilityOverrideReason); err != nil {
@@ -476,6 +724,10 @@ func (s *Service) assignmentSnapshot(ctx context.Context, current Appointment, i
 	if err != nil {
 		return Appointment{}, err
 	}
+	return assignmentSnapshot(current, input, options)
+}
+
+func assignmentSnapshot(current Appointment, input AssignmentInput, options PlanningOptions) (Appointment, error) {
 	driverNames := make(map[string]string, len(options.Drivers))
 	for _, item := range options.Drivers {
 		driverNames[item.ID] = item.Name
@@ -544,7 +796,7 @@ func (s *Service) ReopenAppointment(ctx context.Context, actor auth.Actor, input
 		return Appointment{}, err
 	}
 	if current.Version != input.ExpectedVersion {
-		return Appointment{}, ErrConflict
+		return Appointment{}, ErrVersionConflict
 	}
 	if current.Lifecycle != LifecycleCancelled {
 		return Appointment{}, ErrTransition
@@ -614,6 +866,27 @@ func (s *Service) ListCalendarRange(ctx context.Context, actor auth.Actor, fromU
 	return s.store.ListCalendar(ctx, fromUTC, toUTC)
 }
 
+func (s *Service) SwapCandidates(ctx context.Context, actor auth.Actor, excludeID string, fromUTC, toUTC time.Time) ([]CalendarEvent, error) {
+	if err := actor.Require(auth.PermissionAppointmentPlan); err != nil {
+		return nil, err
+	}
+	excludeID = strings.TrimSpace(excludeID)
+	if excludeID == "" || validateRange(fromUTC, toUTC) != nil {
+		return nil, ErrValidation
+	}
+	events, err := s.store.ListCalendar(ctx, fromUTC, toUTC)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]CalendarEvent, 0, len(events))
+	for _, event := range events {
+		if event.ID != excludeID && swapEligible(event.Lifecycle) {
+			result = append(result, event)
+		}
+	}
+	return result, nil
+}
+
 func (s *Service) AppointmentDetail(ctx context.Context, actor auth.Actor, id string) (Detail, error) {
 	if err := actor.Require(auth.PermissionCalendarViewAll); err != nil {
 		return Detail{}, err
@@ -638,7 +911,7 @@ func (s *Service) AppointmentDetail(ctx context.Context, actor auth.Actor, id st
 }
 
 func (s *Service) PlanningOptions(ctx context.Context, actor auth.Actor) (PlanningOptions, error) {
-	if err := actor.Require(auth.PermissionCalendarViewAll); err != nil {
+	if err := actor.Require(auth.PermissionAppointmentPlan); err != nil {
 		return PlanningOptions{}, err
 	}
 	return s.store.PlanningOptions(ctx)
@@ -677,29 +950,52 @@ func reservationRange(current Appointment, startsAt, endsAt time.Time) (time.Tim
 }
 
 func validateAppointmentAssignments(value Appointment) error {
+	if err := validateAppointmentAssignmentsWithoutChipper(value); err != nil {
+		return err
+	}
+	if !hasChippingResource(value) {
+		return fmt.Errorf("%w: chipping resource required", ErrValidation)
+	}
+	return nil
+}
+
+func validateAppointmentAssignmentsWithoutChipper(value Appointment) error {
 	if len(value.Drivers) == 0 || !slices.ContainsFunc(value.Drivers, func(item DriverAssignment) bool { return item.Primary }) {
 		return fmt.Errorf("%w: primary driver required", ErrValidation)
 	}
-	if !slices.ContainsFunc(value.Resources, func(item AssignedResource) bool {
+	return validateAppointmentTransport(value)
+}
+
+func hasChippingResource(value Appointment) bool {
+	return slices.ContainsFunc(value.Resources, func(item AssignedResource) bool {
 		return item.Type == resource.TypeChipper && item.Purpose == PurposeChipping
-	}) {
-		return fmt.Errorf("%w: chipping resource required", ErrValidation)
+	})
+}
+
+func chipperPreflightDetail(assigned bool) string {
+	if assigned {
+		return "Eine aktive Hackmaschine ist zugewiesen."
 	}
-	if value.JobType == "chipping_with_transport" {
-		switch value.TransportMode {
-		case "internal":
-			if !slices.ContainsFunc(value.Resources, func(item AssignedResource) bool {
-				return item.Type == resource.TypeTransportVehicle && item.Purpose == PurposeTransport
-			}) {
-				return fmt.Errorf("%w: transport resource required", ErrValidation)
-			}
-		case "external":
-			if !value.ExternalTransportConfirmed {
-				return fmt.Errorf("%w: external transport not confirmed", ErrValidation)
-			}
-		default:
-			return fmt.Errorf("%w: transport plan required", ErrValidation)
+	return "Keine Hackmaschine zugewiesen. Zum Fixieren sind Bestätigungsnotiz und ausdrückliche Bestätigung erforderlich."
+}
+
+func validateAppointmentTransport(value Appointment) error {
+	if value.JobType != "chipping_with_transport" {
+		return nil
+	}
+	switch value.TransportMode {
+	case "internal":
+		if !slices.ContainsFunc(value.Resources, func(item AssignedResource) bool {
+			return item.Type == resource.TypeTransportVehicle && item.Purpose == PurposeTransport
+		}) {
+			return fmt.Errorf("%w: transport resource required", ErrValidation)
 		}
+	case "external":
+		if !value.ExternalTransportConfirmed {
+			return fmt.Errorf("%w: external transport not confirmed", ErrValidation)
+		}
+	default:
+		return fmt.Errorf("%w: transport plan required", ErrValidation)
 	}
 	return nil
 }

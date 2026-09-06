@@ -47,6 +47,12 @@ func TestOperationsReadinessHeartbeatAndMetricsSnapshot(t *testing.T) {
 	if err != nil || !healthy || heartbeat.IsZero() {
 		t.Fatalf("WorkerHealthy()=%v/%v/%v", heartbeat, healthy, err)
 	}
+	if _, instanceHealthy, instanceErr := store.WorkerHealthyByID(ctx, "different-worker", time.Minute); instanceErr != nil || instanceHealthy {
+		t.Fatalf("WorkerHealthyByID(different)=%v/%v", instanceHealthy, instanceErr)
+	}
+	if _, instanceHealthy, instanceErr := store.WorkerHealthyByID(ctx, "integration-worker", time.Minute); instanceErr != nil || !instanceHealthy {
+		t.Fatalf("WorkerHealthyByID(integration)=%v/%v", instanceHealthy, instanceErr)
+	}
 	snapshot, err := store.Collect(ctx)
 	if err != nil {
 		t.Fatal(err)

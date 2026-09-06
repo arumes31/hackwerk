@@ -5,9 +5,13 @@ import "fmt"
 type PageData struct {
 	AppName                     string
 	Version                     string
+	BuildVersion                string
 	CSSPath                     string
+	MobileCSSPath               string
 	ControlFoundationCSSPath    string
 	JSPath                      string
+	PresentationBootstrapJSPath string
+	RouteLocationsJSPath        string
 	ManifestPath                string
 	IconPath                    string
 	LoginOriginalCSSPath        string
@@ -18,11 +22,13 @@ type PageData struct {
 	MapLibreWorkerPath          string
 	MapLibreCSSPath             string
 	MapAttribution              string
+	GeocodingEnabled            bool
 	FullCalendarJSPath          string
 	FullCalendarThemeJSPath     string
 	FullCalendarSkeletonCSSPath string
 	FullCalendarThemeCSSPath    string
 	FullCalendarPaletteCSSPath  string
+	Legal                       LegalData
 }
 
 templ documentHead(data PageData, title string) {
@@ -44,7 +50,7 @@ templ documentHeadWithStyles(data PageData, title string, firstStylePath string,
 templ documentHeadWithAssets(data PageData, title string, firstStylePath string, secondStylePath string, includeCalendar bool) {
 	<head>
 		<meta charset="utf-8"/>
-		<meta name="viewport" content="width=device-width, initial-scale=1"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 		<meta name="color-scheme" content="light"/>
 		<meta name="theme-color" content="#214f3a"/>
 		<meta name="application-name" content={ data.AppName }/>
@@ -55,6 +61,7 @@ templ documentHeadWithAssets(data PageData, title string, firstStylePath string,
 		<link rel="manifest" href={ data.ManifestPath }/>
 		<link rel="icon" href={ data.IconPath } type="image/svg+xml"/>
 		<link rel="apple-touch-icon" href={ data.IconPath }/>
+		<script src={ data.PresentationBootstrapJSPath }></script>
 		<link rel="stylesheet" href={ data.ControlFoundationCSSPath }/>
 		<link rel="stylesheet" href={ data.CSSPath }/>
 		if firstStylePath != "" {
@@ -70,8 +77,45 @@ templ documentHeadWithAssets(data PageData, title string, firstStylePath string,
 			<script src={ data.FullCalendarJSPath } defer></script>
 			<script src={ data.FullCalendarThemeJSPath } defer></script>
 		}
+		<link rel="stylesheet" href={ data.MobileCSSPath }/>
 		<script type="module" src={ data.JSPath } defer></script>
 	</head>
+}
+
+templ planningLifecycle(current string) {
+	<ol class="planning-lifecycle" aria-label="Planungsablauf">
+		<li
+			class={ planningLifecycleStepClass(current, "draft") }
+			if current == "draft" {
+				aria-current="step"
+			}
+		><span aria-hidden="true">1</span><strong>Entwurf</strong></li>
+		<li
+			class={ planningLifecycleStepClass(current, "proposal") }
+			if current == "proposal" {
+				aria-current="step"
+			}
+		><span aria-hidden="true">2</span><strong>Vorschlag</strong></li>
+		<li
+			class={ planningLifecycleStepClass(current, "fixed") }
+			if current == "fixed" {
+				aria-current="step"
+			}
+		><span aria-hidden="true">3</span><strong>Fixiert</strong></li>
+		<li
+			class={ planningLifecycleStepClass(current, "message") }
+			if current == "message" {
+				aria-current="step"
+			}
+		><span aria-hidden="true">4</span><strong>Nachricht</strong></li>
+	</ol>
+}
+
+func planningLifecycleStepClass(current string, step string) string {
+	if current == step {
+		return "planning-lifecycle__step planning-lifecycle__step--current"
+	}
+	return "planning-lifecycle__step"
 }
 
 templ Home(data PageData) {
@@ -121,7 +165,7 @@ templ Home(data PageData) {
 					</article>
 				</section>
 			</main>
-			<footer class="site-footer"><div class="site-footer__inner">{ data.AppName } · Europe/Vienna · de-AT</div></footer>
+			@siteFooter(data)
 			<div class="visually-hidden" aria-live="polite" data-live-status></div>
 		</body>
 	</html>
@@ -140,6 +184,8 @@ templ Error(data PageData, status int, heading string, message string) {
 				<p>{ message }</p>
 				<a class="button" href="/">Zur Startseite</a>
 			</main>
+			@siteFooter(data)
+			<div class="visually-hidden" aria-live="polite" data-live-status></div>
 		</body>
 	</html>
 }

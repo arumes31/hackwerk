@@ -49,13 +49,17 @@ func (store *NotificationStore) Reissue(ctx context.Context, actor auth.Actor, a
 		if current.LifecycleStatus != "fixed" || current.Version != expectedVersion {
 			return notification.ErrAdminActionUnavailable
 		}
+		rows, err := queries.BumpAppointmentVersion(ctx, dbgen.BumpAppointmentVersionParams{ID: id, ExpectedVersion: expectedVersion})
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return notification.ErrAdminActionUnavailable
+		}
 		if err := store.planner.planConfirmationAt(ctx, queries, id, "", "admin reissued confirmation", now); err != nil {
 			if errors.Is(err, appointment.ErrNotification) {
 				return notification.ErrAdminActionUnavailable
 			}
-			return err
-		}
-		if err := queries.SetAppointmentConfirmation(ctx, dbgen.SetAppointmentConfirmationParams{ConfirmationStatus: "pending", AppointmentID: id}); err != nil {
 			return err
 		}
 		metadata, _ := json.Marshal(map[string]any{
@@ -96,7 +100,7 @@ func (store *NotificationStore) ResetResponse(ctx context.Context, actor auth.Ac
 			return err
 		}
 		metadata, _ := json.Marshal(map[string]any{
-			"changed_fields":  []string{"confirmation_status"},
+			"changed_fields":  []string{"confirmation_status", "response", "response_note"},
 			"reason_category": "manual_admin_action", "reason_provided": reason != "",
 		})
 		return queries.InsertAuditEvent(ctx, dbgen.InsertAuditEventParams{
@@ -128,6 +132,7 @@ func (store *NotificationStore) Respond(
 	ctx context.Context,
 	tokenHash, nonceHash []byte,
 	response notification.Response,
+	responseNote string,
 	requestID string,
 	now time.Time,
 ) (notification.Confirmation, error) {
@@ -163,7 +168,7 @@ func (store *NotificationStore) Respond(
 			return notification.ErrResponseLocked
 		}
 		responseValue := string(response)
-		rows, err := queries.SetConfirmationResponse(ctx, dbgen.SetConfirmationResponseParams{Response: &responseValue, ID: mustUUID(row.CrID)})
+		rows, err := queries.SetConfirmationResponse(ctx, dbgen.SetConfirmationResponseParams{Response: &responseValue, ResponseNote: responseNote, ID: mustUUID(row.CrID)})
 		if err != nil {
 			return err
 		}
@@ -179,7 +184,11 @@ func (store *NotificationStore) Respond(
 		}); err != nil {
 			return err
 		}
-		metadata, _ := json.Marshal(map[string][]string{"changed_fields": {"confirmation_status"}})
+		changedFields := []string{"confirmation_status"}
+		if responseNote != "" {
+			changedFields = append(changedFields, "response_note")
+		}
+		metadata, _ := json.Marshal(map[string][]string{"changed_fields": changedFields})
 		if err := queries.InsertAuditEvent(ctx, dbgen.InsertAuditEventParams{
 			ActorType: "public", ActorUserID: "", Action: "confirmation.responded", ObjectType: "appointment",
 			ObjectID: row.CrAppointmentID, RequestID: requestID, Metadata: metadata,
@@ -202,7 +211,7 @@ func (store *NotificationStore) ListAppointment(ctx context.Context, appointment
 		values = append(values, notification.Status{
 			ID: row.NID, AppointmentID: appointmentID, Channel: row.Channel, State: row.Status,
 			Recipient: row.RecipientSnapshot, ErrorCode: row.LastErrorCode,
-			ProviderReference: row.ProviderID, ConfirmationStatus: row.ConfirmationRequestStatus, Response: row.Response,
+			ProviderReference: row.ProviderID, ConfirmationStatus: row.ConfirmationRequestStatus, Response: row.Response, ResponseNote: row.ResponseNote,
 			AttemptCount: row.AttemptCount, MaxAttempts: row.MaxAttempts,
 			AvailableAt: timestampValue(row.AvailableAt), SentAt: timestampValue(row.SentAt),
 			CreatedAt: timestampValue(row.CreatedAt), UpdatedAt: timestampValue(row.UpdatedAt),
@@ -222,7 +231,7 @@ func (store *NotificationStore) ListFailed(ctx context.Context, filter notificat
 		values = append(values, notification.Status{
 			ID: row.NID, AppointmentID: row.NAppointmentID, Channel: row.Channel, State: row.Status,
 			Recipient: row.RecipientSnapshot, ErrorCode: row.LastErrorCode,
-			ProviderReference: row.ProviderID, ConfirmationStatus: row.ConfirmationRequestStatus, Response: row.Response,
+			ProviderReference: row.ProviderID, ConfirmationStatus: row.ConfirmationRequestStatus, Response: row.Response, ResponseNote: row.ResponseNote,
 			AttemptCount: row.AttemptCount, MaxAttempts: row.MaxAttempts,
 			AvailableAt: timestampValue(row.AvailableAt), SentAt: timestampValue(row.SentAt),
 			CreatedAt: timestampValue(row.CreatedAt), UpdatedAt: timestampValue(row.UpdatedAt),
@@ -241,7 +250,8 @@ func (store *NotificationStore) ListCallbacks(ctx context.Context, limit int32) 
 	for _, row := range rows {
 		values = append(values, notification.CallbackRequest{
 			AppointmentID: row.AppointmentID, JobNumber: row.JobNumber, CustomerName: row.CustomerName,
-			Locality: row.Locality, Phone: row.Phone, RespondedAt: timestampValue(row.RespondedAt), ExpiresAt: timestampValue(row.ExpiresAt),
+			Locality: row.Locality, Phone: row.Phone, ResponseNote: row.ResponseNote,
+			RespondedAt: timestampValue(row.RespondedAt), ExpiresAt: timestampValue(row.ExpiresAt),
 		})
 	}
 	return values, nil

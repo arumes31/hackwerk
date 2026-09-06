@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -21,7 +22,19 @@ const (
 	EnvironmentDevelopment = "development"
 	EnvironmentTest        = "test"
 	EnvironmentProduction  = "production"
-	CurrentSchemaVersion   = int64(12)
+	CurrentSchemaVersion   = int64(22)
+
+	businessNamePlaceholder                  = "HackWerk – Betreiber noch nicht hinterlegt"
+	businessAddressPlaceholder               = "Ladungsfähige Anschrift noch nicht hinterlegt"
+	businessEmailPlaceholder                 = "E-Mail-Adresse noch nicht hinterlegt"
+	businessPhonePlaceholder                 = "Telefonnummer noch nicht hinterlegt"
+	businessLegalFormPlaceholder             = "Rechtsform noch nicht hinterlegt"
+	businessRegistryPlaceholder              = "Nicht vorhanden oder noch nicht hinterlegt"
+	businessSupervisoryAuthorityPlaceholder  = "Zuständige Behörde noch nicht hinterlegt"
+	businessChamberPlaceholder               = "Kammer/Fachgruppe noch nicht hinterlegt"
+	businessTradeRulesPlaceholder            = "Anwendbare gewerbe- oder berufsrechtliche Vorschriften noch nicht hinterlegt"
+	businessDataProtectionOfficerPlaceholder = "Kein Datenschutzbeauftragter hinterlegt"
+	developmentAuthSecurityKeyMaterial       = "development-only-hackwerk-security-key"
 )
 
 // Config contains the startup settings shared by serve, worker, and CLI modes.
@@ -43,10 +56,12 @@ type Config struct {
 	Mail            Mail
 	SMS             SMS
 	Business        Business
+	Waitlist        Waitlist
 	Dashboard       Dashboard
 	CalendarFeed    CalendarFeed
 	Planning        Planning
 	Map             Map
+	Geocoding       Geocoding
 	Voice           Voice
 	Metrics         Metrics
 	MaintenanceMode bool
@@ -77,16 +92,23 @@ type Database struct {
 
 // Auth contains password, session, cookie, and login protection settings.
 type Auth struct {
-	SessionCookieName   string
-	CSRFCookieName      string
-	SessionIdleTTL      time.Duration
-	SessionAbsoluteTTL  time.Duration
-	CookieSecure        bool
-	PasswordMinLength   int
-	Argon2MemoryKiB     uint32
-	Argon2Iterations    uint32
-	Argon2Parallelism   uint8
-	LoginLimitPerMinute int
+	SessionCookieName    string
+	CSRFCookieName       string
+	MFACookieName        string
+	SessionIdleTTL       time.Duration
+	SessionAbsoluteTTL   time.Duration
+	CookieSecure         bool
+	PasswordMinLength    int
+	Argon2MemoryKiB      uint32
+	Argon2Iterations     uint32
+	Argon2Parallelism    uint8
+	LoginLimitPerMinute  int
+	SecurityCurrentKeyID string
+	SecurityKeys         map[string]string
+	EmailVerificationTTL time.Duration
+	EmailResendInterval  time.Duration
+	MFAChallengeTTL      time.Duration
+	WebAuthnChallengeTTL time.Duration
 }
 
 type Confirmation struct {
@@ -97,6 +119,7 @@ type Confirmation struct {
 }
 
 type Worker struct {
+	InstanceID   string
 	PollInterval time.Duration
 	Lease        time.Duration
 	BatchSize    int
@@ -132,9 +155,18 @@ type SMS struct {
 }
 
 type Business struct {
-	Name    string
-	Address string
-	Phone   string
+	Name                  string
+	Address               string
+	Email                 string
+	Phone                 string
+	LegalForm             string
+	RegistryNumber        string
+	RegistryCourt         string
+	VATID                 string
+	SupervisoryAuthority  string
+	Chamber               string
+	TradeRules            string
+	DataProtectionOfficer string
 }
 
 type Dashboard struct {
@@ -142,6 +174,13 @@ type Dashboard struct {
 	PendingAfter  time.Duration
 	BusinessOpen  string
 	BusinessClose string
+}
+
+// Waitlist configures advisory duration warnings without changing which
+// estimates are valid business data.
+type Waitlist struct {
+	DurationReviewMinMinutes int32
+	DurationReviewMaxMinutes int32
 }
 
 type CalendarFeed struct {
@@ -177,8 +216,6 @@ type Planning struct {
 	SuggestionTTL           time.Duration
 	BusinessOpen            string
 	BusinessClose           string
-	DepotLatitude           float64
-	DepotLongitude          float64
 	HaversineRoadFactor     float64
 	HaversineSpeedKMH       float64
 	WeightPreference        float64
@@ -201,10 +238,27 @@ type Map struct {
 	MaxZoom          int
 }
 
+// Geocoding configures optional address search. SearchURL is startup-only and
+// receives user queries only after authentication, CSRF, and input validation.
+type Geocoding struct {
+	Enabled          bool
+	SearchURL        string
+	CountryCodes     []string
+	Timeout          time.Duration
+	MaxResponseBytes int64
+	MaxResults       int
+	RateLimit        int
+	MinInterval      time.Duration
+	CacheTTL         time.Duration
+	CacheEntries     int
+}
+
 type Voice struct {
 	Enabled               bool
 	Transcriber           string
 	Extractor             string
+	WhisperModel          string
+	WhisperURL            string
 	OpenAIAPIKey          string
 	OpenAIModel           string
 	OpenAIExtractionModel string
@@ -212,6 +266,7 @@ type Voice struct {
 	MaxDuration           time.Duration
 	MaxBytes              int
 	DraftRetention        time.Duration
+	RecordingRetention    time.Duration
 	ProviderTimeout       time.Duration
 	MaxResponseBytes      int
 	TempDir               string
@@ -238,11 +293,12 @@ func LoadForCommand(command string) (Config, error) {
 		validation.Mail.Enabled = false
 		validation.SMS.Enabled = false
 	case "worker":
-		validation.Voice.Enabled = false
+		validation.Map = Map{TileURL: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", Attribution: "unused", Timeout: time.Second, MaxResponseBytes: 16 << 10, MaxZoom: 1}
 	case "migrate", "seed-dev", "admin", "healthcheck":
 		validation.Mail.Enabled = false
 		validation.SMS.Enabled = false
 		validation.Voice.Enabled = false
+		validation.Map = Map{TileURL: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", Attribution: "unused", Timeout: time.Second, MaxResponseBytes: 16 << 10, MaxZoom: 1}
 	}
 	if err := validation.Validate(); err != nil {
 		return Config{}, err
@@ -266,6 +322,10 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 		databaseURL = "postgres://hackplan_app:development-only@postgres:5432/hackplan?sslmode=disable"
 	}
 	confirmationKeys, err := secretValue(getenv, readFile, "CONFIRMATION_TOKEN_KEYS")
+	if err != nil {
+		return Config{}, err
+	}
+	securityKeysValue, err := secretValue(getenv, readFile, "AUTH_SECURITY_KEYS")
 	if err != nil {
 		return Config{}, err
 	}
@@ -308,6 +368,13 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 			return Config{}, errors.New("config: invalid confirmation token keys JSON")
 		}
 	}
+	securityKeys := map[string]string{"development-v1": "ZGV2ZWxvcG1lbnQtb25seS1oYWNrd2Vyay1zZWN1cml0eS1rZXk="}
+	if securityKeysValue != "" {
+		securityKeys = make(map[string]string)
+		if err := json.Unmarshal([]byte(securityKeysValue), &securityKeys); err != nil {
+			return Config{}, errors.New("config: invalid auth security keys JSON")
+		}
+	}
 
 	cfg := Config{
 		Environment:     valueOrDefault(getenv("APP_ENV"), EnvironmentDevelopment),
@@ -339,19 +406,26 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 			ExpectedSchema:   CurrentSchemaVersion,
 		},
 		Auth: Auth{
-			SessionCookieName:   valueOrDefault(getenv("SESSION_COOKIE_NAME"), "hackwerk_session"),
-			CSRFCookieName:      valueOrDefault(getenv("CSRF_COOKIE_NAME"), "hackwerk_csrf"),
-			SessionIdleTTL:      8 * time.Hour,
-			SessionAbsoluteTTL:  24 * time.Hour,
-			CookieSecure:        false,
-			PasswordMinLength:   14,
-			Argon2MemoryKiB:     64 * 1024,
-			Argon2Iterations:    3,
-			Argon2Parallelism:   2,
-			LoginLimitPerMinute: 10,
+			SessionCookieName:    valueOrDefault(getenv("SESSION_COOKIE_NAME"), "hackwerk_session"),
+			CSRFCookieName:       valueOrDefault(getenv("CSRF_COOKIE_NAME"), "hackwerk_csrf"),
+			MFACookieName:        valueOrDefault(getenv("MFA_COOKIE_NAME"), "hackwerk_mfa"),
+			SessionIdleTTL:       8 * time.Hour,
+			SessionAbsoluteTTL:   24 * time.Hour,
+			CookieSecure:         false,
+			PasswordMinLength:    14,
+			Argon2MemoryKiB:      64 * 1024,
+			Argon2Iterations:     3,
+			Argon2Parallelism:    2,
+			LoginLimitPerMinute:  10,
+			SecurityCurrentKeyID: valueOrDefault(getenv("AUTH_SECURITY_KEY_ID"), "development-v1"),
+			SecurityKeys:         securityKeys,
+			EmailVerificationTTL: 24 * time.Hour,
+			EmailResendInterval:  time.Minute,
+			MFAChallengeTTL:      5 * time.Minute,
+			WebAuthnChallengeTTL: 5 * time.Minute,
 		},
 		Confirmation: Confirmation{TokenTTL: 14 * 24 * time.Hour, CurrentKeyID: valueOrDefault(getenv("CONFIRMATION_TOKEN_KEY_ID"), "development-v1"), TokenKeys: keys, RateLimit: 30},
-		Worker:       Worker{PollInterval: time.Second, Lease: 30 * time.Second, BatchSize: 20},
+		Worker:       Worker{InstanceID: strings.TrimSpace(getenv("WORKER_INSTANCE_ID")), PollInterval: time.Second, Lease: 30 * time.Second, BatchSize: 20},
 		Mail: Mail{
 			Host: valueOrDefault(getenv("MAIL_SMTP_HOST"), "smtp.example.invalid"), Port: 587, TLSMode: valueOrDefault(getenv("MAIL_SMTP_TLS"), "starttls"),
 			Username: mailUsername, Password: mailPassword, FromAddress: valueOrDefault(getenv("MAIL_FROM_ADDRESS"), "hackwerk@example.invalid"),
@@ -364,7 +438,21 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 			SendberryKey: sendberryKey, SendberryName: sendberryName, SendberryPassword: sendberryPassword,
 			WebhookURL: strings.TrimSpace(getenv("SMS_WEBHOOK_URL")), HMACSecret: smsSecret,
 		},
-		Business:  Business{Name: valueOrDefault(getenv("BUSINESS_NAME"), "HackWerk"), Address: valueOrDefault(getenv("BUSINESS_ADDRESS"), "Betriebsadresse laut Vereinbarung"), Phone: valueOrDefault(getenv("BUSINESS_PHONE"), "Betriebskontakt laut Vereinbarung")},
+		Business: Business{
+			Name:                  valueOrDefault(getenv("BUSINESS_NAME"), businessNamePlaceholder),
+			Address:               valueOrDefault(getenv("BUSINESS_ADDRESS"), businessAddressPlaceholder),
+			Email:                 valueOrDefault(getenv("BUSINESS_EMAIL"), businessEmailPlaceholder),
+			Phone:                 valueOrDefault(getenv("BUSINESS_PHONE"), businessPhonePlaceholder),
+			LegalForm:             valueOrDefault(getenv("BUSINESS_LEGAL_FORM"), businessLegalFormPlaceholder),
+			RegistryNumber:        valueOrDefault(getenv("BUSINESS_REGISTRY_NUMBER"), businessRegistryPlaceholder),
+			RegistryCourt:         valueOrDefault(getenv("BUSINESS_REGISTRY_COURT"), businessRegistryPlaceholder),
+			VATID:                 valueOrDefault(getenv("BUSINESS_VAT_ID"), businessRegistryPlaceholder),
+			SupervisoryAuthority:  valueOrDefault(getenv("BUSINESS_SUPERVISORY_AUTHORITY"), businessSupervisoryAuthorityPlaceholder),
+			Chamber:               valueOrDefault(getenv("BUSINESS_CHAMBER"), businessChamberPlaceholder),
+			TradeRules:            valueOrDefault(getenv("BUSINESS_TRADE_RULES"), businessTradeRulesPlaceholder),
+			DataProtectionOfficer: valueOrDefault(getenv("BUSINESS_DATA_PROTECTION_OFFICER"), businessDataProtectionOfficerPlaceholder),
+		},
+		Waitlist:  Waitlist{DurationReviewMinMinutes: 15, DurationReviewMaxMinutes: 12 * 60},
 		Dashboard: Dashboard{HorizonDays: 14, PendingAfter: 15 * time.Minute, BusinessOpen: valueOrDefault(getenv("DASHBOARD_BUSINESS_OPEN"), "07:00"), BusinessClose: valueOrDefault(getenv("DASHBOARD_BUSINESS_CLOSE"), "17:00")},
 		CalendarFeed: CalendarFeed{
 			Enabled:   true,
@@ -376,7 +464,7 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 			RoutingTimeout: 5 * time.Second, RoutingMaxResponseBytes: 1 << 20, RoutingBackoff: 30 * time.Second, RoutingCacheTTL: time.Hour, RoutingCacheEntries: 512,
 			HorizonDays: 56, SlotMinutes: 15, BufferMinutes: 15, CandidateLimit: 2500, SuggestionTTL: 30 * time.Minute,
 			BusinessOpen: valueOrDefault(getenv("PLANNING_BUSINESS_OPEN"), "07:00"), BusinessClose: valueOrDefault(getenv("PLANNING_BUSINESS_CLOSE"), "17:00"),
-			DepotLatitude: 48.2, DepotLongitude: 14.2, HaversineRoadFactor: 1.3, HaversineSpeedKMH: 55,
+			HaversineRoadFactor: 1.3, HaversineSpeedKMH: 55,
 			WeightPreference: 25, WeightTravel: 25, WeightDriver: 15, WeightResource: 10, WeightUtilization: 10, WeightUrgency: 10, WeightRegion: 5,
 		},
 		Map: Map{
@@ -384,23 +472,35 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 			TileToken: mapTileToken, Attribution: valueOrDefault(getenv("MAP_TILE_ATTRIBUTION"), "© OpenStreetMap-Mitwirkende"),
 			Timeout: 8 * time.Second, MaxResponseBytes: 2 << 20, MaxZoom: 19,
 		},
+		Geocoding: Geocoding{
+			SearchURL: strings.TrimSpace(getenv("GEOCODING_SEARCH_URL")), CountryCodes: splitCSV(valueOrDefault(getenv("GEOCODING_COUNTRY_CODES"), "at")),
+			Timeout: 5 * time.Second, MaxResponseBytes: 256 << 10, MaxResults: 5, RateLimit: 30,
+			MinInterval: time.Second, CacheTTL: 24 * time.Hour, CacheEntries: 512,
+		},
 		Voice: Voice{
 			Transcriber: valueOrDefault(getenv("VOICE_TRANSCRIBER"), "disabled"), Extractor: valueOrDefault(getenv("VOICE_EXTRACTOR"), "rules"),
+			WhisperModel: valueOrDefault(getenv("VOICE_WHISPER_MODEL"), "small"),
+			WhisperURL:   strings.TrimSpace(getenv("VOICE_WHISPER_URL")),
 			OpenAIAPIKey: openAIKey, OpenAIModel: valueOrDefault(getenv("VOICE_OPENAI_MODEL"), "gpt-4o-mini-transcribe"), OpenAIExtractionModel: valueOrDefault(getenv("VOICE_OPENAI_EXTRACTION_MODEL"), "gpt-5-mini"), FakeTranscript: strings.TrimSpace(getenv("VOICE_FAKE_TRANSCRIPT")),
-			MaxDuration: 90 * time.Second, MaxBytes: 15 << 20, DraftRetention: 24 * time.Hour, ProviderTimeout: 30 * time.Second, MaxResponseBytes: 1 << 20,
+			MaxDuration: 90 * time.Second, MaxBytes: 15 << 20, DraftRetention: 24 * time.Hour, RecordingRetention: 30 * 24 * time.Hour, ProviderTimeout: 30 * time.Second, MaxResponseBytes: 1 << 20,
 			TempDir: valueOrDefault(getenv("VOICE_TEMP_DIR"), "/tmp/hackwerk-voice"), RateLimitPerMinute: 10, ConcurrentPerUser: 2,
 			ExternalProviderNote: valueOrDefault(getenv("VOICE_EXTERNAL_PROVIDER_NOTICE"), "Bei aktivem externem Sprachdienst verlassen Audio und/oder Transkript zur Verarbeitung die HackWerk-Infrastruktur."),
 		},
 		Metrics: Metrics{Enabled: true, ListenAddr: valueOrDefault(getenv("METRICS_LISTEN_ADDR"), "127.0.0.1:19090"), CollectionTimeout: 2 * time.Second, WorkerStaleAfter: 2 * time.Minute},
 	}
 	if len(cfg.HTTP.AllowedHosts) == 0 {
-		if parsedBase, parseErr := url.Parse(cfg.BaseURL); parseErr == nil && parsedBase.Hostname() != "" {
+		if cfg.Environment != EnvironmentProduction {
+			cfg.HTTP.AllowedHosts = []string{"*"}
+		} else if parsedBase, parseErr := url.Parse(cfg.BaseURL); parseErr == nil && parsedBase.Hostname() != "" {
 			cfg.HTTP.AllowedHosts = []string{parsedBase.Hostname()}
 		}
 	}
 
 	if err := applyOverrides(&cfg, getenv); err != nil {
 		return Config{}, err
+	}
+	if (cfg.Voice.Transcriber == "whisper-local" || cfg.Voice.Transcriber == "whisper-tailscale") && strings.TrimSpace(getenv("VOICE_PROVIDER_TIMEOUT")) == "" {
+		cfg.Voice.ProviderTimeout = 10 * time.Minute
 	}
 	if validate {
 		if err := cfg.Validate(); err != nil {
@@ -431,6 +531,26 @@ func applyOverrides(cfg *Config, getenv func(string) string) error {
 	}
 	if cfg.Map.MaxZoom, err = intValue(getenv, "MAP_TILE_MAX_ZOOM", cfg.Map.MaxZoom); err != nil {
 		return err
+	}
+	if cfg.Geocoding.Timeout, err = durationValue(getenv, "GEOCODING_TIMEOUT", cfg.Geocoding.Timeout); err != nil {
+		return err
+	}
+	if cfg.Geocoding.MaxResponseBytes, err = int64Value(getenv, "GEOCODING_MAX_RESPONSE_BYTES", cfg.Geocoding.MaxResponseBytes); err != nil {
+		return err
+	}
+	if cfg.Geocoding.MinInterval, err = durationValue(getenv, "GEOCODING_MIN_INTERVAL", cfg.Geocoding.MinInterval); err != nil {
+		return err
+	}
+	if cfg.Geocoding.CacheTTL, err = durationValue(getenv, "GEOCODING_CACHE_TTL", cfg.Geocoding.CacheTTL); err != nil {
+		return err
+	}
+	for name, target := range map[string]*int{
+		"GEOCODING_MAX_RESULTS": &cfg.Geocoding.MaxResults, "GEOCODING_RATE_LIMIT_PER_MINUTE": &cfg.Geocoding.RateLimit,
+		"GEOCODING_CACHE_ENTRIES": &cfg.Geocoding.CacheEntries,
+	} {
+		if *target, err = intValue(getenv, name, *target); err != nil {
+			return err
+		}
 	}
 	if cfg.HTTP.MaxHeaderBytes, err = intValue(getenv, "HTTP_MAX_HEADER_BYTES", cfg.HTTP.MaxHeaderBytes); err != nil {
 		return err
@@ -471,6 +591,16 @@ func applyOverrides(cfg *Config, getenv func(string) string) error {
 	if cfg.Auth.LoginLimitPerMinute, err = intValue(getenv, "LOGIN_RATE_LIMIT_PER_MINUTE", cfg.Auth.LoginLimitPerMinute); err != nil {
 		return err
 	}
+	for name, target := range map[string]*time.Duration{
+		"AUTH_EMAIL_VERIFICATION_TTL": &cfg.Auth.EmailVerificationTTL,
+		"AUTH_EMAIL_RESEND_INTERVAL":  &cfg.Auth.EmailResendInterval,
+		"AUTH_MFA_CHALLENGE_TTL":      &cfg.Auth.MFAChallengeTTL,
+		"AUTH_WEBAUTHN_CHALLENGE_TTL": &cfg.Auth.WebAuthnChallengeTTL,
+	} {
+		if *target, err = durationValue(getenv, name, *target); err != nil {
+			return err
+		}
+	}
 	if cfg.Confirmation.TokenTTL, err = durationValue(getenv, "CONFIRMATION_TOKEN_TTL", cfg.Confirmation.TokenTTL); err != nil {
 		return err
 	}
@@ -510,6 +640,12 @@ func applyOverrides(cfg *Config, getenv func(string) string) error {
 	if cfg.Dashboard.PendingAfter, err = durationValue(getenv, "DASHBOARD_PENDING_AFTER", cfg.Dashboard.PendingAfter); err != nil {
 		return err
 	}
+	if cfg.Waitlist.DurationReviewMinMinutes, err = int32Value(getenv, "WAITLIST_DURATION_REVIEW_MIN_MINUTES", cfg.Waitlist.DurationReviewMinMinutes); err != nil {
+		return err
+	}
+	if cfg.Waitlist.DurationReviewMaxMinutes, err = int32Value(getenv, "WAITLIST_DURATION_REVIEW_MAX_MINUTES", cfg.Waitlist.DurationReviewMaxMinutes); err != nil {
+		return err
+	}
 	if cfg.CalendarFeed.ExportMaxDays, err = intValue(getenv, "CALENDAR_EXPORT_MAX_DAYS", cfg.CalendarFeed.ExportMaxDays); err != nil {
 		return err
 	}
@@ -527,7 +663,7 @@ func applyOverrides(cfg *Config, getenv func(string) string) error {
 			return err
 		}
 	}
-	for name, target := range map[string]*time.Duration{"VOICE_MAX_DURATION": &cfg.Voice.MaxDuration, "VOICE_DRAFT_RETENTION": &cfg.Voice.DraftRetention, "VOICE_PROVIDER_TIMEOUT": &cfg.Voice.ProviderTimeout} {
+	for name, target := range map[string]*time.Duration{"VOICE_MAX_DURATION": &cfg.Voice.MaxDuration, "VOICE_DRAFT_RETENTION": &cfg.Voice.DraftRetention, "VOICE_RECORDING_RETENTION": &cfg.Voice.RecordingRetention, "VOICE_PROVIDER_TIMEOUT": &cfg.Voice.ProviderTimeout} {
 		if *target, err = durationValue(getenv, name, *target); err != nil {
 			return err
 		}
@@ -552,7 +688,6 @@ func applyOverrides(cfg *Config, getenv func(string) string) error {
 		}
 	}
 	for name, target := range map[string]*float64{
-		"PLANNING_DEPOT_LATITUDE": &cfg.Planning.DepotLatitude, "PLANNING_DEPOT_LONGITUDE": &cfg.Planning.DepotLongitude,
 		"PLANNING_HAVERSINE_ROAD_FACTOR": &cfg.Planning.HaversineRoadFactor, "PLANNING_HAVERSINE_SPEED_KMH": &cfg.Planning.HaversineSpeedKMH,
 		"PLANNING_WEIGHT_PREFERENCE": &cfg.Planning.WeightPreference, "PLANNING_WEIGHT_TRAVEL": &cfg.Planning.WeightTravel,
 		"PLANNING_WEIGHT_DRIVER": &cfg.Planning.WeightDriver, "PLANNING_WEIGHT_RESOURCE": &cfg.Planning.WeightResource,
@@ -563,7 +698,7 @@ func applyOverrides(cfg *Config, getenv func(string) string) error {
 			return err
 		}
 	}
-	for name, target := range map[string]*bool{"MAIL_ENABLED": &cfg.Mail.Enabled, "SMS_ENABLED": &cfg.SMS.Enabled, "VOICE_ENABLED": &cfg.Voice.Enabled, "CALENDAR_ENABLED": &cfg.CalendarFeed.Enabled, "METRICS_ENABLED": &cfg.Metrics.Enabled, "MAINTENANCE_MODE": &cfg.MaintenanceMode} {
+	for name, target := range map[string]*bool{"MAIL_ENABLED": &cfg.Mail.Enabled, "SMS_ENABLED": &cfg.SMS.Enabled, "VOICE_ENABLED": &cfg.Voice.Enabled, "CALENDAR_ENABLED": &cfg.CalendarFeed.Enabled, "GEOCODING_ENABLED": &cfg.Geocoding.Enabled, "METRICS_ENABLED": &cfg.Metrics.Enabled, "MAINTENANCE_MODE": &cfg.MaintenanceMode} {
 		if value := strings.TrimSpace(getenv(name)); value != "" {
 			*target, err = strconv.ParseBool(value)
 			if err != nil {
@@ -625,6 +760,9 @@ func (cfg Config) Validate() error {
 		if !validAllowedHost(host) {
 			return errors.New("config: invalid allowed host")
 		}
+		if cfg.Environment == EnvironmentProduction && strings.TrimSpace(host) == "*" {
+			return errors.New("config: production allowed hosts must not contain wildcard")
+		}
 	}
 	for _, cidr := range cfg.HTTP.TrustedProxyCIDRs {
 		if _, _, err := net.ParseCIDR(cidr); err != nil {
@@ -642,7 +780,8 @@ func (cfg Config) Validate() error {
 	if cfg.Auth.SessionIdleTTL > cfg.Auth.SessionAbsoluteTTL {
 		return errors.New("config: session idle ttl must not exceed absolute ttl")
 	}
-	if !validCookieName(cfg.Auth.SessionCookieName) || !validCookieName(cfg.Auth.CSRFCookieName) || cfg.Auth.SessionCookieName == cfg.Auth.CSRFCookieName {
+	if !validCookieName(cfg.Auth.SessionCookieName) || !validCookieName(cfg.Auth.CSRFCookieName) || !validCookieName(cfg.Auth.MFACookieName) ||
+		cfg.Auth.SessionCookieName == cfg.Auth.CSRFCookieName || cfg.Auth.SessionCookieName == cfg.Auth.MFACookieName || cfg.Auth.CSRFCookieName == cfg.Auth.MFACookieName {
 		return errors.New("config: invalid auth cookie names")
 	}
 	if cfg.Auth.PasswordMinLength < 12 || cfg.Auth.PasswordMinLength > 256 {
@@ -650,6 +789,23 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Auth.LoginLimitPerMinute < 1 || cfg.Auth.LoginLimitPerMinute > 1000 {
 		return errors.New("config: invalid login rate limit")
+	}
+	if cfg.Auth.EmailVerificationTTL < time.Hour || cfg.Auth.EmailVerificationTTL > 7*24*time.Hour ||
+		cfg.Auth.EmailResendInterval < 30*time.Second || cfg.Auth.EmailResendInterval > time.Hour ||
+		cfg.Auth.MFAChallengeTTL < time.Minute || cfg.Auth.MFAChallengeTTL > 15*time.Minute ||
+		cfg.Auth.WebAuthnChallengeTTL < time.Minute || cfg.Auth.WebAuthnChallengeTTL > 15*time.Minute {
+		return errors.New("config: invalid auth security time limits")
+	}
+	securityKey, ok := cfg.Auth.SecurityKeys[cfg.Auth.SecurityCurrentKeyID]
+	decodedSecurityKey, decodeSecurityErr := base64.StdEncoding.DecodeString(securityKey)
+	if !ok || decodeSecurityErr != nil || len(decodedSecurityKey) < 32 {
+		return errors.New("config: current auth security key is missing or too short")
+	}
+	for keyID, encoded := range cfg.Auth.SecurityKeys {
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		if strings.TrimSpace(keyID) == "" || err != nil || len(decoded) < 32 {
+			return errors.New("config: auth security key ring contains a missing, invalid or too short key")
+		}
 	}
 	if cfg.Confirmation.TokenTTL < time.Hour || cfg.Confirmation.TokenTTL > 90*24*time.Hour || cfg.Confirmation.RateLimit < 1 || cfg.Confirmation.RateLimit > 1000 {
 		return errors.New("config: invalid confirmation limits")
@@ -659,7 +815,8 @@ func (cfg Config) Validate() error {
 	if !ok || decodeErr != nil || len(decodedKey) < 32 {
 		return errors.New("config: current confirmation token key is missing or too short")
 	}
-	if cfg.Worker.PollInterval < 100*time.Millisecond || cfg.Worker.Lease < time.Second || cfg.Worker.BatchSize < 1 || cfg.Worker.BatchSize > 500 {
+	if cfg.Worker.PollInterval < 100*time.Millisecond || cfg.Worker.Lease < time.Second || cfg.Worker.BatchSize < 1 || cfg.Worker.BatchSize > 500 ||
+		len(cfg.Worker.InstanceID) > 128 || strings.ContainsAny(cfg.Worker.InstanceID, "\r\n\t") {
 		return errors.New("config: invalid worker settings")
 	}
 	if cfg.Mail.MaxAttempts < 1 || cfg.Mail.MaxAttempts > 50 || cfg.Mail.Port < 1 || cfg.Mail.Port > 65535 ||
@@ -693,6 +850,9 @@ func (cfg Config) Validate() error {
 	if cfg.Dashboard.HorizonDays < 1 || cfg.Dashboard.HorizonDays > 31 || cfg.Dashboard.PendingAfter < time.Minute || cfg.Dashboard.PendingAfter > 7*24*time.Hour {
 		return errors.New("config: invalid dashboard limits")
 	}
+	if cfg.Waitlist.DurationReviewMinMinutes < 1 || cfg.Waitlist.DurationReviewMaxMinutes <= cfg.Waitlist.DurationReviewMinMinutes || cfg.Waitlist.DurationReviewMaxMinutes > 7*24*60 {
+		return errors.New("config: invalid waitlist duration review limits")
+	}
 	openAt, openErr := time.Parse("15:04", cfg.Dashboard.BusinessOpen)
 	closeAt, closeErr := time.Parse("15:04", cfg.Dashboard.BusinessClose)
 	if openErr != nil || closeErr != nil || !closeAt.After(openAt) {
@@ -704,10 +864,13 @@ func (cfg Config) Validate() error {
 		cfg.CalendarFeed.RateLimit < 1 || cfg.CalendarFeed.RateLimit > 1000 {
 		return errors.New("config: invalid calendar feed limits")
 	}
-	if cfg.Planning.Router != "haversine" && cfg.Planning.Router != "osrm" {
-		return errors.New("config: planning router must be haversine or osrm")
+	if cfg.Planning.Router != "haversine" && cfg.Planning.Router != "osrm" && cfg.Planning.Router != "osrm-internal" && cfg.Planning.Router != "osrm-tailscale" {
+		return errors.New("config: planning router must be haversine, osrm, osrm-internal or osrm-tailscale")
 	}
 	if err := validateMapConfig(cfg.Map); err != nil {
+		return err
+	}
+	if err := validateGeocodingConfig(cfg.Geocoding); err != nil {
 		return err
 	}
 	if cfg.Planning.Router == "osrm" {
@@ -716,14 +879,19 @@ func (cfg Config) Validate() error {
 			return errors.New("config: OSRM requires a static non-loopback HTTPS URL")
 		}
 	}
+	if cfg.Planning.Router == "osrm-internal" && cfg.Planning.RoutingURL != "http://osrm:5000" {
+		return errors.New("config: internal OSRM requires exactly http://osrm:5000")
+	}
+	if cfg.Planning.Router == "osrm-tailscale" && !validTailscaleRoutingURL(cfg.Planning.RoutingURL) {
+		return errors.New("config: Tailscale OSRM requires a numeric http://100.64.0.0/10:5000 endpoint")
+	}
 	openPlanning, openPlanningErr := time.Parse("15:04", cfg.Planning.BusinessOpen)
 	closePlanning, closePlanningErr := time.Parse("15:04", cfg.Planning.BusinessClose)
 	weightTotal := cfg.Planning.WeightPreference + cfg.Planning.WeightTravel + cfg.Planning.WeightDriver + cfg.Planning.WeightResource + cfg.Planning.WeightUtilization + cfg.Planning.WeightUrgency + cfg.Planning.WeightRegion
 	if openPlanningErr != nil || closePlanningErr != nil || !closePlanning.After(openPlanning) || cfg.Planning.HorizonDays < 1 || cfg.Planning.HorizonDays > 90 ||
 		cfg.Planning.SlotMinutes < 5 || cfg.Planning.SlotMinutes > 60 || 60%cfg.Planning.SlotMinutes != 0 || cfg.Planning.BufferMinutes < 0 || cfg.Planning.BufferMinutes > 240 ||
 		cfg.Planning.CandidateLimit < 10 || cfg.Planning.CandidateLimit > 10000 || cfg.Planning.SuggestionTTL < time.Minute || cfg.Planning.SuggestionTTL > 24*time.Hour ||
-		cfg.Planning.RoutingMaxResponseBytes < 1024 || cfg.Planning.RoutingMaxResponseBytes > 8<<20 || cfg.Planning.RoutingCacheEntries < 1 || cfg.Planning.RoutingCacheEntries > 10000 || cfg.Planning.RoutingCacheTTL < time.Minute || cfg.Planning.RoutingCacheTTL > 30*24*time.Hour || cfg.Planning.DepotLatitude < -90 || cfg.Planning.DepotLatitude > 90 ||
-		cfg.Planning.DepotLongitude < -180 || cfg.Planning.DepotLongitude > 180 || cfg.Planning.HaversineRoadFactor < 1 || cfg.Planning.HaversineRoadFactor > 3 ||
+		cfg.Planning.RoutingMaxResponseBytes < 1024 || cfg.Planning.RoutingMaxResponseBytes > 8<<20 || cfg.Planning.RoutingCacheEntries < 1 || cfg.Planning.RoutingCacheEntries > 10000 || cfg.Planning.RoutingCacheTTL < time.Minute || cfg.Planning.RoutingCacheTTL > 30*24*time.Hour || cfg.Planning.HaversineRoadFactor < 1 || cfg.Planning.HaversineRoadFactor > 3 ||
 		cfg.Planning.HaversineSpeedKMH < 5 || cfg.Planning.HaversineSpeedKMH > 150 || weightTotal <= 0 {
 		return errors.New("config: invalid planning settings")
 	}
@@ -732,13 +900,13 @@ func (cfg Config) Validate() error {
 			return errors.New("config: invalid planning weights")
 		}
 	}
-	if cfg.Voice.Transcriber != "disabled" && cfg.Voice.Transcriber != "fake" && cfg.Voice.Transcriber != "openai" {
-		return errors.New("config: voice transcriber must be disabled, fake or openai")
+	if cfg.Voice.Transcriber != "disabled" && cfg.Voice.Transcriber != "fake" && cfg.Voice.Transcriber != "openai" && cfg.Voice.Transcriber != "whisper-local" && cfg.Voice.Transcriber != "whisper-tailscale" {
+		return errors.New("config: voice transcriber must be disabled, fake, openai, whisper-local or whisper-tailscale")
 	}
 	if cfg.Voice.Extractor != "rules" && cfg.Voice.Extractor != "openai" {
 		return errors.New("config: voice extractor must be rules or openai")
 	}
-	if cfg.Voice.MaxDuration < time.Second || cfg.Voice.MaxDuration > 5*time.Minute || cfg.Voice.MaxBytes < 1024 || cfg.Voice.MaxBytes > 50<<20 || cfg.Voice.DraftRetention < 5*time.Minute || cfg.Voice.DraftRetention > 7*24*time.Hour || cfg.Voice.ProviderTimeout < time.Second || cfg.Voice.ProviderTimeout > 2*time.Minute || cfg.Voice.MaxResponseBytes < 1024 || cfg.Voice.MaxResponseBytes > 4<<20 || strings.TrimSpace(cfg.Voice.TempDir) == "" || cfg.Voice.RateLimitPerMinute < 1 || cfg.Voice.RateLimitPerMinute > 100 || cfg.Voice.ConcurrentPerUser < 1 || cfg.Voice.ConcurrentPerUser > 5 {
+	if cfg.Voice.MaxDuration < time.Second || cfg.Voice.MaxDuration > 5*time.Minute || cfg.Voice.MaxBytes < 1024 || cfg.Voice.MaxBytes > 15<<20 || cfg.Voice.DraftRetention < 5*time.Minute || cfg.Voice.DraftRetention > 7*24*time.Hour || cfg.Voice.RecordingRetention < 24*time.Hour || cfg.Voice.RecordingRetention > 30*24*time.Hour || cfg.Voice.ProviderTimeout < time.Second || cfg.Voice.ProviderTimeout > 15*time.Minute || cfg.Voice.MaxResponseBytes < 1024 || cfg.Voice.MaxResponseBytes > 4<<20 || strings.TrimSpace(cfg.Voice.TempDir) == "" || cfg.Voice.RateLimitPerMinute < 1 || cfg.Voice.RateLimitPerMinute > 100 || cfg.Voice.ConcurrentPerUser < 1 || cfg.Voice.ConcurrentPerUser > 5 {
 		return errors.New("config: invalid voice limits")
 	}
 	if cfg.Voice.Enabled && cfg.Voice.Transcriber == "disabled" {
@@ -746,6 +914,12 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Voice.Transcriber == "openai" && (len(cfg.Voice.OpenAIAPIKey) < 16 || strings.TrimSpace(cfg.Voice.OpenAIModel) == "") {
 		return errors.New("config: OpenAI voice transcriber requires API key and model")
+	}
+	if (cfg.Voice.Transcriber == "whisper-local" || cfg.Voice.Transcriber == "whisper-tailscale") && cfg.Voice.WhisperModel != "small" {
+		return errors.New("config: local whisper transcriber requires the small model")
+	}
+	if cfg.Voice.Transcriber == "whisper-tailscale" && !validTailscaleVoiceURL(cfg.Voice.WhisperURL) {
+		return errors.New("config: Tailscale whisper requires a numeric http://100.64.0.0/10:8080 endpoint")
 	}
 	if cfg.Voice.Extractor == "openai" && (len(cfg.Voice.OpenAIAPIKey) < 16 || strings.TrimSpace(cfg.Voice.OpenAIExtractionModel) == "") {
 		return errors.New("config: OpenAI voice extractor requires API key and model")
@@ -792,6 +966,15 @@ func (cfg Config) Validate() error {
 		if cfg.Confirmation.CurrentKeyID == "development-v1" {
 			return errors.New("config: production confirmation token key is required")
 		}
+		if cfg.Auth.SecurityCurrentKeyID == "development-v1" {
+			return errors.New("config: production auth security key is required")
+		}
+		for _, encoded := range cfg.Auth.SecurityKeys {
+			decoded, _ := base64.StdEncoding.DecodeString(encoded)
+			if string(decoded) == developmentAuthSecurityKeyMaterial {
+				return errors.New("config: production auth security key is required")
+			}
+		}
 		if len(cfg.HTTP.TrustedProxyCIDRs) == 0 {
 			return errors.New("config: production trusted proxy CIDRs are required")
 		}
@@ -801,11 +984,42 @@ func (cfg Config) Validate() error {
 		if cfg.LogFormat != "json" || cfg.LogLevel == "debug" {
 			return errors.New("config: production logging must use non-debug JSON")
 		}
+		if err := validateProductionBusiness(cfg.Business); err != nil {
+			return err
+		}
 		if cfg.Mail.Enabled && (strings.HasSuffix(strings.ToLower(cfg.Mail.Host), ".invalid") || strings.HasSuffix(strings.ToLower(cfg.Mail.FromAddress), ".invalid")) {
 			return errors.New("config: production mail configuration must not use example defaults")
 		}
 		if cfg.CalendarFeed.Enabled && strings.EqualFold(cfg.CalendarFeed.UIDDomain, "hackwerk.local") {
 			return errors.New("config: production calendar UID domain is required")
+		}
+	}
+	return nil
+}
+
+func validateProductionBusiness(business Business) error {
+	fields := []struct {
+		name        string
+		value       string
+		placeholder string
+	}{
+		{name: "name", value: business.Name, placeholder: businessNamePlaceholder},
+		{name: "address", value: business.Address, placeholder: businessAddressPlaceholder},
+		{name: "email", value: business.Email, placeholder: businessEmailPlaceholder},
+		{name: "phone", value: business.Phone, placeholder: businessPhonePlaceholder},
+		{name: "legal form", value: business.LegalForm, placeholder: businessLegalFormPlaceholder},
+		{name: "registry number", value: business.RegistryNumber, placeholder: businessRegistryPlaceholder},
+		{name: "registry court", value: business.RegistryCourt, placeholder: businessRegistryPlaceholder},
+		{name: "VAT ID", value: business.VATID, placeholder: businessRegistryPlaceholder},
+		{name: "supervisory authority", value: business.SupervisoryAuthority, placeholder: businessSupervisoryAuthorityPlaceholder},
+		{name: "chamber", value: business.Chamber, placeholder: businessChamberPlaceholder},
+		{name: "trade rules", value: business.TradeRules, placeholder: businessTradeRulesPlaceholder},
+		{name: "data protection officer", value: business.DataProtectionOfficer, placeholder: businessDataProtectionOfficerPlaceholder},
+	}
+	for _, field := range fields {
+		value := strings.TrimSpace(field.value)
+		if value == "" || strings.EqualFold(value, field.placeholder) {
+			return fmt.Errorf("config: production business %s is required", field.name)
 		}
 	}
 	return nil
@@ -832,6 +1046,31 @@ func validateMapConfig(cfg Map) error {
 	return nil
 }
 
+func validateGeocodingConfig(cfg Geocoding) error {
+	if cfg.Timeout < time.Second || cfg.Timeout > 30*time.Second || cfg.MaxResponseBytes < 16<<10 || cfg.MaxResponseBytes > 2<<20 ||
+		cfg.MaxResults < 1 || cfg.MaxResults > 10 || cfg.RateLimit < 1 || cfg.RateLimit > 120 || cfg.MinInterval < 100*time.Millisecond || cfg.MinInterval > time.Minute ||
+		cfg.CacheTTL < time.Minute || cfg.CacheTTL > 30*24*time.Hour || cfg.CacheEntries < 1 || cfg.CacheEntries > 4096 || len(cfg.CountryCodes) == 0 || len(cfg.CountryCodes) > 8 {
+		return errors.New("config: invalid geocoding settings")
+	}
+	for _, code := range cfg.CountryCodes {
+		if len(code) != 2 || code[0] < 'a' || code[0] > 'z' || code[1] < 'a' || code[1] > 'z' {
+			return errors.New("config: geocoding country codes must be lowercase ISO alpha-2")
+		}
+	}
+	searchURL := strings.TrimSpace(cfg.SearchURL)
+	if !cfg.Enabled && searchURL == "" {
+		return nil
+	}
+	parsed, err := url.Parse(searchURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || isLoopbackHost(parsed.Hostname()) {
+		return errors.New("config: geocoding requires a static non-loopback HTTPS search URL")
+	}
+	if !cfg.Enabled {
+		return errors.New("config: geocoding URL requires geocoding to be enabled")
+	}
+	return nil
+}
+
 func isLoopbackHost(host string) bool {
 	host = strings.TrimSpace(strings.Trim(host, "[]"))
 	if strings.EqualFold(host, "localhost") {
@@ -841,9 +1080,38 @@ func isLoopbackHost(host string) bool {
 	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
 }
 
+func validTailscaleRoutingURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" ||
+		parsed.RawPath != "" || parsed.Opaque != "" || parsed.Path != "" || parsed.Scheme != "http" {
+		return false
+	}
+	address, err := netip.ParseAddr(parsed.Hostname())
+	if err != nil || !address.Is4() || !netip.MustParsePrefix("100.64.0.0/10").Contains(address) {
+		return false
+	}
+	return parsed.Host == net.JoinHostPort(address.String(), "5000")
+}
+
+func validTailscaleVoiceURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" ||
+		parsed.RawPath != "" || parsed.Opaque != "" || parsed.Path != "" || parsed.Scheme != "http" {
+		return false
+	}
+	address, err := netip.ParseAddr(parsed.Hostname())
+	if err != nil || !address.Is4() || !netip.MustParsePrefix("100.64.0.0/10").Contains(address) {
+		return false
+	}
+	return parsed.Host == net.JoinHostPort(address.String(), "8080")
+}
+
 func validAllowedHost(host string) bool {
 	host = strings.TrimSpace(strings.ToLower(host))
-	if host == "" || host == "*" || strings.ContainsAny(host, "/\\?#@\r\n\t ") {
+	if host == "*" {
+		return true
+	}
+	if host == "" || strings.ContainsAny(host, "/\\?#@\r\n\t ") {
 		return false
 	}
 	if parsed := net.ParseIP(strings.Trim(host, "[]")); parsed != nil {
@@ -868,6 +1136,9 @@ func validCookieName(value string) bool {
 func hostAllowed(host string, allowed []string) bool {
 	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
 	for _, candidate := range allowed {
+		if strings.TrimSpace(candidate) == "*" {
+			return true
+		}
 		if host == strings.Trim(strings.ToLower(strings.TrimSpace(candidate)), "[]") {
 			return true
 		}
@@ -993,8 +1264,10 @@ func (cfg Config) Diagnostic() map[string]any {
 		"mail_enabled": cfg.Mail.Enabled, "mail_username": configured(cfg.Mail.Username), "mail_password": configured(cfg.Mail.Password),
 		"sms_enabled": cfg.SMS.Enabled, "sms_provider": cfg.SMS.Provider, "sendberry_api_url": configured(cfg.SMS.SendberryURL),
 		"sendberry_api_key": configured(cfg.SMS.SendberryKey), "sendberry_access_name": configured(cfg.SMS.SendberryName), "sendberry_access_password": configured(cfg.SMS.SendberryPassword),
-		"voice_enabled": cfg.Voice.Enabled, "voice_provider_key": configured(cfg.Voice.OpenAIAPIKey), "calendar_enabled": cfg.CalendarFeed.Enabled,
+		"voice_enabled": cfg.Voice.Enabled, "voice_transcriber": cfg.Voice.Transcriber, "voice_whisper_url": configured(cfg.Voice.WhisperURL),
+		"voice_recording_retention": cfg.Voice.RecordingRetention.String(), "voice_provider_key": configured(cfg.Voice.OpenAIAPIKey), "calendar_enabled": cfg.CalendarFeed.Enabled,
 		"routing_provider": cfg.Planning.Router, "map_tile_url": configured(cfg.Map.TileURL), "map_tile_token": configured(cfg.Map.TileToken),
-		"confirmation_key_count": len(cfg.Confirmation.TokenKeys), "maintenance_mode": cfg.MaintenanceMode,
+		"geocoding_enabled": cfg.Geocoding.Enabled, "geocoding_search_url": configured(cfg.Geocoding.SearchURL),
+		"confirmation_key_count": len(cfg.Confirmation.TokenKeys), "auth_security_key_count": len(cfg.Auth.SecurityKeys), "maintenance_mode": cfg.MaintenanceMode,
 	}
 }

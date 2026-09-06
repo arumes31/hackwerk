@@ -26,7 +26,12 @@ acceptance
 reference
 tests
 openapi
-scripts
+scripts/*
+!scripts/ops/
+!scripts/ops/*.sh
+!scripts/release/
+scripts/release/*
+!scripts/release/restore-smoke-runner.sh
 README.md
 CHANGELOG.md
 MANIFEST.md

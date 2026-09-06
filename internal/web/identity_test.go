@@ -148,6 +148,18 @@ func TestIdentityHTTPLoginCSRFAndDriverGate(t *testing.T) {
 	}
 
 	csrfToken := cookies[1].Value
+	queryOnlyCSRF := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "https://example.test/logout?csrf_token="+url.QueryEscape(csrfToken), strings.NewReader(""))
+	queryOnlyCSRF.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	queryOnlyCSRF.Header.Set("Origin", "https://example.test")
+	for _, cookie := range cookies {
+		queryOnlyCSRF.AddCookie(cookie)
+	}
+	queryOnlyResponse := httptest.NewRecorder()
+	router.ServeHTTP(queryOnlyResponse, queryOnlyCSRF)
+	if queryOnlyResponse.Code != http.StatusForbidden || store.revoked {
+		t.Fatalf("query-only CSRF status = %d, revoked = %v", queryOnlyResponse.Code, store.revoked)
+	}
+
 	accessForm := url.Values{"csrf_token": {csrfToken}, "version": {"1"}, "role": {"admin"}, "active": {"true"}}
 	accessRequest := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "https://example.test/admin/users/other/access", strings.NewReader(accessForm.Encode()))
 	accessRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -173,7 +185,7 @@ func TestIdentityHTTPGenericLoginError(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := configForWebTest()
-	router, err := NewRouter(Dependencies{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pinger{}, Build: buildinfo.Info{Version: "test"}, Identity: identity})
+	router, err := NewRouter(Dependencies{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pinger{}, Build: buildinfo.Info{Version: "0.1.23", Commit: "11f91120aeba15b59f7c99d805a4ba08a8906672"}, Identity: identity})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,10 +195,12 @@ func TestIdentityHTTPGenericLoginError(t *testing.T) {
 	loginBody := loginResponse.Body.String()
 	if loginResponse.Code != http.StatusOK ||
 		!strings.Contains(loginBody, `href="/assets/login.css?v=`) ||
-		!strings.Contains(loginBody, `href="/assets/login-original.css?v=`) ||
-		!strings.Contains(loginBody, `src="/assets/login-background-loader.js?v=`) ||
-		!strings.Contains(loginBody, `class="scene"`) ||
-		!strings.Contains(loginBody, `class="card form-card login-card"`) {
+		strings.Contains(loginBody, `href="/assets/login-original.css?v=`) ||
+		strings.Contains(loginBody, `src="/assets/login-background-loader.js?v=`) ||
+		strings.Contains(loginBody, `class="scene"`) ||
+		!strings.Contains(loginBody, `class="login-panel"`) ||
+		!strings.Contains(loginBody, `HWK-SYS // V 0.1.23`) ||
+		!strings.Contains(loginBody, `ID: 11f9112`) {
 		t.Fatalf("login page response = %d %q", loginResponse.Code, loginBody)
 	}
 	form := url.Values{"username": {"nicht-vorhanden"}, "password": {"Falsches Passwort 2026"}}
@@ -296,6 +310,70 @@ func TestIdentityHTTPLastAdminErrorIsVisible(t *testing.T) {
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "Mindestens ein aktiver Administrator") ||
 		!strings.Contains(response.Body.String(), `role="alert"`) {
 		t.Fatalf("last-admin response = %d %q", response.Code, response.Body.String())
+	}
+}
+
+func TestIdentityHTTPAccountMutationsClearSessionsAndCookies(t *testing.T) {
+	store := &identityTestStore{}
+	router := identityRouterForMutationTest(t, store, auth.RoleAdmin)
+	request := func(path string, form url.Values) *http.Request {
+		value := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.test"+path, strings.NewReader(form.Encode()))
+		value.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		value.Header.Set("Origin", "https://example.test")
+		// #nosec G124 -- request-only test fixture; no cookie is emitted to a browser.
+		value.AddCookie(&http.Cookie{Name: "hackplan_session", Value: "session"})
+		// #nosec G124 -- request-only test fixture; no cookie is emitted to a browser.
+		value.AddCookie(&http.Cookie{Name: "hackplan_csrf", Value: "csrf"})
+		return value
+	}
+
+	mismatch := httptest.NewRecorder()
+	router.ServeHTTP(mismatch, request("/password", url.Values{"csrf_token": {"csrf"}, "password": {"Sicheres Passwort 2026"}, "confirmation": {"anderes Passwort"}}))
+	if mismatch.Code != http.StatusUnprocessableEntity || !strings.Contains(mismatch.Body.String(), "Passwörter stimmen nicht") {
+		t.Fatalf("mismatch=%d %s", mismatch.Code, mismatch.Body.String())
+	}
+
+	changed := httptest.NewRecorder()
+	router.ServeHTTP(changed, request("/password", url.Values{"csrf_token": {"csrf"}, "password": {"Sicheres Passwort 2026"}, "confirmation": {"Sicheres Passwort 2026"}}))
+	if changed.Code != http.StatusSeeOther || changed.Header().Get("Location") != "/login?password_changed=1" || len(changed.Result().Cookies()) != 2 {
+		t.Fatalf("changed=%d location=%q cookies=%#v", changed.Code, changed.Header().Get("Location"), changed.Result().Cookies())
+	}
+
+	logout := httptest.NewRecorder()
+	router.ServeHTTP(logout, request("/logout", url.Values{"csrf_token": {"csrf"}}))
+	if logout.Code != http.StatusSeeOther || logout.Header().Get("Location") != "/login" || !store.revoked {
+		t.Fatalf("logout=%d location=%q revoked=%t", logout.Code, logout.Header().Get("Location"), store.revoked)
+	}
+}
+
+func TestIdentityHTTPAdminCreateAndResetUser(t *testing.T) {
+	store := &identityTestStore{}
+	router := identityRouterForMutationTest(t, store, auth.RoleAdmin)
+	request := func(path string, form url.Values) *http.Request {
+		value := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.test"+path, strings.NewReader(form.Encode()))
+		value.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		value.Header.Set("Origin", "https://example.test")
+		// #nosec G124 -- request-only test fixture; no cookie is emitted to a browser.
+		value.AddCookie(&http.Cookie{Name: "hackplan_session", Value: "session"})
+		// #nosec G124 -- request-only test fixture; no cookie is emitted to a browser.
+		value.AddCookie(&http.Cookie{Name: "hackplan_csrf", Value: "csrf"})
+		return value
+	}
+	for _, test := range []struct {
+		name string
+		path string
+		form url.Values
+	}{
+		{name: "create", path: "/admin/users", form: url.Values{"csrf_token": {"csrf"}, "username": {"neu"}, "display_name": {"Neue Person"}, "email": {"neu@example.test"}, "role": {"driver"}, "password": {"Sicheres Passwort 2026"}, "create_driver": {"true"}}},
+		{name: "reset", path: "/admin/users/target/reset-password", form: url.Values{"csrf_token": {"csrf"}, "version": {"1"}, "password": {"Sicheres Passwort 2026"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request(test.path, test.form))
+			if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/admin/users" {
+				t.Fatalf("response=%d location=%q body=%s", response.Code, response.Header().Get("Location"), response.Body.String())
+			}
+		})
 	}
 }
 

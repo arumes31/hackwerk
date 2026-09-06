@@ -68,9 +68,9 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 		CardRight     float64 `json:"cardRight"`
 		ViewportWidth float64 `json:"viewportWidth"`
 		SmallTargets  int     `json:"smallTargets"`
-		SceneDisplay  string  `json:"sceneDisplay"`
-		Animations    int     `json:"animations"`
-		Vehicles      int     `json:"vehicles"`
+		Grid          bool    `json:"grid"`
+		InsetBorder   bool    `json:"insetBorder"`
+		LegacyScene   bool    `json:"legacyScene"`
 	}
 	var loginMobileScreenshot []byte
 	if err := chromedp.Run(
@@ -82,60 +82,98 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 		chromedp.Navigate(server.URL+"/login"),
 		chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery),
 		chromedp.Evaluate(`(()=>{
-			const card=document.querySelector('.login-card').getBoundingClientRect();
-			const targets=[...document.querySelectorAll('.login-access input,.login-access button')];
+			const panel=document.querySelector('.login-panel');
+			const card=panel.getBoundingClientRect();
+			const targets=[...document.querySelectorAll('.login-page input,.login-page button')];
 			return {overflow:document.documentElement.scrollWidth>window.innerWidth,
 				cardLeft:card.left,cardRight:card.right,viewportWidth:window.innerWidth,
 				smallTargets:targets.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<44||rect.height<44}).length,
-				sceneDisplay:getComputedStyle(document.querySelector('.scene')).display,
-				animations:[...document.querySelectorAll('.login-body *')].filter(node=>getComputedStyle(node).animationName!=='none').length,
-				vehicles:document.querySelectorAll('#vehicles .vehicle').length};
+				grid:getComputedStyle(document.body).backgroundImage.includes('linear-gradient'),
+				insetBorder:getComputedStyle(panel,'::before').borderTopStyle==='solid',
+				legacyScene:!!document.querySelector('.scene,#vehicles')};
 		})()`, &mobileLayout),
 		chromedp.FullScreenshot(&loginMobileScreenshot, 90),
 	); err != nil {
 		t.Fatalf("mobile login layout: %s", browserDiagnostics(browserContext, err))
 	}
 	cardOutsideViewport := mobileLayout.CardLeft < 0 || mobileLayout.CardRight > mobileLayout.ViewportWidth
-	if mobileLayout.Overflow || cardOutsideViewport || mobileLayout.SmallTargets != 0 || mobileLayout.SceneDisplay != "none" || mobileLayout.Animations != 0 || mobileLayout.Vehicles != 0 {
-		t.Fatalf("mobile login overflow/card/small targets/scene/animations/vehicles = %v/%v/%d/%s/%d/%d: %+v",
+	if mobileLayout.Overflow || cardOutsideViewport || mobileLayout.SmallTargets != 0 || !mobileLayout.Grid || !mobileLayout.InsetBorder || mobileLayout.LegacyScene {
+		t.Fatalf("mobile login overflow/card/small targets/grid/inset/legacy = %v/%v/%d/%v/%v/%v: %+v",
 			mobileLayout.Overflow,
 			cardOutsideViewport,
 			mobileLayout.SmallTargets,
-			mobileLayout.SceneDisplay,
-			mobileLayout.Animations,
-			mobileLayout.Vehicles,
+			mobileLayout.Grid,
+			mobileLayout.InsetBorder,
+			mobileLayout.LegacyScene,
 			mobileLayout,
 		)
 	}
 
 	var usersDesktopScreenshot []byte
 	var loginDesktopScreenshot []byte
+	var installPromptFlow struct {
+		HiddenStateHonored      bool `json:"hiddenStateHonored"`
+		HiddenBehindPrivacy     bool `json:"hiddenBehindPrivacy"`
+		ShownAfterPrivacyClosed bool `json:"shownAfterPrivacyClosed"`
+		HiddenAfterUse          bool `json:"hiddenAfterUse"`
+		PromptCalls             int  `json:"promptCalls"`
+	}
 	var desktopLogin struct {
-		SceneDisplay  string `json:"sceneDisplay"`
-		HasStyles     bool   `json:"hasStyles"`
-		HasLoader     bool   `json:"hasLoader"`
-		OriginalScene bool   `json:"originalScene"`
-		Vehicles      int    `json:"vehicles"`
-		ReducedMotion bool   `json:"reducedMotion"`
+		HasStyles          bool    `json:"hasStyles"`
+		HasLegacyAsset     bool    `json:"hasLegacyAsset"`
+		Grid               bool    `json:"grid"`
+		PanelWidth         float64 `json:"panelWidth"`
+		CenterDelta        float64 `json:"centerDelta"`
+		HasBuildMeta       bool    `json:"hasBuildMeta"`
+		PasswordIconOnly   bool    `json:"passwordIconOnly"`
+		PasswordIconInline bool    `json:"passwordIconInline"`
+		HasScrollTop       bool    `json:"hasScrollTop"`
 	}
 	if err := chromedp.Run(browserContext,
 		chromedp.EmulateViewport(1280, 900),
 		chromedp.Navigate(server.URL+"/login"),
-		chromedp.WaitVisible(".scene", chromedp.ByQuery),
-		chromedp.WaitReady("#vehicles .vehicle", chromedp.ByQuery),
-		chromedp.Evaluate(`(()=>({
-			sceneDisplay:getComputedStyle(document.querySelector('.scene')).display,
-			hasStyles:!!document.querySelector('link[href^="/assets/login-original.css?v="]')&&!!document.querySelector('link[href^="/assets/login.css?v="]'),
-			hasLoader:!!document.querySelector('script[src^="/assets/login-background-loader.js?v="]'),
-			originalScene:!!document.querySelector('#forestDynamic')&&!!document.querySelector('#vehicles'),
-			vehicles:document.querySelectorAll('#vehicles .vehicle').length,
-			reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches
-		}))()`, &desktopLogin),
+		chromedp.WaitVisible(".login-panel", chromedp.ByQuery),
+		chromedp.WaitVisible(".password-reveal", chromedp.ByQuery),
+		chromedp.Evaluate(`(()=>{
+			const panel=document.querySelector('.login-panel').getBoundingClientRect();
+			const meta=document.querySelector('.login-meta').textContent;
+			const password=document.querySelector('#password').getBoundingClientRect();
+			const reveal=document.querySelector('.password-reveal');
+			const revealBox=reveal.getBoundingClientRect();
+			return {
+				hasStyles:!!document.querySelector('link[href^="/assets/login.css?v="]'),
+				hasLegacyAsset:!!document.querySelector('link[href^="/assets/login-original.css?v="],script[src^="/assets/login-background-loader.js?v="],.scene,#vehicles'),
+				grid:getComputedStyle(document.body).backgroundImage.includes('linear-gradient'),
+				panelWidth:panel.width,
+				centerDelta:Math.abs(panel.left+panel.width/2-window.innerWidth/2),
+				hasBuildMeta:meta.includes('HWK-SYS // V')&&meta.includes('ID:'),
+				passwordIconOnly:reveal.textContent.trim()===''&&!!reveal.querySelector('svg')&&reveal.getAttribute('aria-label')==='Passwort anzeigen',
+				passwordIconInline:revealBox.left>=password.left&&revealBox.right<=password.right&&revealBox.top===password.top&&revealBox.bottom===password.bottom,
+				hasScrollTop:!!document.querySelector('.scroll-top')
+			};
+		})()`, &desktopLogin),
 		chromedp.FullScreenshot(&loginDesktopScreenshot, 90),
 		chromedp.SetValue("#username", "admin-task01", chromedp.ByQuery),
 		chromedp.SetValue("#password", adminPassword, chromedp.ByQuery),
 		chromedp.Click("form[action='/login'] button[type='submit']", chromedp.ByQuery),
 		chromedp.WaitVisible("[data-admin-menu] summary", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.scroll-top') !== null`, nil),
+		chromedp.Evaluate(`(()=>{const prompt=document.querySelector('[data-install-prompt]');prompt.hidden=true;return getComputedStyle(prompt).display==='none'})()`, &installPromptFlow.HiddenStateHonored),
+		chromedp.Evaluate(`(()=>{
+			window.__hackwerkInstallPromptCalls=0;
+			const event=new Event('beforeinstallprompt',{cancelable:true});
+			event.prompt=async()=>{window.__hackwerkInstallPromptCalls+=1;};
+			event.userChoice=Promise.resolve({outcome:'accepted'});
+			window.dispatchEvent(event);
+		})()`, nil),
+		chromedp.Evaluate(`(()=>{const notice=document.querySelector('[data-privacy-notice]');const prompt=document.querySelector('[data-install-prompt]');return !notice.hidden&&prompt.hidden&&getComputedStyle(prompt).display==='none'})()`, &installPromptFlow.HiddenBehindPrivacy),
+		chromedp.Click("[data-privacy-notice-dismiss]", chromedp.ByQuery),
+		chromedp.Poll(`(()=>{const prompt=document.querySelector('[data-install-prompt]');return !prompt.hidden&&getComputedStyle(prompt).display!=='none'})()`, nil),
+		chromedp.Evaluate(`(()=>{const prompt=document.querySelector('[data-install-prompt]');return !prompt.hidden&&getComputedStyle(prompt).display!=='none'})()`, &installPromptFlow.ShownAfterPrivacyClosed),
+		chromedp.Click("[data-install-accept]", chromedp.ByQuery),
+		chromedp.Poll(`(()=>{const prompt=document.querySelector('[data-install-prompt]');return prompt.hidden&&window.__hackwerkInstallPromptCalls===1})()`, nil),
+		chromedp.Evaluate(`(()=>{const prompt=document.querySelector('[data-install-prompt]');return prompt.hidden&&getComputedStyle(prompt).display==='none'})()`, &installPromptFlow.HiddenAfterUse),
+		chromedp.Evaluate(`window.__hackwerkInstallPromptCalls`, &installPromptFlow.PromptCalls),
 		chromedp.Click("[data-admin-menu] summary", chromedp.ByQuery),
 		chromedp.WaitVisible("a[href='/admin/users']", chromedp.ByQuery),
 		chromedp.Navigate(server.URL+"/admin/users"),
@@ -144,8 +182,11 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 	); err != nil {
 		t.Fatalf("admin login: %s", browserDiagnostics(browserContext, err))
 	}
-	if desktopLogin.SceneDisplay == "none" || !desktopLogin.HasStyles || !desktopLogin.HasLoader || !desktopLogin.OriginalScene || desktopLogin.ReducedMotion || desktopLogin.Vehicles == 0 {
-		t.Fatalf("desktop login scene/style = %+v", desktopLogin)
+	if !desktopLogin.HasStyles || desktopLogin.HasLegacyAsset || !desktopLogin.Grid || desktopLogin.PanelWidth < 400 || desktopLogin.PanelWidth > 440 || desktopLogin.CenterDelta > 2 || !desktopLogin.HasBuildMeta || !desktopLogin.PasswordIconOnly || !desktopLogin.PasswordIconInline || desktopLogin.HasScrollTop {
+		t.Fatalf("desktop login field-manual layout = %+v", desktopLogin)
+	}
+	if !installPromptFlow.HiddenStateHonored || !installPromptFlow.HiddenBehindPrivacy || !installPromptFlow.ShownAfterPrivacyClosed || !installPromptFlow.HiddenAfterUse || installPromptFlow.PromptCalls != 1 {
+		t.Fatalf("install prompt flow = %+v", installPromptFlow)
 	}
 	detailsForm := "form[action='/admin/users/" + driverUserID + "/details']"
 	if err := runBrowserStep(browserContext, "submit user details",
@@ -211,7 +252,7 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 				tables:document.querySelectorAll('.users-page table').length,
 				smallTargets:targets.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<44||rect.height<44}).length,
 				headingSize:document.querySelector('.users-page h1').getBoundingClientRect().height,
-				directCalendarLinks:document.querySelectorAll(".primary-nav > a[href='/calendar']").length,
+				directCalendarLinks:document.querySelectorAll(".primary-nav a[href='/calendar']").length,
 				navigationFeedLinks:document.querySelectorAll(".site-header a[href='/calendar/feeds'],.mobile-bottom-nav a[href='/calendar/feeds']").length,
 				openManagementRows:document.querySelectorAll('details.user-manage[open]').length};
 		})()`, &usersLayout),
@@ -326,11 +367,10 @@ func TestTask01UserDetailsBrowserJourney(t *testing.T) {
 		t.Fatalf("confirmed reset hash-changed/must-change = %v/%v", resetPasswordHash != createdPasswordHash, createdMustChange)
 	}
 
-	createdAccessForm := "form[action='/admin/users/" + createdUserID + "/access']"
+	createdAccessForm := "form.user-access-status[action='/admin/users/" + createdUserID + "/access']"
 	var deactivateCancelConfirmCalls int
 	if err := runBrowserStep(browserContext, "cancel user deactivation",
 		chromedp.Evaluate(`document.querySelector(`+quoteJS(createdAccessForm)+`).closest('details').open=true`, nil),
-		chromedp.Evaluate(`document.querySelector(`+quoteJS(createdAccessForm+" [name='active']")+`).checked=false`, nil),
 		chromedp.Evaluate(`window.__e2eConfirmCalls=0;window.confirm=()=>{window.__e2eConfirmCalls++;return false}`, nil),
 		chromedp.Click(createdAccessForm+" button[type='submit']", chromedp.ByQuery),
 		chromedp.Evaluate(`window.__e2eConfirmCalls`, &deactivateCancelConfirmCalls),

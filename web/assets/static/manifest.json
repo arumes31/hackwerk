@@ -3,11 +3,26 @@
   "short_name": "HackWerk",
   "description": "Mobile Einsatzplanung für Hackaufträge und Fahrerrouten.",
   "lang": "de-AT",
+  "id": "/dashboard",
   "start_url": "/dashboard",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f3efe4",
   "theme_color": "#214f3a",
+  "shortcuts": [
+    {
+      "name": "Kalender öffnen",
+      "short_name": "Kalender",
+      "url": "/calendar",
+      "icons": [{"src": "/assets/hackwerk-icon.svg", "sizes": "any", "type": "image/svg+xml"}]
+    },
+    {
+      "name": "Neuen Auftrag erfassen",
+      "short_name": "Neuer Auftrag",
+      "url": "/customers/new",
+      "icons": [{"src": "/assets/hackwerk-icon.svg", "sizes": "any", "type": "image/svg+xml"}]
+    }
+  ],
   "icons": [
     {
       "src": "/assets/hackwerk-icon.svg",

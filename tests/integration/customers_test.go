@@ -24,6 +24,47 @@ import (
 )
 
 func TestCustomersPersistence(t *testing.T) {
+	t.Run("customer can be created without a job", func(t *testing.T) {
+		ctx, pool, service, admin, _ := customerFixture(t)
+		created, err := service.CreateCustomer(ctx, admin, customers.CreateCustomerInput{
+			Customer:  customers.CustomerInput{FirstName: "Anna", LastName: "Wald", CountryCode: "AT", NotificationPreference: customers.NotifyNone},
+			RequestID: "request-customer-only",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var jobs int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM jobs WHERE customer_id=$1", created.CustomerID).Scan(&jobs); err != nil {
+			t.Fatal(err)
+		}
+		if jobs != 0 {
+			t.Fatalf("jobs = %d", jobs)
+		}
+		partnerID, err := service.CreateTransportPartner(ctx, admin, customers.TransportPartnerInput{
+			Type: customers.TransportPartnerCompany, Name: "Holztrans GmbH", Phone: "+43 660 123456", Address: "Waldweg 1",
+		}, "request-partner")
+		if err != nil {
+			t.Fatal(err)
+		}
+		job := customerIntake("", "", "80", customers.UrgencyNormal, "Nord").Job
+		job.JobType, job.TransportMode, job.TransportPartnerID = customers.JobTypeChippingWithTransport, customers.TransportExternal, partnerID
+		job.EstimatedTransportMinutes = 60
+		if _, err := service.CreateJob(ctx, admin, customers.CreateJobInput{CustomerID: created.CustomerID, Job: job, RequestID: "request-partner-job"}); err != nil {
+			t.Fatal(err)
+		}
+		detail, err := service.CustomerDetail(ctx, admin, created.CustomerID)
+		if err != nil || len(detail.Jobs) != 1 || detail.Jobs[0].TransportPartnerName != "Holztrans GmbH" {
+			t.Fatalf("detail=%#v error=%v", detail, err)
+		}
+		var auditText string
+		if err := pool.QueryRow(ctx, "SELECT COALESCE(string_agg(metadata::text, ' '), '') FROM audit_events").Scan(&auditText); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(auditText, "Holztrans") || strings.Contains(auditText, "+43 660") {
+			t.Fatalf("transport partner pii leaked into audit: %s", auditText)
+		}
+	})
+
 	t.Run("intake is atomic and audit contains no pii", func(t *testing.T) {
 		ctx, pool, service, admin, _ := customerFixture(t)
 		input := customerIntake("Franz", "Huber", "80", customers.UrgencyNormal, "Unterneukirchen")
@@ -252,6 +293,135 @@ func TestCustomersPersistence(t *testing.T) {
 			t.Fatalf("urgency/month filter = %#v, error = %v", page.Items, err)
 		}
 	})
+
+	t.Run("customer list filters and count are applied server side", func(t *testing.T) {
+		ctx, _, service, admin, _ := customerFixture(t)
+
+		activeEmail := customerIntake("Erika", "Aktiv", "60", customers.UrgencyNormal, "Nord")
+		activeEmail.Customer.Locality = "Nordstadt"
+		activeEmail.Customer.Email = "erika.aktiv@example.test"
+		activeEmail.Customer.NotificationPreference = customers.NotifyEmail
+		if _, err := service.CreateIntake(ctx, admin, activeEmail, "request-customer-filter-active"); err != nil {
+			t.Fatal(err)
+		}
+
+		missing := customerIntake("Konrad", "Fehlt", "40", customers.UrgencyNormal, "Süd")
+		missing.Customer.Street = ""
+		missing.Customer.PostalCode = ""
+		missing.Customer.Locality = "Südort"
+		missing.Customer.NotificationPreference = customers.NotifyNone
+		if _, err := service.CreateIntake(ctx, admin, missing, "request-customer-filter-missing"); err != nil {
+			t.Fatal(err)
+		}
+
+		historicalSMS := customerIntake("Heidi", "Historisch", "30", customers.UrgencyNormal, "Nord")
+		historicalSMS.Customer.Locality = "Westdorf"
+		historicalSMS.Customer.PhoneRaw = "0664 1234567"
+		historicalSMS.Customer.NotificationPreference = customers.NotifySMS
+		historical, err := service.CreateIntake(ctx, admin, historicalSMS, "request-customer-filter-historical")
+		if err != nil {
+			t.Fatal(err)
+		}
+		detail, err := service.CustomerDetail(ctx, admin, historical.CustomerID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := service.ArchiveJob(ctx, admin, historical.JobID, detail.Jobs[0].Version, "request-customer-filter-archive"); err != nil {
+			t.Fatal(err)
+		}
+
+		tests := []struct {
+			name   string
+			filter customers.CustomerListFilter
+			want   []string
+		}{
+			{name: "missing contact", filter: customers.CustomerListFilter{MissingContact: true}, want: []string{"Fehlt"}},
+			{name: "incomplete address", filter: customers.CustomerListFilter{IncompleteAddress: true}, want: []string{"Fehlt"}},
+			{name: "active jobs", filter: customers.CustomerListFilter{JobActivity: customers.CustomerJobsActive}, want: []string{"Aktiv", "Fehlt"}},
+			{name: "without active job", filter: customers.CustomerListFilter{JobActivity: customers.CustomerJobsNone}, want: []string{"Historisch"}},
+			{name: "email preference", filter: customers.CustomerListFilter{NotificationPreference: customers.NotifyEmail}, want: []string{"Aktiv"}},
+			{name: "no notification", filter: customers.CustomerListFilter{NotificationPreference: customers.NotifyNone}, want: []string{"Fehlt"}},
+			{name: "sms preference", filter: customers.CustomerListFilter{NotificationPreference: customers.NotifySMS}, want: []string{"Historisch"}},
+			{name: "locality", filter: customers.CustomerListFilter{Locality: "nord"}, want: []string{"Aktiv"}},
+			{name: "region", filter: customers.CustomerListFilter{Region: "nord"}, want: []string{"Aktiv", "Historisch"}},
+			{name: "combined gaps", filter: customers.CustomerListFilter{MissingContact: true, IncompleteAddress: true, JobActivity: customers.CustomerJobsActive}, want: []string{"Fehlt"}},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				test.filter.Sort = "name"
+				test.filter.Direction = "asc"
+				test.filter.Page = 1
+				test.filter.PageSize = 25
+				page, listErr := service.ListCustomers(ctx, admin, test.filter)
+				if listErr != nil {
+					t.Fatal(listErr)
+				}
+				got := make([]string, 0, len(page.Items))
+				for _, item := range page.Items {
+					got = append(got, item.LastName)
+				}
+				if fmt.Sprint(got) != fmt.Sprint(test.want) || page.Total != int64(len(test.want)) {
+					t.Fatalf("ListCustomers() names/total = %v/%d, want %v/%d", got, page.Total, test.want, len(test.want))
+				}
+			})
+		}
+	})
+
+	t.Run("preference mode and priority reason survive persistence constraints", func(t *testing.T) {
+		ctx, pool, service, admin, _ := customerFixture(t)
+		created, err := service.CreateIntake(ctx, admin, customerIntake("Petra", "Planbar", "60", customers.UrgencyNormal, "Nord"), "request-preference")
+		if err != nil {
+			t.Fatal(err)
+		}
+		detail, err := service.CustomerDetail(ctx, admin, created.CustomerID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		job := customerIntake("", "", "60", customers.UrgencyNormal, "Nord").Job
+		job.PreferenceMode = customers.PreferenceFixed
+		job.PreferredStartDate, job.PreferredEndDate = "2026-09-03", "2026-09-03"
+		if err := service.UpdateJob(ctx, admin, customers.UpdateJobInput{ID: created.JobID, ExpectedVersion: detail.Jobs[0].Version, Job: job, RequestID: "request-fixed"}); err != nil {
+			t.Fatal(err)
+		}
+		updated, err := service.CustomerDetail(ctx, admin, created.CustomerID)
+		if err != nil || updated.Jobs[0].PreferenceMode != customers.PreferenceFixed {
+			t.Fatalf("persisted preference=%q error=%v", updated.Jobs[0].PreferenceMode, err)
+		}
+		_, err = pool.Exec(ctx, "UPDATE jobs SET preferred_start_date='2026-09-03', preferred_end_date='2026-09-04' WHERE id=$1", created.JobID)
+		assertPostgresCode(t, err, "23514")
+		_, err = pool.Exec(ctx, "UPDATE waitlist_entries SET manual_priority=10, priority_reason='' WHERE id=$1", created.WaitlistID)
+		assertPostgresCode(t, err, "23514")
+		if err := service.UpdateWaitlistPriority(ctx, admin, created.WaitlistID, 10, "Fixtermin bevorzugt", 1, "request-priority"); err != nil {
+			t.Fatal(err)
+		}
+		var priority int32
+		var reason string
+		if err := pool.QueryRow(ctx, "SELECT manual_priority,priority_reason FROM waitlist_entries WHERE id=$1", created.WaitlistID).Scan(&priority, &reason); err != nil || priority != 10 || reason != "Fixtermin bevorzugt" {
+			t.Fatalf("persisted priority/reason=%d/%q error=%v", priority, reason, err)
+		}
+	})
+
+	t.Run("waitlist filter favorite round trips every visible filter", func(t *testing.T) {
+		ctx, _, service, admin, _ := customerFixture(t)
+		filter := customers.WaitlistFilter{
+			JobType: string(customers.JobTypeChippingWithTransport), Region: "Nord", Urgency: string(customers.UrgencyUrgent),
+			PreferredMonth: "2026-10", Workflow: "proposal", DurationGroup: "long",
+			MissingLocation: true, DurationIssue: true, Overdue: true, Unassigned: true, TransportPending: true, Incomplete: true,
+			Sort: "duration", Direction: "desc",
+		}
+		if err := service.SaveWaitlistFilterFavorite(ctx, admin, "Disposition", filter); err != nil {
+			t.Fatal(err)
+		}
+		favorites, err := service.ListWaitlistFilterFavorites(ctx, admin)
+		if err != nil || len(favorites) != 1 {
+			t.Fatalf("favorites=%#v error=%v", favorites, err)
+		}
+		got := favorites[0].Filter
+		if got.DurationGroup != "long" || !got.MissingLocation || !got.DurationIssue || !got.Overdue ||
+			!got.Unassigned || !got.TransportPending || !got.Incomplete || got.Sort != "duration" || got.Direction != "desc" {
+			t.Fatalf("favorite filter=%#v", got)
+		}
+	})
 }
 
 func customerFixture(t *testing.T) (context.Context, *pgxpool.Pool, *customers.Service, auth.Actor, auth.Actor) {
@@ -280,7 +450,7 @@ func customerFixture(t *testing.T) (context.Context, *pgxpool.Pool, *customers.S
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, `TRUNCATE job_notes, waitlist_entries, jobs, job_number_counters, customers,
+	if _, err := pool.Exec(ctx, `TRUNCATE job_notes, waitlist_entries, jobs, job_number_counters, customers, transport_partners,
 		audit_events, auth_rate_limits, sessions, drivers, users RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +479,7 @@ func customerIntake(firstName, lastName, volume string, urgency customers.Urgenc
 		},
 		Job: customers.JobInput{
 			JobType: customers.JobTypeChippingOnly, VolumeM3: volume, EstimatedHackMinutes: 120,
-			TransportMode: customers.TransportNone, Urgency: urgency, Region: region, Source: customers.SourcePhone,
+			TransportMode: customers.TransportNone, PreferenceMode: customers.PreferenceWindow, Urgency: urgency, Region: region, Source: customers.SourcePhone,
 		},
 	}
 }

@@ -48,6 +48,35 @@ func TestHostAllowlistAndTrustedProxyHeaders(t *testing.T) {
 	if trustedResponse.Header().Get("Strict-Transport-Security") == "" || trustedResponse.Header().Get("X-Test-Remote") != "198.51.100.2" {
 		t.Fatalf("trusted forwarded headers ignored: %#v", trustedResponse.Header())
 	}
+
+	longChain := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://hackwerk.example/", nil)
+	longChain.RemoteAddr = "10.1.2.3:1234"
+	longChain.Header.Set("X-Forwarded-For", strings.Join([]string{
+		"198.51.100.1", "198.51.100.2", "198.51.100.3", "198.51.100.4",
+		"198.51.100.5", "198.51.100.6", "198.51.100.7", "198.51.100.8",
+		"203.0.113.99", "10.2.3.4",
+	}, ", "))
+	longChainResponse := httptest.NewRecorder()
+	handler.ServeHTTP(longChainResponse, longChain)
+	if longChainResponse.Header().Get("X-Test-Remote") != "203.0.113.99" {
+		t.Fatalf("long forwarded chain client=%q, want proxy-appended client", longChainResponse.Header().Get("X-Test-Remote"))
+	}
+}
+
+func TestDevelopmentWildcardAllowsTailscaleHost(t *testing.T) {
+	boundary, err := newNetworkBoundary(config.Config{BaseURL: "http://localhost:18533", HTTP: config.HTTP{AllowedHosts: []string{"*"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := boundary.Middleware(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) { response.WriteHeader(http.StatusNoContent) }))
+	for _, host := range []string{"100.115.58.99:18533", "dr-ex-develop01.werewolf-gondola.ts.net:18533"} {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+host+"/", nil)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("host %q status = %d", host, response.Code)
+		}
+	}
 }
 
 func TestRequestLimitsAndStrictCSP(t *testing.T) {
@@ -63,7 +92,7 @@ func TestRequestLimitsAndStrictCSP(t *testing.T) {
 	validResponse := httptest.NewRecorder()
 	handler.ServeHTTP(validResponse, valid)
 	csp := validResponse.Header().Get("Content-Security-Policy")
-	if strings.Contains(csp, "unsafe") || !strings.Contains(csp, "frame-ancestors 'none'") {
+	if strings.Contains(csp, "unsafe") || !strings.Contains(csp, "frame-ancestors 'none'") || !strings.Contains(csp, "media-src 'self' blob:") {
 		t.Fatalf("CSP=%q", csp)
 	}
 }

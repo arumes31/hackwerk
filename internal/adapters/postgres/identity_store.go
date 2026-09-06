@@ -36,6 +36,9 @@ func (store *IdentityStore) FindUserByUsername(ctx context.Context, username str
 		ID: row.ID, Username: row.Username, DisplayName: row.DisplayName, Email: row.Email,
 		Role: auth.Role(row.Role), PasswordHash: row.PasswordHash, MustChangePassword: row.MustChangePassword,
 		Active: row.Active, Version: row.Version, DriverID: row.DriverID,
+		Salutation: row.Salutation, WorkPhoneRaw: row.WorkPhoneRaw, WorkPhoneNormalized: row.WorkPhoneNormalized,
+		EmailVerifiedAt: optionalTime(row.EmailVerifiedAt), WebAuthnUserHandle: append([]byte(nil), row.WebauthnUserHandle...),
+		TOTPEnabled: row.TotpEnabled, PasskeyEnabled: row.PasskeyEnabled,
 	}, nil
 }
 
@@ -53,10 +56,13 @@ func (store *IdentityStore) FindUserByID(ctx context.Context, id string) (auth.U
 		ID: row.UID, Username: row.UUsername, DisplayName: row.DisplayName, Email: row.Email,
 		Role: auth.Role(row.Role), PasswordHash: row.PasswordHash, MustChangePassword: row.MustChangePassword,
 		Active: row.Active, Version: row.Version, DriverID: row.DriverID,
+		Salutation: row.Salutation, WorkPhoneRaw: row.WorkPhoneRaw, WorkPhoneNormalized: row.WorkPhoneNormalized,
+		EmailVerifiedAt: optionalTime(row.EmailVerifiedAt), WebAuthnUserHandle: append([]byte(nil), row.WebauthnUserHandle...),
+		TOTPEnabled: row.TotpEnabled, PasskeyEnabled: row.PasskeyEnabled,
 	}, nil
 }
 
-// RotateLogin atomically revokes older sessions, optionally rehashes, creates a session, and audits login.
+// RotateLogin atomically rehashes if needed, creates a parallel session, and audits login.
 func (store *IdentityStore) RotateLogin(ctx context.Context, user auth.User, session auth.NewSession, replacementHash []byte, rateKey []byte, requestID string) error {
 	return store.transaction(ctx, pgx.TxOptions{}, func(queries *dbgen.Queries, _ pgx.Tx) error {
 		userID, err := uuid(user.ID)
@@ -75,12 +81,10 @@ func (store *IdentityStore) RotateLogin(ctx context.Context, user auth.User, ses
 				return auth.ErrConflict
 			}
 		}
-		if err := queries.RevokeUserSessions(ctx, userID); err != nil {
-			return err
-		}
 		if _, err := queries.InsertSession(ctx, dbgen.InsertSessionParams{
 			UserID: userID, TokenHash: session.TokenHash, CsrfTokenHash: session.CSRFTokenHash,
 			IdleExpiresAt: timestamp(session.IdleExpiresAt), AbsoluteExpiresAt: timestamp(session.AbsoluteExpiresAt),
+			DeviceLabel: session.DeviceLabel,
 		}); err != nil {
 			return err
 		}
@@ -114,6 +118,7 @@ func (store *IdentityStore) FindSession(ctx context.Context, tokenHash []byte) (
 		},
 		CSRFTokenHash: row.CsrfTokenHash, IdleExpiresAt: row.IdleExpiresAt.Time,
 		AbsoluteExpiresAt: row.AbsoluteExpiresAt.Time, RevokedAt: revokedAt, UserActive: row.Active,
+		CreatedAt: row.CreatedAt.Time, LastUsedAt: row.LastUsedAt.Time, DeviceLabel: row.DeviceLabel,
 	}, nil
 }
 
@@ -345,6 +350,17 @@ func insertAudit(ctx context.Context, queries *dbgen.Queries, actor auth.Actor, 
 	return queries.InsertAuditEvent(ctx, dbgen.InsertAuditEventParams{
 		ActorType: actorType, ActorUserID: actorID, Action: action, ObjectType: objectType,
 		ObjectID: objectID, RequestID: requestID, Metadata: metadata,
+	})
+}
+
+func insertPublicAudit(ctx context.Context, queries *dbgen.Queries, action, objectType, objectID, requestID string, changedFields []string) error {
+	metadata, err := json.Marshal(map[string][]string{"changed_fields": changedFields})
+	if err != nil {
+		return fmt.Errorf("postgres: encoding public audit metadata: %w", err)
+	}
+	return queries.InsertAuditEvent(ctx, dbgen.InsertAuditEventParams{
+		ActorType: "public", Action: action, ObjectType: objectType, ObjectID: objectID,
+		RequestID: requestID, Metadata: metadata,
 	})
 }
 

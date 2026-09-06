@@ -15,6 +15,7 @@ type secureRequestKey struct{}
 
 type networkBoundary struct {
 	allowedHosts map[string]struct{}
+	allowAnyHost bool
 	trusted      []*net.IPNet
 }
 
@@ -29,7 +30,12 @@ func newNetworkBoundary(cfg config.Config) (*networkBoundary, error) {
 	}
 	boundary := &networkBoundary{allowedHosts: make(map[string]struct{}, len(allowedHosts))}
 	for _, host := range allowedHosts {
-		boundary.allowedHosts[strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")] = struct{}{}
+		normalized := strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
+		if normalized == "*" {
+			boundary.allowAnyHost = true
+			continue
+		}
+		boundary.allowedHosts[normalized] = struct{}{}
 	}
 	for _, value := range cfg.HTTP.TrustedProxyCIDRs {
 		_, cidr, err := net.ParseCIDR(value)
@@ -48,7 +54,7 @@ func (boundary *networkBoundary) Middleware(next http.Handler) http.Handler {
 			host = parsed
 		}
 		host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
-		if _, ok := boundary.allowedHosts[host]; !ok {
+		if _, ok := boundary.allowedHosts[host]; !boundary.allowAnyHost && !ok {
 			http.Error(response, "Ungültiger Host.", http.StatusBadRequest)
 			return
 		}
@@ -70,19 +76,19 @@ func (boundary *networkBoundary) Middleware(next http.Handler) http.Handler {
 }
 
 func (boundary *networkBoundary) forwardedClient(value string, source net.IP) net.IP {
-	chain := make([]net.IP, 0, 8)
-	for _, item := range strings.Split(value, ",") {
-		if len(chain) == 8 {
-			break
+	const maxForwardedHops = 8
+	items := strings.Split(value, ",")
+	// Proxies append from the right. Walk inward from the trusted connection so
+	// attacker-supplied addresses on the left cannot crowd out the real client.
+	for index, checked := len(items)-1, 0; index >= 0; index-- {
+		item := strings.TrimSpace(items[index])
+		ip := net.ParseIP(item)
+		if item == "" || ip == nil || checked == maxForwardedHops {
+			return source
 		}
-		if ip := net.ParseIP(strings.TrimSpace(item)); ip != nil {
-			chain = append(chain, ip)
-		}
-	}
-	chain = append(chain, source)
-	for index := len(chain) - 1; index >= 0; index-- {
-		if !boundary.isTrusted(chain[index]) {
-			return chain[index]
+		checked++
+		if !boundary.isTrusted(ip) {
+			return ip
 		}
 	}
 	return source

@@ -111,6 +111,11 @@ VALUES (sqlc.arg(run_id)::uuid, sqlc.arg(rank), sqlc.arg(starts_at)::timestamptz
         sqlc.narg(distance_meters)::integer, sqlc.narg(duration_seconds)::integer)
 RETURNING id::text;
 
+-- name: GetPlanningRun :one
+SELECT id::text, job_id::text, created_at, expires_at, config_snapshot
+FROM planning_runs
+WHERE id=sqlc.arg(id)::uuid;
+
 -- name: ListPlanningSuggestions :many
 SELECT s.id::text, s.run_id::text, s.rank, s.starts_at, s.ends_at,
        s.driver_id::text, d.display_name AS driver_name,
@@ -119,7 +124,7 @@ SELECT s.id::text, s.run_id::text, s.rank, s.starts_at, s.ends_at,
        s.score::text,
        s.components, s.reasons, s.warnings, s.routing_source,
        s.distance_meters, s.duration_seconds, s.status, r.job_id::text, r.job_version,
-       r.waitlist_version, r.created_at, r.expires_at
+       r.waitlist_version, r.created_at, r.expires_at, r.config_snapshot
 FROM planning_suggestions s
 JOIN planning_runs r ON r.id=s.run_id
 JOIN drivers d ON d.id=s.driver_id
@@ -194,8 +199,9 @@ SELECT CASE
 END::boolean;
 
 -- name: InsertAdoptedProposal :one
-INSERT INTO appointments (job_id, lifecycle_status, starts_at, ends_at)
-VALUES (sqlc.arg(job_id)::uuid, 'proposal', sqlc.arg(starts_at)::timestamptz, sqlc.arg(ends_at)::timestamptz)
+INSERT INTO appointments (job_id, lifecycle_status, starts_at, ends_at, buffer_before_minutes, buffer_after_minutes)
+VALUES (sqlc.arg(job_id)::uuid, 'proposal', sqlc.arg(starts_at)::timestamptz, sqlc.arg(ends_at)::timestamptz,
+        sqlc.arg(buffer_before_minutes), sqlc.arg(buffer_after_minutes))
 RETURNING id::text;
 
 -- name: MarkPlanningSuggestionAdopted :execrows

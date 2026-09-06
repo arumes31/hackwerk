@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"example.invalid/hackplan/internal/outbound"
 )
 
 type SendberryConfig struct {
@@ -32,7 +34,7 @@ func NewSendberryProvider(cfg SendberryConfig) (*SendberryProvider, error) {
 	}
 	return &SendberryProvider{
 		cfg:    cfg,
-		client: &http.Client{Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		client: &http.Client{Transport: outbound.Transport(), Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}, nil
 }
 

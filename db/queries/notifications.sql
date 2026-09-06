@@ -89,7 +89,7 @@ FOR UPDATE;
 
 -- name: SetConfirmationResponse :execrows
 UPDATE confirmation_requests
-SET response=sqlc.arg(response), responded_at=now(), updated_at=now()
+SET response=sqlc.arg(response), response_note=NULLIF(sqlc.arg(response_note)::text, ''), responded_at=now(), updated_at=now()
 WHERE id=sqlc.arg(id)::uuid AND status='active'
   AND (response IS NULL OR (response='callback_requested' AND sqlc.arg(response)::text IN ('confirmed','declined')));
 
@@ -108,7 +108,7 @@ FOR UPDATE OF cr;
 
 -- name: ResetConfirmationResponse :execrows
 UPDATE confirmation_requests
-SET response=NULL, responded_at=NULL, updated_at=now()
+SET response=NULL, response_note=NULL, responded_at=NULL, updated_at=now()
 WHERE id=sqlc.arg(id)::uuid AND status='active' AND response IS NOT NULL;
 
 -- name: InsertConfirmationRespondedEvent :exec
@@ -141,9 +141,12 @@ RETURNING o.id::text, o.aggregate_id::text AS notification_id, o.idempotency_key
 SELECT n.id::text, n.appointment_id::text, n.confirmation_request_id::text,
        n.channel, n.recipient_snapshot, n.template_version, n.status,
        cr.token_key_id, cr.token_version, cr.status AS confirmation_request_status, cr.expires_at,
-       a.lifecycle_status, a.starts_at, a.ends_at,
-       j.job_type, j.volume_m3::text,
-       concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, ''))::text AS customer_name
+       a.lifecycle_status,
+       COALESCE(NULLIF(n.parameters->>'starts_at', '')::timestamptz, a.starts_at) AS starts_at,
+       COALESCE(NULLIF(n.parameters->>'ends_at', '')::timestamptz, a.ends_at) AS ends_at,
+       COALESCE(NULLIF(n.parameters->>'job_type', ''), j.job_type)::text AS job_type,
+       COALESCE(NULLIF(n.parameters->>'volume_m3', ''), j.volume_m3::text)::text AS volume_m3,
+       COALESCE(NULLIF(n.parameters->>'customer_name', ''), concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, '')))::text AS customer_name
 FROM notifications n
 JOIN confirmation_requests cr ON cr.id=n.confirmation_request_id
 JOIN appointments a ON a.id=n.appointment_id
@@ -191,7 +194,7 @@ SELECT n.id::text, n.channel, n.status, n.recipient_snapshot, n.attempt_count, n
        COALESCE(n.last_error_code, '')::text AS last_error_code,
        COALESCE(n.provider_id, '')::text AS provider_id,
        n.available_at, n.sent_at, n.created_at, n.updated_at,
-       cr.status AS confirmation_request_status, COALESCE(cr.response, '')::text AS response,
+       cr.status AS confirmation_request_status, COALESCE(cr.response, '')::text AS response, COALESCE(cr.response_note, '')::text AS response_note,
        cr.responded_at, cr.expires_at, n.reviewed_at
 FROM notifications n
 JOIN confirmation_requests cr ON cr.id=n.confirmation_request_id
@@ -204,6 +207,7 @@ SELECT n.id::text, n.appointment_id::text, n.channel, n.status, n.recipient_snap
        COALESCE(n.provider_id, '')::text AS provider_id,
        n.available_at, n.sent_at, n.created_at, n.updated_at,
        cr.status AS confirmation_request_status, COALESCE(cr.response, '')::text AS response,
+       COALESCE(cr.response_note, '')::text AS response_note,
        cr.responded_at, cr.expires_at, n.reviewed_at
 FROM notifications n
 JOIN confirmation_requests cr ON cr.id=n.confirmation_request_id AND cr.status='active'
@@ -217,7 +221,7 @@ LIMIT sqlc.arg(result_limit);
 SELECT a.id::text AS appointment_id, j.job_number,
        concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, ''))::text AS customer_name,
        c.locality, COALESCE(c.phone_normalized, c.phone_raw, '')::text AS phone,
-       cr.responded_at, cr.expires_at
+       COALESCE(cr.response_note, '')::text AS response_note, cr.responded_at, cr.expires_at
 FROM confirmation_requests cr
 JOIN appointments a ON a.id=cr.appointment_id AND a.lifecycle_status='fixed'
 JOIN jobs j ON j.id=a.job_id

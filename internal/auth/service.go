@@ -12,16 +12,23 @@ import (
 
 // User is the persistence-neutral identity record used by authentication.
 type User struct {
-	ID                 string
-	Username           string
-	DisplayName        string
-	Email              string
-	Role               Role
-	PasswordHash       string
-	MustChangePassword bool
-	Active             bool
-	Version            int32
-	DriverID           string
+	ID                  string
+	Username            string
+	DisplayName         string
+	Email               string
+	Role                Role
+	PasswordHash        string
+	MustChangePassword  bool
+	Active              bool
+	Version             int32
+	DriverID            string
+	Salutation          string
+	WorkPhoneRaw        string
+	WorkPhoneNormalized string
+	EmailVerifiedAt     *time.Time
+	WebAuthnUserHandle  []byte
+	TOTPEnabled         bool
+	PasskeyEnabled      bool
 }
 
 // Session is the persistence-neutral server-side session record.
@@ -33,13 +40,18 @@ type Session struct {
 	AbsoluteExpiresAt time.Time
 	RevokedAt         *time.Time
 	UserActive        bool
+	CreatedAt         time.Time
+	LastUsedAt        time.Time
+	DeviceLabel       string
 }
 
 // SessionTokens are raw one-time values returned only to the browser boundary.
 type SessionTokens struct {
-	SessionToken string
-	CSRFToken    string
-	Actor        Actor
+	SessionToken      string
+	CSRFToken         string
+	Actor             Actor
+	MFARequired       bool
+	MFAChallengeToken string
 }
 
 // NewSession contains only hashed tokens for persistence.
@@ -49,6 +61,7 @@ type NewSession struct {
 	CSRFTokenHash     []byte
 	IdleExpiresAt     time.Time
 	AbsoluteExpiresAt time.Time
+	DeviceLabel       string
 }
 
 // RateLimit is a privacy-minimized login failure window.
@@ -129,14 +142,16 @@ type Store interface {
 
 // Service applies authentication, password, session, and RBAC invariants.
 type Service struct {
-	store       Store
-	hasher      PasswordHasher
-	now         func() time.Time
-	newToken    func() (string, error)
-	idleTTL     time.Duration
-	absoluteTTL time.Duration
-	loginLimit  int
-	dummyHash   string
+	store          Store
+	hasher         PasswordHasher
+	now            func() time.Time
+	newToken       func() (string, error)
+	idleTTL        time.Duration
+	absoluteTTL    time.Duration
+	loginLimit     int
+	dummyHash      string
+	security       SecurityStore
+	securityConfig *SecurityConfig
 }
 
 // NewService constructs an identity service and precomputes an enumeration-safe dummy hash.
@@ -154,8 +169,13 @@ func NewService(store Store, hasher PasswordHasher, now func() time.Time, idleTT
 	}, nil
 }
 
-// Login verifies credentials generically and rotates all existing sessions atomically.
+// Login verifies credentials generically and creates a parallel server-side session.
 func (service *Service) Login(ctx context.Context, username string, password string, clientKey string, requestID string) (SessionTokens, error) {
+	return service.LoginWithDevice(ctx, username, password, clientKey, "Unbekanntes Gerät", requestID)
+}
+
+// LoginWithDevice verifies the password and either creates a session or starts the required second-factor step.
+func (service *Service) LoginWithDevice(ctx context.Context, username string, password string, clientKey string, deviceLabel string, requestID string) (SessionTokens, error) {
 	now := service.now()
 	rateKey := TokenHash("login\x00" + strings.ToLower(strings.TrimSpace(username)) + "\x00" + clientKey)
 	rate, err := service.store.LoginRate(ctx, rateKey)
@@ -182,6 +202,28 @@ func (service *Service) Login(ctx context.Context, username string, password str
 		return SessionTokens{}, ErrInvalidCredentials
 	}
 
+	if user.TOTPEnabled || user.PasskeyEnabled {
+		if service.securityConfig == nil || service.security == nil {
+			return SessionTokens{}, ErrInvalidMFA
+		}
+		challengeToken, tokenErr := service.newToken()
+		if tokenErr != nil {
+			return SessionTokens{}, tokenErr
+		}
+		var replacementHash []byte
+		if needsRehash {
+			rehashed, hashErr := service.hasher.Hash(password)
+			if hashErr != nil {
+				return SessionTokens{}, hashErr
+			}
+			replacementHash = []byte(rehashed)
+		}
+		if err := service.security.StartLoginChallenge(ctx, user, TokenHash(challengeToken), now.Add(service.securityConfig.MFAChallengeTTL), replacementHash, rateKey, requestID); err != nil {
+			return SessionTokens{}, fmt.Errorf("auth: starting second factor: %w", err)
+		}
+		return SessionTokens{Actor: actorFromUser(user), MFARequired: true, MFAChallengeToken: challengeToken}, nil
+	}
+
 	sessionToken, err := service.newToken()
 	if err != nil {
 		return SessionTokens{}, err
@@ -201,6 +243,7 @@ func (service *Service) Login(ctx context.Context, username string, password str
 	newSession := NewSession{
 		UserID: user.ID, TokenHash: TokenHash(sessionToken), CSRFTokenHash: TokenHash(csrfToken),
 		IdleExpiresAt: now.Add(service.idleTTL), AbsoluteExpiresAt: now.Add(service.absoluteTTL),
+		DeviceLabel: normalizeDeviceLabel(deviceLabel),
 	}
 	if err := service.store.RotateLogin(ctx, user, newSession, replacementHash, rateKey, requestID); err != nil {
 		return SessionTokens{}, fmt.Errorf("auth: rotating login: %w", err)

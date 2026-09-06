@@ -77,7 +77,7 @@ func TestTask07PrivateCalendarFeedBrowserJourney(t *testing.T) {
 	var feedURL string
 	var overflow bool
 	if err := chromedp.Run(browser,
-		chromedp.Navigate(server.URL+"/login"), chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery), chromedp.SetValue("#username", "admin-task04", chromedp.ByQuery), chromedp.SetValue("#password", adminPassword, chromedp.ByQuery), chromedp.Click("form[action='/login'] button", chromedp.ByQuery), chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery),
+		chromedp.Navigate(server.URL+"/login"), chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery), chromedp.SetValue("#username", "admin-task04", chromedp.ByQuery), chromedp.SetValue("#password", adminPassword, chromedp.ByQuery), chromedp.Click("form[action='/login'] button[type='submit']", chromedp.ByQuery), chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery),
 		chromedp.Navigate(server.URL+"/calendar/feeds"), chromedp.WaitVisible("form[action='/calendar/feeds']", chromedp.ByQuery), chromedp.SetValue("form[action='/calendar/feeds'] [name='name']", "Privater Testfeed", chromedp.ByQuery), chromedp.SetValue("form[action='/calendar/feeds'] [name='detail']", "minimal", chromedp.ByQuery), chromedp.Click("form[action='/calendar/feeds'] button[type='submit']", chromedp.ByQuery), chromedp.WaitVisible("#new-feed-url", chromedp.ByQuery), chromedp.Value("#new-feed-url", &feedURL, chromedp.ByQuery), chromedp.Evaluate(`document.documentElement.scrollWidth>window.innerWidth`, &overflow),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))

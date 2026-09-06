@@ -11,20 +11,30 @@ import (
 )
 
 type routeStoreFake struct {
-	candidates      []RouteCandidate
-	missing         []RouteMissingLocation
-	options         RouteOptions
-	route           RouteDraft
-	routes          map[string]RouteDraft
-	moved           SaveMovedDraftStopInput
-	savedDraft      SaveRouteDraftInput
-	savedOrder      SaveRouteOrderInput
-	assigned        AssignRouteInput
-	latestDriverID  string
-	latestLocalDate string
-	draftSaves      int
-	orderSaves      int
-	assignmentSaves int
+	candidates        []RouteCandidate
+	missing           []RouteMissingLocation
+	options           RouteOptions
+	route             RouteDraft
+	routes            map[string]RouteDraft
+	moved             SaveMovedDraftStopInput
+	savedDraft        SaveRouteDraftInput
+	savedOrder        SaveRouteOrderInput
+	assigned          AssignRouteInput
+	latestDriverID    string
+	latestLocalDate   string
+	available         bool
+	availabilityErr   error
+	availabilityCalls int
+	draftSaves        int
+	orderSaves        int
+	assignmentSaves   int
+}
+
+func (f *routeStoreFake) AssignedRouteExistsForDriver(_ context.Context, driverID, localDate string) (bool, error) {
+	f.latestDriverID = driverID
+	f.latestLocalDate = localDate
+	f.availabilityCalls++
+	return f.available, f.availabilityErr
 }
 
 func (f *routeStoreFake) LoadRouteCandidates(context.Context, []string) ([]RouteCandidate, error) {
@@ -192,6 +202,7 @@ func TestRouteServicePlanOptimizesDeterministicallyAndBuildsTimeline(t *testing.
 
 	route, err := service.Plan(t.Context(), routeAdmin(), PlanRouteInput{
 		Departure: departure, DriverID: "driver", ChipperResourceID: "chipper",
+		StartLabel: "Betriebshof", EndLabel: "Betriebshof",
 		Start: Point{Latitude: 48.1, Longitude: 14.1}, End: Point{Latitude: 48.1, Longitude: 14.1},
 		JobIDs: []string{"job-b", "job-a"}, Optimize: true, RequestID: "request",
 	})
@@ -242,12 +253,92 @@ func TestRouteServiceOptimizeKeepsFixedCandidateAtItsPosition(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ordered, err := service.optimize(t.Context(), Point{Latitude: 48, Longitude: 14}, Point{Latitude: 49, Longitude: 15}, candidates, []string{"job-b"})
+	ordered, err := service.optimize(t.Context(), Point{Latitude: 48, Longitude: 14}, Point{Latitude: 49, Longitude: 15}, candidates, []string{"job-b"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := []string{ordered[0].JobID, ordered[1].JobID, ordered[2].JobID}; !reflect.DeepEqual(got, []string{"job-c", "job-b", "job-a"}) {
 		t.Fatalf("fixed order = %v", got)
+	}
+}
+
+func TestRouteServiceOptimizeUsesEndPointForLastStop(t *testing.T) {
+	t.Parallel()
+	candidates := []RouteCandidate{
+		{JobID: "job-a", Location: Point{Latitude: 48.1, Longitude: 14.1}},
+		{JobID: "job-b", Location: Point{Latitude: 48.2, Longitude: 14.2}},
+	}
+	matrix := matrixRouterFunc(func(_ context.Context, points []Point) (Matrix, error) {
+		cells := make([][]MatrixCell, len(points))
+		for row := range cells {
+			cells[row] = make([]MatrixCell, len(points))
+			for column := range cells[row] {
+				cells[row][column] = MatrixCell{DistanceMeters: 1000, Duration: time.Minute}
+			}
+		}
+		end := len(points) - 1
+		if points[end].Latitude > 0 {
+			cells[1][end] = MatrixCell{DistanceMeters: 20_000, Duration: 20 * time.Minute}
+		} else {
+			cells[2][end] = MatrixCell{DistanceMeters: 20_000, Duration: 20 * time.Minute}
+		}
+		return Matrix{Cells: cells, Source: "fake"}, nil
+	})
+	service, err := NewRouteService(&routeStoreFake{}, matrix, directionsRouterFunc(func(_ context.Context, points []Point) (RouteDirections, error) {
+		return testDirections(points, time.Minute), nil
+	}), DefaultRouteConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	north, err := service.optimize(t.Context(), Point{Latitude: 48, Longitude: 14}, Point{Latitude: 49, Longitude: 15}, candidates, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	south, err := service.optimize(t.Context(), Point{Latitude: 48, Longitude: 14}, Point{Latitude: -49, Longitude: 15}, candidates, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string{north[0].JobID, north[1].JobID}; !reflect.DeepEqual(got, []string{"job-a", "job-b"}) {
+		t.Fatalf("north end order = %v, want job-b last", got)
+	}
+	if got := []string{south[0].JobID, south[1].JobID}; !reflect.DeepEqual(got, []string{"job-b", "job-a"}) {
+		t.Fatalf("south end order = %v, want job-a last", got)
+	}
+}
+
+func TestRouteServiceOptimizeEndAtLastStopOmitsExternalEndPoint(t *testing.T) {
+	t.Parallel()
+	candidates := []RouteCandidate{
+		{JobID: "job-a", Location: Point{Latitude: 48.1, Longitude: 14.1}},
+		{JobID: "job-b", Location: Point{Latitude: 48.2, Longitude: 14.2}},
+	}
+	matrix := matrixRouterFunc(func(_ context.Context, points []Point) (Matrix, error) {
+		if len(points) != len(candidates)+1 {
+			t.Fatalf("matrix point count = %d, want start plus candidates", len(points))
+		}
+		cells := make([][]MatrixCell, len(points))
+		for row := range cells {
+			cells[row] = make([]MatrixCell, len(points))
+			for column := range cells[row] {
+				cells[row][column] = MatrixCell{DistanceMeters: 1000, Duration: time.Minute}
+			}
+		}
+		return Matrix{Cells: cells, Source: "fake"}, nil
+	})
+	service, err := NewRouteService(&routeStoreFake{}, matrix, directionsRouterFunc(func(_ context.Context, points []Point) (RouteDirections, error) {
+		return testDirections(points, time.Minute), nil
+	}), DefaultRouteConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ordered, err := service.optimize(t.Context(), Point{Latitude: 48, Longitude: 14}, Point{}, candidates, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ordered) != len(candidates) {
+		t.Fatalf("ordered candidate count = %d, want %d", len(ordered), len(candidates))
 	}
 }
 
@@ -261,12 +352,59 @@ func TestRouteServicePlanCanEndAtLastStop(t *testing.T) {
 	}}}
 	service := newRouteTestService(t, store)
 	input.EndAtLastStop = true
+	input.End = Point{}
 	route, err := service.Plan(t.Context(), routeAdmin(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if route.End != last {
 		t.Fatalf("route end = %#v, want last stop %#v", route.End, last)
+	}
+	if route.EndLabel != "Letzter Stopp" {
+		t.Fatalf("route end label = %q", route.EndLabel)
+	}
+}
+
+func TestRouteServicePlanAllowsMissingChipperResource(t *testing.T) {
+	t.Parallel()
+	input := validPlanRouteInput()
+	input.ChipperResourceID = ""
+	store := &routeStoreFake{candidates: []RouteCandidate{{
+		JobID: input.JobIDs[0], JobType: "chipping_only", Location: Point{Latitude: 48.25, Longitude: 14.25},
+		WorkDuration: time.Hour, JobVersion: 1, WaitlistVersion: 1,
+	}}}
+	service := newRouteTestService(t, store)
+
+	route, err := service.Plan(t.Context(), routeAdmin(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if route.ChipperResourceID != "" || store.savedDraft.Route.ChipperResourceID != "" {
+		t.Fatalf("chipper resource = %q/%q, want unassigned", route.ChipperResourceID, store.savedDraft.Route.ChipperResourceID)
+	}
+}
+
+func TestRouteServicePlanNormalizesEndpointLabels(t *testing.T) {
+	t.Parallel()
+	input := validPlanRouteInput()
+	input.StartLabel = "  Betriebshof Nord  "
+	input.EndLabel = "  Lager Süd  "
+	store := &routeStoreFake{candidates: []RouteCandidate{{
+		JobID: input.JobIDs[0], JobType: "chipping_only", Location: Point{Latitude: 48.25, Longitude: 14.25},
+		WorkDuration: time.Hour, JobVersion: 1, WaitlistVersion: 1,
+	}}}
+	service := newRouteTestService(t, store)
+	route, err := service.Plan(t.Context(), routeAdmin(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if route.StartLabel != "Betriebshof Nord" || route.EndLabel != "Lager Süd" {
+		t.Fatalf("endpoint labels = %q/%q", route.StartLabel, route.EndLabel)
+	}
+
+	input.StartLabel = string(make([]rune, 201))
+	if _, err := service.Plan(t.Context(), routeAdmin(), input); !errors.Is(err, ErrValidation) {
+		t.Fatalf("long endpoint label error = %v, want %v", err, ErrValidation)
 	}
 }
 
@@ -280,6 +418,29 @@ func TestRouteDraftNextStopSkipsCompletedStops(t *testing.T) {
 	}}
 	if next := route.NextStop(now); next == nil || next.ID != "current" {
 		t.Fatalf("NextStop() = %#v, want current", next)
+	}
+}
+
+func TestRouteReservationDurationRoundsUpToWholeMinutes(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name string
+		in   time.Duration
+		want time.Duration
+	}{
+		{name: "zero", in: 0, want: 0},
+		{name: "exact", in: 12 * time.Minute, want: 12 * time.Minute},
+		{name: "partial", in: 12*time.Minute + time.Second, want: 13 * time.Minute},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := routeReservationDuration(test.in)
+			if err != nil || got != test.want {
+				t.Fatalf("routeReservationDuration(%s) = %s, %v; want %s", test.in, got, err, test.want)
+			}
+		})
+	}
+	if _, err := routeReservationDuration(-time.Second); !errors.Is(err, ErrValidation) {
+		t.Fatalf("negative routeReservationDuration error = %v, want validation", err)
 	}
 }
 
@@ -379,6 +540,26 @@ func TestRouteServiceOwnRouteScopesToSessionDriver(t *testing.T) {
 	}
 }
 
+func TestRouteServiceOwnRouteAvailabilityUsesScopedExistenceCheck(t *testing.T) {
+	t.Parallel()
+	store := &routeStoreFake{available: true}
+	service := newRouteTestService(t, store)
+
+	available, err := service.OwnRouteAvailableForDate(t.Context(), routeDriver("driver-1"), "2026-09-01")
+	if err != nil || !available {
+		t.Fatalf("OwnRouteAvailableForDate() = %v, %v", available, err)
+	}
+	if store.availabilityCalls != 1 || store.latestDriverID != "driver-1" || store.latestLocalDate != "2026-09-01" {
+		t.Fatalf("availability scope/calls = %q/%q/%d", store.latestDriverID, store.latestLocalDate, store.availabilityCalls)
+	}
+	if _, err := service.OwnRouteAvailableForDate(t.Context(), auth.Actor{UserID: "user", Role: auth.RoleDriver}, "2026-09-01"); !errors.Is(err, auth.ErrForbidden) {
+		t.Fatalf("profileless availability error = %v", err)
+	}
+	if _, err := service.OwnRouteAvailableForDate(t.Context(), routeDriver("driver-1"), "invalid"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("invalid availability date error = %v", err)
+	}
+}
+
 func TestRouteServiceReorderOwnPreservesAppointmentsAndTimes(t *testing.T) {
 	t.Parallel()
 	store := &routeStoreFake{route: assignedRouteFixture()}
@@ -462,6 +643,7 @@ func testDirections(points []Point, duration time.Duration) RouteDirections {
 func validPlanRouteInput() PlanRouteInput {
 	return PlanRouteInput{
 		Departure: time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC), DriverID: "driver", ChipperResourceID: "chipper",
+		StartLabel: "Betriebshof", EndLabel: "Betriebshof",
 		Start: Point{Latitude: 48.1, Longitude: 14.1}, End: Point{Latitude: 48.1, Longitude: 14.1}, JobIDs: []string{"job-a"},
 	}
 }

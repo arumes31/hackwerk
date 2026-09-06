@@ -53,6 +53,8 @@ hackwerk migrate up|down|status
 hackwerk seed-dev
 hackwerk admin --help
 hackwerk healthcheck
+hackwerk healthcheck worker
+hackwerk schema-version
 hackwerk version
 ```
 

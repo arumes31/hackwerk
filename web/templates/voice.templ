@@ -7,10 +7,12 @@ import (
 )
 
 type VoiceCaptureData struct {
-	Shell                     ShellData
-	Enabled, ExternalProvider bool
-	MaxBytes, MaxSeconds      int
-	ProviderNotice            string
+	Shell                                    ShellData
+	Enabled, ExternalProvider, LocalProvider bool
+	MaxBytes, MaxSeconds, ProcessingMinutes  int
+	ProviderNotice                           string
+	Error                                    string
+	UploadKey                                string
 }
 
 type VoiceReviewData struct {
@@ -19,6 +21,52 @@ type VoiceReviewData struct {
 	Values     IntakeValues
 	Duplicates []customers.Duplicate
 	Error      string
+}
+
+type voiceReviewIssue struct {
+	Target string
+	Label  string
+	Reason string
+}
+
+func voiceReviewIssues(fields voice.Fields) []voiceReviewIssue {
+	candidates := []struct {
+		target   string
+		label    string
+		field    voice.Field
+		required bool
+	}{
+		{"voice-field-first-name", "Vorname", fields.FirstName, false},
+		{"voice-field-last-name", "Nachname", fields.LastName, false},
+		{"voice-field-company-name", "Firma", fields.CompanyName, false},
+		{"voice-field-address", "Freie Adresse", fields.AddressFreeform, false},
+		{"voice-field-phone", "Telefon", fields.PhoneRaw, false},
+		{"voice-field-email", "E-Mail", fields.Email, false},
+		{"voice-field-volume", "Menge", fields.VolumeM3, true},
+		{"voice-field-hack-duration", "Hackdauer", fields.EstimatedHackMinutes, true},
+		{"voice-field-preferred-start", "Frühestes Datum", fields.PreferredStartDate, false},
+		{"voice-field-preferred-end", "Spätestes Datum", fields.PreferredEndDate, false},
+		{"voice-field-preference", "Wunsch", fields.PreferenceText, false},
+	}
+	issues := make([]voiceReviewIssue, 0, len(candidates))
+	if fields.FirstName.Value == "" && fields.LastName.Value == "" && fields.CompanyName.Value == "" {
+		issues = append(issues, voiceReviewIssue{Target: "voice-field-first-name", Label: "Name oder Firma", Reason: "Angabe fehlt"})
+	}
+	for _, candidate := range candidates {
+		reason := ""
+		switch {
+		case candidate.field.Value == "" && candidate.required:
+			reason = "Angabe fehlt"
+		case candidate.field.Value != "" && candidate.field.Confidence < .75:
+			reason = fmt.Sprintf("%.0f %% Erkennungssicherheit", candidate.field.Confidence*100)
+		case len(candidate.field.Warnings) > 0:
+			reason = "Erkennungshinweis vorhanden"
+		}
+		if reason != "" {
+			issues = append(issues, voiceReviewIssue{Target: candidate.target, Label: candidate.label, Reason: reason})
+		}
+	}
+	return issues
 }
 
 templ VoiceCapture(data VoiceCaptureData) {
@@ -33,27 +81,52 @@ templ VoiceCapture(data VoiceCaptureData) {
 					<a class="button button--quiet" href="/customers/new">Manuell erfassen</a>
 				</div>
 				if !data.Enabled {
-					<div class="form-alert" role="status"><strong>Spracheingabe ist deaktiviert.</strong> Die vollständige manuelle Erfassung steht weiterhin zur Verfügung.</div>
+					<div class="form-alert form-alert--info" role="status"><strong>Spracheingabe ist deaktiviert.</strong> Die vollständige manuelle Erfassung steht weiterhin zur Verfügung.</div>
 				} else {
 					<section class="voice-capture" data-voice-capture data-max-seconds={ fmt.Sprint(data.MaxSeconds) } data-csrf={ data.Shell.CSRFToken }>
+						if data.Error != "" {
+							<div class="form-alert" role="alert" tabindex="-1" autofocus>{ data.Error }</div>
+						}
 						<div class="privacy-notice">
 							<h2>Vor der Aufnahme</h2>
-							<p>Maximal { fmt.Sprint(data.MaxSeconds) } Sekunden und { fmt.Sprint(data.MaxBytes / (1 << 20)) } MiB. Audio liegt nur im begrenzten temporären Speicher und wird nach dem Transkriptionsversuch gelöscht.</p>
+							<p>Maximal { fmt.Sprint(data.MaxSeconds) } Sekunden und { fmt.Sprint(data.MaxBytes / (1 << 20)) } MiB. Die Originalaufnahme ist ausschließlich für Administratoren zugänglich und wird spätestens 30 Tage nach dem Upload automatisch gelöscht.</p>
+							<p><strong>Unterstützte Formate:</strong> WebM/Opus, Ogg/Opus und WAV. Der Browser fragt erst nach Klick auf „Aufnahme starten“ nach der Mikrofonberechtigung. Bei einer Ablehnung bleibt der Datei-Upload verfügbar.</p>
 							if data.ExternalProvider {
 								<p><strong>Externer Anbieter:</strong> { data.ProviderNotice }</p>
 							}
 						</div>
+						<details class="voice-info">
+							<summary><span class="voice-info__icon" aria-hidden="true">i</span><span>Wie funktioniert die Spracheingabe?</span></summary>
+							<div class="voice-info__body">
+								if data.LocalProvider {
+									<p>Die Aufnahme wird primär als deutsche Sprache im internen CPU-Dienst mit dem multilingualen Modell „small“ verarbeitet. Sie wird nicht an einen externen KI-Anbieter übertragen.</p>
+									<p>Je nach Aufnahmelänge und Serverauslastung kann die Verarbeitung bis zu { fmt.Sprint(data.ProcessingMinutes) } Minuten dauern. Sie können in dieser Zeit weiterarbeiten; der Entwurf zeigt den aktuellen Stand.</p>
+								} else if data.ExternalProvider {
+									<p>{ data.ProviderNotice }</p>
+								}
+								<p>Das Ergebnis ist immer nur ein Entwurf. Prüfen und korrigieren Sie Transkript und Felder, bevor Sie Daten bewusst übernehmen.</p>
+							</div>
+						</details>
 						<div class="voice-controls">
 							<button class="button" type="button" data-voice-start>Aufnahme starten</button>
 							<button class="button button--quiet" type="button" data-voice-pause disabled>Pause</button>
 							<button class="button button--danger" type="button" data-voice-stop disabled>Stoppen</button>
 							<button class="button button--quiet" type="button" data-voice-cancel disabled>Abbrechen</button>
-							<span class="status-badge" data-voice-timer>00:00</span>
+							<span class="status-badge" data-voice-timer aria-label="Verbleibende Aufnahmezeit">Verbleibend: { fmt.Sprintf("%02d:%02d", data.MaxSeconds/60, data.MaxSeconds%60) }</span>
 						</div>
+						<div class="voice-level" data-voice-level-wrap hidden><label for="voice-level-meter">Audiopegel</label><meter id="voice-level-meter" min="0" max="1" value="0" data-voice-level>0</meter></div>
 						<p data-voice-status role="status">Das Mikrofon wird erst nach „Aufnahme starten“ angefragt.</p>
-						<form data-voice-upload>
-							<label>Oder vorhandene Audiodatei prüfen und hochladen<input type="file" name="audio" accept="audio/webm,audio/ogg,audio/wav,audio/mp4,video/webm,video/mp4" required/></label>
-							<label>Dauer in Sekunden<input name="duration_seconds" type="number" min="1" max={ fmt.Sprint(data.MaxSeconds) } required/></label>
+						<section class="voice-preview" data-voice-preview hidden aria-labelledby="voice-preview-title">
+							<h3 id="voice-preview-title">Aufnahme vor dem Upload prüfen</h3>
+							<audio controls preload="metadata" data-voice-audio></audio>
+							<div class="action-row"><button class="button" type="button" data-voice-send>Aufnahme als Entwurf hochladen</button><button class="button button--quiet" type="button" data-voice-discard>Aufnahme verwerfen</button><button class="button button--quiet" type="button" data-voice-retry hidden>Upload erneut versuchen</button></div>
+							<label class="visually-hidden" for="voice-upload-progress">Uploadfortschritt</label><progress id="voice-upload-progress" max="100" value="0" data-voice-progress hidden>0 %</progress>
+						</section>
+						<form method="post" action="/voice/upload" enctype="multipart/form-data" data-voice-upload>
+							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
+							<input type="hidden" name="idempotency_key" value={ data.UploadKey } data-voice-idempotency-key/>
+							<label>Oder vorhandene Audiodatei prüfen und hochladen<input type="file" name="audio" accept="audio/webm,audio/ogg,audio/wav,video/webm" required data-voice-file/></label>
+							<label>Dauer in Sekunden<input name="duration_seconds" type="number" min="1" max={ fmt.Sprint(data.MaxSeconds) } required data-voice-duration/></label>
 							<button class="button button--quiet" type="submit">Datei als Entwurf verarbeiten</button>
 						</form>
 					</section>
@@ -75,17 +148,40 @@ templ VoiceReview(data VoiceReviewData) {
 					<div><p class="eyebrow">Menschliche Prüfung erforderlich</p><h1>Sprachentwurf prüfen</h1><p>Status: <span class="status-badge">{ voiceStatusLabel(data.Draft.Status) }</span> · Ablauf { data.Draft.ExpiresAt.In(viennaLocation()).Format("02.01.2006 15:04") }</p></div>
 					<a class="button button--quiet" href="/customers/new">Stattdessen manuell erfassen</a>
 				</div>
-				if data.Draft.Status == voice.StatusFailed {
-					<div class="form-alert" role="alert">Die Transkription ist fehlgeschlagen. Audio wurde gelöscht. Sie können bewusst neu aufnehmen oder manuell erfassen.</div>
-					<a class="button" href="/voice">Neu aufnehmen</a>
+				if data.Draft.Status == voice.StatusRecorded || data.Draft.Status == voice.StatusTranscribing {
+					<section class="form-card voice-processing" data-voice-processing data-status-url={ "/api/v1/voice/drafts/" + data.Draft.ID }>
+						<p class="eyebrow">Verarbeitung läuft</p>
+						<h2>Die Aufnahme wird im Hintergrund transkribiert</h2>
+						<p role="status" data-voice-processing-message>Sie können diese Seite geöffnet lassen oder später zu diesem Entwurf zurückkehren. Es wird nichts automatisch gespeichert oder eingeplant.</p>
+						<a class="button button--quiet" href={ "/voice/drafts/" + data.Draft.ID }>Status aktualisieren</a>
+					</section>
+				} else if data.Draft.Status == voice.StatusFailed {
+					<div class="form-alert" role="alert">Die Transkription ist nach mehreren Versuchen fehlgeschlagen. Die geschützte Originalaufnahme bleibt bis zum Ablauf der 30-Tage-Frist für Administratoren verfügbar.</div>
+					if data.Draft.ManualRetryCount < 1 {
+						<form method="post" action={ "/voice/drafts/" + data.Draft.ID + "/retranscribe" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(data.Draft.Version) }/><button class="button" type="submit">Originalaufnahme einmalig neu transkribieren</button></form>
+					} else {
+						<p>Die einmalige manuelle Neu-Transkription wurde bereits verwendet.</p>
+					}
+					<a class="button button--quiet" href="/voice">Neu aufnehmen</a>
 				} else if data.Draft.Status == voice.StatusExpired {
-					<div class="form-alert" role="alert">Dieser Entwurf ist abgelaufen und enthält keine weiter nutzbaren Daten.</div>
+					<div class="form-alert form-alert--warning" role="alert">Dieser Entwurf ist abgelaufen und enthält keine weiter nutzbaren Daten.</div>
 				} else if data.Draft.Status == voice.StatusCommitted {
-					<div class="form-alert">Dieser Entwurf wurde bereits übernommen.</div>
+					<div class="form-alert form-alert--info">Dieser Entwurf wurde bereits übernommen.</div>
 					<a class="button" href={ "/customers/" + data.Draft.Committed.CustomerID }>Zur Kundenakte</a>
 				} else {
 					if data.Error != "" {
 						<div class="form-alert" role="alert">{ data.Error }</div>
+					}
+					if issues := voiceReviewIssues(data.Draft.Fields); len(issues) > 0 {
+						<section class="form-alert form-alert--warning" aria-labelledby="voice-review-issues-title">
+							<h2 id="voice-review-issues-title">Zu prüfen</h2>
+							<p>Diese erkannten Angaben fehlen oder sind unsicher. Springen Sie direkt zum Feld und prüfen Sie den Wert vor der bewussten Übernahme.</p>
+							<ul>
+								for _, issue := range issues {
+									<li><a href={ "#" + issue.Target }>{ issue.Label }</a>: { issue.Reason }</li>
+								}
+							</ul>
+						</section>
 					}
 					<div class="voice-review-grid">
 						<aside class="transcript-card">
@@ -103,29 +199,29 @@ templ VoiceReview(data VoiceReviewData) {
 								<div class="form-grid">
 									<label>
 										<span>Vorname</span> @confidence(data.Draft.Fields.FirstName)
-										<input name="first_name" value={ data.Values.FirstName }/>
+										<input id="voice-field-first-name" name="first_name" value={ data.Values.FirstName }/>
 									</label>
 									<label>
 										<span>Nachname</span> @confidence(data.Draft.Fields.LastName)
-										<input name="last_name" value={ data.Values.LastName }/>
+										<input id="voice-field-last-name" name="last_name" value={ data.Values.LastName }/>
 									</label>
 									<label class="span-2">
 										<span>Firma</span> @confidence(data.Draft.Fields.CompanyName)
-										<input name="company_name" value={ data.Values.CompanyName }/>
+										<input id="voice-field-company-name" name="company_name" value={ data.Values.CompanyName }/>
 									</label>
 									<label class="span-2">
 										<span>Freie Adresse</span> @confidence(data.Draft.Fields.AddressFreeform)
-										<textarea name="address_freeform">{ data.Values.AddressFreeform }</textarea>
+										<textarea id="voice-field-address" name="address_freeform">{ data.Values.AddressFreeform }</textarea>
 									</label>
 									<input type="hidden" name="street"/><input type="hidden" name="postal_code"/><input type="hidden" name="locality"/>
 									<label>Region<input name="region" value={ data.Values.Region }/></label>
 									<label>
 										<span>Telefon</span> @confidence(data.Draft.Fields.PhoneRaw)
-										<input name="phone" type="tel" value={ data.Values.Phone }/>
+										<input id="voice-field-phone" name="phone" type="tel" value={ data.Values.Phone }/>
 									</label>
 									<label>
 										<span>E-Mail</span> @confidence(data.Draft.Fields.Email)
-										<input name="email" type="email" value={ data.Values.Email }/>
+										<input id="voice-field-email" name="email" type="email" value={ data.Values.Email }/>
 									</label>
 								</div>
 							</fieldset>
@@ -135,11 +231,11 @@ templ VoiceReview(data VoiceReviewData) {
 									<label>Auftragstyp – ausdrücklich prüfen<select name="job_type" required data-job-type><option value="chipping_only" selected?={ data.Values.JobType == "chipping_only" }>Nur Hackmaschine</option><option value="chipping_with_transport" selected?={ data.Values.JobType == "chipping_with_transport" }>Mit Transport</option></select></label>
 									<label>
 										<span>Menge m³</span> @confidence(data.Draft.Fields.VolumeM3)
-										<input name="volume_m3" value={ data.Values.Volume } required/>
+										<input id="voice-field-volume" name="volume_m3" value={ data.Values.Volume } required/>
 									</label>
 									<label>
 										<span>Hackdauer in Minuten</span> @confidence(data.Draft.Fields.EstimatedHackMinutes)
-										<input name="hack_duration" value={ data.Values.HackDuration } required/>
+										<input id="voice-field-hack-duration" name="hack_duration" value={ data.Values.HackDuration } required/>
 									</label>
 									<label data-transport-field>Transportdauer Minuten<input name="transport_duration" value={ data.Values.TransportDuration } data-transport-control/></label>
 									<label data-transport-field>Fahrten<input name="transport_trips" value={ data.Values.Trips } type="number" min="0" data-transport-control/></label>
@@ -147,16 +243,16 @@ templ VoiceReview(data VoiceReviewData) {
 									<label class="check-label" data-external-confirmation><input name="external_confirmed" type="checkbox" value="true"/> externer Transport bestätigt</label>
 									<label>
 										<span>Frühestes Datum</span> @confidence(data.Draft.Fields.PreferredStartDate)
-										<input name="preferred_start" type="date" value={ data.Values.PreferredStart }/>
+										<input id="voice-field-preferred-start" name="preferred_start" type="date" value={ data.Values.PreferredStart }/>
 									</label>
 									<label>
 										<span>Spätestes Datum</span> @confidence(data.Draft.Fields.PreferredEndDate)
-										<input name="preferred_end" type="date" value={ data.Values.PreferredEnd }/>
+										<input id="voice-field-preferred-end" name="preferred_end" type="date" value={ data.Values.PreferredEnd }/>
 									</label>
 									<label>Dringlichkeit<select name="urgency"><option value="normal" selected?={ data.Values.Urgency == "normal" }>Normal</option><option value="low" selected?={ data.Values.Urgency == "low" }>Niedrig</option><option value="high" selected?={ data.Values.Urgency == "high" }>Hoch</option><option value="urgent" selected?={ data.Values.Urgency == "urgent" }>Dringend</option></select></label>
 									<label class="span-2">
 										<span>Wunsch</span> @confidence(data.Draft.Fields.PreferenceText)
-										<textarea name="preference_text">{ data.Values.PreferenceText }</textarea>
+										<textarea id="voice-field-preference" name="preference_text">{ data.Values.PreferenceText }</textarea>
 									</label>
 									<label class="span-2">Interne Bemerkung<textarea name="note">{ data.Values.Note }</textarea></label>
 								</div>
@@ -197,7 +293,7 @@ templ confidence(field voice.Field) {
 }
 
 func voiceStatusLabel(status voice.Status) string {
-	return map[voice.Status]string{voice.StatusTranscribing: "Transkription", voice.StatusNeedsReview: "Prüfung erforderlich", voice.StatusFailed: "Fehlgeschlagen", voice.StatusCommitted: "Übernommen", voice.StatusExpired: "Abgelaufen"}[status]
+	return map[voice.Status]string{voice.StatusRecorded: "Wartet auf Verarbeitung", voice.StatusTranscribing: "Transkription", voice.StatusNeedsReview: "Prüfung erforderlich", voice.StatusFailed: "Fehlgeschlagen", voice.StatusCommitted: "Übernommen", voice.StatusExpired: "Abgelaufen"}[status]
 }
 
 func duplicateName(value customers.Duplicate) string {

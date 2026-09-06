@@ -5,6 +5,7 @@ import (
 	"example.invalid/hackplan/internal/dashboard"
 	"example.invalid/hackplan/internal/notification"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -18,6 +19,15 @@ type ShellData struct {
 type PasswordData struct {
 	Shell ShellData
 	Error string
+}
+type ProfileData struct {
+	Shell            ShellData
+	Profile          auth.Profile
+	CurrentSessionID string
+	Error            string
+	Notice           string
+	TOTPEnrollment   *auth.TOTPEnrollment
+	RecoveryCodes    []string
 }
 type UsersData struct {
 	Shell        ShellData
@@ -36,47 +46,50 @@ type CreateUserValues struct {
 
 templ appHeader(shell ShellData) {
 	<a class="skip-link" href="#hauptinhalt">Zum Inhalt springen</a>
-	<header class="site-header">
-		<div class="site-header__inner">
+	<header class="site-header" data-actor-role={ string(shell.Actor.Role) }>
+		<div class="site-header__inner site-header__inner--desktop">
 			<a class="wordmark" href="/dashboard" aria-label={ shell.Page.AppName + " Übersicht" }><span class="wordmark__mark" aria-hidden="true">H</span><span>{ shell.Page.AppName }</span></a>
 			<nav class="primary-nav" aria-label="Hauptnavigation">
 				@navLink(shell, "/dashboard", "Übersicht")
-				@navLink(shell, "/calendar", "Kalender")
-				@navLink(shell, "/waitlist", "Warteliste")
-				@navLink(shell, "/customers", "Kunden")
 				if shell.Actor.Role == auth.RoleAdmin {
-					@navLink(shell, "/planning", "Planung")
-					@navLink(shell, "/planning/routes", "Karte & Routen")
+					<details class="nav-menu disposition-nav" data-popover-menu>
+						<summary>Disposition</summary>
+						<div class="nav-menu__panel">
+							<span class="nav-menu__label">Disposition</span>
+							@navLink(shell, "/calendar", "Kalender")
+							@navLink(shell, "/waitlist", "Warteliste")
+							@navLink(shell, "/planning", "Vorschläge")
+							@navLink(shell, "/planning/routes", "Tagesrouten")
+						</div>
+					</details>
+				} else {
+					@navLink(shell, "/calendar", "Kalender")
+					@navLink(shell, "/waitlist", "Warteliste")
 				}
+				@navLink(shell, "/customers", "Kunden")
 			</nav>
 			<div class="shell-tools">
-				<details class="nav-menu quick-menu" data-popover-menu data-quick-menu>
-					<summary>Schnell</summary>
-					<div class="nav-menu__panel">
-						<span class="nav-menu__label">Neue Aufgabe</span>
-						<a href="/customers/new">Auftrag erfassen</a>
-						<a href="/voice">Sprachentwurf</a>
-						if shell.Actor.Role == auth.RoleAdmin {
-							<a href="/calendar">Termin vorschlagen</a>
-							<a href="/planning/routes">Route planen</a>
-						} else if shell.Actor.DriverID != "" {
-							<a href="/my-route">Meine Route</a>
-							<a href="/availability">Verfügbarkeit</a>
-						}
-						<span class="nav-menu__label">Darstellung</span>
-						<button class="nav-menu__action" type="button" data-density-toggle>Komfortable Dichte</button>
-						<button class="nav-menu__action" type="button" data-outdoor-toggle>Outdoor-Kontrast</button>
+				<button class="nav-menu__icon-trigger" type="button" data-command-open aria-label="Globale Suche und Kommandos öffnen" title="Kommandos (Strg/⌘ K)">⌘</button>
+				<details class="nav-menu command-search-fallback" data-command-search-fallback>
+					<summary class="nav-menu__icon-trigger" aria-label="Globale Suche öffnen" title="Globale Suche">⌕</summary>
+					<div class="nav-menu__panel command-search-fallback__panel">
+						<form method="post" action="/search"><input type="hidden" name="csrf_token" value={ shell.CSRFToken }/><label>Global suchen<input name="q" type="search" minlength="2" maxlength="120" autocomplete="off" placeholder="Kunde, Auftrag oder Termin" required/></label><button class="button" type="submit">Suchen</button></form>
 					</div>
 				</details>
 				if shell.Actor.Role == auth.RoleAdmin {
 					<details class="nav-menu" data-popover-menu data-admin-menu>
-						<summary>Verwaltung</summary>
+						<summary class="nav-menu__icon-trigger" aria-label="Verwaltung" title="Verwaltung">
+							@administrationIcon()
+						</summary>
 						<div class="nav-menu__panel">
 							<span class="nav-menu__label">Administration</span>
 							@navLink(shell, "/admin/users", "Benutzer & Fahrer")
 							@navLink(shell, "/admin/drivers", "Fahrerverfügbarkeit")
 							@navLink(shell, "/admin/resources", "Ressourcen")
+							@navLink(shell, "/transport-partners", "Transportpartner")
+							@navLink(shell, "/settings/route-locations", "Routenorte")
 							@navLink(shell, "/admin/notifications", "Versand")
+							@navLink(shell, "/admin/voice-recordings", "Sprachaufnahmen")
 						</div>
 					</details>
 				}
@@ -87,6 +100,7 @@ templ appHeader(shell ShellData) {
 					<div class="nav-menu__panel nav-menu__panel--account">
 						<span class="nav-menu__label">Mein Zugang</span>
 						@navLink(shell, "/profile", "Profil")
+						@navLink(shell, "/hilfe/erste-schritte", "Erste Schritte")
 						@navLink(shell, "/voice", "Spracheingabe")
 						if shell.Actor.Role == auth.RoleDriver && shell.Actor.DriverID != "" {
 							@navLink(shell, "/my-route", "Meine Route")
@@ -97,37 +111,219 @@ templ appHeader(shell ShellData) {
 				</details>
 			</div>
 		</div>
+		<div class="mobile-app-bar">
+			<a class="mobile-app-bar__brand" href="/dashboard" aria-label={ shell.Page.AppName + " Übersicht" }><span class="wordmark__mark" aria-hidden="true">H</span></a>
+			<div class="mobile-context-actions">
+				<button class="mobile-context-action" type="button" data-command-open aria-label="Globale Suche und Kommandos öffnen" title="Kommandos (Strg/⌘ K)">
+					@mobileShellIcon("search", "mobile-context-action__icon")
+				</button>
+				<details class="nav-menu command-search-fallback command-search-fallback--mobile" data-command-search-fallback>
+					<summary class="mobile-context-action" aria-label="Globale Suche öffnen">
+						@mobileShellIcon("search", "mobile-context-action__icon")
+					</summary>
+					<div class="nav-menu__panel command-search-fallback__panel">
+						<form method="post" action="/search"><input type="hidden" name="csrf_token" value={ shell.CSRFToken }/><label>Global suchen<input name="q" type="search" minlength="2" maxlength="120" autocomplete="off" placeholder="Kunde, Auftrag oder Termin" required/></label><button class="button" type="submit">Suchen</button></form>
+					</div>
+				</details>
+				<a
+					href="/customers/new"
+					class="mobile-primary-action"
+					if isActivePath(shell.ActivePath, "/customers/new") {
+						aria-current="page"
+					}
+				>
+					@mobileShellIcon("plus", "mobile-primary-action__icon")
+					<span>Neuer Auftrag</span>
+				</a>
+			</div>
+		</div>
 	</header>
+	<dialog class="command-palette" data-command-palette aria-labelledby="command-palette-title">
+		<div class="dialog-heading"><div><p class="eyebrow">Navigation &amp; Suche</p><h2 id="command-palette-title">Kommandos</h2></div><button class="icon-button" type="button" data-command-close aria-label="Kommandos schließen">×</button></div>
+		<form method="post" action="/search" class="command-search" data-global-search-form><input type="hidden" name="csrf_token" value={ shell.CSRFToken }/><label>Global suchen<input name="q" type="search" minlength="2" maxlength="120" autocomplete="off" placeholder="Kunde, Auftragsnummer oder Termin" data-global-search-input required/></label><button class="button" type="submit">Suchen</button></form>
+		<div class="command-results" data-global-search-results aria-live="polite"></div>
+		<div class="command-grid" data-command-actions>
+			<section class="command-section" aria-labelledby="command-work-title">
+				<h3 id="command-work-title">Arbeiten</h3>
+				<nav class="command-links" aria-label="Schnellaktionen">
+					<a href="/customers/new">Auftrag erfassen</a>
+					<a href="/voice">Sprachentwurf</a>
+					if shell.Actor.Role == auth.RoleAdmin {
+						<a href="/calendar">Kalender / Termin vorschlagen</a>
+						<a href="/planning/routes">Tagesroute planen</a>
+					} else {
+						<a href="/calendar">Kalender öffnen</a>
+						if shell.Actor.DriverID != "" {
+							<a href="/my-route">Meine Route</a>
+							<a href="/availability">Verfügbarkeit</a>
+						}
+					}
+				</nav>
+			</section>
+			<section class="command-section" aria-labelledby="command-open-title">
+				<h3 id="command-open-title">Öffnen &amp; prüfen</h3>
+				<nav class="command-links" aria-label="Sichere Schnellnavigation">
+					<a href="/dashboard">Heute öffnen</a>
+					<a href="/waitlist?incomplete=1">Prüfwarteschlange öffnen</a>
+					if shell.Actor.Role == auth.RoleAdmin {
+						<a href="/planning">Vorschläge öffnen</a>
+						<a href="/admin/notifications">Versand prüfen</a>
+					}
+				</nav>
+			</section>
+			<section class="command-section command-section--wide" aria-labelledby="command-view-title">
+				<h3 id="command-view-title">Darstellung</h3>
+				<div class="command-preferences">
+					<button class="button button--quiet" type="button" data-density-toggle>Komfortable Dichte</button>
+					<button class="button button--quiet" type="button" data-outdoor-toggle>Outdoor-Kontrast</button>
+				</div>
+			</section>
+		</div>
+		<button class="button button--quiet" type="button" data-shortcuts-open>Tastaturkürzel anzeigen</button>
+	</dialog>
+	<dialog class="shortcut-help" data-shortcuts-dialog aria-labelledby="shortcut-help-title"><div class="dialog-heading"><div><p class="eyebrow">Tastatur</p><h2 id="shortcut-help-title">Kürzel</h2></div><button class="icon-button" type="button" data-shortcuts-close aria-label="Kürzel schließen">×</button></div><dl class="shortcut-list"><div><dt><kbd>Strg</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd></dt><dd>Kommandos und globale Suche</dd></div><div><dt><kbd>/</kbd></dt><dd>Seitensuche fokussieren</dd></div><div><dt><kbd>?</kbd></dt><dd>Diese Übersicht öffnen</dd></div><div><dt><kbd>Esc</kbd></dt><dd>Dialog schließen</dd></div></dl><p>Kürzel werden in Eingabefeldern nicht ausgelöst.</p></dialog>
 	<div class="connectivity-banner" role="status" aria-live="polite" data-connectivity-banner hidden></div>
+	<aside class="install-prompt" data-install-prompt hidden aria-label="HackWerk installieren">
+		<span>HackWerk auf diesem Gerät installieren – schneller erreichbar, ohne Kundendaten lokal zu speichern.</span>
+		<div class="action-row"><button class="button" type="button" data-install-accept>Installieren</button><button class="button button--quiet" type="button" data-install-later>Später</button><button class="button button--quiet" type="button" data-install-dismiss>Nicht mehr anzeigen</button></div>
+	</aside>
 	<nav class="mobile-bottom-nav" aria-label="Mobile Hauptnavigation">
-		@navLink(shell, "/dashboard", "Heute")
-		@navLink(shell, "/calendar", "Kalender")
-		@navLink(shell, "/waitlist", "Warteliste")
-		@navLink(shell, "/customers", "Kunden")
-		<details class="mobile-more" data-mobile-menu>
-			<summary aria-label="Weitere Bereiche">Mehr</summary>
-			<div class="mobile-more__panel">
-				<span class="mobile-more__label">Erfassen</span>
-				<a href="/customers/new">Auftrag erfassen</a>
-				<a href="/voice">Auftrag per Sprache</a>
-				if shell.Actor.Role == auth.RoleDriver && shell.Actor.DriverID != "" {
-					<a href="/my-route">Meine Route</a>
-					<a href="/availability">Meine Verfügbarkeit</a>
+		if driverFieldNavigation(shell) {
+			@mobileNavLink(shell, "/dashboard", "Übersicht", "home")
+			@mobileNavLink(shell, "/my-route", "Route", "route")
+			@mobileNavLink(shell, "/calendar", "Kalender", "calendar")
+			@mobileNavLink(shell, "/availability", "Zeiten", "availability")
+		} else {
+			@mobileNavLink(shell, "/dashboard", "Heute", "home")
+			@mobileNavLink(shell, "/calendar", "Kalender", "calendar")
+			@mobileNavLink(shell, "/waitlist", "Warteliste", "waitlist")
+			@mobileNavLink(shell, "/customers", "Kunden", "customers")
+		}
+		<button
+			type="button"
+			data-mobile-nav-item
+			data-mobile-menu-open
+			aria-label="Weitere Bereiche"
+			aria-haspopup="dialog"
+			aria-controls="mobile-more-sheet"
+			aria-expanded="false"
+			class={ "mobile-more mobile-more-trigger " + mobileMoreSummaryClass(shell) }
+			if mobileMoreActive(shell) {
+				aria-current="page"
+			}
+		>
+			@mobileShellIcon("more", "mobile-nav-item__icon")
+			<span class="mobile-nav-item__label">Mehr</span>
+		</button>
+		<details class="mobile-more--fallback">
+			<summary
+				data-mobile-nav-fallback
+				aria-label="Weitere Bereiche"
+				class={ mobileMoreSummaryClass(shell) }
+				if mobileMoreActive(shell) {
+					aria-current="page"
 				}
-				<a href="/profile">Profil</a>
-				if shell.Actor.Role == auth.RoleAdmin {
-					<span class="mobile-more__label">Administration</span>
-					<a href="/planning">Planung</a>
-					<a href="/planning/routes">Karte &amp; Routen</a>
-					<a href="/admin/drivers">Fahrer</a><a href="/admin/resources">Ressourcen</a><a href="/admin/notifications">Versand</a><a href="/admin/users">Benutzer</a>
-				}
-				<span class="mobile-more__label">Darstellung</span>
-				<button class="button button--quiet" type="button" data-density-toggle>Komfortable Dichte</button>
-				<button class="button button--quiet" type="button" data-outdoor-toggle>Outdoor-Kontrast</button>
-				<form method="post" action="/logout"><input type="hidden" name="csrf_token" value={ shell.CSRFToken }/><button class="button button--quiet" type="submit">Abmelden</button></form>
+			>
+				@mobileShellIcon("more", "mobile-nav-item__icon")
+				<span class="mobile-nav-item__label">Mehr</span>
+			</summary>
+			<div class="mobile-more__panel mobile-more__panel--fallback">
+				@mobileMoreActions(shell)
 			</div>
 		</details>
 	</nav>
+	<dialog id="mobile-more-sheet" class="mobile-more__dialog" data-mobile-menu aria-labelledby="mobile-more-title">
+		<div class="mobile-more__panel">
+			<div class="mobile-more__heading">
+				<h2 id="mobile-more-title">Mehr</h2>
+				<button class="icon-button" type="button" data-mobile-menu-close aria-label="Weitere Bereiche schließen">×</button>
+			</div>
+			@mobileMoreActions(shell)
+		</div>
+	</dialog>
+}
+
+templ mobileMoreActions(shell ShellData) {
+	<span class="mobile-more__label">Erfassen</span>
+	@mobileMoreLink(shell, "/voice", "Auftrag per Sprache")
+	if driverFieldNavigation(shell) {
+		<span class="mobile-more__label">Aufträge</span>
+		@mobileMoreLink(shell, "/waitlist", "Warteliste")
+		@mobileMoreLink(shell, "/customers", "Kunden")
+	}
+	@mobileMoreLink(shell, "/profile", "Profil")
+	if driverFieldNavigation(shell) {
+		<button class="button button--quiet" type="button" data-install-open hidden>App installieren</button>
+	}
+	<span class="mobile-more__label">Hilfe</span>
+	@mobileMoreLink(shell, "/hilfe/erste-schritte", "Erste Schritte")
+	if shell.Actor.Role == auth.RoleAdmin {
+		<span class="mobile-more__label">Administration</span>
+		@mobileMoreLink(shell, "/planning", "Vorschläge")
+		@mobileMoreLink(shell, "/planning/routes", "Tagesrouten")
+		@mobileMoreLink(shell, "/admin/drivers", "Fahrer")
+		@mobileMoreLink(shell, "/admin/resources", "Ressourcen")
+		@mobileMoreLink(shell, "/transport-partners", "Transportpartner")
+		@mobileMoreLink(shell, "/settings/route-locations", "Routenorte")
+		@mobileMoreLink(shell, "/admin/notifications", "Versand")
+		@mobileMoreLink(shell, "/admin/voice-recordings", "Sprachaufnahmen")
+		@mobileMoreLink(shell, "/admin/users", "Benutzer")
+	}
+	<span class="mobile-more__label">Darstellung</span>
+	<button class="button button--quiet" type="button" data-density-toggle>Komfortable Dichte</button>
+	<button class="button button--quiet" type="button" data-outdoor-toggle>Outdoor-Kontrast</button>
+	<form method="post" action="/logout"><input type="hidden" name="csrf_token" value={ shell.CSRFToken }/><button class="button button--quiet" type="submit">Abmelden</button></form>
+}
+
+templ mobileNavLink(shell ShellData, path string, label string, icon string) {
+	<a
+		data-mobile-nav-item
+		href={ templ.SafeURL(path) }
+		class={ mobileNavClass(shell.ActivePath, path) }
+		if mobileNavActive(shell.ActivePath, path) {
+			aria-current="page"
+		}
+	>
+		@mobileShellIcon(icon, "mobile-nav-item__icon")
+		<span class="mobile-nav-item__label">{ label }</span>
+	</a>
+}
+
+templ mobileMoreLink(shell ShellData, path string, label string) {
+	<a href={ templ.SafeURL(path) } class={ navClass(shell.ActivePath, path) }>{ label }</a>
+}
+
+templ mobileShellIcon(name string, className string) {
+	<svg class={ className } viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+		if name == "home" {
+			<path d="m3 11.5 9-7.5 9 7.5"></path><path d="M5.5 10.5V20h13v-9.5M9.5 20v-6h5v6"></path>
+		} else if name == "calendar" {
+			<rect x="3.5" y="5" width="17" height="15" rx="2"></rect><path d="M8 3v4m8-4v4M3.5 10h17"></path>
+		} else if name == "waitlist" {
+			<path d="M9 6h11M9 12h11M9 18h11"></path><path d="m4 6 .8.8L6.5 5M4 12l.8.8L6.5 11M4 18l.8.8 1.7-1.8"></path>
+		} else if name == "customers" {
+			<circle cx="9" cy="8" r="3"></circle><path d="M3.5 19v-1.5A4.5 4.5 0 0 1 8 13h2a4.5 4.5 0 0 1 4.5 4.5V19"></path><path d="M15.5 6.2a3 3 0 0 1 0 5.6M16.5 14a4.5 4.5 0 0 1 4 4.5V19"></path>
+		} else if name == "route" {
+			<path d="M6 19.5c0-3 3-3 3-6s-3-3-3-6"></path><path d="M18 4.5c0 3-3 3-3 6s3 3 3 6"></path><circle cx="6" cy="5" r="2"></circle><circle cx="18" cy="19" r="2"></circle>
+		} else if name == "availability" {
+			<circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path><path d="m7.5 17.5 1.8 1.8 3.5-3.5"></path>
+		} else if name == "search" {
+			<circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m15.5 15.5 5 5"></path>
+		} else if name == "plus" {
+			<path d="M12 5v14M5 12h14"></path>
+		} else {
+			<circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle>
+		}
+	</svg>
+}
+
+templ administrationIcon() {
+	<svg class="nav-menu__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+		<path d="M4 6h9m4 0h3M4 12h3m4 0h9M4 18h8m4 0h4"></path>
+		<circle cx="15" cy="6" r="2"></circle>
+		<circle cx="9" cy="12" r="2"></circle>
+		<circle cx="14" cy="18" r="2"></circle>
+	</svg>
 }
 
 templ navLink(shell ShellData, path string, label string) {
@@ -141,15 +337,17 @@ templ navLink(shell ShellData, path string, label string) {
 }
 
 templ appFooter(page PageData) {
-	<footer class="site-footer"><div class="site-footer__inner">{ page.AppName } · Europe/Vienna · de-AT · Version { page.Version }</div></footer>
+	@siteFooter(page)
 	<div class="visually-hidden" aria-live="polite" data-live-status></div>
 }
 
 type DashboardData struct {
-	Shell              ShellData
-	View               dashboard.View
-	NotificationIssues []notification.Status
-	Error              string
+	Shell                ShellData
+	View                 dashboard.View
+	NotificationIssues   []notification.Status
+	OwnRouteAvailable    bool
+	OwnRouteLookupFailed bool
+	Error                string
 }
 
 templ Dashboard(data DashboardData) {
@@ -158,94 +356,145 @@ templ Dashboard(data DashboardData) {
 		@documentHead(data.Shell.Page, "Übersicht – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page dashboard-page">
-				<section class="dashboard-intro"><div><p class="eyebrow">Einsatzübersicht</p><h1>Grüß Gott, { data.Shell.Actor.DisplayName }.</h1><p>Termine, Rückmeldungen und Kapazität auf einen Blick.</p></div><a class="button dashboard-primary-action" href="/customers/new">Neuen Auftrag erfassen</a></section>
+			<main id="hauptinhalt" class="page dashboard-page" data-dashboard-role={ dashboardRole(data.Shell.Actor.Role) }>
+				<section class="dashboard-intro">
+					<h1>Grüß Gott, { data.Shell.Actor.DisplayName }.</h1>
+					if data.Shell.Actor.Role == auth.RoleAdmin {
+						<div class="action-row"><button class="button button--quiet" type="button" data-print-page>Tagesübersicht drucken</button><a class="button dashboard-primary-action" href="/customers/new">Neuen Auftrag erfassen</a></div>
+					}
+				</section>
+				if data.Error == "" && data.Shell.Actor.Role == auth.RoleAdmin {
+					@adminTour(data.View)
+				}
 				if data.Error != "" {
 					<section class="empty-state" role="alert"><h2>Übersicht nicht verfügbar</h2><p>{ data.Error }</p><a class="button button--quiet" href="/dashboard">Heute erneut laden</a></section>
 				}
 				if data.Error == "" {
-					<nav class="dashboard-date-nav" aria-label="Tag auswählen">
-						<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + data.View.PreviousDate) } aria-label="Vorheriger Tag">←</a>
-						<div><span class="eyebrow">Tag</span><h2>{ data.View.DateLabel }</h2><small>Aktualisiert um { data.View.UpdatedLabel } Uhr</small></div>
-						<a class="button button--quiet" href="/dashboard">Heute</a>
-						<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + data.View.NextDate) } aria-label="Nächster Tag">→</a>
-					</nav>
-					<section class="dashboard-metrics" aria-label="Kennzahlen">
-						@metricCard("Warteliste", data.View.Counts.Waitlist, "/waitlist", "⌛")
-						@metricCard("Termine", data.View.Counts.Appointments, "/calendar", "▣")
-						@metricCard("Offene Antworten", data.View.Counts.Attention, "/calendar", "?")
-						@metricCard("Fahrer", data.View.Counts.ActiveDrivers, driverLink(data.Shell.Actor.Role), "♟")
+					<div class="dashboard-control-bar">
+						<nav class="dashboard-date-nav" aria-label="Tag auswählen">
+							<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + data.View.PreviousDate) } aria-label="Vorheriger Tag">←</a>
+							<div><h2>{ data.View.DateLabel }</h2><small>Aktualisiert um { data.View.UpdatedLabel } Uhr</small></div>
+							<a class="button button--quiet" href="/dashboard">Heute</a>
+							<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + data.View.NextDate) } aria-label="Nächster Tag">→</a>
+						</nav>
 						if data.View.Admin {
-							@metricCard("Versandprobleme", data.View.Counts.NotificationIssues, "/admin/notifications", "!")
-							@metricCard("Konflikte/Overrides", data.View.Counts.Overrides, "/calendar", "⚠")
-							@metricCard("Freie Fenster", freeSlotCount(data.View.Capacities), "/calendar", "◷")
-						}
-					</section>
-					if data.View.Counts.Attention > 0 || data.View.Counts.NotificationIssues > 0 || data.View.Counts.Overrides > 0 || len(data.View.UrgentJobs) > 0 {
-						<section class="dashboard-attention" aria-labelledby="dashboard-attention-heading">
-							<div><p class="eyebrow">Priorität</p><h2 id="dashboard-attention-heading">Heute Aufmerksamkeit nötig</h2></div>
-							<div class="dashboard-attention__items">
-								if data.View.Counts.Attention > 0 {
-									<a href="/calendar"><strong>{ fmt.Sprint(data.View.Counts.Attention) }</strong> offene Kundenantworten</a>
-								}
-								if data.View.Admin && data.View.Counts.NotificationIssues > 0 {
-									<a href="/admin/notifications?status=failed"><strong>{ fmt.Sprint(data.View.Counts.NotificationIssues) }</strong> Versandprobleme prüfen/erneut senden</a>
-								}
-								if data.View.Admin && data.View.Counts.Overrides > 0 {
-									<a href="/calendar"><strong>{ fmt.Sprint(data.View.Counts.Overrides) }</strong> Konflikte oder Overrides</a>
-								}
-								if data.View.Admin && len(data.View.UrgentJobs) > 0 {
-									<a href="/waitlist?urgency=urgent"><strong>{ fmt.Sprint(len(data.View.UrgentJobs)) }</strong> dringende Aufträge</a>
-								}
-							</div>
-							if len(data.NotificationIssues) > 0 {
-								<div class="dashboard-notification-issues" aria-label="Versandprobleme direkt bearbeiten">
-									for _, issue := range data.NotificationIssues {
-										<div class="dashboard-notification-issue">
-											<span class={ "status-badge status-badge--" + strings.ReplaceAll(issue.State, "_", "-") }>{ notificationStateLabel(issue.State) }</span>
-											<span>{ notificationChannelLabel(issue.Channel) } · { issue.Recipient }</span>
-											<form method="post" action={ templ.SafeURL("/admin/notifications/" + issue.ID + "/retry") }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Erneut versuchen</button></form>
-										</div>
+							<div class="action-row dashboard-mode" aria-label="Dashboardansicht">
+								<a
+									class={ dashboardModeClass(!data.View.ExceptionsOnly) }
+									href={ templ.SafeURL("/dashboard?date=" + data.View.Date) }
+									if !data.View.ExceptionsOnly {
+										aria-current="page"
 									}
-								</div>
-							}
-						</section>
-					}
+								>Alle Einsätze</a>
+								<a
+									class={ dashboardModeClass(data.View.ExceptionsOnly) }
+									href={ templ.SafeURL("/dashboard?date=" + data.View.Date + "&mode=exceptions") }
+									if data.View.ExceptionsOnly {
+										aria-current="page"
+									}
+								>Nur Ausnahmen</a>
+							</div>
+						}
+					</div>
 					<div class="dashboard-columns">
-						<section aria-labelledby="today-heading">
-							<div class="section-heading"><div><p class="eyebrow">Heute</p><h2 id="today-heading">Einsätze nach Hackmaschine</h2></div><a href="/calendar">Kalender öffnen</a></div>
-							if len(data.View.Groups) == 0 {
-								<div class="empty-state"><h3>Keine Einsätze</h3><p>Für diesen Tag sind keine Vorschläge oder fixierten Termine eingetragen.</p><a class="button button--quiet" href="/waitlist">Warteliste ansehen</a></div>
+						<div class="dashboard-core">
+							<section class="dashboard-today--grouped" data-dashboard-projection="resource-groups" aria-labelledby="today-heading">
+								<div class="section-heading"><h2 id="today-heading">Einsätze nach Hackmaschine</h2><a href="/calendar">Kalender öffnen</a></div>
+								if len(data.View.Groups) == 0 {
+									<div class="empty-state"><h3>Keine Einsätze</h3><p>Für diesen Tag sind keine Vorschläge oder fixierten Termine eingetragen.</p><a class="button button--quiet" href="/waitlist">Warteliste ansehen</a></div>
+								}
+								for _, group := range data.View.Groups {
+									<section class="dashboard-resource-group" aria-label={ group.ResourceName }>
+										<h3>{ group.ResourceName }</h3>
+										for _, item := range group.Appointments {
+											@dashboardAppointment(item)
+										}
+									</section>
+								}
+							</section>
+							if data.Shell.Actor.Role == auth.RoleDriver {
+								@driverTour(data.View.Today, data.View.Date, data.View.DateLabel, data.Shell.Actor.DriverID, data.OwnRouteAvailable, data.OwnRouteLookupFailed)
+								@driverMobileAvailability(data.View.OwnAvailability)
 							}
-							for _, group := range data.View.Groups {
-								<section class="dashboard-resource-group" aria-label={ group.ResourceName }>
-									<h3>{ group.ResourceName }</h3>
-									for _, item := range group.Appointments {
-										@dashboardAppointment(item)
+							if data.View.Admin && (data.View.Counts.Attention > 0 || data.View.Counts.NotificationIssues > 0 || data.View.Counts.Overrides > 0 || len(data.View.UrgentJobs) > 0) {
+								<section class="dashboard-attention" aria-labelledby="dashboard-attention-heading">
+									<h2 id="dashboard-attention-heading">Aufmerksamkeit nötig</h2>
+									<div class="dashboard-attention__items">
+										if data.View.Counts.Attention > 0 {
+											<a href="/calendar"><strong>{ fmt.Sprint(data.View.Counts.Attention) }</strong> offene Kundenantworten</a>
+										}
+										if data.View.Counts.OverdueConfirmations > 0 {
+											<a href="/calendar"><strong>{ fmt.Sprint(data.View.Counts.OverdueConfirmations) }</strong> Bestätigungen überfällig</a>
+										}
+										if data.View.Counts.DeclinedConfirmations > 0 {
+											<a href="/calendar"><strong>{ fmt.Sprint(data.View.Counts.DeclinedConfirmations) }</strong> abgelehnte Termine</a>
+										}
+										if data.View.Counts.CallbackRequests > 0 {
+											<a href="/admin/notifications"><strong>{ fmt.Sprint(data.View.Counts.CallbackRequests) }</strong> Rückrufwünsche</a>
+										}
+										if data.View.Admin && data.View.Counts.NotificationIssues > 0 {
+											<a href="/admin/notifications?status=failed"><strong>{ fmt.Sprint(data.View.Counts.NotificationIssues) }</strong> Versandprobleme prüfen/erneut senden</a>
+										}
+										if data.View.Admin && data.View.Counts.Overrides > 0 {
+											<a href="/calendar"><strong>{ fmt.Sprint(data.View.Counts.Overrides) }</strong> Konflikte oder Overrides</a>
+										}
+										if data.View.Admin && len(data.View.UrgentJobs) > 0 {
+											<a href="/waitlist?urgency=urgent"><strong>{ fmt.Sprint(len(data.View.UrgentJobs)) }</strong> dringende Aufträge</a>
+										}
+									</div>
+									if len(data.NotificationIssues) > 0 {
+										<div class="dashboard-notification-issues" aria-label="Versandprobleme direkt bearbeiten">
+											for _, issue := range data.NotificationIssues {
+												<div class="dashboard-notification-issue">
+													<span class={ "status-badge status-badge--" + strings.ReplaceAll(issue.State, "_", "-") }>{ notificationStateLabel(issue.State) }</span>
+													<span>{ notificationChannelLabel(issue.Channel) } · { issue.Recipient }</span>
+													<form method="post" action={ templ.SafeURL("/admin/notifications/" + issue.ID + "/retry") }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Erneut versuchen</button></form>
+												</div>
+											}
+										</div>
 									}
 								</section>
 							}
-						</section>
-						<aside class="dashboard-side" aria-label="Tageshinweise">
-							<section class="dashboard-panel">
-								<h2>{ availabilityTitle(data.View.Admin) }</h2>
-								if data.View.Admin {
+							if data.View.Admin && len(data.View.MissingAssignments) > 0 {
+								<section class="dashboard-attention" aria-labelledby="missing-assignments-heading">
+									<h2 id="missing-assignments-heading">Fahrer oder Hackmaschine fehlt</h2>
+									<div class="dashboard-attention__items">
+										for _, item := range data.View.MissingAssignments {
+											<a href={ "/calendar/appointments/" + item.ID }><strong>{ item.JobNumber }</strong> · { item.CustomerName } · { dashboardTime(item.StartsAt) } Uhr</a>
+										}
+									</div>
+								</section>
+							}
+							if data.View.Admin {
+								<section class="dashboard-metrics" aria-label="Kennzahlen">
+									@metricCard("Warteliste", data.View.Counts.Waitlist, "/waitlist")
+									@metricCard("Termine", data.View.Counts.Appointments, "/calendar")
+									@metricCard("Offene Antworten", data.View.Counts.Attention, "/calendar")
+									@metricCard("Eigene Voice-Entwürfe", data.View.Counts.VoiceDrafts, "/voice")
+									@metricCard("Versandprobleme", data.View.Counts.NotificationIssues, "/admin/notifications")
+									@metricCard("Konflikte/Overrides", data.View.Counts.Overrides, "/calendar")
+									@metricCard("Freie Fenster", freeSlotCount(data.View.Capacities), "/calendar")
+									@metricCard("Fahrer", data.View.Counts.ActiveDrivers, driverLink(data.Shell.Actor.Role))
+								</section>
+							}
+						</div>
+						if data.View.Admin {
+							<aside class="dashboard-side" aria-label="Verfügbarkeit und Kapazität">
+								<section class="dashboard-panel">
+									<h2>{ availabilityTitle(data.View.Admin) }</h2>
 									for _, driver := range data.View.Drivers {
 										@availabilityRow(driver)
 									}
-								} else if data.View.OwnAvailability != nil {
-									@availabilityRow(*data.View.OwnAvailability)
-									<a class="button button--quiet" href="/availability">Verfügbarkeit pflegen</a>
-								} else {
-									<p class="empty-copy">Kein Fahrerprofil ist diesem Zugang zugeordnet.</p>
-								}
-							</section>
-							if data.View.Admin {
+								</section>
 								@capacityPanel(data.View.Capacities)
+								@unplannedPanel(data.View.UnplannedJobs)
 								@urgentPanel(data.View.UrgentJobs)
-							}
-						</aside>
+							</aside>
+						}
 					</div>
+					if data.View.Admin {
+						@capacityForecast(data.View.DailyCapacities)
+					}
 					if len(data.View.Upcoming) > 0 {
 						<section class="dashboard-upcoming" aria-labelledby="upcoming-heading">
 							<div class="section-heading"><h2 id="upcoming-heading">Demnächst</h2><a href="/calendar">Alle Termine</a></div>
@@ -264,8 +513,21 @@ templ Dashboard(data DashboardData) {
 	</html>
 }
 
-templ metricCard(label string, value int64, href string, icon string) {
-	<a class="metric-card" href={ templ.SafeURL(href) } aria-label={ fmt.Sprintf("%s: %d", label, value) }><span aria-hidden="true">{ icon }</span><strong>{ fmt.Sprint(value) }</strong><small>{ label }</small></a>
+templ metricCard(label string, value int64, href string) {
+	<a class="metric-card" href={ templ.SafeURL(href) } aria-label={ fmt.Sprintf("%s: %d", label, value) }><strong>{ fmt.Sprint(value) }</strong><small>{ label }</small></a>
+}
+
+func localizedDecimal(value string) string {
+	value = strings.TrimSpace(value)
+	whole, fraction, found := strings.Cut(value, ".")
+	if !found {
+		return value
+	}
+	fraction = strings.TrimRight(fraction, "0")
+	if fraction == "" {
+		return whole
+	}
+	return whole + "," + fraction
 }
 
 templ dashboardAppointment(item dashboard.Appointment) {
@@ -274,7 +536,7 @@ templ dashboardAppointment(item dashboard.Appointment) {
 		<div class="dashboard-appointment__body">
 			<div class="badge-row"><span class={ "appointment-badge appointment-badge--" + item.Lifecycle }><span aria-hidden="true">{ appointmentIcon(item.Confirmation) }</span>{ dashboardStatus(item.Lifecycle, item.Confirmation) }</span></div>
 			<h3><a href={ templ.SafeURL("/customers/" + item.CustomerID + "#job-" + item.JobID) }>{ item.CustomerName }</a></h3>
-			<p><strong>{ item.VolumeM3 } m³</strong> · { dashboardJobType(item.JobType) } · { item.Locality }</p>
+			<p><strong>{ localizedDecimal(item.VolumeM3) } m³</strong> · { dashboardJobType(item.JobType) } · { item.Locality }</p>
 			<p>{ item.Drivers }<span class="separator" aria-hidden="true">· </span>{ item.Resources }</p>
 			if item.LatestNote != "" {
 				<p class="note-excerpt">Bemerkung: { item.LatestNote }</p>
@@ -282,13 +544,175 @@ templ dashboardAppointment(item dashboard.Appointment) {
 			if item.OverrideReason != "" {
 				<p class="warning-copy"><span aria-hidden="true">⚠</span> Verfügbarkeit mit Admin-Begründung übersteuert</p>
 			}
-			<div class="dashboard-actions"><a class="button button--quiet" href={ templ.SafeURL(item.MapsURL) } target="_blank" rel="noopener noreferrer">Navigation</a><a class="button button--quiet" href={ templ.SafeURL("/customers/" + item.CustomerID + "#job-" + item.JobID) }>Auftrag öffnen</a><a class="button button--quiet" href={ templ.SafeURL("/customers/" + item.CustomerID + "#notes-" + item.JobID) }>Notiz ergänzen</a></div>
+			<div class="dashboard-actions"><a class="button" href={ templ.SafeURL(item.MapsURL) } target="_blank" rel="noopener noreferrer">Navigation starten</a><a class="button button--quiet" href={ templ.SafeURL("/customers/" + item.CustomerID + "#job-" + item.JobID) }>Auftrag öffnen</a><a class="dashboard-note-action" href={ templ.SafeURL("/customers/" + item.CustomerID + "#notes-" + item.JobID) }>Notiz ergänzen</a></div>
 		</div>
 	</article>
 }
 
+templ driverTour(items []dashboard.Appointment, selectedDate string, dateLabel string, driverID string, ownRouteAvailable bool, ownRouteLookupFailed bool) {
+	<section class="driver-tour" data-dashboard-projection="driver-tour" aria-labelledby="driver-tour-heading">
+		<div class="section-heading driver-tour__heading">
+			<div>
+				<h2 id="driver-tour-heading">Meine Tour</h2>
+				<p>{ dateLabel } · Einsätze in zeitlicher Reihenfolge, alle Teamtermine sichtbar.</p>
+			</div>
+		</div>
+		if strings.TrimSpace(driverID) != "" && ownRouteAvailable {
+			<div class="driver-tour__quick-actions">
+				<a class="button driver-tour__route" href={ templ.SafeURL("/my-route?date=" + url.QueryEscape(selectedDate)) }>Route öffnen</a>
+			</div>
+		}
+		if strings.TrimSpace(driverID) != "" && ownRouteLookupFailed {
+			<div class="driver-tour__route-status"><span>Routenstatus konnte nicht geprüft werden.</span> <a href={ templ.SafeURL("/my-route?date=" + url.QueryEscape(selectedDate)) }>Route direkt prüfen</a></div>
+		} else if strings.TrimSpace(driverID) != "" && !ownRouteAvailable {
+			<p class="driver-tour__route-status">Keine gespeicherte Route. Navigation direkt beim nächsten Einsatz starten.</p>
+		}
+		if len(items) == 0 {
+			<div class="empty-state"><h3>Keine Einsätze</h3><p>Für diesen Tag sind keine Vorschläge oder fixierten Termine eingetragen.</p><a class="button button--quiet" href="/calendar">Teamkalender öffnen</a></div>
+		} else {
+			<ol class="driver-tour__list" aria-label="Einsätze in zeitlicher Reihenfolge">
+				for index, item := range items {
+					<li class="driver-tour__item" data-driver-tour-appointment>
+						<article class="driver-tour__appointment" aria-label={ fmt.Sprintf("%d. Einsatz: %s um %s Uhr", index+1, item.CustomerName, dashboardTime(item.StartsAt)) }>
+							<div class="driver-tour__time">
+								<span class="driver-tour__stop" aria-hidden="true">{ fmt.Sprint(index + 1) }</span>
+								<time datetime={ item.StartsAt.Format(time.RFC3339) } data-dashboard-start={ item.StartsAt.Format(time.RFC3339) }>{ dashboardTime(item.StartsAt) }</time>
+								<small>bis { dashboardTime(item.EndsAt) } Uhr</small>
+							</div>
+							<div class="driver-tour__body">
+								<div class="badge-row"><span class={ "appointment-badge appointment-badge--" + item.Lifecycle }><span aria-hidden="true">{ appointmentIcon(item.Confirmation) }</span>{ dashboardStatus(item.Lifecycle, item.Confirmation) }</span></div>
+								<h3>{ item.CustomerName }</h3>
+								<p><strong>{ localizedDecimal(item.VolumeM3) } m³</strong> · { dashboardJobType(item.JobType) } · { item.Locality }</p>
+								<p class="driver-tour__crew"><span><strong>Fahrer:</strong> { item.Drivers }</span><span><strong>Ressource:</strong> { item.Resources }</span></p>
+								if item.LatestNote != "" {
+									<p class="note-excerpt">Bemerkung: { item.LatestNote }</p>
+								}
+								<div class="driver-tour__actions">
+									<a class="button driver-tour__navigate" href={ templ.SafeURL(item.MapsURL) } target="_blank" rel="noopener noreferrer">Navigation starten</a>
+									<a class="button button--quiet" href={ templ.SafeURL("/customers/" + item.CustomerID + "#job-" + item.JobID) }>Auftrag öffnen</a>
+									<a class="button button--quiet" href={ templ.SafeURL("/customers/" + item.CustomerID + "#notes-" + item.JobID) }>Notiz ergänzen</a>
+								</div>
+							</div>
+						</article>
+					</li>
+				}
+			</ol>
+		}
+	</section>
+}
+
+templ driverMobileAvailability(item *dashboard.DriverAvailability) {
+	<section class="driver-mobile-availability" aria-labelledby="driver-mobile-availability-heading">
+		<div class="section-heading">
+			<h2 id="driver-mobile-availability-heading">Meine Verfügbarkeit</h2>
+			<a href="/availability">Ändern</a>
+		</div>
+		if item != nil {
+			@availabilityRow(*item)
+		} else {
+			<p class="empty-copy">Kein Fahrerprofil ist diesem Zugang zugeordnet.</p>
+		}
+	</section>
+}
+
+templ adminTour(view dashboard.View) {
+	<section class="admin-tour" data-dashboard-projection="admin-tour" aria-labelledby="admin-tour-heading">
+		<div class="section-heading admin-tour__heading">
+			<div>
+				<h2 id="admin-tour-heading">Tagesdisposition</h2>
+				<p>Alle Hackmaschinen · chronologisch und direkt bearbeitbar.</p>
+			</div>
+		</div>
+		<nav class="admin-tour__date-nav" aria-label="Dispositionstag auswählen">
+			<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + view.PreviousDate) } aria-label="Vorheriger Tag">←</a>
+			<div><strong>{ view.DateLabel }</strong><small>Aktualisiert { view.UpdatedLabel } Uhr</small></div>
+			<a class="button button--quiet" href={ templ.SafeURL("/dashboard?date=" + view.NextDate) } aria-label="Nächster Tag">→</a>
+			<a class="button button--quiet admin-tour__today" href="/dashboard">Heute</a>
+		</nav>
+		<div class="admin-tour__commands">
+			<div class="admin-tour__mode" aria-label="Disposition filtern">
+				<a
+					class={ dashboardModeClass(!view.ExceptionsOnly) }
+					href={ templ.SafeURL("/dashboard?date=" + view.Date) }
+					if !view.ExceptionsOnly {
+						aria-current="page"
+					}
+				>Alle Einsätze</a>
+				<a
+					class={ dashboardModeClass(view.ExceptionsOnly) }
+					href={ templ.SafeURL("/dashboard?date=" + view.Date + "&mode=exceptions") }
+					if view.ExceptionsOnly {
+						aria-current="page"
+					}
+				>Nur Ausnahmen</a>
+			</div>
+			<div class="admin-tour__tools">
+				<a class="button button--quiet admin-tour__calendar" href={ templ.SafeURL("/calendar?date=" + url.QueryEscape(view.Date)) }>Kalender öffnen</a>
+				<button class="button button--quiet" type="button" data-print-page>Tag drucken</button>
+			</div>
+		</div>
+		if len(view.Today) == 0 {
+			<div class="empty-state"><h3>Keine Einsätze</h3><p>Für diesen Tag sind keine Vorschläge oder fixierten Termine eingetragen.</p><a class="button button--quiet" href="/waitlist">Warteliste disponieren</a></div>
+		} else {
+			<ol class="admin-tour__list" aria-label="Termine in zeitlicher Reihenfolge">
+				for index, item := range view.Today {
+					<li class="admin-tour__item" data-admin-tour-appointment>
+						<article class="admin-tour__appointment" aria-label={ fmt.Sprintf("%d. Termin: %s um %s Uhr", index+1, item.CustomerName, dashboardTime(item.StartsAt)) }>
+							<div class="admin-tour__time">
+								<span class="admin-tour__stop" aria-hidden="true">{ fmt.Sprint(index + 1) }</span>
+								<time datetime={ item.StartsAt.Format(time.RFC3339) } data-dashboard-start={ item.StartsAt.Format(time.RFC3339) }>{ dashboardTime(item.StartsAt) }</time>
+								<small>bis { dashboardTime(item.EndsAt) } Uhr</small>
+							</div>
+							<div class="admin-tour__body">
+								<div class="badge-row">
+									<span class={ "appointment-badge appointment-badge--" + item.Lifecycle }><span aria-hidden="true">{ appointmentIcon(item.Confirmation) }</span>{ dashboardStatus(item.Lifecycle, item.Confirmation) }</span>
+									if strings.TrimSpace(item.JobNumber) != "" {
+										<span class="admin-tour__job-number">Auftrag { item.JobNumber }</span>
+									}
+								</div>
+								<h3>{ item.CustomerName }</h3>
+								<p><strong>{ item.VolumeM3 } m³</strong> · { dashboardJobType(item.JobType) } · { item.Locality }</p>
+								<p class="admin-tour__assignment"><span><strong>Fahrer:</strong> { dashboardAssignment(item.Drivers) }</span><span><strong>Ressourcen:</strong> { dashboardAssignment(item.Resources) }</span></p>
+								if strings.TrimSpace(item.Drivers) == "" || strings.TrimSpace(item.Chippers) == "" {
+									<p class="warning-copy"><span aria-hidden="true">⚠</span> Zuweisung unvollständig: Fahrer oder Hackmaschine prüfen.</p>
+								}
+								if item.OverrideReason != "" {
+									<p class="warning-copy"><span aria-hidden="true">⚠</span> Verfügbarkeit mit Admin-Begründung übersteuert</p>
+								}
+								if item.LatestNote != "" {
+									<p class="note-excerpt">Bemerkung: { item.LatestNote }</p>
+								}
+								<div class="admin-tour__actions">
+									<a class="button admin-tour__appointment-link" href={ templ.SafeURL("/calendar/appointments/" + item.ID) }>Termin öffnen</a>
+									<a class="button button--quiet" href={ templ.SafeURL("/customers/" + item.CustomerID + "#job-" + item.JobID) }>Auftrag öffnen</a>
+									<a class="button button--quiet admin-tour__navigate" href={ templ.SafeURL(item.MapsURL) } target="_blank" rel="noopener noreferrer">Navigation</a>
+									<a class="button button--quiet admin-tour__note" href={ templ.SafeURL("/customers/" + item.CustomerID + "#notes-" + item.JobID) }>Notiz ergänzen</a>
+								</div>
+							</div>
+						</article>
+					</li>
+				}
+			</ol>
+		}
+	</section>
+}
+
 templ availabilityRow(item dashboard.DriverAvailability) {
-	<div class="availability-row"><span class={ "availability-dot availability-dot--" + availabilityClass(item.State) } aria-hidden="true"></span><span><strong>{ item.Name }</strong><small>{ item.State }</small></span></div>
+	<div class="availability-row">
+		<span class={ "availability-dot availability-dot--" + availabilityClass(item.State) } aria-hidden="true"></span>
+		<span>
+			<strong>{ item.Name }</strong><small>{ item.State } · { fmt.Sprint(item.BookedMinutes) } Min. belegt</small>
+			if item.Windows != "" {
+				<small>Verfügbar: { item.Windows }</small>
+			}
+			if item.ExceptionReasons != "" {
+				<small>Abweichung: { item.ExceptionReasons }</small>
+			}
+			if item.OvertimeRisk {
+				<span class="status-badge status-badge--failed">Überstundenrisiko: Belegung über Betriebszeit</span>
+			}
+		</span>
+	</div>
 }
 
 templ capacityPanel(values []dashboard.Capacity) {
@@ -300,14 +724,49 @@ templ capacityPanel(values []dashboard.Capacity) {
 		for _, capacity := range values {
 			<div class="capacity-item">
 				<strong>{ capacity.ResourceName }</strong>
+				<progress max={ fmt.Sprint(capacity.TotalMinutes) } value={ fmt.Sprint(capacity.FreeMinutes) } aria-label={ fmt.Sprintf("%s: %d von %d Minuten frei", capacity.ResourceName, capacity.FreeMinutes, capacity.TotalMinutes) }></progress><small>{ fmt.Sprint(capacity.FreeMinutes) } von { fmt.Sprint(capacity.TotalMinutes) } Minuten frei</small>
 				if len(capacity.Free) == 0 {
 					<small>Kein freies Fenster in der Betriebszeit</small>
 				}
 				for _, slot := range capacity.Free {
-					<small>{ dashboardTime(slot.StartsAt) }–{ dashboardTime(slot.EndsAt) } Uhr <span class="muted">(vor Planung erneut prüfen)</span></small>
+					<small>
+						{ dashboardTime(slot.StartsAt) }–{ dashboardTime(slot.EndsAt) } Uhr
+						if slot.StartsAt.Equal(capacity.Largest.StartsAt) && slot.EndsAt.Equal(capacity.Largest.EndsAt) {
+							<strong>größtes Fenster</strong>
+						}
+						<span class="muted">(vor Planung erneut prüfen)</span>
+					</small>
 				}
 			</div>
 		}
+	</section>
+}
+
+templ unplannedPanel(values []dashboard.UrgentJob) {
+	<section class="dashboard-panel">
+		<div class="section-heading"><h2>Heute noch ungeplant</h2><a href="/waitlist?workflow=unplanned">Alle ungeplanten</a></div>
+		if len(values) == 0 {
+			<p class="empty-copy">Keine aktiven ungeplanten Aufträge.</p>
+		}
+		for _, item := range values {
+			<a class="urgent-job" href={ "/calendar/plan?job_id=" + item.ID }><strong>{ item.CustomerName } · { item.VolumeM3 } m³</strong><small>{ item.Number } · { dashboardUrgencyLabel(item.Urgency) } · Planung prüft den aktuellen Stand erneut</small></a>
+		}
+	</section>
+}
+
+templ capacityForecast(days []dashboard.DailyCapacity) {
+	<section class="dashboard-upcoming" aria-labelledby="capacity-forecast-heading">
+		<div class="section-heading"><h2 id="capacity-forecast-heading">Freie Hackkapazität der nächsten 7 Tage</h2><span>Hinweis, keine Planungsgarantie</span></div>
+		<div class="capacity-forecast">
+			for _, day := range days {
+				<a class="capacity-day" href={ "/calendar?date=" + day.Date }>
+					<strong>{ day.DateLabel }</strong>
+					for _, capacity := range day.Capacities {
+						<span>{ capacity.ResourceName }: { fmt.Sprint(capacity.FreeMinutes) } Min. frei</span>
+					}
+				</a>
+			}
+		</div>
 	</section>
 }
 
@@ -323,15 +782,137 @@ templ urgentPanel(values []dashboard.UrgentJob) {
 	</section>
 }
 
-templ Profile(shell ShellData) {
+templ Profile(data ProfileData) {
 	<!DOCTYPE html>
 	<html lang="de-AT">
-		@documentHead(shell.Page, "Profil – "+shell.Page.AppName)
+		@documentHead(data.Shell.Page, "Profil – "+data.Shell.Page.AppName)
 		<body>
-			@appHeader(shell)
-			<main id="hauptinhalt" class="page narrow-page"><p class="eyebrow">Mein Zugang</p><h1>{ shell.Actor.DisplayName }</h1><dl class="profile-list"><div><dt>Benutzername</dt><dd>{ shell.Actor.Username }</dd></div><div><dt>Rolle</dt><dd>{ roleLabel(shell.Actor.Role) }</dd></div></dl><a class="button" href="/password">Passwort ändern</a></main>@appFooter(shell.Page)
+			@appHeader(data.Shell)
+			<main id="hauptinhalt" class="page profile-page">
+				<header class="profile-hero">
+					<div><p class="eyebrow">Mein Zugang</p><h1>{ data.Profile.DisplayName }</h1><p>Persönliche Daten, Kontosicherheit und angemeldete Geräte an einem Ort.</p></div>
+					<div class="profile-hero__badges"><span class={ userStatusClass(data.Profile.Active) }>{ activeLabel(data.Profile.Active) }</span><span class="user-badge">{ roleLabel(data.Profile.Role) }</span></div>
+				</header>
+				<nav class="profile-section-nav" aria-label="Profilbereiche">
+					<a href="#personal">Persönlich</a><a href="#email">E-Mail</a><a href="#security">Sicherheit</a><a href="#sessions">Sitzungen</a><a href="#system">App &amp; System</a>
+				</nav>
+				if data.Error != "" {
+					<div class="form-alert" role="alert" tabindex="-1" data-error-summary>{ data.Error }</div>
+				}
+				if data.Notice != "" {
+					<div class="form-alert form-alert--info" role="status" tabindex="-1" data-profile-notice>{ data.Notice }</div>
+				}
+				<div class="profile-grid">
+					<section id="personal" class="profile-card profile-card--identity" aria-labelledby="profile-identity-heading">
+						<header><div><p class="eyebrow">Identität</p><h2 id="profile-identity-heading">Persönliche Daten</h2></div><span class="profile-card__number" aria-hidden="true">01</span></header>
+						<dl class="profile-list"><div><dt>Benutzername</dt><dd>{ data.Profile.Username }</dd></div><div><dt>Fahrerprofil</dt><dd>{ driverLabel(data.Profile.DriverID) }</dd></div></dl>
+						<form method="post" action="/profile/details" class="form-stack">
+							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(data.Profile.Version) }/>
+							<label for="profile-salutation">Anrede<select id="profile-salutation" name="salutation"><option value="" selected?={ data.Profile.Salutation == "" }>Keine Angabe</option><option value="frau" selected?={ data.Profile.Salutation == "frau" }>Frau</option><option value="herr" selected?={ data.Profile.Salutation == "herr" }>Herr</option><option value="divers" selected?={ data.Profile.Salutation == "divers" }>Divers</option></select></label>
+							<label for="profile-display-name">Anzeigename<input id="profile-display-name" name="display_name" value={ data.Profile.DisplayName } maxlength="200" autocomplete="name" required/></label>
+							<label for="profile-phone">Dienstliche Telefonnummer<input id="profile-phone" name="work_phone" type="tel" value={ data.Profile.WorkPhoneRaw } maxlength="80" autocomplete="tel"/></label>
+							<div class="action-row"><button class="button" type="submit">Änderungen speichern</button><a class="button button--quiet" href="/profile">Abbrechen</a></div>
+						</form>
+					</section>
+					<section id="email" class="profile-card" aria-labelledby="profile-email-heading">
+						<header><div><p class="eyebrow">Kontakt</p><h2 id="profile-email-heading">E-Mail-Adresse</h2></div><span class="profile-card__number" aria-hidden="true">02</span></header>
+						<dl class="profile-list"><div><dt>Aktuell</dt><dd>{ fallback(data.Profile.Email) }</dd></div><div><dt>Status</dt><dd>{ emailVerificationLabel(data.Profile) }</dd></div></dl>
+						if data.Profile.PendingEmail != "" {
+							<div class="profile-pending" role="status"><strong>Bestätigung ausstehend</strong><span>{ data.Profile.PendingEmail }</span><small>{ pendingEmailStatus(data.Profile) }</small></div>
+							<div class="action-row"><form method="post" action="/profile/email/resend"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Bestätigung erneut senden</button></form><form method="post" action="/profile/email/cancel"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Änderung abbrechen</button></form></div>
+						}
+						<form method="post" action="/profile/email" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label for="profile-email">Neue E-Mail-Adresse<input id="profile-email" name="email" type="email" maxlength="320" autocomplete="email" required/></label><p class="field-help">Die neue Adresse wird erst nach Klick auf den zeitlich begrenzten Bestätigungslink aktiv.</p><button class="button" type="submit">Bestätigung senden</button></form>
+					</section>
+					<section id="security" class="profile-card profile-card--wide" aria-labelledby="profile-security-heading">
+						<header><div><p class="eyebrow">Kontosicherheit</p><h2 id="profile-security-heading">Anmeldung schützen</h2></div><span class="profile-card__number" aria-hidden="true">03</span></header>
+						<div class="security-checklist" aria-label="Sicherheitsstatus">
+							@securityCheck("Langes persönliches Passwort", true, "Mindestens 14 Zeichen")
+							@securityCheck("Authenticator-App", data.Profile.TOTPEnabledAt != nil, securityMethodState(data.Profile.TOTPEnabledAt != nil))
+							@securityCheck("Passkey oder Sicherheitsschlüssel", len(data.Profile.Passkeys) > 0, securityMethodState(len(data.Profile.Passkeys) > 0))
+							@securityCheck("Recovery-Codes verfügbar", data.Profile.RecoveryCodeCount > 0, fmt.Sprintf("%d unverbrauchte Codes", data.Profile.RecoveryCodeCount))
+						</div>
+						<div class="security-columns">
+							<section aria-labelledby="password-method-heading"><h3 id="password-method-heading">Passwort</h3><p>Die Änderung meldet alle Geräte ab.</p><a class="button button--quiet" href="/password">Passwort ändern</a></section>
+							<section aria-labelledby="totp-method-heading">
+								<h3 id="totp-method-heading">Authenticator-App</h3>
+								if data.Profile.TOTPEnabledAt != nil {
+									<form method="post" action="/profile/security/totp/rename" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label>Name<input name="name" value={ data.Profile.TOTPName } maxlength="100" required/></label><button class="button button--quiet" type="submit">Namen speichern</button></form>
+									<form method="post" action="/profile/security/totp/delete"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--danger" type="submit" data-confirm-message="Authenticator-App wirklich entfernen? Prüfen Sie vorher, ob ein Passkey oder die Recovery-Codes verfügbar sind.">Authenticator-App entfernen</button></form>
+								} else {
+									<form method="post" action="/profile/security/totp/start" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label>Name<input name="name" value="Diensthandy" maxlength="100" required/></label><button class="button button--quiet" type="submit">Authenticator-App einrichten</button></form>
+								}
+							</section>
+							<section aria-labelledby="passkey-method-heading">
+								<h3 id="passkey-method-heading">Passkeys</h3>
+								<p>Mit Geräte-PIN, Fingerabdruck oder Sicherheitsschlüssel als zweitem Faktor.</p>
+								<form class="form-stack" data-passkey-register><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label>Name<input name="name" value="Dieses Gerät" maxlength="100" required/></label><button class="button button--quiet" type="submit" data-passkey-register-button>Passkey hinzufügen</button><p class="field-help" data-passkey-support>Benötigt einen kompatiblen Browser und eine sichere Verbindung.</p></form>
+								if len(data.Profile.Passkeys) > 0 {
+									<ul class="security-method-list">
+										for _, passkey := range data.Profile.Passkeys {
+											<li><div><strong>{ passkey.Name }</strong><small>Hinzugefügt { profileDateTime(passkey.CreatedAt) }{ lastUsedLabel(passkey.LastUsedAt) }</small></div><div class="action-row"><form method="post" action={ "/profile/security/passkeys/" + passkey.EncodedID + "/rename" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label class="visually-hidden" for={ "passkey-rename-" + passkey.EncodedID }>Neuer Name für { passkey.Name }</label><input id={ "passkey-rename-" + passkey.EncodedID } name="name" value={ passkey.Name } maxlength="100" required/><button class="button button--quiet" type="submit">Umbenennen</button></form><form method="post" action={ "/profile/security/passkeys/" + passkey.EncodedID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--danger" type="submit" data-confirm-message="Diesen Passkey wirklich entfernen?">Entfernen</button></form></div></li>
+										}
+									</ul>
+								}
+							</section>
+						</div>
+						if data.TOTPEnrollment != nil {
+							<section class="enrollment-panel" aria-labelledby="totp-enrollment-heading"><h3 id="totp-enrollment-heading">Authenticator-App verbinden</h3><p>QR-Code scannen oder Schlüssel manuell eingeben. Danach einen aktuellen sechsstelligen Code bestätigen.</p><div class="totp-setup"><img src={ templ.SafeURL(data.TOTPEnrollment.QRCodeDataURI) } width="220" height="220" alt="QR-Code für die Authenticator-App"/><div><label>Einrichtungsschlüssel<input value={ data.TOTPEnrollment.Secret } readonly data-copy-source/></label><button class="button button--quiet" type="button" data-copy-value={ data.TOTPEnrollment.Secret }>Schlüssel kopieren</button></div></div><form method="post" action="/profile/security/totp/confirm" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label for="totp-confirm-code">Sechsstelliger Code<input id="totp-confirm-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus/></label><button class="button" type="submit">Einrichtung bestätigen</button></form></section>
+						}
+						<section class="recovery-panel" aria-labelledby="recovery-heading">
+							<h3 id="recovery-heading">Recovery-Codes</h3>
+							<p>Jeder Code funktioniert genau einmal. Sicher und getrennt vom Arbeitsgerät aufbewahren.</p>
+							if len(data.RecoveryCodes) > 0 {
+								<div class="recovery-codes" role="status">
+									<strong>Jetzt einmalig speichern</strong>
+									<ul>
+										for _, code := range data.RecoveryCodes {
+											<li><code>{ code }</code></li>
+										}
+									</ul>
+									<div class="action-row recovery-actions"><button class="button button--quiet" type="button" data-copy-value={ strings.Join(data.RecoveryCodes, "\n") }>Codes kopieren</button><button class="button button--quiet" type="button" data-print-page>Codes drucken</button></div>
+								</div>
+							}
+							<form method="post" action="/profile/security/recovery-codes"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit" data-confirm-message="Neue Recovery-Codes erzeugen? Alle bisherigen Codes werden sofort ungültig.">Recovery-Codes neu erzeugen</button></form>
+						</section>
+					</section>
+					<section id="sessions" class="profile-card profile-card--wide" aria-labelledby="sessions-heading">
+						<header><div><p class="eyebrow">Geräte</p><h2 id="sessions-heading">Aktive Sitzungen</h2></div><span class="profile-card__number" aria-hidden="true">04</span></header>
+						<div class="session-list">
+							for _, item := range data.Profile.Sessions {
+								<article class="session-row">
+									<div>
+										<strong>{ item.DeviceLabel }</strong>
+										<div class="badge-row">
+											if item.ID == data.CurrentSessionID {
+												<span class="status-badge status-badge--ready">Aktuelle Sitzung</span>
+											}
+										</div><small>Gestartet { profileDateTime(item.CreatedAt) } · zuletzt aktiv { profileDateTime(item.LastUsedAt) }</small><small>Automatisches Ende spätestens { profileDateTime(item.AbsoluteExpiresAt) }</small>
+									</div>
+									<form method="post" action={ "/profile/sessions/" + item.ID + "/revoke" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit" data-confirm-message="Diese Sitzung wirklich abmelden?">Sitzung abmelden</button></form>
+								</article>
+							}
+						</div>
+						<form method="post" action="/profile/sessions/revoke-all"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--danger" type="submit" data-confirm-message="Alle Sitzungen einschließlich dieses Geräts wirklich abmelden?">Alle Geräte abmelden</button></form>
+					</section>
+					<section id="system" class="profile-card" aria-labelledby="system-heading">
+						<header><div><p class="eyebrow">System</p><h2 id="system-heading">App &amp; Verbindung</h2></div><span class="profile-card__number" aria-hidden="true">05</span></header>
+						<dl class="profile-list"><div><dt>Zeitzone</dt><dd>Europe/Vienna</dd></div><div><dt>Build</dt><dd>{ data.Shell.Page.BuildVersion }</dd></div><div><dt>Verbindung</dt><dd data-profile-connectivity role="status" aria-live="polite">Status wird geprüft</dd></div><div><dt>Installation</dt><dd data-profile-install-status>Im Browser geöffnet</dd></div></dl>
+						<button class="button button--quiet" type="button" data-profile-install hidden>Auf diesem Gerät installieren</button>
+						<p class="field-help">HackWerk speichert keine Kundendaten für Offline-Arbeit. Ohne Verbindung werden Änderungen nicht vorgemerkt.</p>
+					</section>
+					<section class="profile-card" aria-labelledby="logout-heading">
+						<header><div><p class="eyebrow">Abschluss</p><h2 id="logout-heading">Abmelden</h2></div><span class="profile-card__number" aria-hidden="true">06</span></header>
+						<form method="post" action="/logout" class="form-stack" data-logout-form><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label class="check-label"><input type="checkbox" name="clear_preferences" value="true" data-clear-local-preferences/> Lokale Darstellungs- und Installationspräferenzen auf diesem Gerät löschen</label><button class="button button--quiet" type="submit">Abmelden</button></form>
+						<p class="field-help">Bei verlorenem Zugriff setzt ein Administrator nach Identitätsprüfung Sicherheitsmethoden und ein temporäres Passwort zurück.</p>
+					</section>
+				</div>
+			</main>@appFooter(data.Shell.Page)
 		</body>
 	</html>
+}
+
+templ securityCheck(label string, ready bool, detail string) {
+	<div class="security-check"><span class={ securityCheckClass(ready) } aria-hidden="true">{ securityCheckIcon(ready) }</span><span><strong>{ label }</strong><small>{ detail }</small></span></div>
 }
 
 templ Password(data PasswordData) {
@@ -344,11 +925,11 @@ templ Password(data PasswordData) {
 				<section class="form-card">
 					<p class="eyebrow">Kontosicherheit</p>
 					<h1>Passwort ändern</h1>
-					<p>Verwenden Sie mindestens 14 Zeichen. Nach der Änderung melden Sie sich erneut an.</p>
+					<p>Verwenden Sie mindestens 14 Zeichen. Nach der Änderung werden alle bisherigen Sitzungen – einschließlich dieser – sofort widerrufen; anschließend melden Sie sich neu an.</p>
 					if data.Error != "" {
 						<div class="form-alert" role="alert">{ data.Error }</div>
 					}
-					<form method="post" action="/password" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label for="new-password">Neues Passwort</label><input id="new-password" name="password" type="password" autocomplete="new-password" minlength="14" required/><label for="confirm-password">Passwort wiederholen</label><input id="confirm-password" name="confirmation" type="password" autocomplete="new-password" minlength="14" required/><button class="button" type="submit">Passwort speichern</button></form>
+					<form method="post" action="/password" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label for="new-password">Neues Passwort</label><input id="new-password" name="password" type="password" autocomplete="new-password" minlength="14" required data-password-strength/><div class="password-strength" data-password-strength-output role="status" aria-live="polite"><span></span><small>Mindestens 14 Zeichen verwenden.</small></div><label for="confirm-password">Passwort wiederholen</label><input id="confirm-password" name="confirmation" type="password" autocomplete="new-password" minlength="14" required/><button class="button" type="submit">Passwort speichern</button></form>
 				</section>
 			</main>@appFooter(data.Shell.Page)
 		</body>
@@ -361,18 +942,18 @@ templ Users(data UsersData) {
 		@documentHead(data.Shell.Page, "Benutzer & Fahrer – "+data.Shell.Page.AppName)
 		<body>
 			@appHeader(data.Shell)
-			<main id="hauptinhalt" class="page users-page">
+			<main id="hauptinhalt" class="page users-page admin-work-page">
 				<div class="users-heading">
 					<div><p class="eyebrow">Administration</p><h1>Benutzer &amp; Fahrer</h1><p>Zugänge, Rollen und Passwörter zentral verwalten. Fahrerprofile bleiben eigenständige Datensätze.</p></div>
-					<div class="users-heading__actions"><span class="status-badge">{ fmt.Sprint(len(data.Users)) } Zugänge</span><a class="button" href="#new-user">Neuer Zugang</a></div>
+					<div class="users-heading__actions"><label class="user-directory-search">Zugänge filtern<input type="search" autocomplete="off" placeholder="Name, Benutzername oder E-Mail" data-user-filter/></label><span class="status-badge">{ fmt.Sprint(len(data.Users)) } Zugänge</span><a class="button" href="#new-user">Neuer Zugang</a></div>
 				</div>
 				if data.Error != "" {
 					<div class="form-alert" role="alert" tabindex="-1" data-error-summary>{ data.Error }</div>
 				}
 				<section class="user-admin-layout">
-					<div class="user-directory" aria-label="Vorhandene Zugänge">
+					<div class="user-directory" aria-label="Vorhandene Zugänge" data-user-directory>
 						for _, user := range data.Users {
-							<article class="user-card">
+							<article class="user-card" data-user-card data-user-search={ strings.ToLower(user.DisplayName + " " + user.Username + " " + user.Email) }>
 								<header class="user-card__header">
 									<div class="user-card__identity">
 										<h2>{ user.DisplayName }</h2>
@@ -396,12 +977,27 @@ templ Users(data UsersData) {
 											<p class="field-help">Das verknüpfte Fahrerprofil bleibt unverändert.</p>
 											<button class="button button--quiet" type="submit">Stammdaten speichern</button>
 										</form>
-										<form method="post" action={ "/admin/users/" + user.ID + "/access" } class="form-stack user-manage__panel">
-											<div><h3>Rolle &amp; Status</h3><p>Zugriff steuern oder vorübergehend sperren.</p></div>
+										<form method="post" action={ "/admin/users/" + user.ID + "/access" } class="form-stack user-manage__panel user-access-role">
+											<div><h3>Rolle</h3><p>Legt die serverseitigen Berechtigungen für die nächste Anfrage fest.</p></div>
 											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(user.Version) }/>
+											if user.Active {
+												<input type="hidden" name="active" value="true"/>
+											}
 											<label><span>Rolle</span><select name="role" aria-label={ "Rolle für " + user.Username }><option value="admin" selected?={ user.Role == auth.RoleAdmin }>Administrator</option><option value="driver" selected?={ user.Role == auth.RoleDriver }>Fahrer</option></select></label>
-											<label class="check-label"><input type="checkbox" name="active" value="true" checked?={ user.Active }/> Zugang aktiv</label>
-											<button class="button button--quiet" type="submit" data-confirm-message="Rolle oder Zugangsstatus wirklich ändern? Aktive Sitzungen können dadurch ihre Berechtigung verlieren.">Zugriff speichern</button>
+											<p class="field-help">Das verknüpfte Fahrerprofil bleibt unverändert. Berechtigungen gelten ab der nächsten Anfrage.</p>
+											<button class="button button--quiet" type="submit" data-confirm-message="Rolle wirklich ändern? Die neuen Berechtigungen gelten ab der nächsten Anfrage; das verknüpfte Fahrerprofil bleibt unverändert.">Rolle speichern</button>
+										</form>
+										<form method="post" action={ "/admin/users/" + user.ID + "/access" } class="form-stack user-manage__panel user-access-status">
+											<div><h3>Zugangsstatus</h3><p>Zugang gezielt aktivieren oder sperren, ohne die Rolle zu verändern.</p></div>
+											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(user.Version) }/><input type="hidden" name="role" value={ string(user.Role) }/>
+											if user.Active {
+												<p class="field-help">Alle aktiven Sitzungen dieses Zugangs werden sofort widerrufen. Die Person muss nach einer späteren Aktivierung neu anmelden.</p>
+												<button class="button button--danger" type="submit" data-confirm-message="Zugang wirklich sperren? Alle aktiven Sitzungen dieses Zugangs werden sofort widerrufen; die Rolle und das Fahrerprofil bleiben erhalten.">Zugang sperren</button>
+											} else {
+												<input type="hidden" name="active" value="true"/>
+												<p class="field-help">Frühere Sitzungen bleiben widerrufen. Die Person muss sich mit ihrem gültigen Passwort neu anmelden.</p>
+												<button class="button button--quiet" type="submit" data-confirm-message="Zugang wirklich aktivieren? Frühere Sitzungen bleiben ungültig; die Person muss sich neu anmelden.">Zugang aktivieren</button>
+											}
 										</form>
 										<form method="post" action={ "/admin/users/" + user.ID + "/reset-password" } class="form-stack user-manage__panel reset-form">
 											<div><h3>Passwort zurücksetzen</h3><p>Die Person muss das temporäre Passwort beim nächsten Login ändern.</p></div>
@@ -409,10 +1005,16 @@ templ Users(data UsersData) {
 											<label><span>Temporäres Passwort</span><input name="password" type="password" autocomplete="new-password" minlength="14" required/></label>
 											<button class="button button--quiet" type="submit" data-confirm-message="Passwort wirklich zurücksetzen? Das bisherige Passwort wird sofort ungültig.">Passwort zurücksetzen</button>
 										</form>
+										<form method="post" action={ "/admin/users/" + user.ID + "/reset-security" } class="form-stack user-manage__panel reset-form">
+											<div><h3>Sicherheitszugang wiederherstellen</h3><p>Nur nach persönlicher Identitätsprüfung: MFA, Passkeys und Recovery-Codes entfernen sowie alle Sitzungen widerrufen.</p></div>
+											<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="version" value={ fmt.Sprint(user.Version) }/>
+											<button class="button button--danger" type="submit" data-confirm-message="Sicherheitszugang wirklich zurücksetzen? Alle Sicherheitsmethoden und aktiven Sitzungen werden sofort ungültig; beim nächsten Login ist eine Passwortänderung Pflicht.">Sicherheitszugang zurücksetzen</button>
+										</form>
 									</div>
 								</details>
 							</article>
 						}
+						<p class="empty-state" data-user-filter-status role="status" aria-live="polite" hidden>Kein Zugang passt zum Filter.</p>
 					</div>
 					<aside id="new-user" class="form-card create-user-card"><p class="eyebrow">Neuer Zugang</p><h2>Zugang anlegen</h2><p>Ein temporäres Passwort wird beim ersten Login zwingend ersetzt.</p><form method="post" action="/admin/users" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label for="create-username">Benutzername</label><input id="create-username" name="username" value={ data.Values.Username } autocomplete="username" required/><label for="create-name">Anzeigename</label><input id="create-name" name="display_name" value={ data.Values.DisplayName } required/><label for="create-email">E-Mail (optional)</label><input id="create-email" name="email" type="email" value={ data.Values.Email }/><label for="create-role">Rolle</label><select id="create-role" name="role"><option value="driver" selected?={ data.Values.Role != "admin" }>Fahrer</option><option value="admin" selected?={ data.Values.Role == "admin" }>Administrator</option></select><label for="create-password">Temporäres Passwort</label><input id="create-password" name="password" type="password" autocomplete="new-password" minlength="14" required/><label class="check-label"><input name="create_driver" type="checkbox" value="true" checked?={ data.Values.CreateDriver }/> Separates Fahrerprofil anlegen</label><button class="button" type="submit">Benutzer anlegen</button></form></aside>
 				</section>
@@ -446,6 +1048,64 @@ func driverLabel(id string) string {
 	return "Zugeordnet"
 }
 
+func emailVerificationLabel(profile auth.Profile) string {
+	if profile.Email == "" {
+		return "Keine Adresse hinterlegt"
+	}
+	if profile.EmailVerifiedAt == nil {
+		return "Nicht bestätigt"
+	}
+	return "Bestätigt"
+}
+
+func pendingEmailStatus(profile auth.Profile) string {
+	status := "Versand vorgemerkt"
+	switch profile.PendingEmailDeliveryStatus {
+	case "processed":
+		status = "Bestätigung versendet"
+	case "retry_wait":
+		status = "Versand wird erneut versucht"
+	case "dead":
+		status = "Versand fehlgeschlagen – erneut senden"
+	}
+	if profile.PendingEmailExpiresAt != nil {
+		status += " · gültig bis " + profileDateTime(*profile.PendingEmailExpiresAt)
+	}
+	return status
+}
+
+func securityMethodState(enabled bool) string {
+	if enabled {
+		return "Eingerichtet"
+	}
+	return "Noch nicht eingerichtet"
+}
+
+func securityCheckClass(ready bool) string {
+	if ready {
+		return "security-check__icon security-check__icon--ready"
+	}
+	return "security-check__icon"
+}
+
+func securityCheckIcon(ready bool) string {
+	if ready {
+		return "✓"
+	}
+	return "○"
+}
+
+func profileDateTime(value time.Time) string {
+	return value.In(viennaLocation()).Format("02.01.2006, 15:04 Uhr")
+}
+
+func lastUsedLabel(value *time.Time) string {
+	if value == nil {
+		return " · noch nicht verwendet"
+	}
+	return " · zuletzt verwendet " + profileDateTime(*value)
+}
+
 func isActivePath(active string, path string) bool {
 	if path == "/planning" {
 		return active == path
@@ -460,11 +1120,73 @@ func navClass(active string, path string) string {
 	return "nav-link"
 }
 
+func mobileNavActive(active string, path string) bool {
+	if path == "/customers" && isActivePath(active, "/customers/new") {
+		return false
+	}
+	return isActivePath(active, path)
+}
+
+func mobileNavClass(active string, path string) string {
+	if mobileNavActive(active, path) {
+		return "nav-link nav-link--active"
+	}
+	return "nav-link"
+}
+
+func driverFieldNavigation(shell ShellData) bool {
+	return shell.Actor.Role == auth.RoleDriver
+}
+
+func mobileMoreActive(shell ShellData) bool {
+	if isActivePath(shell.ActivePath, "/customers/new") {
+		return false
+	}
+	primaryPaths := []string{"/dashboard", "/calendar", "/waitlist", "/customers"}
+	if driverFieldNavigation(shell) {
+		primaryPaths = []string{"/dashboard", "/my-route", "/calendar", "/availability"}
+	}
+	for _, path := range primaryPaths {
+		if mobileNavActive(shell.ActivePath, path) {
+			return false
+		}
+	}
+	return shell.ActivePath != ""
+}
+
+func mobileMoreSummaryClass(shell ShellData) string {
+	if mobileMoreActive(shell) {
+		return "nav-link--active"
+	}
+	return ""
+}
+
 func driverLink(role auth.Role) string {
 	if role == auth.RoleAdmin {
 		return "/admin/drivers"
 	}
 	return "/availability"
+}
+
+func dashboardModeClass(active bool) string {
+	if active {
+		return "button"
+	}
+	return "button button--quiet"
+}
+
+func dashboardRole(role auth.Role) string {
+	if role == auth.RoleAdmin {
+		return "admin"
+	}
+	return "driver"
+}
+
+func dashboardAssignment(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "Nicht zugewiesen"
+	}
+	return value
 }
 
 func availabilityTitle(admin bool) string {

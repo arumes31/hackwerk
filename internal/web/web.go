@@ -8,9 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 
 	"example.invalid/hackplan/internal/appointment"
@@ -21,11 +24,13 @@ import (
 	"example.invalid/hackplan/internal/customers"
 	"example.invalid/hackplan/internal/dashboard"
 	"example.invalid/hackplan/internal/driver"
+	"example.invalid/hackplan/internal/geocode"
 	"example.invalid/hackplan/internal/maptile"
 	"example.invalid/hackplan/internal/notification"
 	"example.invalid/hackplan/internal/observability"
 	"example.invalid/hackplan/internal/planning"
 	"example.invalid/hackplan/internal/resource"
+	"example.invalid/hackplan/internal/routelocation"
 	"example.invalid/hackplan/internal/voice"
 	"example.invalid/hackplan/web/assets"
 	"example.invalid/hackplan/web/templates"
@@ -34,7 +39,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-const contentSecurityPolicy = "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'"
+const contentSecurityPolicy = "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'"
 
 // DatabasePinger is the readiness boundary consumed by the HTTP layer.
 type DatabasePinger interface {
@@ -48,24 +53,26 @@ type OperationsHealth interface {
 
 // Dependencies contains explicit HTTP dependencies.
 type Dependencies struct {
-	Config        config.Config
-	Logger        *slog.Logger
-	Database      DatabasePinger
-	Build         buildinfo.Info
-	Identity      *auth.Service
-	Customers     *customers.Service
-	Drivers       *driver.Service
-	Resources     *resource.Service
-	Appointments  *appointment.Service
-	Confirmations *notification.ConfirmationService
-	Notifications *notification.AdminService
-	Dashboard     *dashboard.Service
-	CalendarFeeds *calendarfeed.Service
-	Planning      *planning.Service
-	Routes        *planning.RouteService
-	Voice         *voice.Service
-	Metrics       *observability.Registry
-	MapTiles      *maptile.Client
+	Config         config.Config
+	Logger         *slog.Logger
+	Database       DatabasePinger
+	Build          buildinfo.Info
+	Identity       *auth.Service
+	Customers      *customers.Service
+	Drivers        *driver.Service
+	Resources      *resource.Service
+	RouteLocations *routelocation.Service
+	Appointments   *appointment.Service
+	Confirmations  *notification.ConfirmationService
+	Notifications  *notification.AdminService
+	Dashboard      *dashboard.Service
+	CalendarFeeds  *calendarfeed.Service
+	Planning       *planning.Service
+	Routes         *planning.RouteService
+	Voice          *voice.Service
+	Metrics        *observability.Registry
+	MapTiles       *maptile.Client
+	Geocoder       geocode.Searcher
 }
 
 // NewRouter builds the complete Task-00 router without starting a listener.
@@ -86,9 +93,13 @@ func NewRouter(dependencies Dependencies) (http.Handler, error) {
 	pageData := templates.PageData{
 		AppName:                     dependencies.Config.AppName,
 		Version:                     dependencies.Build.Version,
+		BuildVersion:                dependencies.Build.DisplayVersion(),
 		CSSPath:                     assetPaths.CSS,
+		MobileCSSPath:               assetPaths.MobileCSS,
 		ControlFoundationCSSPath:    assetPaths.ControlFoundationCSS,
 		JSPath:                      assetPaths.JavaScript,
+		PresentationBootstrapJSPath: assetPaths.PresentationBootstrapJS,
+		RouteLocationsJSPath:        assetPaths.RouteLocationsJavaScript,
 		ManifestPath:                assetPaths.Manifest,
 		IconPath:                    assetPaths.Icon,
 		LoginOriginalCSSPath:        assetPaths.LoginOriginalCSS,
@@ -99,11 +110,36 @@ func NewRouter(dependencies Dependencies) (http.Handler, error) {
 		MapLibreWorkerPath:          assetPaths.MapLibreWorker,
 		MapLibreCSSPath:             assetPaths.MapLibreCSS,
 		MapAttribution:              dependencies.Config.Map.Attribution,
+		GeocodingEnabled:            dependencies.Geocoder != nil,
 		FullCalendarThemeJSPath:     assetPaths.FullCalendarThemeJavaScript,
 		FullCalendarSkeletonCSSPath: assetPaths.FullCalendarSkeletonCSS,
 		FullCalendarThemeCSSPath:    assetPaths.FullCalendarThemeCSS,
 		FullCalendarPaletteCSSPath:  assetPaths.FullCalendarPaletteCSS,
 		FullCalendarJSPath:          assetPaths.FullCalendarJavaScript,
+		Legal: templates.LegalData{
+			OperatorName:          dependencies.Config.Business.Name,
+			Address:               dependencies.Config.Business.Address,
+			Email:                 dependencies.Config.Business.Email,
+			Phone:                 dependencies.Config.Business.Phone,
+			LegalForm:             dependencies.Config.Business.LegalForm,
+			RegistryNumber:        dependencies.Config.Business.RegistryNumber,
+			RegistryCourt:         dependencies.Config.Business.RegistryCourt,
+			VATID:                 dependencies.Config.Business.VATID,
+			SupervisoryAuthority:  dependencies.Config.Business.SupervisoryAuthority,
+			Chamber:               dependencies.Config.Business.Chamber,
+			TradeRules:            dependencies.Config.Business.TradeRules,
+			DataProtectionOfficer: dependencies.Config.Business.DataProtectionOfficer,
+			SessionCookieName:     dependencies.Config.Auth.SessionCookieName,
+			CSRFCookieName:        dependencies.Config.Auth.CSRFCookieName,
+			SessionIdleTTL:        dependencies.Config.Auth.SessionIdleTTL,
+			SessionAbsoluteTTL:    dependencies.Config.Auth.SessionAbsoluteTTL,
+			MailEnabled:           dependencies.Config.Mail.Enabled,
+			SMSEnabled:            dependencies.Config.SMS.Enabled,
+			GeocodingEnabled:      dependencies.Geocoder != nil,
+			RoutingMode:           dependencies.Config.Planning.Router,
+			ExternalVoiceEnabled:  dependencies.Config.Voice.Transcriber == "openai" || dependencies.Config.Voice.Extractor == "openai",
+			LocalVoiceEnabled:     dependencies.Config.Voice.Transcriber == "whisper-local" || dependencies.Config.Voice.Transcriber == "whisper-tailscale",
+		},
 	}
 
 	router := chi.NewRouter()
@@ -123,6 +159,7 @@ func NewRouter(dependencies Dependencies) (http.Handler, error) {
 	router.Get("/health/live", liveHandler(dependencies.Build))
 	router.Get("/health/ready", readyHandler(dependencies.Database, dependencies.Config.Database.ReadinessTimeout, dependencies.Config.Database.ExpectedSchema))
 	router.Get("/health/worker", workerHealthHandler(dependencies.Database, dependencies.Config.Database.ReadinessTimeout, dependencies.Config.Metrics.WorkerStaleAfter))
+	registerLegalRoutes(router, pageData, dependencies.Logger)
 	if dependencies.Identity == nil {
 		router.Get("/", componentHandler(templates.Home(pageData), dependencies.Logger))
 	} else {
@@ -304,13 +341,23 @@ func MetricsServer(cfg config.Config, handler http.Handler) *http.Server {
 	}
 }
 
-// Healthcheck requests a health endpoint and accepts only a 200 response.
-func Healthcheck(ctx context.Context, baseURL string, timeout time.Duration) (checkErr error) {
-	client := &http.Client{Timeout: timeout}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/health/ready", nil)
+// Healthcheck requests readiness directly from the local listener while using
+// the public host for the application's unchanged host allowlist.
+func Healthcheck(ctx context.Context, listenAddr, baseURL string, timeout time.Duration) (checkErr error) {
+	endpoint, err := localHealthEndpoint(listenAddr)
+	if err != nil {
+		return err
+	}
+	publicURL, err := url.Parse(baseURL)
+	if err != nil || publicURL.Hostname() == "" || publicURL.User != nil {
+		return errors.New("healthcheck: invalid public base URL")
+	}
+	client := loopbackHTTPClient(timeout)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return fmt.Errorf("healthcheck: creating request: %w", err)
 	}
+	request.Host = publicURL.Host
 	response, err := client.Do(request)
 	if err != nil {
 		return fmt.Errorf("healthcheck: requesting readiness: %w", err)
@@ -322,4 +369,27 @@ func Healthcheck(ctx context.Context, baseURL string, timeout time.Duration) (ch
 		return fmt.Errorf("healthcheck: readiness returned status %s", strconv.Itoa(response.StatusCode))
 	}
 	return nil
+}
+
+func loopbackHTTPClient(timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	return &http.Client{Timeout: timeout, Transport: transport}
+}
+
+func localHealthEndpoint(listenAddr string) (string, error) {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(listenAddr))
+	if err != nil || port == "" {
+		return "", errors.New("healthcheck: invalid listen address")
+	}
+	dialHost := strings.Trim(strings.TrimSpace(host), "[]")
+	switch {
+	case dialHost == "", dialHost == "0.0.0.0", strings.EqualFold(dialHost, "localhost"):
+		dialHost = "127.0.0.1"
+	case dialHost == "::":
+		dialHost = "::1"
+	case net.ParseIP(dialHost) == nil:
+		return "", errors.New("healthcheck: listen host must be an IP address")
+	}
+	return (&url.URL{Scheme: "http", Host: net.JoinHostPort(dialHost, port), Path: "/health/ready"}).String(), nil
 }

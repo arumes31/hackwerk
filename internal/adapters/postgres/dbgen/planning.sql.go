@@ -167,6 +167,33 @@ func (q *Queries) GetPlanningInput(ctx context.Context, jobID pgtype.UUID) (GetP
 	return i, err
 }
 
+const getPlanningRun = `-- name: GetPlanningRun :one
+SELECT id::text, job_id::text, created_at, expires_at, config_snapshot
+FROM planning_runs
+WHERE id=$1::uuid
+`
+
+type GetPlanningRunRow struct {
+	ID             string
+	JobID          string
+	CreatedAt      pgtype.Timestamptz
+	ExpiresAt      pgtype.Timestamptz
+	ConfigSnapshot []byte
+}
+
+func (q *Queries) GetPlanningRun(ctx context.Context, id pgtype.UUID) (GetPlanningRunRow, error) {
+	row := q.db.QueryRow(ctx, getPlanningRun, id)
+	var i GetPlanningRunRow
+	err := row.Scan(
+		&i.ID,
+		&i.JobID,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.ConfigSnapshot,
+	)
+	return i, err
+}
+
 const getPlanningSuggestionForUpdate = `-- name: GetPlanningSuggestionForUpdate :one
 SELECT s.id::text, s.run_id::text, s.starts_at, s.ends_at, s.driver_id::text,
        s.resource_ids::text[] AS resource_ids, s.resource_purposes, s.status,
@@ -258,19 +285,28 @@ func (q *Queries) GetPlanningSuggestionForUpdate(ctx context.Context, id pgtype.
 }
 
 const insertAdoptedProposal = `-- name: InsertAdoptedProposal :one
-INSERT INTO appointments (job_id, lifecycle_status, starts_at, ends_at)
-VALUES ($1::uuid, 'proposal', $2::timestamptz, $3::timestamptz)
+INSERT INTO appointments (job_id, lifecycle_status, starts_at, ends_at, buffer_before_minutes, buffer_after_minutes)
+VALUES ($1::uuid, 'proposal', $2::timestamptz, $3::timestamptz,
+        $4, $5)
 RETURNING id::text
 `
 
 type InsertAdoptedProposalParams struct {
-	JobID    pgtype.UUID
-	StartsAt pgtype.Timestamptz
-	EndsAt   pgtype.Timestamptz
+	JobID               pgtype.UUID
+	StartsAt            pgtype.Timestamptz
+	EndsAt              pgtype.Timestamptz
+	BufferBeforeMinutes int32
+	BufferAfterMinutes  int32
 }
 
 func (q *Queries) InsertAdoptedProposal(ctx context.Context, arg InsertAdoptedProposalParams) (string, error) {
-	row := q.db.QueryRow(ctx, insertAdoptedProposal, arg.JobID, arg.StartsAt, arg.EndsAt)
+	row := q.db.QueryRow(ctx, insertAdoptedProposal,
+		arg.JobID,
+		arg.StartsAt,
+		arg.EndsAt,
+		arg.BufferBeforeMinutes,
+		arg.BufferAfterMinutes,
+	)
 	var id string
 	err := row.Scan(&id)
 	return id, err
@@ -482,7 +518,7 @@ SELECT s.id::text, s.run_id::text, s.rank, s.starts_at, s.ends_at,
        s.score::text,
        s.components, s.reasons, s.warnings, s.routing_source,
        s.distance_meters, s.duration_seconds, s.status, r.job_id::text, r.job_version,
-       r.waitlist_version, r.created_at, r.expires_at
+       r.waitlist_version, r.created_at, r.expires_at, r.config_snapshot
 FROM planning_suggestions s
 JOIN planning_runs r ON r.id=s.run_id
 JOIN drivers d ON d.id=s.driver_id
@@ -514,6 +550,7 @@ type ListPlanningSuggestionsRow struct {
 	WaitlistVersion  int32
 	CreatedAt        pgtype.Timestamptz
 	ExpiresAt        pgtype.Timestamptz
+	ConfigSnapshot   []byte
 }
 
 func (q *Queries) ListPlanningSuggestions(ctx context.Context, runID pgtype.UUID) ([]ListPlanningSuggestionsRow, error) {
@@ -549,6 +586,7 @@ func (q *Queries) ListPlanningSuggestions(ctx context.Context, runID pgtype.UUID
 			&i.WaitlistVersion,
 			&i.CreatedAt,
 			&i.ExpiresAt,
+			&i.ConfigSnapshot,
 		); err != nil {
 			return nil, err
 		}

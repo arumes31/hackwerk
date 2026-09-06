@@ -9,7 +9,9 @@ SELECT a.id::text, a.job_id::text, a.lifecycle_status, a.confirmation_status,
        COALESCE(a.availability_override_reason, '')::text AS availability_override_reason,
        COALESCE(a.cancellation_reason, '')::text AS cancellation_reason,
        a.version, j.workflow_status, j.job_type, j.transport_mode,
-       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes
+       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes,
+       COALESCE(j.preferred_start_date::text, '')::text AS preferred_start_date,
+       COALESCE(j.preferred_end_date::text, '')::text AS preferred_end_date, j.preference_mode
 FROM appointments a
 JOIN jobs j ON j.id = a.job_id
 WHERE a.id = sqlc.arg(id)::uuid
@@ -20,7 +22,9 @@ SELECT a.id::text, a.job_id::text, j.job_number, a.lifecycle_status, a.confirmat
        a.starts_at, a.ends_at, a.buffer_before_minutes, a.buffer_after_minutes,
        COALESCE(a.availability_override_reason, '')::text AS availability_override_reason,
        a.version, j.workflow_status, j.job_type, j.transport_mode,
-       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes
+       j.external_transport_confirmed, j.estimated_hack_minutes, j.estimated_transport_minutes,
+       COALESCE(j.preferred_start_date::text, '')::text AS preferred_start_date,
+       COALESCE(j.preferred_end_date::text, '')::text AS preferred_end_date, j.preference_mode
 FROM appointments a
 JOIN jobs j ON j.id = a.job_id
 WHERE a.id = sqlc.arg(id)::uuid;
@@ -226,10 +230,13 @@ SELECT (
         SELECT 1 FROM appointment_drivers ad JOIN drivers d ON d.id=ad.driver_id
         WHERE ad.appointment_id=sqlc.arg(appointment_id)::uuid AND NOT d.active
     )
-    AND EXISTS (
-        SELECT 1 FROM appointment_resources ar JOIN resources r ON r.id=ar.resource_id
-        WHERE ar.appointment_id=sqlc.arg(appointment_id)::uuid AND ar.purpose='chipping'
-          AND r.resource_type='chipper' AND r.active
+    AND (
+        sqlc.arg(allow_missing_chipper)::boolean
+        OR EXISTS (
+            SELECT 1 FROM appointment_resources ar JOIN resources r ON r.id=ar.resource_id
+            WHERE ar.appointment_id=sqlc.arg(appointment_id)::uuid AND ar.purpose='chipping'
+              AND r.resource_type='chipper' AND r.active
+        )
     )
     AND NOT EXISTS (
         SELECT 1 FROM appointment_resources ar JOIN resources r ON r.id=ar.resource_id
@@ -264,7 +271,8 @@ FOR SHARE OF r;
 
 -- name: ListWaitlistForPlanning :many
 SELECT w.id::text AS waitlist_id, j.id::text AS job_id, j.job_number,
-       j.job_type, j.volume_m3::text, j.estimated_hack_minutes,
+       j.job_type, j.transport_mode, j.external_transport_confirmed,
+       j.volume_m3::text, j.estimated_hack_minutes, j.estimated_transport_minutes,
        concat_ws(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''), NULLIF(c.company_name, ''))::text AS customer_name,
        c.locality
 FROM waitlist_entries w

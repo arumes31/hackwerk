@@ -11,6 +11,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const assignedRouteExistsForDriver = `-- name: AssignedRouteExistsForDriver :one
+SELECT EXISTS (
+  SELECT 1
+  FROM route_drafts
+  WHERE driver_id=$1::uuid AND status='assigned'
+    AND (departure_at AT TIME ZONE 'Europe/Vienna')::date=$2::date
+)
+`
+
+type AssignedRouteExistsForDriverParams struct {
+	DriverID  pgtype.UUID
+	LocalDate pgtype.Date
+}
+
+func (q *Queries) AssignedRouteExistsForDriver(ctx context.Context, arg AssignedRouteExistsForDriverParams) (bool, error) {
+	row := q.db.QueryRow(ctx, assignedRouteExistsForDriver, arg.DriverID, arg.LocalDate)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const deleteRouteStops = `-- name: DeleteRouteStops :exec
 DELETE FROM route_stops
 WHERE route_draft_id=$1::uuid
@@ -23,16 +44,17 @@ func (q *Queries) DeleteRouteStops(ctx context.Context, routeDraftID pgtype.UUID
 
 const getRouteDraft = `-- name: GetRouteDraft :one
 SELECT rd.id::text, rd.actor_user_id::text, rd.driver_id::text, d.display_name AS driver_name,
-       rd.chipper_resource_id::text, chipper.name AS chipper_name,
+       COALESCE(rd.chipper_resource_id::text, '')::text AS rd_chipper_resource_id,
+       COALESCE(chipper.name, '')::text AS chipper_name,
        COALESCE(rd.transport_resource_id::text, '')::text AS transport_resource_id,
        COALESCE(transport.name, '')::text AS transport_name,
-       rd.departure_at, rd.start_latitude::text, rd.start_longitude::text,
-       rd.end_latitude::text, rd.end_longitude::text, rd.status, rd.routing_source,
+       rd.departure_at, rd.start_label, rd.start_latitude::text, rd.start_longitude::text,
+       rd.end_label, rd.end_latitude::text, rd.end_longitude::text, rd.status, rd.routing_source,
        rd.distance_meters, rd.duration_seconds, rd.route_geometry, rd.assigned_at,
        rd.version, rd.created_at, rd.updated_at
 FROM route_drafts rd
 JOIN drivers d ON d.id=rd.driver_id
-JOIN resources chipper ON chipper.id=rd.chipper_resource_id
+LEFT JOIN resources chipper ON chipper.id=rd.chipper_resource_id
 LEFT JOIN resources transport ON transport.id=rd.transport_resource_id
 WHERE rd.id=$1::uuid
 `
@@ -47,8 +69,10 @@ type GetRouteDraftRow struct {
 	TransportResourceID string
 	TransportName       string
 	DepartureAt         pgtype.Timestamptz
+	StartLabel          string
 	RdStartLatitude     string
 	RdStartLongitude    string
+	EndLabel            string
 	RdEndLatitude       string
 	RdEndLongitude      string
 	Status              string
@@ -75,8 +99,10 @@ func (q *Queries) GetRouteDraft(ctx context.Context, id pgtype.UUID) (GetRouteDr
 		&i.TransportResourceID,
 		&i.TransportName,
 		&i.DepartureAt,
+		&i.StartLabel,
 		&i.RdStartLatitude,
 		&i.RdStartLongitude,
+		&i.EndLabel,
 		&i.RdEndLatitude,
 		&i.RdEndLongitude,
 		&i.Status,
@@ -95,15 +121,15 @@ func (q *Queries) GetRouteDraft(ctx context.Context, id pgtype.UUID) (GetRouteDr
 const insertRouteDraft = `-- name: InsertRouteDraft :one
 INSERT INTO route_drafts (
     actor_user_id, driver_id, chipper_resource_id, transport_resource_id,
-    departure_at, start_latitude, start_longitude, end_latitude, end_longitude,
+    departure_at, start_label, start_latitude, start_longitude, end_label, end_latitude, end_longitude,
     routing_source, distance_meters, duration_seconds, route_geometry
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
     NULLIF($4::text, '')::uuid,
-    $5::timestamptz, $6::numeric,
-    $7::numeric, $8::numeric,
-    $9::numeric, $10,
-    $11, $12, $13::jsonb
+    $5::timestamptz, $6, $7::numeric,
+    $8::numeric, $9, $10::numeric,
+    $11::numeric, $12,
+    $13, $14, $15::jsonb
 )
 RETURNING id::text, version
 `
@@ -114,8 +140,10 @@ type InsertRouteDraftParams struct {
 	ChipperResourceID   pgtype.UUID
 	TransportResourceID string
 	DepartureAt         pgtype.Timestamptz
+	StartLabel          string
 	StartLatitude       pgtype.Numeric
 	StartLongitude      pgtype.Numeric
+	EndLabel            string
 	EndLatitude         pgtype.Numeric
 	EndLongitude        pgtype.Numeric
 	RoutingSource       string
@@ -136,8 +164,10 @@ func (q *Queries) InsertRouteDraft(ctx context.Context, arg InsertRouteDraftPara
 		arg.ChipperResourceID,
 		arg.TransportResourceID,
 		arg.DepartureAt,
+		arg.StartLabel,
 		arg.StartLatitude,
 		arg.StartLongitude,
+		arg.EndLabel,
 		arg.EndLatitude,
 		arg.EndLongitude,
 		arg.RoutingSource,
@@ -601,9 +631,10 @@ func (q *Queries) ListRouteStops(ctx context.Context, routeDraftID pgtype.UUID) 
 }
 
 const lockRouteDraft = `-- name: LockRouteDraft :one
-SELECT rd.id::text, rd.driver_id::text, rd.chipper_resource_id::text,
+SELECT rd.id::text, rd.driver_id::text,
+       COALESCE(rd.chipper_resource_id::text, '')::text AS rd_chipper_resource_id,
        COALESCE(rd.transport_resource_id::text, '')::text AS transport_resource_id,
-       rd.status, rd.version
+       rd.departure_at, rd.duration_seconds, rd.status, rd.version
 FROM route_drafts rd
 WHERE rd.id=$1::uuid
 FOR UPDATE
@@ -614,6 +645,8 @@ type LockRouteDraftRow struct {
 	RdDriverID          string
 	RdChipperResourceID string
 	TransportResourceID string
+	DepartureAt         pgtype.Timestamptz
+	DurationSeconds     int32
 	Status              string
 	Version             int32
 }
@@ -626,6 +659,8 @@ func (q *Queries) LockRouteDraft(ctx context.Context, id pgtype.UUID) (LockRoute
 		&i.RdDriverID,
 		&i.RdChipperResourceID,
 		&i.TransportResourceID,
+		&i.DepartureAt,
+		&i.DurationSeconds,
 		&i.Status,
 		&i.Version,
 	)
@@ -634,7 +669,7 @@ func (q *Queries) LockRouteDraft(ctx context.Context, id pgtype.UUID) (LockRoute
 
 const lockRouteStopsForAssignment = `-- name: LockRouteStopsForAssignment :many
 SELECT rs.id::text, rs.job_id::text, rs.job_version, rs.waitlist_version, rs.position,
-       rs.planned_starts_at, rs.planned_ends_at,
+       rs.travel_duration_seconds, rs.planned_starts_at, rs.planned_ends_at,
        j.version AS current_job_version, j.workflow_status, j.archived_at,
        j.job_type, j.transport_mode, j.external_transport_confirmed,
        COALESCE(j.pile_latitude::text, '')::text AS latitude,
@@ -654,6 +689,7 @@ type LockRouteStopsForAssignmentRow struct {
 	JobVersion                 int32
 	WaitlistVersion            int32
 	Position                   int32
+	TravelDurationSeconds      int32
 	PlannedStartsAt            pgtype.Timestamptz
 	PlannedEndsAt              pgtype.Timestamptz
 	CurrentJobVersion          int32
@@ -683,6 +719,7 @@ func (q *Queries) LockRouteStopsForAssignment(ctx context.Context, routeDraftID 
 			&i.JobVersion,
 			&i.WaitlistVersion,
 			&i.Position,
+			&i.TravelDurationSeconds,
 			&i.PlannedStartsAt,
 			&i.PlannedEndsAt,
 			&i.CurrentJobVersion,
@@ -732,17 +769,19 @@ SET actor_user_id=$1::uuid,
     chipper_resource_id=$3::uuid,
     transport_resource_id=NULLIF($4::text, '')::uuid,
     departure_at=$5::timestamptz,
-    start_latitude=$6::numeric,
-    start_longitude=$7::numeric,
-    end_latitude=$8::numeric,
-    end_longitude=$9::numeric,
-    routing_source=$10,
-    distance_meters=$11,
-    duration_seconds=$12,
-    route_geometry=$13::jsonb,
+    start_label=$6,
+    start_latitude=$7::numeric,
+    start_longitude=$8::numeric,
+    end_label=$9,
+    end_latitude=$10::numeric,
+    end_longitude=$11::numeric,
+    routing_source=$12,
+    distance_meters=$13,
+    duration_seconds=$14,
+    route_geometry=$15::jsonb,
     version=version+1,
     updated_at=now()
-WHERE id=$14::uuid AND version=$15 AND status='draft'
+WHERE id=$16::uuid AND version=$17 AND status='draft'
 `
 
 type UpdateRouteDraftParams struct {
@@ -751,8 +790,10 @@ type UpdateRouteDraftParams struct {
 	ChipperResourceID   pgtype.UUID
 	TransportResourceID string
 	DepartureAt         pgtype.Timestamptz
+	StartLabel          string
 	StartLatitude       pgtype.Numeric
 	StartLongitude      pgtype.Numeric
+	EndLabel            string
 	EndLatitude         pgtype.Numeric
 	EndLongitude        pgtype.Numeric
 	RoutingSource       string
@@ -770,8 +811,10 @@ func (q *Queries) UpdateRouteDraft(ctx context.Context, arg UpdateRouteDraftPara
 		arg.ChipperResourceID,
 		arg.TransportResourceID,
 		arg.DepartureAt,
+		arg.StartLabel,
 		arg.StartLatitude,
 		arg.StartLongitude,
+		arg.EndLabel,
 		arg.EndLatitude,
 		arg.EndLongitude,
 		arg.RoutingSource,

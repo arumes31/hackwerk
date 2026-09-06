@@ -6,6 +6,37 @@ const announce = (message) => {
   if (target) target.textContent = message;
 };
 
+async function copyText(value, sourceElement = null) {
+  const text = String(value || "");
+  if (!text) return false;
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const fallback = sourceElement || document.createElement("textarea");
+    const temporary = !sourceElement;
+    if (temporary) {
+      document.querySelector("[data-copy-manual]")?.remove();
+      fallback.value = text;
+      fallback.className = "copy-manual-field";
+      fallback.dataset.copyManual = "true";
+      fallback.setAttribute("aria-label", "Text zum manuellen Kopieren");
+      document.body.append(fallback);
+    }
+    fallback.focus();
+    fallback.select?.();
+    try {
+      if (document.execCommand?.("copy")) {
+        if (temporary) fallback.remove();
+        return true;
+      }
+    } catch { /* Keep the selected text available for manual copying. */ }
+    announce("Automatisches Kopieren ist nicht verfügbar. Der Text ist markiert; bitte mit Strg+C kopieren.");
+    return false;
+  }
+}
+
 function safePreferenceGet(key) {
   try { return window.localStorage.getItem(key); } catch { return null; }
 }
@@ -13,6 +44,47 @@ function safePreferenceGet(key) {
 function safePreferenceSet(key, value) {
   try { window.localStorage.setItem(key, value); } catch { /* Presentation preference stays optional. */ }
 }
+
+function safePreferenceRemove(key) {
+  try { window.localStorage.removeItem(key); } catch { /* Privacy notice remains usable without storage. */ }
+}
+
+const privacyNoticeVisible = () => {
+  const notice = document.querySelector("[data-privacy-notice]");
+  return Boolean(notice && !notice.hidden);
+};
+
+function initializePrivacyNotice() {
+  const notice = document.querySelector("[data-privacy-notice]");
+  if (!notice) return;
+  // Keep the notice prominent without covering controls near the viewport edge.
+  // The template lives next to the footer so it can be reused on every page;
+  // moving it to the start of the body turns it into an in-flow page banner.
+  document.body.prepend(notice);
+  const preferenceKey = "hackwerk:privacy-notice:v1";
+  const open = ({ reset = false, focus = false } = {}) => {
+    if (reset) safePreferenceRemove(preferenceKey);
+		notice.hidden = false;
+		window.dispatchEvent(new CustomEvent("hackwerk:privacy-notice", { detail: { open: true } }));
+    if (focus) window.requestAnimationFrame(() => notice.focus({ preventScroll: true }));
+  };
+  const dismiss = () => {
+    safePreferenceSet(preferenceKey, "read");
+		notice.hidden = true;
+		window.dispatchEvent(new CustomEvent("hackwerk:privacy-notice", { detail: { open: false } }));
+    announce("Cookie-Hinweis geschlossen. Er kann im Footer erneut geöffnet werden.");
+  };
+  document.querySelectorAll("[data-privacy-notice-open]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      open({ reset: true, focus: true });
+    });
+  });
+  notice.querySelector("[data-privacy-notice-dismiss]")?.addEventListener("click", dismiss);
+  if (safePreferenceGet(preferenceKey) !== "read") open();
+}
+
+initializePrivacyNotice();
 
 function applyPresentationPreferences() {
   const comfortable = safePreferenceGet("hackwerk:density") === "comfortable";
@@ -43,18 +115,478 @@ document.querySelectorAll("[data-outdoor-toggle]").forEach((button) => {
 });
 applyPresentationPreferences();
 
+let lastSuccessfulConnection = navigator.onLine ? new Date() : null;
+let wasOffline = !navigator.onLine;
 function updateConnectivityBanner() {
   document.querySelectorAll("[data-connectivity-banner]").forEach((banner) => {
     banner.hidden = navigator.onLine;
     banner.textContent = navigator.onLine
       ? "Verbindung wiederhergestellt. Nicht gespeicherte Änderungen können jetzt gesendet werden."
-      : "Offline: Lesen bleibt teilweise möglich, Änderungen werden nicht zwischengespeichert. Bitte erst bei Verbindung speichern.";
+      : `Offline: Lesen bleibt teilweise möglich. Letzte Verbindung${lastSuccessfulConnection ? ` um ${lastSuccessfulConnection.toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" })} Uhr` : " unbekannt"}. Änderungen werden nicht zwischengespeichert.`;
   });
-  if (navigator.onLine) announce("Verbindung wiederhergestellt.");
+  document.querySelectorAll("[data-profile-connectivity]").forEach((status) => {
+    status.textContent = navigator.onLine
+      ? "Online – Änderungen werden direkt an HackWerk gesendet"
+      : "Offline – Änderungen sind gesperrt und werden nicht vorgemerkt";
+    status.dataset.state = navigator.onLine ? "online" : "offline";
+  });
+  const recovered = navigator.onLine && wasOffline;
+  if (navigator.onLine) {
+    lastSuccessfulConnection = new Date();
+    wasOffline = false;
+    if (recovered) {
+      announce("Verbindung wiederhergestellt. Sichere Leseansichten werden aktualisiert.");
+      window.dispatchEvent(new CustomEvent("hackwerk:online"));
+    }
+  } else {
+    wasOffline = true;
+  }
 }
 window.addEventListener("online", updateConnectivityBanner);
 window.addEventListener("offline", updateConnectivityBanner);
 updateConnectivityBanner();
+
+// Keep navigation context without storing customer or job identifiers outside
+// the current browser-history entry.
+const currentHistoryState = { ...(window.history.state || {}) };
+if (Number.isFinite(currentHistoryState.scrollY)) {
+  window.requestAnimationFrame(() => window.scrollTo({ top: currentHistoryState.scrollY, behavior: "auto" }));
+}
+window.addEventListener("pagehide", () => {
+  window.history.replaceState({ ...(window.history.state || {}), scrollY: window.scrollY }, "");
+});
+
+const safeSectionID = (id) => id && !/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i.test(id);
+document.querySelectorAll("details[id]").forEach((details) => {
+  if (!safeSectionID(details.id)) return;
+  const url = new URL(window.location.href);
+  if (url.searchParams.getAll("section").includes(details.id)) details.open = true;
+  details.addEventListener("toggle", () => {
+    const next = new URL(window.location.href);
+    const openSections = Array.from(document.querySelectorAll("details[id][open]"), (item) => item.id).filter(safeSectionID).slice(0, 12);
+    next.searchParams.delete("section");
+    openSections.forEach((id) => next.searchParams.append("section", id));
+    window.history.replaceState(window.history.state, "", next);
+  });
+});
+
+document.querySelectorAll('input[type="tel"]').forEach((input) => {
+  input.inputMode = "tel";
+  const preview = document.createElement("small");
+  preview.className = "field-preview";
+  preview.setAttribute("aria-live", "polite");
+  input.insertAdjacentElement("afterend", preview);
+  const normalizePhone = (value) => {
+    let compact = value.trim().replace(/[\s()./-]+/g, "");
+    if (compact.startsWith("00")) compact = `+${compact.slice(2)}`;
+    if (compact.startsWith("0")) compact = `+43${compact.slice(1)}`;
+    if ((compact.match(/\+/g) || []).length > 1 || (compact.includes("+") && !compact.startsWith("+"))) return "";
+    const digits = compact.startsWith("+") ? compact.slice(1) : compact;
+    if (!/^\d{7,15}$/.test(digits)) return "";
+    return `+${digits}`;
+  };
+  const update = () => {
+    const raw = input.value.trim();
+    const normalized = normalizePhone(raw);
+    preview.textContent = !raw ? "" : normalized ? `Gespeichert als: ${normalized}` : "Bitte 7 bis 15 Ziffern als gültige Telefonnummer eingeben.";
+  };
+  input.addEventListener("input", update); update();
+});
+document.querySelectorAll('input[type="email"]').forEach((input) => {
+  const warning = document.createElement("small");
+  warning.className = "field-preview field-preview--warning";
+  warning.setAttribute("role", "status");
+  input.insertAdjacentElement("afterend", warning);
+  const update = () => { warning.textContent = input.value !== input.value.trim() ? "Leerzeichen am Anfang oder Ende entfernen." : ""; };
+  input.addEventListener("input", update); update();
+});
+document.querySelectorAll("[data-job-type]").forEach((select) => {
+  const help = document.createElement("small"); help.className = "field-preview";
+  select.insertAdjacentElement("afterend", help);
+  const update = () => { help.textContent = select.value === "chipping_with_transport" ? "Mit Transport: Entscheiden Sie danach intern, extern oder noch offen; extern erfordert eine ausdrückliche Bestätigung." : "Nur Hackmaschine: Es wird keine Transportressource eingeplant."; };
+  select.addEventListener("change", update); update();
+});
+document.querySelectorAll("[data-history-filter]").forEach((select) => {
+  const rows = Array.from(document.querySelectorAll("[data-history-event]"));
+  const initial = new URL(window.location.href).searchParams.get("history_event") || "";
+  if (Array.from(select.options).some((option) => option.value === initial)) select.value = initial;
+  const update = () => {
+    rows.forEach((row) => { row.hidden = Boolean(select.value) && row.dataset.historyEvent !== select.value; });
+    const url = new URL(window.location.href);
+    if (select.value) url.searchParams.set("history_event", select.value); else url.searchParams.delete("history_event");
+    window.history.replaceState(window.history.state, "", url);
+  };
+  select.addEventListener("change", update); update();
+});
+document.querySelectorAll("[data-note-input]").forEach((input) => {
+  const warning = document.createElement("small"); warning.className = "field-preview field-preview--warning"; warning.setAttribute("role", "status"); input.insertAdjacentElement("afterend", warning);
+  const update = () => { warning.textContent = input.value.length >= 3200 ? "Sehr lange interne Bemerkung: Bitte auf entscheidungsrelevante Informationen kürzen." : ""; };
+  input.addEventListener("input", update); update();
+});
+
+document.querySelectorAll('input[type="password"]').forEach((input) => {
+  const wrapper = document.createElement("span");
+  wrapper.className = "password-input";
+  input.before(wrapper);
+  wrapper.append(input);
+  const toggle = document.createElement("button");
+  toggle.type = "button"; toggle.className = "password-reveal";
+  toggle.setAttribute("aria-pressed", "false");
+  toggle.setAttribute("aria-label", "Passwort anzeigen");
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true"); icon.setAttribute("focusable", "false");
+  const eye = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  eye.setAttribute("d", "M2.5 12s3.5-5.5 9.5-5.5 9.5 5.5 9.5 5.5-3.5 5.5-9.5 5.5S2.5 12 2.5 12Z");
+  const pupil = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  pupil.setAttribute("cx", "12"); pupil.setAttribute("cy", "12"); pupil.setAttribute("r", "2.5");
+  const slash = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  slash.setAttribute("class", "password-reveal__slash"); slash.setAttribute("d", "m4 4 16 16");
+  icon.append(eye, pupil, slash); toggle.append(icon); wrapper.append(toggle);
+  const caps = document.createElement("small"); caps.className = "field-preview field-preview--warning"; caps.setAttribute("role", "status");
+  wrapper.insertAdjacentElement("afterend", caps);
+  toggle.addEventListener("click", () => {
+    const reveal = input.type === "password";
+    input.type = reveal ? "text" : "password";
+    toggle.setAttribute("aria-pressed", String(reveal));
+    toggle.setAttribute("aria-label", reveal ? "Passwort verbergen" : "Passwort anzeigen");
+    input.focus();
+  });
+  const updateCaps = (event) => { caps.textContent = event.getModifierState?.("CapsLock") ? "Feststelltaste ist aktiv." : ""; };
+  input.addEventListener("keydown", updateCaps); input.addEventListener("keyup", updateCaps); input.addEventListener("blur", () => { caps.textContent = ""; });
+});
+
+document.querySelectorAll("[data-password-strength]").forEach((input) => {
+  const output = document.querySelector("[data-password-strength-output]");
+  if (!output) return;
+  const bar = output.querySelector("span");
+  const label = output.querySelector("small");
+  const update = () => {
+    const value = input.value;
+    const score = [value.length >= 14, value.length >= 20, /[a-z]/.test(value) && /[A-Z]/.test(value), /\d/.test(value), /[^\p{L}\p{N}]/u.test(value)].filter(Boolean).length;
+    output.dataset.score = String(score);
+    if (bar) bar.style.setProperty("--password-score", `${score * 20}%`);
+    if (label) label.textContent = value.length < 14
+      ? `Noch ${14 - value.length} Zeichen bis zur Mindestlänge.`
+      : score >= 4 ? "Starkes Passwort. Die endgültige Prüfung erfolgt beim Speichern." : "Gültige Länge. Mehr Länge und unterschiedliche Zeichenarten erhöhen die Stärke.";
+  };
+  input.addEventListener("input", update);
+  update();
+});
+
+let installEvent;
+const installPrompt = document.querySelector("[data-install-prompt]");
+const installOpenButtons = Array.from(document.querySelectorAll("[data-install-open]"));
+const driverInstallEntry = document.querySelector('.site-header[data-actor-role="driver"]') !== null;
+const profileInstallButton = document.querySelector("[data-profile-install]");
+const profileInstallStatus = document.querySelector("[data-profile-install-status]");
+const firstInstallAction = installPrompt?.querySelector("[data-install-accept]");
+let installPromptReturnFocus;
+const restoreInstallPromptFocus = () => {
+  const target = installPromptReturnFocus;
+  installPromptReturnFocus = undefined;
+  if (!(target instanceof HTMLElement) || !target.isConnected) return;
+  window.requestAnimationFrame(() => target.focus({ preventScroll: true }));
+};
+const hideInstallPrompt = ({ restoreFocus = false } = {}) => {
+  const containedFocus = installPrompt?.contains(document.activeElement) === true;
+  if (installPrompt) installPrompt.hidden = true;
+  if (restoreFocus && containedFocus) restoreInstallPromptFocus();
+};
+const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const updateInstallState = () => {
+  const installed = isStandalone();
+  if (profileInstallStatus) profileInstallStatus.textContent = installed ? "Installiert" : installEvent ? "Installation unterstützt" : "In diesem Browser nicht verfügbar";
+  if (profileInstallButton) profileInstallButton.hidden = installed || !installEvent;
+  installOpenButtons.forEach((button) => { button.hidden = installed || !installEvent; });
+};
+let installPromptPostponed = false;
+const offerInstallPrompt = ({ automatic = true, returnFocus } = {}) => {
+  const dismissed = safePreferenceGet("hackwerk:install-dismissed") === "true";
+  if (!installEvent || dismissed || isStandalone() || !installPrompt || privacyNoticeVisible() || (automatic && (driverInstallEntry || installPromptPostponed))) {
+    hideInstallPrompt();
+    return;
+  }
+  installPromptReturnFocus = returnFocus instanceof HTMLElement ? returnFocus : document.activeElement;
+  installPrompt.hidden = false;
+  if (!automatic) window.requestAnimationFrame(() => firstInstallAction?.focus({ preventScroll: true }));
+  announce("HackWerk kann auf diesem Gerät installiert werden.");
+};
+const promptForInstall = async () => {
+  if (!installEvent) {
+    hideInstallPrompt({ restoreFocus: true });
+    updateInstallState();
+    return;
+  }
+  const promptEvent = installEvent;
+  installEvent = undefined;
+  hideInstallPrompt();
+  updateInstallState();
+  try {
+    await promptEvent.prompt();
+    await promptEvent.userChoice;
+  } catch {
+    announce("Die Installation konnte nicht geöffnet werden. Verwenden Sie bei Bedarf die Installationsfunktion des Browsers.");
+  } finally {
+    restoreInstallPromptFocus();
+  }
+};
+
+hideInstallPrompt();
+updateInstallState();
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  if (typeof event.prompt !== "function") return;
+  installEvent = event;
+  updateInstallState();
+  offerInstallPrompt({ automatic: true });
+});
+window.addEventListener("hackwerk:privacy-notice", (event) => {
+  if (event.detail?.open) hideInstallPrompt({ restoreFocus: true });
+  else offerInstallPrompt({ automatic: true });
+});
+installPrompt?.querySelector("[data-install-accept]")?.addEventListener("click", async () => {
+  await promptForInstall();
+});
+profileInstallButton?.addEventListener("click", promptForInstall);
+installOpenButtons.forEach((button) => button.addEventListener("click", () => {
+  const dialog = button.closest("dialog");
+  const returnFocus = dialog instanceof HTMLDialogElement ? document.querySelector("[data-mobile-menu-open]") : button;
+  if (dialog instanceof HTMLDialogElement && dialog.open) dialog.close();
+  offerInstallPrompt({ automatic: false, returnFocus });
+}));
+installPrompt?.querySelector("[data-install-later]")?.addEventListener("click", () => {
+  installPromptPostponed = true;
+  hideInstallPrompt({ restoreFocus: true });
+});
+installPrompt?.querySelector("[data-install-dismiss]")?.addEventListener("click", () => {
+  safePreferenceSet("hackwerk:install-dismissed", "true");
+  hideInstallPrompt({ restoreFocus: true });
+  updateInstallState();
+});
+window.addEventListener("appinstalled", () => {
+  installEvent = undefined;
+  hideInstallPrompt({ restoreFocus: true });
+  updateInstallState();
+});
+
+const bytesFromBase64URL = (value) => {
+  const base64 = String(value).replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(String(value).length / 4) * 4, "=");
+  return Uint8Array.from(window.atob(base64), (character) => character.charCodeAt(0));
+};
+const base64URLFromBytes = (value) => {
+  if (value === null || value === undefined) return null;
+  const bytes = new Uint8Array(value);
+  let binary = "";
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+};
+const credentialCreationOptions = (options) => {
+  const publicKey = options.publicKey || options;
+  if (PublicKeyCredential.parseCreationOptionsFromJSON) return { publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(publicKey) };
+  publicKey.challenge = bytesFromBase64URL(publicKey.challenge);
+  publicKey.user.id = bytesFromBase64URL(publicKey.user.id);
+  (publicKey.excludeCredentials || []).forEach((item) => { item.id = bytesFromBase64URL(item.id); });
+  return options.publicKey ? { ...options, publicKey } : { publicKey };
+};
+const credentialRequestOptions = (options) => {
+  const publicKey = options.publicKey || options;
+  if (PublicKeyCredential.parseRequestOptionsFromJSON) return { publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(publicKey) };
+  publicKey.challenge = bytesFromBase64URL(publicKey.challenge);
+  (publicKey.allowCredentials || []).forEach((item) => { item.id = bytesFromBase64URL(item.id); });
+  return options.publicKey ? { ...options, publicKey } : { publicKey };
+};
+const publicKeyCredentialJSON = (credential) => {
+  if (typeof credential.toJSON === "function") return credential.toJSON();
+  const response = {
+    clientDataJSON: base64URLFromBytes(credential.response.clientDataJSON),
+  };
+  if (credential.response.attestationObject) response.attestationObject = base64URLFromBytes(credential.response.attestationObject);
+  if (credential.response.authenticatorData) response.authenticatorData = base64URLFromBytes(credential.response.authenticatorData);
+  if (credential.response.signature) response.signature = base64URLFromBytes(credential.response.signature);
+  if (credential.response.userHandle) response.userHandle = base64URLFromBytes(credential.response.userHandle);
+  if (credential.response.getTransports) response.transports = credential.response.getTransports();
+  return { id: credential.id, rawId: base64URLFromBytes(credential.rawId), type: credential.type, response, clientExtensionResults: credential.getClientExtensionResults(), authenticatorAttachment: credential.authenticatorAttachment };
+};
+const passkeysSupported = () => window.isSecureContext && "PublicKeyCredential" in window && navigator.credentials;
+
+document.querySelectorAll("[data-passkey-register]").forEach((form) => {
+  const button = form.querySelector("[data-passkey-register-button]");
+  const status = form.querySelector("[data-passkey-support]");
+  if (!passkeysSupported()) {
+    if (button) button.hidden = true;
+    if (status) status.textContent = "Passkeys werden auf diesem Gerät oder in dieser Verbindung nicht unterstützt.";
+    return;
+  }
+  if (status) status.textContent = "Unterstützt. HackWerk speichert keinen Fingerabdruck und keine Geräte-PIN.";
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (button) button.disabled = true;
+    if (status) status.textContent = "Passkey wird vorbereitet …";
+    try {
+      const csrf = form.elements.namedItem("csrf_token")?.value || "";
+      const optionsResponse = await fetch("/profile/security/passkeys/options", { method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": csrf } });
+      if (!optionsResponse.ok) throw new Error("options");
+      const credential = await navigator.credentials.create(credentialCreationOptions(await optionsResponse.json()));
+      const passkeyName = encodeURIComponent(form.elements.namedItem("name")?.value || "Dieses Gerät");
+      const finishResponse = await fetch(`/profile/security/passkeys/finish?name=${passkeyName}`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf }, body: JSON.stringify(publicKeyCredentialJSON(credential)) });
+      if (!finishResponse.ok) throw new Error("finish");
+      const result = await finishResponse.json();
+      if (Array.isArray(result.recovery_codes) && result.recovery_codes.length) {
+        const panel = document.querySelector(".recovery-panel");
+        const oneTime = document.createElement("div");
+        oneTime.className = "recovery-codes";
+        oneTime.setAttribute("role", "status");
+        oneTime.tabIndex = -1;
+        const heading = document.createElement("strong"); heading.textContent = "Jetzt einmalig speichern";
+        const list = document.createElement("ul");
+        result.recovery_codes.forEach((value) => { const item = document.createElement("li"); const code = document.createElement("code"); code.textContent = String(value); item.append(code); list.append(item); });
+        const help = document.createElement("p"); help.textContent = "Der Passkey ist aktiv. Laden Sie die Seite erst neu, nachdem Sie diese Codes gesichert haben.";
+        oneTime.append(heading, list, help);
+        panel?.prepend(oneTime);
+        oneTime.focus();
+        if (status) status.textContent = "Passkey aktiviert. Recovery-Codes jetzt sicher speichern.";
+      } else {
+        window.location.assign("/profile?status=passkey_added#security");
+      }
+    } catch (error) {
+      if (status) status.textContent = error?.name === "NotAllowedError" ? "Passkey-Einrichtung abgebrochen oder nicht erlaubt." : "Passkey konnte nicht eingerichtet werden. Bitte erneut versuchen.";
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
+});
+
+document.querySelectorAll("[data-passkey-login]").forEach((button) => {
+  const status = document.querySelector("[data-passkey-login-status]");
+  if (!passkeysSupported()) {
+    button.hidden = true;
+    if (status) status.textContent = "Passkeys werden auf diesem Gerät oder in dieser Verbindung nicht unterstützt.";
+    return;
+  }
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    if (status) status.textContent = "Passkey wird angefordert …";
+    try {
+      const optionsResponse = await fetch("/login/mfa/passkey/options", { method: "POST", credentials: "same-origin" });
+      if (!optionsResponse.ok) throw new Error("options");
+      const credential = await navigator.credentials.get(credentialRequestOptions(await optionsResponse.json()));
+      const finishResponse = await fetch("/login/mfa/passkey/finish", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(publicKeyCredentialJSON(credential)) });
+      if (!finishResponse.ok) throw new Error("finish");
+      const result = await finishResponse.json();
+      window.location.assign(result.redirect || "/dashboard");
+    } catch (error) {
+      if (status) status.textContent = error?.name === "NotAllowedError" ? "Passkey-Anmeldung abgebrochen oder nicht erlaubt." : "Passkey konnte nicht geprüft werden. Verwenden Sie eine andere Methode oder versuchen Sie es erneut.";
+      button.disabled = false;
+    }
+  });
+});
+
+document.querySelectorAll("[data-logout-form]").forEach((form) => {
+  form.addEventListener("submit", () => {
+    if (!form.querySelector("[data-clear-local-preferences]")?.checked) return;
+    ["hackwerk:density", "hackwerk:outdoor", "hackwerk:install-dismissed", "hackwerk:privacy-notice:v1"].forEach(safePreferenceRemove);
+  });
+});
+
+document.querySelectorAll("[data-user-directory]").forEach((directory) => {
+  const filter = document.querySelector("[data-user-filter]");
+  const cards = Array.from(directory.querySelectorAll("[data-user-card]"));
+  const status = directory.querySelector("[data-user-filter-status]");
+  if (!filter) return;
+  const apply = () => {
+    const query = filter.value.trim().toLocaleLowerCase("de-AT");
+    let visibleCount = 0;
+    cards.forEach((card) => {
+      const visible = query === "" || card.dataset.userSearch.includes(query);
+      card.hidden = !visible;
+      if (visible) visibleCount += 1;
+    });
+    if (status) {
+      status.hidden = visibleCount !== 0;
+      status.textContent = visibleCount === 0 ? "Kein Zugang passt zum Filter." : `${visibleCount} Zugänge sichtbar.`;
+    }
+  };
+  filter.addEventListener("input", apply);
+});
+if (window.visualViewport) {
+  const updateViewport = () => document.documentElement.style.setProperty("--visual-viewport-height", `${window.visualViewport.height}px`);
+  window.visualViewport.addEventListener("resize", updateViewport); updateViewport();
+}
+if (!document.body.classList.contains("login-body")) {
+  const scrollTopButton = document.createElement("button");
+  scrollTopButton.type = "button"; scrollTopButton.className = "scroll-top button button--quiet"; scrollTopButton.textContent = "Nach oben"; scrollTopButton.hidden = true;
+  scrollTopButton.addEventListener("click", () => window.scrollTo({ top: 0, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }));
+  document.body.append(scrollTopButton);
+  window.addEventListener("scroll", () => { scrollTopButton.hidden = window.scrollY < 900; }, { passive: true });
+}
+
+document.querySelectorAll("[data-confirmation-form]").forEach((form) => {
+  const summary = form.querySelector("[data-confirmation-summary]");
+  const note = form.elements.namedItem("response_note");
+  const noteFeedback = form.querySelector("[data-confirmation-note-feedback]");
+  const choices = Array.from(form.querySelectorAll("input[name='action']"));
+  const selectedChoice = () => choices.find((choice) => choice.checked);
+  const updateNoteFeedback = () => {
+    if (!note || !noteFeedback) return;
+    note.removeAttribute("aria-invalid");
+    const length = note.value.length;
+    noteFeedback.textContent = length === 0 ? "Die Notiz wird nur bei einer Ablehnung oder einem Rückrufwunsch übermittelt." : `${length} von 500 Zeichen. Die Notiz wird nur bei einer Ablehnung oder einem Rückrufwunsch übermittelt.`;
+  };
+  note?.addEventListener("input", updateNoteFeedback);
+  updateNoteFeedback();
+  choices.forEach((choice) => {
+    const updateSummary = () => { if (summary && choice.checked) summary.textContent = `${choice.dataset.responseLabel} Gespeichert wird erst mit „Antwort verbindlich speichern“.`; };
+    choice.addEventListener("change", updateSummary);
+    choice.addEventListener("focus", updateSummary);
+  });
+  form.addEventListener("submit", (event) => {
+    const choice = selectedChoice();
+    const actionAllowsNote = choice?.value === "declined" || choice?.value === "callback_requested";
+    if (note?.value.trim() && !actionAllowsNote) {
+      event.preventDefault(); note.focus();
+      note.setAttribute("aria-invalid", "true");
+      if (noteFeedback) noteFeedback.textContent = "Die Rückrufnotiz kann nur mit einer Ablehnung oder einem Rückrufwunsch gesendet werden.";
+      if (summary) summary.textContent = "Bitte leeren Sie die Notiz oder wählen Sie „Termin ablehnen“ beziehungsweise „Rückruf wünschen“.";
+      return;
+    }
+    if (summary && choice?.dataset.responseLabel) summary.textContent = `${choice.dataset.responseLabel} Jetzt wird die Antwort einmalig gespeichert.`;
+  });
+});
+
+document.querySelectorAll("[data-planning-results]").forEach((results) => {
+  const grid = results.querySelector(".suggestion-grid");
+  const cards = Array.from(results.querySelectorAll(".suggestion-card"));
+  const comparison = results.querySelector("[data-suggestion-comparison]");
+  const selected = () => cards.filter((card) => card.querySelector("[data-suggestion-compare]")?.checked);
+  const renderComparison = () => {
+    const values = selected();
+    cards.forEach((card) => card.classList.toggle("suggestion-card--selected", values.includes(card)));
+    if (!comparison) return;
+    comparison.hidden = values.length === 0;
+    comparison.replaceChildren();
+    values.forEach((card) => { const item = document.createElement("p"); item.textContent = card.dataset.suggestionSummary; comparison.append(item); });
+  };
+  cards.forEach((card) => {
+    const checkbox = card.querySelector("[data-suggestion-compare]");
+    checkbox?.addEventListener("change", () => {
+      if (selected().length > 2) { checkbox.checked = false; announce("Es können höchstens zwei Vorschläge verglichen werden."); }
+      renderComparison();
+    });
+    card.querySelector("[data-copy-suggestion]")?.addEventListener("click", async () => {
+      const explanation = Array.from(card.querySelectorAll("h3, .suggestion-facts dd, h4 + ul li, .planning-warning li"), (item) => item.textContent.trim()).join(" · ");
+      if (await copyText(explanation)) announce("Vorschlagserklärung kopiert.");
+    });
+    card.querySelector("[data-suggestion-adopt]")?.closest("form")?.addEventListener("submit", (event) => {
+      if (!window.confirm(`${card.dataset.suggestionSummary}\n\nAls unverbindlichen Vorschlag übernehmen? Es wird nichts fixiert oder versendet.`)) event.preventDefault();
+    });
+  });
+  results.querySelector("[data-suggestion-sort]")?.addEventListener("change", (event) => {
+    const key = event.target.value;
+    const attribute = { travel: "suggestionTravel", start: "suggestionStart", duration: "suggestionDuration", rank: "suggestionRank" }[key];
+    cards.sort((left, right) => key === "start" ? left.dataset[attribute].localeCompare(right.dataset[attribute]) : Number(left.dataset[attribute]) - Number(right.dataset[attribute]));
+    cards.forEach((card) => grid.append(card));
+  });
+});
 
 async function operationFailureMessage(response) {
   if (response.status === 401) {
@@ -74,7 +606,7 @@ async function operationFailureMessage(response) {
 document.addEventListener("submit", async (event) => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement) || !form.closest("[data-operation-page]") || String(form.method).toLowerCase() === "get") return;
-  const confirmationMessage = event.submitter?.dataset.confirmMessage;
+  const confirmationMessage = event.submitter?.dataset.confirmMessage || form.dataset.confirmMessage;
   if (confirmationMessage && !window.confirm(confirmationMessage)) {
     event.preventDefault();
     announce("Aktion abgebrochen.");
@@ -131,6 +663,7 @@ document.addEventListener("submit", async (event) => {
 });
 
 const dirtyForms = new Set();
+const dirtyDialogs = new Set();
 document.querySelectorAll("form").forEach((form) => {
   const method = String(form.method || "get").toLowerCase();
   if (method === "get" || form.hasAttribute("data-no-dirty-warning")) return;
@@ -143,16 +676,58 @@ document.querySelectorAll("form").forEach((form) => {
   form.addEventListener("reset", () => dirtyForms.delete(form));
 });
 window.addEventListener("beforeunload", (event) => {
-  if (dirtyForms.size === 0) return;
+  if (dirtyForms.size === 0 && dirtyDialogs.size === 0) return;
   event.preventDefault();
   event.returnValue = "";
+});
+
+function dirtyDialogForms(dialog) {
+  if (!(dialog instanceof HTMLDialogElement)) return [];
+  return Array.from(dialog.querySelectorAll("form")).filter((form) => dirtyForms.has(form));
+}
+
+function clearDialogDirtyState(dialog) {
+  dirtyDialogForms(dialog).forEach((form) => dirtyForms.delete(form));
+  dirtyDialogs.delete(dialog);
+}
+
+function closeDialogWithDirtyCheck(dialog) {
+  const hadFocus = document.activeElement;
+  const dirty = dirtyDialogForms(dialog).length > 0 || dirtyDialogs.has(dialog);
+  if (dirty && !window.confirm("Ungespeicherte Änderungen verwerfen und Dialog schließen?")) {
+    announce("Dialog bleibt geöffnet. Ihre Eingaben wurden nicht verworfen.");
+    queueMicrotask(() => {
+      if (dialog?.open && hadFocus instanceof HTMLElement) hadFocus.focus();
+    });
+    return false;
+  }
+  clearDialogDirtyState(dialog);
+  dialog?.close();
+  return true;
+}
+
+document.querySelectorAll("dialog").forEach((dialog) => {
+  const markDirty = (event) => {
+    const control = event.target;
+    if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement)) return;
+    if (control.closest("form")) return;
+    if (control instanceof HTMLInputElement && ["hidden", "submit", "button"].includes(control.type)) return;
+    dirtyDialogs.add(dialog);
+  };
+  dialog.addEventListener("input", markDirty);
+  dialog.addEventListener("change", markDirty);
+  dialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    if (dialog.dataset.actionPending === "true") return;
+    closeDialogWithDirtyCheck(dialog);
+  });
 });
 
 document.addEventListener("submit", (event) => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement) || String(form.method).toLowerCase() === "get" || form.dataset.allowMultipleSubmit === "true") return;
   if (event.defaultPrevented) return;
-  const confirmationMessage = event.submitter?.dataset.confirmMessage;
+  const confirmationMessage = event.submitter?.dataset.confirmMessage || form.dataset.confirmMessage;
   if (confirmationMessage && !window.confirm(confirmationMessage)) {
     event.preventDefault();
     announce("Aktion abgebrochen.");
@@ -166,7 +741,6 @@ document.addEventListener("submit", (event) => {
   }
   form.dataset.submitting = "true";
   submitters.forEach((control) => {
-    control.disabled = true;
     control.setAttribute("aria-disabled", "true");
     if (control instanceof HTMLButtonElement && !control.dataset.originalLabel) {
       control.dataset.originalLabel = control.textContent;
@@ -177,7 +751,6 @@ document.addEventListener("submit", (event) => {
     if (!event.defaultPrevented) return;
     delete form.dataset.submitting;
     submitters.forEach((control) => {
-      control.disabled = false;
       control.removeAttribute("aria-disabled");
       if (control instanceof HTMLButtonElement && control.dataset.originalLabel) {
         control.textContent = control.dataset.originalLabel;
@@ -189,8 +762,10 @@ document.addEventListener("submit", (event) => {
 
 document.addEventListener("submit", (event) => {
   const form = event.target;
-  if (!(form instanceof HTMLFormElement) || event.defaultPrevented) return;
-  dirtyForms.delete(form);
+  if (!(form instanceof HTMLFormElement)) return;
+  queueMicrotask(() => {
+    if (!event.defaultPrevented) dirtyForms.delete(form);
+  });
 });
 
 window.addEventListener("pageshow", () => {
@@ -208,21 +783,17 @@ document.querySelectorAll("form[data-track-change][data-record-id]").forEach((fo
   form.addEventListener("submit", (event) => {
     queueMicrotask(() => {
       if (event.defaultPrevented) return;
-      try { window.sessionStorage.setItem("hackwerk:changed-record", form.dataset.recordId); } catch { /* Highlight is optional. */ }
+      try { window.sessionStorage.setItem("hackwerk:return-scroll-y", String(Math.max(0, Math.round(window.scrollY)))); } catch { /* Position restoration is optional. */ }
     });
   });
 });
 try {
-  const changedRecord = window.sessionStorage.getItem("hackwerk:changed-record");
-  if (changedRecord) {
-    const changed = document.querySelector(`[data-record-id="${CSS.escape(changedRecord)}"]`);
-    if (changed) {
-      changed.classList.add("row-changed");
-      changed.scrollIntoView({ block: "nearest" });
-      window.sessionStorage.removeItem("hackwerk:changed-record");
-    }
+  const returnScrollY = Number(window.sessionStorage.getItem("hackwerk:return-scroll-y"));
+  if (Number.isFinite(returnScrollY) && returnScrollY > 0) {
+    window.requestAnimationFrame(() => window.scrollTo({ top: returnScrollY, behavior: "auto" }));
   }
-} catch { /* Session-only visual feedback is optional. */ }
+  window.sessionStorage.removeItem("hackwerk:return-scroll-y");
+} catch { /* Session-only position restoration is optional. */ }
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -379,6 +950,13 @@ function calendarErrorMessage(error) {
   return error?.error?.message || "Die Planung konnte nicht gespeichert werden. Bitte prüfen Sie den aktuellen Kalenderstand.";
 }
 
+function calendarFailure(payload, status) {
+  const failure = new Error(calendarErrorMessage(payload));
+  failure.status = status;
+  failure.code = payload?.error?.code;
+  return failure;
+}
+
 async function calendarRequest(url, form, csrf) {
   const body = form instanceof FormData ? new URLSearchParams(form) : form;
   const response = await fetch(url, {
@@ -389,10 +967,7 @@ async function calendarRequest(url, form, csrf) {
   });
   const payload = await response.json().catch(() => ({ error: { code: "invalid_response" } }));
   if (!response.ok) {
-    const failure = new Error(calendarErrorMessage(payload));
-    failure.status = response.status;
-    failure.code = payload?.error?.code;
-    throw failure;
+    throw calendarFailure(payload, response.status);
   }
   return payload;
 }
@@ -422,7 +997,7 @@ function appointmentConflictCause(failure) {
   return ({
     driver_unavailable: "Fahrer-Verfügbarkeit",
     reservation_conflict: "Fahrer- oder Ressourcenreservierung",
-    version_conflict: "Zwischenzeitliche Terminänderung",
+    appointment_version_conflict: "Zwischenzeitliche Terminänderung",
   })[failure?.code] || "";
 }
 
@@ -449,6 +1024,61 @@ function showAppointmentFailure(failure) {
   showAppointmentError(failure.message, null, appointmentConflictCause(failure));
 }
 
+function renderAppointmentPreflight(preview) {
+  const target = document.querySelector("[data-appointment-preflight]");
+  if (!target) return null;
+  target.replaceChildren();
+  const heading = document.createElement("h3");
+  heading.textContent = "Prüfung vor der Änderung";
+  const timing = document.createElement("p");
+  timing.textContent = `Arbeit ${preview.WorkingMinutes ?? preview.working_minutes ?? 0} Min. · Transport ${preview.TransportMinutes ?? preview.transport_minutes ?? 0} Min. · Puffer ${preview.BufferBeforeMinutes ?? preview.buffer_before_minutes ?? 0}/${preview.BufferAfterMinutes ?? preview.buffer_after_minutes ?? 0} Min.`;
+  const list = document.createElement("ul");
+  list.className = "preflight-check-list";
+	  (preview.Checks || preview.checks || []).forEach((check) => {
+	    const item = document.createElement("li");
+	    const passed = check.Passed ?? check.passed;
+	    const severity = check.Severity || check.severity || "blocking";
+	    item.className = severity === "warning" ? "preflight-check preflight-check--warning" : (passed ? "preflight-check preflight-check--passed" : "preflight-check preflight-check--failed");
+	    const label = document.createElement("strong");
+	    label.textContent = `${severity === "warning" ? "Hinweis" : (passed ? "Bestanden" : "Prüfen")}: ${check.Label || check.label}`;
+    const detail = document.createElement("span");
+    detail.textContent = check.Detail || check.detail || "";
+    item.append(label, detail); list.append(item);
+  });
+  const conflicts = preview.Conflicts || preview.conflicts || [];
+  target.append(heading, timing, list);
+  if (conflicts.length) {
+    const conflictHeading = document.createElement("strong");
+    conflictHeading.textContent = "Betroffene Zuweisungen";
+    const conflictList = document.createElement("ul");
+    conflicts.forEach((conflict) => {
+      const item = document.createElement("li");
+      item.textContent = `${conflict.SubjectName || conflict.subject_name || "Ressource"} · ${conflict.JobNumber || conflict.job_number || "Termin"} · ${conflict.CustomerName || conflict.customer_name || ""}`;
+      conflictList.append(item);
+    });
+    target.append(conflictHeading, conflictList);
+  }
+  target.hidden = false;
+  target.tabIndex = -1;
+  return target;
+}
+
+async function previewAppointmentMutation(appointmentID, version, action, extra, csrf) {
+  const form = new FormData();
+  form.set("csrf_token", csrf); form.set("version", version); form.set("action", action);
+  Object.entries(extra || {}).forEach(([key, value]) => {
+    if (Array.isArray(value)) value.forEach((item) => form.append(key, item));
+    else form.set(key, value);
+  });
+  const preview = await calendarRequest(`/api/v1/appointments/${encodeURIComponent(appointmentID)}/preview`, form, csrf);
+  const target = renderAppointmentPreflight(preview);
+  if (target) {
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+    if (target.isConnected && !target.hidden) target.focus({ preventScroll: false });
+  }
+  return preview;
+}
+
 async function showConflictAlternatives(appointmentID, startsAt, endsAt) {
   if (!appointmentID || !startsAt || !endsAt) return;
   const query = new URLSearchParams({ starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString() });
@@ -462,7 +1092,7 @@ async function showConflictAlternatives(appointmentID, startsAt, endsAt) {
   (result.Conflicts || result.conflicts || []).forEach((item) => affected.set(item.AppointmentID || item.appointment_id, `${item.JobNumber || item.job_number || "Termin"} · ${item.CustomerName || item.customer_name || "Kunde"} · ${item.SubjectName || item.subject_name || "Belegung"}`));
   if (affected.size) {
     const heading = document.createElement("strong"); heading.textContent = "Betroffen"; block.append(heading);
-    const list = document.createElement("ul"); affected.forEach((label) => { const item = document.createElement("li"); item.textContent = label; list.append(item); }); block.append(list);
+    const list = document.createElement("ul"); affected.forEach((label, appointmentID) => { const item = document.createElement("li"); const link = document.createElement("a"); link.href = `/calendar?appointment=${encodeURIComponent(appointmentID)}`; link.textContent = label; item.append(link); list.append(item); }); block.append(list);
   }
   const alternatives = result.Alternatives || result.alternatives || [];
   if (alternatives.length) {
@@ -472,7 +1102,19 @@ async function showConflictAlternatives(appointmentID, startsAt, endsAt) {
     alternatives.forEach((item) => {
       const start = new Date(item.StartsAt || item.starts_at); const end = new Date(item.EndsAt || item.ends_at);
       const button = document.createElement("button"); button.type = "button"; button.className = "button button--quiet"; button.textContent = formatter.format(start);
-      button.addEventListener("click", () => { const input = document.querySelector("[data-appointment-start]"); const duration = document.querySelector("[data-appointment-duration]"); if (input) input.value = localInputValue(start); if (duration) duration.value = String(Math.round((end-start)/60000)); input?.focus(); });
+      button.addEventListener("click", () => {
+        const input = document.querySelector("[data-appointment-start]");
+        const duration = document.querySelector("[data-appointment-duration]");
+        if (input) {
+          input.value = localInputValue(start);
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        if (duration) {
+          duration.value = String(Math.round((end-start)/60000));
+          duration.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        input?.focus();
+      });
       actions.append(button);
     });
     block.append(actions);
@@ -480,7 +1122,52 @@ async function showConflictAlternatives(appointmentID, startsAt, endsAt) {
   target.append(block);
 }
 
-function openPlanning(jobID, title, duration, start) {
+function clearPlanningError(form) {
+  const error = form?.querySelector("[data-planning-error]");
+  if (!error) return;
+  error.hidden = true;
+  error.replaceChildren();
+  form.querySelectorAll('[aria-errormessage="planning-error"]').forEach((field) => {
+    field.removeAttribute("aria-invalid");
+    field.removeAttribute("aria-errormessage");
+  });
+}
+
+function planningErrorTarget(form, failure) {
+  const selector = ({
+    driver_unavailable: "#planning-primary-driver",
+    reservation_conflict: "#planning-start",
+    version_conflict: "#planning-start",
+    invalid_local_time: "#planning-start",
+  })[failure?.code];
+  return (selector ? form.querySelector(selector) : null)
+    || form.querySelector(":invalid");
+}
+
+function showPlanningError(form, failure) {
+  const summary = form?.querySelector("[data-planning-error]");
+  if (!summary) return;
+  clearPlanningError(form);
+  const heading = document.createElement("strong");
+  heading.textContent = "Vorschlag konnte nicht gespeichert werden.";
+  const message = document.createElement("p");
+  message.textContent = failure?.message || "Die Planung konnte nicht gespeichert werden.";
+  summary.append(heading, message);
+  const field = planningErrorTarget(form, failure);
+  if (field?.id) {
+    field.setAttribute("aria-invalid", "true");
+    field.setAttribute("aria-errormessage", "planning-error");
+    const link = document.createElement("a");
+    link.href = `#${field.id}`;
+    link.textContent = "Zugehörige Eingabe prüfen";
+    link.addEventListener("click", () => field.focus());
+    summary.append(link);
+  }
+  summary.hidden = false;
+  summary.focus();
+}
+
+function openPlanning(jobID, title, duration, start, transportMode, externalConfirmed) {
   const dialog = document.querySelector("[data-planning-dialog]");
   if (!dialog) return;
   const form = dialog.querySelector("[data-planning-form]");
@@ -488,17 +1175,32 @@ function openPlanning(jobID, title, duration, start) {
   form.querySelector("[data-planning-job]").value = jobID;
   form.querySelector("[data-planning-title]").textContent = title || "Auftrag einplanen";
   form.querySelector("[data-planning-duration]").value = duration || "180";
-  form.querySelector("[data-planning-start]").value = start
+	form.querySelector("[data-planning-start]").value = start
     ? localInputValue(start)
-    : `${viennaDateWithOffset(new Date(), 1)}T08:00`;
-  const error = form.querySelector("[data-planning-error]");
-  error.hidden = true;
-  error.textContent = "";
+		: `${viennaDateWithOffset(new Date(), 1)}T08:00`;
+	const transport = form.querySelector("[data-planning-transport-resource]");
+	const transportNote = form.querySelector("[data-planning-transport-note]");
+	if (transport) transport.required = transportMode === "internal";
+	if (transportNote) {
+		transportNote.textContent = transportMode === "internal"
+			? "Interner Transport: Fahrzeug auswählen."
+			: transportMode === "external" && externalConfirmed === "true"
+				? "Externer Transport ist im Auftrag bestätigt; kein internes Fahrzeug nötig."
+				: transportMode === "external"
+					? "Externer Transport muss zuerst im Auftrag bestätigt werden."
+					: transportMode === "undecided"
+						? "Transportmodus muss zuerst im Auftrag festgelegt werden."
+						: "";
+	}
+  clearPlanningError(form);
   dialog.showModal();
 }
 
 document.querySelectorAll("[data-plan-job]").forEach((button) => {
-  button.addEventListener("click", () => openPlanning(button.dataset.planJob, button.dataset.title, button.dataset.duration));
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+		openPlanning(button.dataset.planJob, button.dataset.title, button.dataset.duration, undefined, button.dataset.transportMode, button.dataset.externalConfirmed);
+  });
 });
 
 const requestedPlanningJob = new URLSearchParams(window.location.search).get("job");
@@ -507,7 +1209,110 @@ if (requestedPlanningJob) {
 }
 
 document.querySelectorAll("[data-dialog-close]").forEach((button) => {
-  button.addEventListener("click", () => button.closest("dialog")?.close());
+  button.addEventListener("click", () => closeDialogWithDirtyCheck(button.closest("dialog")));
+});
+
+const commandPalette = document.querySelector("[data-command-palette]");
+const shortcutDialog = document.querySelector("[data-shortcuts-dialog]");
+let commandTrigger = null;
+let shortcutTrigger = null;
+
+function openCommandPalette(trigger) {
+  if (!commandPalette) return;
+  commandTrigger = trigger || document.activeElement;
+  if (!commandPalette.open) commandPalette.showModal();
+  window.requestAnimationFrame(() => commandPalette.querySelector("[data-global-search-input]")?.focus());
+}
+
+function closeCommandPalette() {
+  if (!commandPalette?.open) return;
+  commandPalette.close();
+  commandTrigger?.focus?.();
+}
+
+document.querySelectorAll("[data-command-open]").forEach((button) => button.addEventListener("click", () => openCommandPalette(button)));
+document.querySelectorAll("[data-command-close]").forEach((button) => button.addEventListener("click", closeCommandPalette));
+document.querySelectorAll("[data-shortcuts-open]").forEach((button) => button.addEventListener("click", () => {
+	shortcutTrigger = commandTrigger || button;
+  if (commandPalette?.open) commandPalette.close();
+  if (shortcutDialog && !shortcutDialog.open) shortcutDialog.showModal();
+  window.requestAnimationFrame(() => shortcutDialog?.querySelector("[data-shortcuts-close]")?.focus());
+}));
+document.querySelectorAll("[data-shortcuts-close]").forEach((button) => button.addEventListener("click", () => shortcutDialog?.close()));
+commandPalette?.addEventListener("close", () => commandTrigger?.focus?.());
+shortcutDialog?.addEventListener("close", () => shortcutTrigger?.focus?.());
+if (commandPalette instanceof HTMLDialogElement) document.documentElement.classList.add("command-dialog-ready");
+
+document.addEventListener("keydown", (event) => {
+  const active = document.activeElement;
+  const isInput = active && active.matches("input, textarea, select, [contenteditable='true']");
+  if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase("de-AT") === "k") {
+    event.preventDefault(); openCommandPalette(active); return;
+  }
+  if (!isInput && event.key === "?") {
+    event.preventDefault();
+	shortcutTrigger = active;
+    if (commandPalette?.open) commandPalette.close();
+    if (shortcutDialog && !shortcutDialog.open) shortcutDialog.showModal();
+	window.requestAnimationFrame(() => shortcutDialog?.querySelector("[data-shortcuts-close]")?.focus());
+  }
+});
+
+function renderGlobalSearchResults(target, results) {
+  target.replaceChildren();
+  if (!results.length) {
+    const empty = document.createElement("p"); empty.textContent = "Keine Treffer."; target.append(empty); return;
+  }
+  results.forEach((result) => {
+    const link = document.createElement("a"); link.className = "search-result"; link.href = result.Href || result.href;
+    const label = document.createElement("span"); label.className = "status-badge";
+    label.textContent = ({ customer: "Kunde", job: "Auftrag", appointment: "Termin" })[result.Kind || result.kind] || "Treffer";
+    const title = document.createElement("strong"); title.textContent = result.Title || result.title;
+    const subtitle = document.createElement("small"); subtitle.textContent = result.Subtitle || result.subtitle || "";
+    link.append(label, title, subtitle); target.append(link);
+  });
+  target.querySelector("a")?.focus();
+}
+
+document.querySelector("[data-global-search-form]")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const target = commandPalette?.querySelector("[data-global-search-results]");
+  if (!target || !form.reportValidity()) return;
+  target.textContent = "Suche läuft …";
+  try {
+    const response = await fetch(form.action, { method: "POST", body: new URLSearchParams(new FormData(form)), credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error?.message || "Suche derzeit nicht verfügbar.");
+    renderGlobalSearchResults(target, payload.results || []);
+  } catch (failure) {
+    target.replaceChildren();
+    const message = document.createElement("p"); message.className = "form-alert"; message.textContent = failure.message;
+    const retry = document.createElement("button"); retry.type = "button"; retry.className = "button button--quiet"; retry.textContent = "Suche erneut versuchen"; retry.addEventListener("click", () => form.requestSubmit());
+    target.append(message, retry); retry.focus();
+  }
+});
+
+const waitlistSelections = Array.from(document.querySelectorAll("[data-waitlist-select]"));
+const selectionCount = document.querySelector("[data-selection-count]");
+const selectionOpen = document.querySelector("[data-selection-open]");
+const selectionToolbar = document.querySelector("[data-waitlist-selection-toolbar]");
+function updateWaitlistSelection() {
+  const selected = waitlistSelections.filter((input) => input.checked);
+  if (selected.length > 20) {
+    const changed = selected[selected.length - 1]; changed.checked = false;
+    announce("Maximal 20 Aufträge auswählen.", "Auswahl begrenzt");
+    return updateWaitlistSelection();
+  }
+  if (selectionCount) selectionCount.textContent = `${selected.length} ausgewählt`;
+  if (selectionOpen) selectionOpen.disabled = selected.length === 0;
+  if (selectionToolbar) selectionToolbar.hidden = selected.length === 0;
+}
+waitlistSelections.forEach((input) => input.addEventListener("change", updateWaitlistSelection));
+updateWaitlistSelection();
+selectionOpen?.addEventListener("click", () => {
+  waitlistSelections.filter((input) => input.checked).forEach((input) => window.open(input.dataset.openHref, "_blank", "noopener"));
+  announce("Ausgewählte Aufträge wurden nur lesend geöffnet. Es wurde keine Mehrfachmutation ausgeführt.");
 });
 
 const planningForm = document.querySelector("[data-planning-form]");
@@ -516,9 +1321,8 @@ if (planningForm) {
     if (!window.fetch) return;
     event.preventDefault();
     const submit = planningForm.querySelector("button[type='submit']");
-    const error = planningForm.querySelector("[data-planning-error]");
     submit.disabled = true;
-    error.hidden = true;
+    clearPlanningError(planningForm);
     try {
       await calendarRequest("/api/v1/calendar/plan", new FormData(planningForm), planningForm.elements.csrf_token.value);
       dirtyForms.delete(planningForm);
@@ -528,8 +1332,7 @@ if (planningForm) {
       window.hackWerkCalendar?.refetchEvents();
       announceCalendar("Terminvorschlag gespeichert. Der Termin ist noch nicht fixiert.");
     } catch (failure) {
-      error.textContent = failure.message;
-      error.hidden = false;
+      showPlanningError(planningForm, failure);
     } finally {
       submit.disabled = false;
     }
@@ -600,6 +1403,11 @@ function notificationStateLabel(value) {
   return ({ queued: "Eingereiht", sending: "Wird gesendet", retry_wait: "Wartet auf Wiederholung", sent: "Gesendet", failed: "Fehlgeschlagen" })[value] || value;
 }
 
+function setAppointmentActionGroupVisibility(dialog, name, visible) {
+  const group = dialog.querySelector(`[data-appointment-action-group="${name}"]`);
+  if (group) group.hidden = !visible;
+}
+
 async function appointmentDetail(event, loadedProps) {
   const dialog = document.querySelector("[data-appointment-dialog]");
   if (!dialog) return;
@@ -615,6 +1423,7 @@ async function appointmentDetail(event, loadedProps) {
     }
   }
   if (requestSequence !== appointmentDetailSequence) return;
+  clearDialogDirtyState(dialog);
   dialog.dataset.appointmentId = event.id;
   dialog.dataset.version = props.version;
   dialog.dataset.lifecycle = props.lifecycle;
@@ -623,6 +1432,8 @@ async function appointmentDetail(event, loadedProps) {
   dialog.dataset.notificationTargets = planningSummary.targets.join(" und ");
   dialog.dataset.appointmentSummary = `${props.title}; ${props.status_label}`;
   clearAppointmentError();
+  const previousPreflight = dialog.querySelector("[data-appointment-preflight]");
+  if (previousPreflight) { previousPreflight.hidden = true; previousPreflight.replaceChildren(); }
   dialog.querySelectorAll([
     "[data-appointment-move-override]",
     "[data-without-notification-reason]",
@@ -633,7 +1444,7 @@ async function appointmentDetail(event, loadedProps) {
     "[data-appointment-complete-override-reason]",
   ].join(",")).forEach((field) => { field.value = ""; });
   const withoutNotification = dialog.querySelector("[data-without-notification]");
-  if (withoutNotification) withoutNotification.hidden = (props.notification_channels || []).length > 0;
+  if (withoutNotification) withoutNotification.hidden = true;
   dialog.querySelector("[data-appointment-title]").textContent = props.title;
   const detail = dialog.querySelector("[data-appointment-detail]");
   detail.replaceChildren();
@@ -645,10 +1456,17 @@ async function appointmentDetail(event, loadedProps) {
   const time = new Intl.DateTimeFormat("de-AT", {
     timeZone: "Europe/Vienna", hour: "2-digit", minute: "2-digit",
   });
+  const dateOnly = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Vienna", year: "numeric", month: "2-digit", day: "2-digit",
+  });
   const channels = (props.notification_channels || []).join(" und ") || "Keine automatische Benachrichtigung";
   const rows = [
     ["Status", props.status_label],
     ["Zeit", `${dateTime.format(start)} – ${time.format(end)}`],
+    ["Dauer", `${Math.round((end - start) / 60000)} Minuten${dateOnly.format(start) !== dateOnly.format(end) ? " · endet am Folgetag" : ""}`],
+    ["Arbeitszeit", `${props.working_minutes || 0} Minuten`],
+    ["Transportzeit", `${props.transport_minutes || 0} Minuten`],
+    ["Puffer", `${props.buffer_before_minutes || 0} Minuten davor · ${props.buffer_after_minutes || 0} Minuten danach`],
     ["Ort", props.locality], ["Menge", `${props.volume_m3} m³`],
     ["Fahrer", (props.drivers || []).map((item) => item.Name).join(", ") || "Nicht zugewiesen"],
     ["Ressourcen", (props.resources || []).map((item) => item.Name).join(", ") || "Nicht zugewiesen"],
@@ -676,6 +1494,7 @@ async function appointmentDetail(event, loadedProps) {
       notificationDateLabel(item.responded_at) ? `Antwort ${notificationDateLabel(item.responded_at)}` : "",
     ].filter(Boolean);
     rows.push([`Versand ${item.channel === "sms" ? "SMS" : "E-Mail"}`, timeline.join(" · ")]);
+    if (item.response_note) rows.push(["Rückrufnotiz zur Ablehnung", item.response_note]);
   });
   const list = document.createElement("dl");
   list.className = "appointment-detail-list";
@@ -686,6 +1505,20 @@ async function appointmentDetail(event, loadedProps) {
     wrapper.append(term, description); list.append(wrapper);
   });
   detail.append(list);
+  if (props.message_preview) {
+    const preview = document.createElement("section");
+    preview.className = "message-preview";
+    const heading = document.createElement("h3"); heading.textContent = "Nachrichtenvorschau vor Fixierung / neuem Link";
+    const explanation = document.createElement("p"); explanation.textContent = "Diese Vorschau löst keinen Versand aus. Der sichere Bestätigungslink wird erst beim Versand eingesetzt.";
+    const subject = document.createElement("p"); subject.textContent = `Betreff: ${props.message_preview.Subject || props.message_preview.subject || ""}`;
+    const email = document.createElement("pre"); email.textContent = props.message_preview.Text || props.message_preview.text || "";
+    const sms = document.createElement("pre"); sms.textContent = props.message_preview.SMS || props.message_preview.sms || "";
+    preview.append(heading, explanation, subject, email, sms); detail.append(preview);
+  }
+  const copyTime = document.createElement("button");
+  copyTime.type = "button"; copyTime.className = "button button--quiet"; copyTime.textContent = "Beginn und Ende kopieren";
+  copyTime.addEventListener("click", async () => { if (await copyText(`${dateTime.format(start)} – ${dateTime.format(end)} · Europe/Vienna`)) announce("Terminzeit kopiert."); });
+  detail.append(copyTime);
   if (props.maps_url) {
     const navigation = document.createElement("a");
     navigation.className = "button button--quiet"; navigation.href = props.maps_url;
@@ -699,9 +1532,16 @@ async function appointmentDetail(event, loadedProps) {
     job.dataset.appointmentJobLink = "";
     job.textContent = "Auftrag öffnen";
     detail.append(job);
+    const customer = document.createElement("a"); customer.className = "button button--quiet"; customer.href = `/customers/${encodeURIComponent(props.customer_id)}`; customer.textContent = "Kundenakte öffnen"; detail.append(customer);
   }
+  const permalink = document.createElement("a"); permalink.className = "button button--quiet"; permalink.href = `/calendar?appointment=${encodeURIComponent(event.id)}`; permalink.textContent = "Terminlink"; detail.append(permalink);
   const fix = dialog.querySelector("[data-appointment-fix]");
   const cancel = dialog.querySelector("[data-appointment-cancel]");
+	const cancelField = dialog.querySelector("[data-appointment-cancel-field]");
+	const cancelReason = dialog.querySelector("[data-appointment-cancel-reason]");
+	const cancelLabel = dialog.querySelector("[data-appointment-cancel-label]");
+	const dangerTitle = dialog.querySelector("[data-appointment-danger-title]");
+  const assignment = dialog.querySelector("[data-appointment-assignment]");
   const reschedule = dialog.querySelector("[data-appointment-reschedule]");
 	const swapPanel = dialog.querySelector("[data-appointment-swap-panel]");
   const confirmationAdmin = dialog.querySelector("[data-confirmation-admin]");
@@ -710,10 +1550,47 @@ async function appointmentDetail(event, loadedProps) {
 	const reopenPanel = dialog.querySelector("[data-appointment-reopen-panel]");
   const completePanel = dialog.querySelector("[data-appointment-complete-panel]");
   const completeOverride = dialog.querySelector("[data-appointment-complete-override]");
-  if (fix) fix.hidden = !props.can_fix;
-  if (cancel) cancel.hidden = !props.can_cancel;
-  if (reschedule) reschedule.hidden = !props.can_reschedule;
-	if (swapPanel) swapPanel.hidden = !props.can_swap;
+  const canAssign = Boolean(props.can_assign);
+  const canReschedule = Boolean(props.can_reschedule);
+  const canSwap = Boolean(props.can_swap);
+  const canFix = Boolean(props.can_fix);
+  const canComplete = Boolean(props.can_complete);
+  const canCancel = Boolean(props.can_cancel);
+  const canReopen = Boolean(props.can_reopen);
+  const canReissue = Boolean(props.can_reissue);
+  const canResetConfirmation = Boolean(props.can_reset_confirmation);
+  const needsWithoutNotificationReason = (canFix || canReschedule) && (props.notification_channels || []).length === 0;
+  if (fix) fix.hidden = !canFix;
+  if (cancel) cancel.hidden = !canCancel;
+	if (cancelField) cancelField.hidden = !canCancel;
+	if (cancelReason) cancelReason.required = canCancel && props.lifecycle === "fixed";
+	if (cancelLabel) cancelLabel.textContent = props.lifecycle === "fixed" ? "Absagegrund (erforderlich)" : "Absagegrund (optional)";
+	if (dangerTitle) dangerTitle.textContent = canCancel ? "Termin absagen" : "Absage rückgängig machen";
+  if (assignment) {
+    assignment.hidden = !canAssign;
+    const selectedDrivers = new Set((props.drivers || []).map((item) => item.ID));
+    assignment.querySelectorAll("[data-appointment-driver]").forEach((input) => {
+      input.checked = selectedDrivers.has(input.value);
+    });
+    const primary = (props.drivers || []).find((item) => item.Primary);
+    const primaryInput = assignment.querySelector("[data-appointment-primary-driver]");
+    if (primaryInput) primaryInput.value = primary?.ID || "";
+    const resourceFor = (purpose) => (props.resources || []).find((item) => item.Purpose === purpose)?.ID || "";
+    const chipper = assignment.querySelector("[data-appointment-chipper]");
+    const transport = assignment.querySelector("[data-appointment-transport]");
+    const trailer = assignment.querySelector("[data-appointment-trailer]");
+    if (chipper) chipper.value = resourceFor("chipping");
+    if (transport) transport.value = resourceFor("transport");
+    if (trailer) trailer.value = resourceFor("trailer");
+    const selectedOtherResources = new Set((props.resources || []).filter((item) => item.Purpose === "other").map((item) => item.ID));
+    assignment.querySelectorAll("[data-appointment-other-resource]").forEach((input) => {
+      input.checked = selectedOtherResources.has(input.value);
+    });
+    const assignmentVersion = assignment.querySelector("[data-appointment-assignment-version]");
+    if (assignmentVersion) assignmentVersion.value = props.version;
+  }
+  if (reschedule) reschedule.hidden = !canReschedule;
+	if (swapPanel) swapPanel.hidden = !canSwap;
 	const swapTarget = dialog.querySelector("[data-appointment-swap-target]");
 	if (swapTarget) {
 	  swapTarget.replaceChildren(new Option("Bitte wählen", ""));
@@ -730,38 +1607,68 @@ async function appointmentDetail(event, loadedProps) {
   dialog.dataset.originalDuration = durationMinutes;
   if (startInput) startInput.value = localStart;
   if (durationInput) durationInput.value = durationMinutes;
-  if (confirmationAdmin) confirmationAdmin.hidden = !props.can_reissue;
-  if (reissue) reissue.hidden = !props.can_reissue;
-  if (resetConfirmation) resetConfirmation.hidden = !props.can_reset_confirmation;
-	if (reopenPanel) reopenPanel.hidden = !props.can_reopen;
-  if (completePanel) completePanel.hidden = !props.can_complete;
+  if (withoutNotification) withoutNotification.hidden = !needsWithoutNotificationReason;
+  if (confirmationAdmin) confirmationAdmin.hidden = !(canReissue || canResetConfirmation);
+  if (reissue) reissue.hidden = !canReissue;
+  if (resetConfirmation) resetConfirmation.hidden = !canResetConfirmation;
+	if (reopenPanel) reopenPanel.hidden = !canReopen;
+  if (completePanel) completePanel.hidden = !canComplete;
   if (completeOverride) completeOverride.hidden = !props.complete_requires_override;
   dialog.dataset.completeRequiresOverride = props.complete_requires_override ? "true" : "false";
+  setAppointmentActionGroupVisibility(dialog, "assignment", canAssign);
+  setAppointmentActionGroupVisibility(dialog, "time", canReschedule || canSwap);
+  setAppointmentActionGroupVisibility(dialog, "customer-communication", needsWithoutNotificationReason || canReissue || canResetConfirmation);
+  setAppointmentActionGroupVisibility(dialog, "primary", canFix || canComplete);
+  setAppointmentActionGroupVisibility(dialog, "danger", canCancel || canReopen);
   dialog.showModal();
 }
 
 document.querySelectorAll("[data-appointment-close]").forEach((button) => {
   button.addEventListener("click", () => {
-    appointmentDetailSequence += 1;
-    button.closest("dialog")?.close();
+    if (closeDialogWithDirtyCheck(button.closest("dialog"))) appointmentDetailSequence += 1;
   });
+});
+document.querySelector("[data-appointment-dialog]")?.addEventListener("cancel", (event) => {
+  if (event.currentTarget.dataset.actionPending === "true") event.preventDefault();
 });
 
 async function appointmentAction(action, extra = {}) {
   const dialog = document.querySelector("[data-appointment-dialog]");
+  if (dialog.dataset.actionPending === "true") throw new Error("appointment action pending");
+  const controls = Array.from(dialog.querySelectorAll("button, input, select, textarea"));
+  const controlStates = controls.map((control) => control.disabled);
+  dialog.dataset.actionPending = "true";
+  dialog.setAttribute("aria-busy", "true");
+  controls.forEach((control) => { control.disabled = true; });
+  dialog.inert = true;
   const csrf = dialog.querySelector("[data-appointment-csrf]").value;
   const form = new FormData();
   form.set("csrf_token", csrf); form.set("version", dialog.dataset.version);
-  Object.entries(extra).forEach(([key, value]) => form.set(key, value));
-  const result = await calendarRequest(`/api/v1/appointments/${encodeURIComponent(dialog.dataset.appointmentId)}/${action}`, form, csrf);
-  dialog.close(); window.hackWerkCalendar?.refetchEvents();
-  const message = action === "fix"
-    ? "Termin wurde ausdrücklich fixiert; der Versand erfolgt später über die Outbox."
-    : action === "complete"
-      ? "Termin und Auftrag wurden als erledigt markiert."
-      : "Termin wurde aktualisiert.";
-  announceCalendar(message);
-  return result;
+  Object.entries(extra).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      form.delete(key);
+      value.forEach((item) => form.append(key, item));
+      return;
+    }
+    form.set(key, value);
+  });
+  try {
+    const result = await calendarRequest(`/api/v1/appointments/${encodeURIComponent(dialog.dataset.appointmentId)}/${action}`, form, csrf);
+    clearDialogDirtyState(dialog);
+    dialog.close(); window.hackWerkCalendar?.refetchEvents();
+    const message = action === "fix"
+      ? "Termin wurde ausdrücklich fixiert; der Versand erfolgt später über die Outbox."
+      : action === "complete"
+        ? "Termin und Auftrag wurden als erledigt markiert."
+        : "Termin wurde aktualisiert.";
+    announceCalendar(message);
+    return result;
+  } finally {
+    delete dialog.dataset.actionPending;
+    dialog.removeAttribute("aria-busy");
+    dialog.inert = false;
+    controls.forEach((control, index) => { control.disabled = controlStates[index]; });
+  }
 }
 
 document.querySelector("[data-appointment-reschedule-submit]")?.addEventListener("click", async () => {
@@ -779,14 +1686,23 @@ document.querySelector("[data-appointment-reschedule-submit]")?.addEventListener
     return;
   }
   clearAppointmentError();
+  const preflight = dialog.querySelector("[data-appointment-preflight]");
+  if (preflight) { preflight.hidden = true; preflight.replaceChildren(); }
   try {
     const action = start.value === dialog.dataset.originalStart ? "resize" : "move";
-    await appointmentAction(action, {
+	const proposedStart = viennaLocalDate(start.value);
+	const proposedEnd = proposedStart ? new Date(proposedStart.getTime() + Number(duration.value) * 60000) : null;
+	const fields = {
       starts_at_local: start.value,
       duration_minutes: duration.value,
       override_reason: dialog.querySelector("[data-appointment-move-override]")?.value.trim() || "",
       without_notification_reason: reason,
-    });
+	  starts_at: proposedStart?.toISOString() || "",
+	  ends_at: proposedEnd?.toISOString() || "",
+	};
+	await previewAppointmentMutation(dialog.dataset.appointmentId, dialog.dataset.version, action, fields, dialog.querySelector("[data-appointment-csrf]").value);
+	if (!window.confirm("Geprüfte Zeitänderung mit Alt/Neu-Vergleich speichern? Der Server prüft Version und Belegungen erneut.")) return;
+	await appointmentAction(action, fields);
   } catch (failure) {
 	showAppointmentFailure(failure);
 	if (failure.code === "reservation_conflict") {
@@ -804,6 +1720,24 @@ document.querySelector("[data-appointment-swap]")?.addEventListener("click", asy
   if (!target?.value || !option?.dataset.version) { showAppointmentError("Bitte wählen Sie einen anderen Entwurf oder Vorschlag.", target); return; }
   if (!window.confirm("Die Zeitfenster beider Vorschläge atomisch tauschen? Es wird kein Termin fixiert und keine Nachricht versendet.")) return;
   try { await appointmentAction("swap", { other_appointment_id: target.value, other_version: option.dataset.version }); } catch (failure) { showAppointmentFailure(failure); }
+});
+
+document.querySelector("[data-appointment-swap-search]")?.addEventListener("click", async () => {
+  const dialog = document.querySelector("[data-appointment-dialog]");
+  const date = dialog?.querySelector("[data-appointment-swap-date]");
+  const target = dialog?.querySelector("[data-appointment-swap-target]");
+  if (!date?.value || !target) { showAppointmentError("Bitte wählen Sie ein Datum.", date); return; }
+  const response = await fetch(`/api/v1/appointments/${encodeURIComponent(dialog.dataset.appointmentId)}/swap-candidates?date=${encodeURIComponent(date.value)}`, { headers: { Accept: "application/json" } });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) { showAppointmentFailure(calendarFailure(payload, response.status)); return; }
+  target.replaceChildren(new Option("Bitte wählen", ""));
+  (payload.candidates || []).forEach((candidate) => {
+    const label = new Intl.DateTimeFormat("de-AT", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Vienna" }).format(new Date(candidate.start));
+    const option = new Option(`${candidate.title} · ${label}`, candidate.id);
+    option.dataset.version = candidate.version;
+    target.add(option);
+  });
+  announceCalendar(payload.candidates?.length ? `${payload.candidates.length} tauschbare Vorschläge geladen.` : "Keine tauschbaren Vorschläge an diesem Datum gefunden.");
 });
 
 document.querySelectorAll("[data-appointment-duration-adjust]").forEach((button) => {
@@ -828,9 +1762,12 @@ document.querySelector("[data-appointment-fix]")?.addEventListener("click", asyn
     showAppointmentError("Bitte begründen Sie die Fixierung ohne Benachrichtigung.", reasonInput);
     return;
   }
-  if (!window.confirm(`Termin mit den angezeigten Fahrern und Ressourcen fixieren? Versandvormerkung: ${channels}; ${targets}.`)) return;
   clearAppointmentError();
-  try { await appointmentAction("fix", { without_notification_reason: reason }); } catch (failure) { showAppointmentFailure(failure); }
+  try {
+    await previewAppointmentMutation(dialog.dataset.appointmentId, dialog.dataset.version, "fix", { without_notification_reason: reason }, dialog.querySelector("[data-appointment-csrf]").value);
+    if (!window.confirm(`Termin verbindlich fixieren? Zeit, Fahrer und Ressourcen werden reserviert. Die Kundeninformation wird über ${channels} für ${targets} zum Versand vorgemerkt.`)) return;
+    await appointmentAction("fix", { without_notification_reason: reason });
+  } catch (failure) { showAppointmentFailure(failure); }
 });
 
 document.querySelector("[data-appointment-complete]")?.addEventListener("click", async () => {
@@ -848,10 +1785,17 @@ document.querySelector("[data-appointment-complete]")?.addEventListener("click",
 
 document.querySelector("[data-appointment-cancel]")?.addEventListener("click", async () => {
   const dialog = document.querySelector("[data-appointment-dialog]");
-  const reason = document.querySelector("[data-appointment-cancel-reason]")?.value || "";
+  const reasonInput = document.querySelector("[data-appointment-cancel-reason]");
+  const reason = reasonInput?.value || "";
+  if (reasonInput?.required && !reason.trim()) {
+    showAppointmentError("Bitte geben Sie einen Absagegrund an.", reasonInput);
+    return;
+  }
   const summary = dialog?.dataset.appointmentSummary || "diesen Termin";
-  const targets = dialog?.dataset.notificationTargets || "kein automatisches Versandziel";
-  if (!window.confirm(`${summary} wirklich absagen? Begründung: ${reason.trim() || "nicht angegeben"}. Versandziel: ${targets}.`)) return;
+  const consequence = dialog?.dataset.lifecycle === "fixed"
+    ? "Fahrer- und Ressourcenreservierungen werden aufgehoben und der Auftrag wird als abgebrochen geführt."
+    : "Der Vorschlag wird entfernt und der Auftrag kehrt in die Warteliste zurück.";
+  if (!window.confirm(`${summary} wirklich absagen? ${consequence} Begründung: ${reason.trim() || "nicht angegeben"}.`)) return;
   clearAppointmentError();
   try { await appointmentAction("cancel", { reason }); } catch (failure) { showAppointmentFailure(failure); }
 });
@@ -865,7 +1809,7 @@ document.querySelector("[data-appointment-reopen]")?.addEventListener("click", a
     return;
   }
   const summary = dialog?.dataset.appointmentSummary || "Diesen abgesagten Termin";
-  if (!window.confirm(`${summary} als unverbindlichen Vorschlag wieder öffnen? Begründung: ${reason}. Es wird keine Nachricht versendet.`)) return;
+  if (!window.confirm(`${summary} als unverbindlichen Vorschlag wieder öffnen? Fahrer- und Ressourcenbelegung werden erneut geprüft. Alte Bestätigungslinks werden widerrufen; eine Nachricht wird nicht versendet. Begründung: ${reason}.`)) return;
   clearAppointmentError();
   try {
     await appointmentAction("reopen", {
@@ -892,14 +1836,28 @@ async function confirmationAdminAction(action, question) {
 document.querySelector("[data-confirmation-reissue]")?.addEventListener("click", () => confirmationAdminAction("reissue", "Aktiven Link widerrufen und eine neue Benachrichtigung einreihen?"));
 document.querySelector("[data-confirmation-reset]")?.addEventListener("click", () => confirmationAdminAction("reset", "Gespeicherte Kundenantwort wirklich zurücksetzen?"));
 
-function calendarMutation(info, action, csrf) {
+async function calendarMutation(info, action, csrf) {
 	const proposedStart = new Date(info.event.start);
 	const proposedEnd = new Date(info.event.end);
+  const previousStart = new Date(info.oldEvent?.start || info.event.start);
+  const previousEnd = new Date(info.oldEvent?.end || info.event.end);
+  const compareFormat = new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", dateStyle: "short", timeStyle: "short" });
+  const comparison = action === "resize"
+    ? `Dauer ändern: ${Math.round((previousEnd - previousStart) / 60000)} → ${Math.round((proposedEnd - proposedStart) / 60000)} Minuten?`
+    : `Termin verschieben:\nAlt: ${compareFormat.format(previousStart)}–${compareFormat.format(previousEnd)}\nNeu: ${compareFormat.format(proposedStart)}–${compareFormat.format(proposedEnd)}?`;
   const form = new FormData();
   form.set("csrf_token", csrf);
   form.set("version", info.event.extendedProps.version);
   form.set("starts_at", info.event.start.toISOString());
   form.set("ends_at", info.event.end.toISOString());
+  try {
+    await previewAppointmentMutation(info.event.id, info.event.extendedProps.version, action, {
+      starts_at: info.event.start.toISOString(), ends_at: info.event.end.toISOString(),
+    }, csrf);
+  } catch (failure) {
+    info.revert(); showAppointmentFailure(failure); return;
+  }
+  if (!window.confirm(comparison)) { info.revert(); announceCalendar("Änderung abgebrochen."); return; }
   const send = () => calendarRequest(`/api/v1/appointments/${encodeURIComponent(info.event.id)}/${action}`, form, csrf);
   const accept = (payload, message) => {
     if (Number.isInteger(payload?.version)) info.event.setExtendedProp("version", payload.version);
@@ -927,18 +1885,31 @@ function calendarMutation(info, action, csrf) {
   });
 }
 
+const calendarWaitlistPanel = document.querySelector(".calendar-waitlist");
+const calendarCompactMedia = window.matchMedia("(max-width: 1050px)");
+if (calendarWaitlistPanel) {
+  const syncCalendarDisclosures = () => {
+    calendarWaitlistPanel.open = !calendarCompactMedia.matches;
+  };
+  syncCalendarDisclosures();
+  calendarCompactMedia.addEventListener("change", syncCalendarDisclosures);
+}
+
 const calendarElement = document.querySelector("[data-calendar]");
 if (calendarElement && window.FullCalendar) {
   const editable = calendarElement.dataset.editable === "true";
-  const compact = window.matchMedia("(max-width: 680px)").matches;
+  const compact = calendarCompactMedia.matches;
   const calendarParameters = new URLSearchParams(window.location.search);
   const requestedAppointment = calendarParameters.get("appointment");
-  const requestedView = { day: "timeGridDay", week: "timeGridWeek", month: "dayGridMonth", agenda: "listWeek" }[calendarParameters.get("view")]
+  const requestedViewName = calendarParameters.get("view");
+  const requestedView = (compact && requestedViewName === "week" ? "listWeek" : { day: "timeGridDay", week: "timeGridWeek", month: "dayGridMonth", agenda: "listWeek" }[requestedViewName])
     || (compact ? "timeGridDay" : "timeGridWeek");
   const requestedWeekends = calendarParameters.get("weekends") !== "false";
   const viewParameter = (view) => ({ timeGridDay: "day", timeGridWeek: "week", dayGridMonth: "month", listWeek: "agenda" }[view] || "week");
+  const toolbarForWidth = (narrow) => narrow
+    ? { start: "prev,next", center: "title", end: "today,timeGridDay,dayGridMonth,listWeek" }
+    : { start: "prev,next today", center: "title", end: "timeGridDay,timeGridWeek,dayGridMonth,listWeek" };
   const calendar = new FullCalendar.Calendar(calendarElement, {
-    themeSystem: "classic",
     locale: "de-AT",
     timeZone: "Europe/Vienna",
     firstDay: 1,
@@ -962,14 +1933,20 @@ if (calendarElement && window.FullCalendar) {
     snapDuration: "00:15:00",
     dayMaxEvents: compact ? 1 : 3,
     moreLinkText: (count) => `+${count} weitere`,
-    headerToolbar: { start: "prev,next today", center: "title", end: compact ? "timeGridDay,dayGridMonth,listWeek" : "timeGridDay,timeGridWeek,dayGridMonth,listWeek" },
+    headerToolbar: toolbarForWidth(compact),
     buttons: {
-      today: { text: "Heute" },
-      timeGridDay: { text: "Tag" },
-      timeGridWeek: { text: "Woche" },
-      dayGridMonth: { text: "Monat" },
-      listWeek: { text: "Agenda" },
+	  prev: { hint: "Vorheriger Zeitraum" },
+	  next: { hint: "Nächster Zeitraum" },
+      today: { text: "Heute", hint: "Heutigen Tag anzeigen" },
+      timeGridDay: { text: "Tag", hint: "Tagesansicht öffnen" },
+      timeGridWeek: { text: "Woche", hint: "Wochenansicht öffnen" },
+      dayGridMonth: { text: "Monat", hint: "Monatsansicht öffnen" },
+      listWeek: { text: "Agenda", hint: "Agendaansicht öffnen" },
     },
+    viewHint: "Ansicht $0 öffnen",
+	timedText: "Uhrzeit",
+    moreLinkHint: (count) => `${count} weitere Termine anzeigen`,
+    noEventsText: "Keine Termine in diesem Zeitraum",
     events(info, success, failure) {
       const url = new URL(calendarElement.dataset.eventSource, window.location.origin);
       url.searchParams.set("from", info.start.toISOString());
@@ -978,6 +1955,9 @@ if (calendarElement && window.FullCalendar) {
         .then((response) => response.ok ? response.json() : Promise.reject(new Error("Kalenderdaten nicht verfügbar")))
         .then((events) => {
           success(events);
+          calendarElement.dataset.loadedAt = new Date().toISOString();
+          const freshness = document.querySelector("[data-calendar-freshness]");
+          if (freshness) freshness.textContent = `Zuletzt geladen: ${new Date().toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" })} Uhr`;
           if (calendarElement.dataset.loadFailed === "true") {
             delete calendarElement.dataset.loadFailed;
             announceCalendar("Kalenderdaten wurden wieder geladen.");
@@ -995,6 +1975,8 @@ if (calendarElement && window.FullCalendar) {
       info.el.tabIndex = 0;
       info.el.setAttribute("role", "button");
       info.el.setAttribute("aria-label", `${info.event.title}, ${info.event.extendedProps.status_label || "Termin"}. Details öffnen`);
+      info.el.title = `${info.event.title} · ${info.event.extendedProps.status_label || "Termin"}`;
+      if (info.event.start && info.event.end && info.event.start.toLocaleDateString("de-AT", { timeZone: "Europe/Vienna" }) !== info.event.end.toLocaleDateString("de-AT", { timeZone: "Europe/Vienna" })) info.el.dataset.crossMidnight = "true";
       info.el.addEventListener("keydown", (event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
@@ -1021,7 +2003,7 @@ if (calendarElement && window.FullCalendar) {
     },
     drop(info) {
       if (!editable) return;
-      openPlanning(info.draggedEl.dataset.calendarJob, info.draggedEl.dataset.title, info.draggedEl.dataset.duration, info.date);
+      openPlanning(info.draggedEl.dataset.calendarJob, info.draggedEl.dataset.title, info.draggedEl.dataset.duration, info.date, info.draggedEl.dataset.transportMode, info.draggedEl.dataset.externalConfirmed);
     },
     datesSet(info) {
       const dateInput = document.querySelector("[data-calendar-date]");
@@ -1031,14 +2013,37 @@ if (calendarElement && window.FullCalendar) {
       url.searchParams.set("view", viewParameter(info.view.type));
       url.searchParams.set("weekends", String(calendar.getOption("weekends")));
       url.searchParams.delete("appointment");
-      window.history.replaceState({}, "", url);
+      window.history.replaceState(window.history.state, "", url);
+      const range = document.querySelector("[data-calendar-range]");
+      const rangeFormat = new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
+      const inclusiveEnd = new Date(info.end.getTime() - 1);
+      const label = `${rangeFormat.format(info.start)} bis ${rangeFormat.format(inclusiveEnd)}`;
+      if (range) range.textContent = label;
+      document.title = `${label} – Kalender – HackWerk`;
+      const offsetName = (date) => new Intl.DateTimeFormat("de-AT", { timeZone: "Europe/Vienna", timeZoneName: "longOffset" }).formatToParts(date).find((part) => part.type === "timeZoneName")?.value;
+      const dstChange = offsetName(info.start) !== offsetName(inclusiveEnd);
+      if (dateInput) dateInput.title = dstChange ? "Dieser Bereich enthält einen Wechsel zwischen Sommer- und Winterzeit." : "Datum direkt auswählen";
     },
   });
   calendar.render();
+  let calendarNarrow = compact;
+  window.addEventListener("resize", () => {
+    const narrow = window.matchMedia("(max-width: 1050px)").matches;
+    if (narrow === calendarNarrow) return;
+    calendarNarrow = narrow;
+    calendar.setOption("headerToolbar", toolbarForWidth(narrow));
+    if (narrow && calendar.view.type === "timeGridWeek") {
+      calendar.changeView("listWeek");
+      announceCalendar("Die Wochenansicht wird auf diesem Bildschirm als kompakte Agenda angezeigt.");
+    }
+  });
   window.hackWerkCalendar = calendar;
   const controls = document.querySelector("[data-calendar-controls]");
   const calendarDate = controls?.querySelector("[data-calendar-date]");
   const weekendToggle = controls?.querySelector("[data-calendar-weekends]");
+  const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const zoneWarning = document.querySelector("[data-calendar-timezone-warning]");
+  if (zoneWarning && browserZone !== "Europe/Vienna") { zoneWarning.hidden = false; zoneWarning.textContent = `Ihr Browser verwendet ${browserZone || "eine andere Zeitzone"}. HackWerk zeigt Termine verbindlich in Europe/Vienna.`; }
   if (weekendToggle) {
     weekendToggle.checked = requestedWeekends;
     weekendToggle.addEventListener("change", () => {
@@ -1057,6 +2062,9 @@ if (calendarElement && window.FullCalendar) {
       calendar.gotoDate(target);
     });
   });
+  controls?.querySelector("[data-calendar-reload]")?.addEventListener("click", () => { calendar.refetchEvents(); announceCalendar("Kalender wird neu geladen; Ansicht und Datum bleiben erhalten."); });
+  controls?.querySelector("[data-calendar-share]")?.addEventListener("click", async () => { const link = new URL(window.location.href); link.searchParams.delete("appointment"); if (await copyText(link.href)) announceCalendar("Datenschutzarmer Ansichtslink kopiert."); });
+  window.addEventListener("hackwerk:online", () => { if (calendarElement.dataset.loadFailed === "true") calendar.refetchEvents(); });
   if (requestedAppointment) {
     loadAppointmentDetail(requestedAppointment).then(async (props) => {
       const startsAt = new Date(props.start);
@@ -1078,7 +2086,47 @@ if (calendarElement && window.FullCalendar) {
   }
 }
 
-const popoverMenus = Array.from(document.querySelectorAll("[data-mobile-menu], [data-popover-menu]"));
+const mobileMenu = document.querySelector("[data-mobile-menu]");
+const mobileMenuTrigger = document.querySelector("[data-mobile-menu-open]");
+const closeMobileMenu = () => {
+  if (mobileMenu instanceof HTMLDialogElement && mobileMenu.open) mobileMenu.close();
+};
+if (mobileMenu instanceof HTMLDialogElement && mobileMenuTrigger instanceof HTMLElement) {
+	const focusableMobileMenuControls = () => Array.from(mobileMenu.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])'))
+		.filter((control) => control instanceof HTMLElement && control.getClientRects().length > 0);
+  mobileMenuTrigger.addEventListener("click", () => {
+    if (mobileMenu.open) return;
+    mobileMenu.showModal();
+    mobileMenuTrigger.setAttribute("aria-expanded", "true");
+    mobileMenu.querySelector("[data-mobile-menu-close]")?.focus();
+  });
+  mobileMenu.querySelector("[data-mobile-menu-close]")?.addEventListener("click", closeMobileMenu);
+  mobileMenu.querySelectorAll("a").forEach((link) => link.addEventListener("click", closeMobileMenu));
+  mobileMenu.addEventListener("click", (event) => {
+    if (event.target === mobileMenu) closeMobileMenu();
+  });
+	mobileMenu.addEventListener("keydown", (event) => {
+		if (event.key !== "Tab") return;
+		const controls = focusableMobileMenuControls();
+		if (controls.length === 0) return;
+		const first = controls[0];
+		const last = controls[controls.length - 1];
+		if (event.shiftKey && document.activeElement === first) {
+			event.preventDefault();
+			last.focus();
+		} else if (!event.shiftKey && document.activeElement === last) {
+			event.preventDefault();
+			first.focus();
+		}
+	});
+  mobileMenu.addEventListener("close", () => {
+    mobileMenuTrigger.setAttribute("aria-expanded", "false");
+    mobileMenuTrigger.focus();
+  });
+  document.documentElement.classList.add("mobile-menu-dialog-ready");
+}
+
+const popoverMenus = Array.from(document.querySelectorAll("[data-popover-menu]"));
 popoverMenus.forEach((menu) => {
   const summary = menu.querySelector("summary");
   menu.addEventListener("toggle", () => {
@@ -1098,11 +2146,23 @@ popoverMenus.forEach((menu) => {
 });
 
 const dashboardStarts = Array.from(document.querySelectorAll("[data-dashboard-start]"));
+const viennaCalendarDate = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Vienna",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const viennaCalendarDayNumber = (value) => {
+  const date = new Date(value);
+  const parts = Object.fromEntries(viennaCalendarDate.formatToParts(date).map((part) => [part.type, part.value]));
+  return Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day)) / 86400000;
+};
 function updateDashboardCountdown() {
   if (document.hidden || dashboardStarts.length === 0) return;
   document.querySelectorAll("[data-dashboard-countdown]").forEach((node) => node.remove());
   const now = Date.now();
   const next = dashboardStarts
+    .filter((node) => node.getClientRects().length > 0 && getComputedStyle(node).visibility !== "hidden")
     .map((node) => ({ node, startsAt: Date.parse(node.dataset.dashboardStart) }))
     .filter((item) => Number.isFinite(item.startsAt) && item.startsAt > now)
     .sort((left, right) => left.startsAt - right.startsAt)[0];
@@ -1111,28 +2171,30 @@ function updateDashboardCountdown() {
   const label = document.createElement("small");
   label.dataset.dashboardCountdown = "true";
   label.className = "dashboard-countdown";
-  label.textContent = minutes < 60 ? `beginnt in ${minutes} Min.` : `beginnt in ${Math.floor(minutes / 60)} Std. ${minutes % 60} Min.`;
+  const calendarDays = viennaCalendarDayNumber(next.startsAt) - viennaCalendarDayNumber(now);
+  if (calendarDays >= 1) {
+    label.textContent = calendarDays === 1 ? "morgen" : `in ${calendarDays} Tagen`;
+  } else {
+    label.textContent = minutes < 60 ? `beginnt in ${minutes} Min.` : `beginnt in ${Math.floor(minutes / 60)} Std. ${minutes % 60} Min.`;
+  }
+  if (minutes <= 120) label.classList.add("dashboard-countdown--soon");
   next.node.parentElement?.append(label);
 }
 updateDashboardCountdown();
 window.setInterval(updateDashboardCountdown, 30000);
 document.addEventListener("visibilitychange", updateDashboardCountdown);
+window.addEventListener("resize", updateDashboardCountdown);
 
 document.querySelectorAll("[data-copy-source]").forEach((button) => {
   button.addEventListener("click", async () => {
     const input = document.getElementById(button.dataset.copySource);
     if (!input) return;
     const original = button.textContent;
-    try {
-      await navigator.clipboard.writeText(input.value);
+    if (await copyText(input.value, input)) {
       button.textContent = "Kopiert";
-    } catch {
-      input.select();
-      document.execCommand("copy");
-      button.textContent = "Kopiert";
+      announce("In die Zwischenablage kopiert.");
+      window.setTimeout(() => { button.textContent = original; }, 1800);
     }
-    announce("In die Zwischenablage kopiert.");
-    window.setTimeout(() => { button.textContent = original; }, 1800);
   });
 });
 
@@ -1141,20 +2203,30 @@ document.querySelectorAll("[data-copy-value]").forEach((button) => {
     const value = String(button.dataset.copyValue || "").trim();
     if (!value) return;
     const original = button.textContent;
-    try {
-      await navigator.clipboard.writeText(value);
-    } catch {
-      const fallback = document.createElement("textarea");
-      fallback.value = value;
-      fallback.className = "visually-hidden";
-      document.body.append(fallback);
-      fallback.select();
-      document.execCommand("copy");
-      fallback.remove();
+    const iconOnly = button.hasAttribute("data-copy-icon");
+    const originalLabel = button.getAttribute("aria-label");
+    const originalTitle = button.getAttribute("title");
+    if (await copyText(value)) {
+      if (iconOnly) {
+        button.classList.add("is-copied");
+        button.setAttribute("aria-label", originalLabel?.replace(/kopieren$/i, "kopiert") || "Kopiert");
+        button.setAttribute("title", "Kopiert");
+      } else {
+        button.textContent = "Kopiert";
+      }
+      announce("In die Zwischenablage kopiert.");
+      window.setTimeout(() => {
+        if (iconOnly) {
+          button.classList.remove("is-copied");
+          if (originalLabel === null) button.removeAttribute("aria-label");
+          else button.setAttribute("aria-label", originalLabel);
+          if (originalTitle === null) button.removeAttribute("title");
+          else button.setAttribute("title", originalTitle);
+        } else {
+          button.textContent = original;
+        }
+      }, 1800);
     }
-    button.textContent = "Kopiert";
-    announce("In die Zwischenablage kopiert.");
-    window.setTimeout(() => { button.textContent = original; }, 1800);
   });
 });
 
@@ -1348,26 +2420,66 @@ document.querySelectorAll("[data-planning-workbench]").forEach((workbench) => {
   const radius = workbench.querySelector("[data-planning-radius]");
 	const region = workbench.querySelector("[data-planning-region]");
   const single = workbench.querySelector("[data-planning-single]");
+  const singleSubmit = workbench.querySelector("[data-planning-single-submit]");
   const routeButton = workbench.querySelector("[data-planning-route]");
   const detail = workbench.querySelector("[data-planning-detail-panel]");
-  const depot = { latitude: 48.2, longitude: 14.2 };
+  const results = workbench.querySelector("[data-planning-results]");
+  const planningSteps = Array.from(workbench.querySelectorAll("[data-planning-step]"));
+  const setCurrentStep = (number) => planningSteps.forEach((step) => {
+    const current = step.dataset.planningStep === String(number);
+    step.closest("li")?.classList.toggle("is-active", current);
+    if (current) step.setAttribute("aria-current", "step");
+    else step.removeAttribute("aria-current");
+  });
+  planningSteps.filter((step) => step.matches("a[href^='#']")).forEach((step) => {
+    step.addEventListener("click", (event) => {
+      const target = document.querySelector(step.hash);
+      if (!target) return;
+      event.preventDefault();
+      window.history.pushState(null, "", step.hash);
+      setCurrentStep(step.dataset.planningStep);
+      target.focus({ preventScroll: true });
+      target.scrollIntoView({ block: "start", behavior: "auto" });
+    });
+  });
+  workbench.querySelectorAll("form[action$='/adopt']").forEach((form) => {
+    form.addEventListener("submit", () => setCurrentStep(4));
+  });
+  const radiusOrigin = mapPoint(workbench.dataset.planningRadiusLatitude, workbench.dataset.planningRadiusLongitude);
+  if (radius && !radiusOrigin) {
+    radius.value = "";
+    radius.disabled = true;
+    radius.setAttribute("aria-describedby", "planning-radius-unavailable");
+    const hint = document.createElement("small");
+    hint.id = "planning-radius-unavailable";
+    hint.className = "form-hint";
+    hint.textContent = "Radiusfilter ist ohne konfigurierten Standard-Startort nicht verfügbar.";
+    radius.closest("label")?.append(hint);
+  }
   const radians = (value) => value * Math.PI / 180;
   const distanceKM = (row) => {
     const latitude = Number(row.dataset.latitude); const longitude = Number(row.dataset.longitude);
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return Number.POSITIVE_INFINITY;
-    const dLat = radians(latitude - depot.latitude); const dLon = radians(longitude - depot.longitude);
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(radians(depot.latitude)) * Math.cos(radians(latitude)) * Math.sin(dLon / 2) ** 2;
+    if (!radiusOrigin) return Number.POSITIVE_INFINITY;
+    const dLat = radians(latitude - radiusOrigin.latitude); const dLon = radians(longitude - radiusOrigin.longitude);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(radians(radiusOrigin.latitude)) * Math.cos(radians(latitude)) * Math.sin(dLon / 2) ** 2;
     return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
   const visible = (row) => {
     const query = String(search?.value || "").trim().toLocaleLowerCase("de-AT");
     const maximum = Number(radius?.value || 0);
 	const selectedRegion = String(region?.value || "");
-    return (!query || String(row.dataset.search || "").includes(query)) && (!selectedRegion || row.dataset.region === selectedRegion) && (!maximum || distanceKM(row) <= maximum);
+    return (!query || String(row.dataset.search || "").includes(query)) && (!selectedRegion || row.dataset.region === selectedRegion) && (!maximum || (radiusOrigin && distanceKM(row) <= maximum));
   };
-  const renderFilters = () => rows.forEach((row) => { row.hidden = !visible(row); });
+  const renderFilters = () => {
+    rows.forEach((row) => { row.hidden = !visible(row); });
+    const count = rows.filter((row) => !row.hidden).length;
+    const label = workbench.querySelector("[data-planning-visible-count]");
+    if (label) label.textContent = `${count} sichtbar`;
+    workbench.dispatchEvent(new CustomEvent("planningfilterchange", { bubbles: true, detail: { count } }));
+  };
   const checkedRows = () => rows.filter((row) => row.querySelector('input[name="job_id"]')?.checked);
-  const update = () => {
+  const update = ({ syncSingle = true } = {}) => {
     const selected = checkedRows();
     const volume = selected.reduce((sum, row) => sum + (Number(String(row.dataset.volume || "0").replace(",", ".")) || 0), 0);
     const duration = selected.reduce((sum, row) => sum + (Number(row.dataset.durationMinutes) || 0), 0);
@@ -1377,11 +2489,22 @@ document.querySelectorAll("[data-planning-workbench]").forEach((workbench) => {
     set("[data-planning-duration]", duration >= 60 ? `${Math.floor(duration / 60)} Std. ${duration % 60} Min.` : `${duration} Min.`);
     set("[data-planning-selection-title]", selected.length === 0 ? "Noch nichts gewählt" : selected.length === 1 ? selected[0].dataset.label : `${selected.length} Aufträge gewählt`);
     if (routeButton) routeButton.disabled = selected.length === 0;
-    if (selected.length === 1 && single) single.value = selected[0].dataset.jobId;
+    if (syncSingle && single) single.value = selected.length === 1 ? selected[0].dataset.jobId : "";
+    if (singleSubmit) singleSubmit.disabled = !single?.value;
+    rows.forEach((row) => row.classList.toggle("route-candidate--selected", selected.includes(row)));
+    setCurrentStep(results ? 3 : selected.length === 1 ? 2 : 1);
   };
   rows.forEach((row) => {
     row.querySelector('input[name="job_id"]')?.addEventListener("change", update);
     row.querySelector("[data-planning-detail]")?.addEventListener("click", () => {
+      const selectedBox = row.querySelector('input[name="job_id"]');
+      if (selectedBox && !selectedBox.disabled) {
+        rows.forEach((candidate) => {
+          const box = candidate.querySelector('input[name="job_id"]');
+          if (box) box.checked = candidate === row;
+        });
+        update();
+      }
       if (!detail) return;
       detail.replaceChildren();
       const title = document.createElement("strong"); title.textContent = `${row.dataset.label} · ${row.dataset.customer}`;
@@ -1392,9 +2515,26 @@ document.querySelectorAll("[data-planning-workbench]").forEach((workbench) => {
     });
   });
 	search?.addEventListener("input", renderFilters); radius?.addEventListener("input", renderFilters); region?.addEventListener("change", renderFilters);
+  single?.addEventListener("change", () => {
+    rows.forEach((row) => {
+      const box = row.querySelector('input[name="job_id"]');
+      if (box) box.checked = Boolean(single.value) && row.dataset.jobId === single.value;
+    });
+    update({ syncSingle: false });
+  });
   workbench.querySelector("[data-planning-select-visible]")?.addEventListener("click", () => { rows.filter(visible).forEach((row) => { const box = row.querySelector('input[name="job_id"]'); if (box && !box.disabled) box.checked = true; }); update(); });
-	workbench.querySelector("[data-planning-reset]")?.addEventListener("click", () => { rows.forEach((row) => { const box = row.querySelector('input[name="job_id"]'); if (box) box.checked = false; row.hidden = false; }); if (search) search.value = ""; if (radius) radius.value = ""; if (region) region.value = ""; update(); });
-  renderFilters(); update();
+	workbench.querySelector("[data-planning-reset]")?.addEventListener("click", () => { rows.forEach((row) => { const box = row.querySelector('input[name="job_id"]'); if (box) box.checked = false; }); if (search) search.value = ""; if (radius) radius.value = ""; if (region) region.value = ""; renderFilters(); update(); });
+  if (single?.value) {
+    const selectedRow = rows.find((row) => row.dataset.jobId === single.value);
+    const selectedBox = selectedRow?.querySelector('input[name="job_id"]');
+    if (selectedBox && !selectedBox.disabled) selectedBox.checked = true;
+  }
+  renderFilters(); update({ syncSingle: false });
+  if (results && !window.location.hash) requestAnimationFrame(() => {
+    results.focus({ preventScroll: true });
+    results.scrollIntoView({ block: "start", behavior: "auto" });
+  });
+  workbench.dataset.planningReady = "true";
 });
 
 document.querySelectorAll(".parallel-move-form").forEach((form) => {
@@ -1437,7 +2577,7 @@ document.querySelectorAll("[data-wake-lock]").forEach((button) => {
     if (lock) { await release(); return; }
     try {
       lock = await navigator.wakeLock.request("screen");
-      lock.addEventListener("release", () => { lock = undefined; update(); }, { once: true });
+      lock.addEventListener("release", () => { lock = undefined; update(); announce("Der Bildschirm darf wieder schlafen. Aktivieren Sie die Wachhaltung bei Bedarf erneut."); }, { once: true });
       announce("Der Bildschirm bleibt für diese geöffnete Route wach.");
     } catch { announce("Der Bildschirm kann in diesem Browser nicht wach gehalten werden."); }
     update();
@@ -1456,6 +2596,17 @@ if (voiceCapture) {
   const timer = voiceCapture.querySelector("[data-voice-timer]");
   const status = voiceCapture.querySelector("[data-voice-status]");
   const uploadForm = voiceCapture.querySelector("[data-voice-upload]");
+  const fileInput = voiceCapture.querySelector("[data-voice-file]");
+  const durationInput = voiceCapture.querySelector("[data-voice-duration]");
+  const idempotencyInput = voiceCapture.querySelector("[data-voice-idempotency-key]");
+  const preview = voiceCapture.querySelector("[data-voice-preview]");
+  const previewAudio = voiceCapture.querySelector("[data-voice-audio]");
+  const sendButton = voiceCapture.querySelector("[data-voice-send]");
+  const discardButton = voiceCapture.querySelector("[data-voice-discard]");
+  const retryButton = voiceCapture.querySelector("[data-voice-retry]");
+  const progress = voiceCapture.querySelector("[data-voice-progress]");
+  const levelWrap = voiceCapture.querySelector("[data-voice-level-wrap]");
+  const level = voiceCapture.querySelector("[data-voice-level]");
   const maxSeconds = Number(voiceCapture.dataset.maxSeconds);
   let recorder;
   let stream;
@@ -1464,6 +2615,90 @@ if (voiceCapture) {
   let segmentStartedAt = 0;
   let interval;
   let cancelled = false;
+  let audioContext;
+  let levelFrame;
+  let peakLevel = 0;
+  let pendingAudio;
+  let pendingDurationMs = 0;
+  let previewURL = "";
+  let pendingUploadKey = idempotencyInput?.value || "";
+  let cancelDurationProbe = () => {};
+  let settingDuration = false;
+
+  const setDurationValue = (seconds, source) => {
+    if (!durationInput || !Number.isFinite(seconds) || seconds <= 0) return;
+    settingDuration = true;
+    durationInput.value = String(Math.max(1, Math.ceil(seconds)));
+    durationInput.dataset.durationSource = source;
+    durationInput.dispatchEvent(new Event("input", { bubbles: true }));
+    settingDuration = false;
+  };
+  const prefillAudioDuration = (blob, fallbackSeconds = 0) => {
+    if (!durationInput || !blob) return;
+    cancelDurationProbe();
+    if (fallbackSeconds > 0) {
+      setDurationValue(fallbackSeconds, "recording");
+    } else {
+      settingDuration = true;
+      durationInput.value = "";
+      delete durationInput.dataset.durationSource;
+      settingDuration = false;
+    }
+    const probe = document.createElement("audio");
+    const objectURL = URL.createObjectURL(blob);
+    let timeout;
+    let settled = false;
+    let attemptedSeek = false;
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      probe.removeAttribute("src");
+      probe.load();
+      URL.revokeObjectURL(objectURL);
+      if (cancelDurationProbe === cleanup) cancelDurationProbe = () => {};
+    };
+    const readDuration = () => {
+      if (settled) return;
+      const seconds = probe.duration;
+      if (Number.isFinite(seconds) && seconds > 0) {
+        if (durationInput.dataset.durationSource !== "manual") setDurationValue(seconds, "metadata");
+        cleanup();
+        return;
+      }
+      if (seconds === Infinity && !attemptedSeek) {
+        attemptedSeek = true;
+        try { probe.currentTime = 1e101; } catch { cleanup(); }
+      }
+    };
+    cancelDurationProbe = cleanup;
+    probe.preload = "metadata";
+    probe.addEventListener("loadedmetadata", readDuration);
+    probe.addEventListener("durationchange", readDuration);
+    probe.addEventListener("timeupdate", readDuration);
+    probe.addEventListener("error", cleanup, { once: true });
+    timeout = window.setTimeout(cleanup, 5000);
+    probe.src = objectURL;
+    probe.load();
+  };
+  durationInput?.addEventListener("input", () => {
+    if (!settingDuration) durationInput.dataset.durationSource = "manual";
+  });
+  fileInput?.addEventListener("change", () => {
+    const audio = fileInput.files?.[0];
+    if (audio) prefillAudioDuration(audio);
+  });
+
+  const newUploadKey = () => {
+    if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+    const values = new Uint32Array(4);
+    crypto.getRandomValues(values);
+    return Array.from(values, (value) => value.toString(16).padStart(8, "0")).join("-");
+  };
+  const resetUploadKey = () => {
+    pendingUploadKey = newUploadKey();
+    if (idempotencyInput) idempotencyInput.value = pendingUploadKey;
+  };
 
   const announce = (message) => { status.textContent = message; };
   const resetControls = () => {
@@ -1477,6 +2712,10 @@ if (voiceCapture) {
     stream?.getTracks().forEach((track) => track.stop());
     stream = undefined;
     window.clearInterval(interval);
+    window.cancelAnimationFrame(levelFrame);
+    audioContext?.close().catch(() => {});
+    audioContext = undefined;
+    if (levelWrap) levelWrap.hidden = true;
   };
   const elapsedMs = () => accumulatedMs + (recorder?.state === "recording" && segmentStartedAt ? Date.now() - segmentStartedAt : 0);
   const freezeElapsed = () => {
@@ -1486,23 +2725,68 @@ if (voiceCapture) {
   };
   const updateTimer = () => {
     const elapsed = Math.min(maxSeconds, Math.max(0, Math.ceil(elapsedMs() / 1000)));
-    const minutes = Math.floor(elapsed / 60);
-    const seconds = elapsed % 60;
-    timer.textContent = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    const remaining = Math.max(0, maxSeconds - elapsed);
+    const minutes = Math.floor(remaining / 60);
+    const seconds = remaining % 60;
+    timer.textContent = `Verbleibend: ${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
     if (elapsed >= maxSeconds && recorder?.state !== "inactive") { freezeElapsed(); recorder.stop(); }
   };
-  const uploadAudio = async (blob, durationMs) => {
+  const uploadAudio = (blob, durationMs) => new Promise((resolve, reject) => {
     const form = new FormData();
+    form.append("idempotency_key", pendingUploadKey);
     form.append("duration_ms", String(Math.max(1, Math.min(maxSeconds * 1000, durationMs))));
     form.append("audio", blob, "aufnahme.webm");
-    announce("Aufnahme wird sicher übertragen und verarbeitet …");
-    const response = await fetch("/api/v1/voice/drafts", { method: "POST", headers: { "X-CSRF-Token": voiceCapture.dataset.csrf, Accept: "application/json" }, credentials: "same-origin", body: form });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload?.error?.message || "Die Aufnahme konnte nicht verarbeitet werden.");
-    dirtyForms.delete(uploadForm);
-    window.location.assign(payload.location);
+    announce("Aufnahme wird sicher übertragen und für die Verarbeitung eingereiht …");
+    if (progress) { progress.hidden = false; progress.value = 0; }
+    const request = new XMLHttpRequest();
+    request.open("POST", "/api/v1/voice/drafts");
+    request.responseType = "json";
+    request.withCredentials = true;
+    request.setRequestHeader("X-CSRF-Token", voiceCapture.dataset.csrf);
+    request.setRequestHeader("Accept", "application/json");
+    request.upload.addEventListener("progress", (event) => {
+      if (!progress || !event.lengthComputable) return;
+      progress.value = Math.round((event.loaded / event.total) * 100);
+      announce(`Upload: ${progress.value} Prozent.`);
+    });
+    request.addEventListener("load", () => {
+      const payload = request.response || {};
+      if (request.status < 200 || request.status >= 300) {
+        reject(new Error(payload?.error?.message || "Die Aufnahme konnte nicht verarbeitet werden."));
+        return;
+      }
+      dirtyForms.delete(uploadForm);
+      resolve(payload);
+    });
+    request.addEventListener("error", () => reject(new Error("Der Übertragungsstatus ist unbekannt. Die Aufnahme bleibt in diesem Tab erhalten; prüfen Sie zuerst Ihre Entwürfe und senden Sie sie nur kontrolliert erneut.")));
+    request.addEventListener("abort", () => reject(new Error("Der Upload wurde abgebrochen. Die Aufnahme bleibt in diesem Tab erhalten.")));
+    request.send(form);
+  });
+  const clearPreview = () => {
+    pendingAudio = undefined;
+    pendingDurationMs = 0;
+    if (previewURL) URL.revokeObjectURL(previewURL);
+    previewURL = "";
+    previewAudio?.removeAttribute("src");
+    if (preview) preview.hidden = true;
+    if (retryButton) retryButton.hidden = true;
+    if (progress) progress.hidden = true;
+    resetUploadKey();
   };
-  const supportedType = () => ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find((type) => window.MediaRecorder?.isTypeSupported(type));
+  const submitPendingAudio = async () => {
+    if (!pendingAudio) return;
+    if (sendButton) sendButton.disabled = true;
+    if (retryButton) retryButton.hidden = true;
+    try {
+      const payload = await uploadAudio(pendingAudio, pendingDurationMs);
+      window.location.assign(payload.location);
+    } catch (failure) {
+      announce(failure.message);
+      if (retryButton) retryButton.hidden = false;
+      if (sendButton) sendButton.disabled = false;
+    }
+  };
+  const supportedType = () => ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"].find((type) => window.MediaRecorder?.isTypeSupported(type));
 
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder || !supportedType()) {
     startButton.disabled = true;
@@ -1510,10 +2794,28 @@ if (voiceCapture) {
   } else {
     startButton.addEventListener("click", async () => {
       try {
+        resetUploadKey();
         stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         chunks = [];
         cancelled = false;
 		accumulatedMs = 0;
+        peakLevel = 0;
+        if (window.AudioContext) {
+          audioContext = new AudioContext();
+          const analyser = audioContext.createAnalyser();
+          analyser.fftSize = 256;
+          audioContext.createMediaStreamSource(stream).connect(analyser);
+          const values = new Uint8Array(analyser.fftSize);
+          const sampleLevel = () => {
+            analyser.getByteTimeDomainData(values);
+            const current = values.reduce((maximum, value) => Math.max(maximum, Math.abs(value - 128) / 128), 0);
+            peakLevel = Math.max(peakLevel, current);
+            if (level) level.value = current;
+            levelFrame = window.requestAnimationFrame(sampleLevel);
+          };
+          if (levelWrap) levelWrap.hidden = false;
+          sampleLevel();
+        }
         recorder = new MediaRecorder(stream, { mimeType: supportedType() });
         recorder.addEventListener("dataavailable", (event) => { if (event.data.size) chunks.push(event.data); });
         recorder.addEventListener("stop", async () => {
@@ -1522,7 +2824,22 @@ if (voiceCapture) {
           const blob = new Blob(chunks, { type: recorder.mimeType });
           stopTracks(); resetControls();
           if (cancelled) return;
-          try { await uploadAudio(blob, durationMs); } catch (failure) { announce(`${failure.message} Audio wurde nicht dauerhaft gespeichert; manuelle Erfassung bleibt möglich.`); }
+          if (blob.size < 64) {
+            chunks = [];
+            clearPreview();
+            announce("Der Browser hat keine verwertbare Aufnahme erzeugt. Bitte nehmen Sie erneut auf.");
+            return;
+          }
+          pendingAudio = blob;
+          pendingDurationMs = durationMs;
+          prefillAudioDuration(blob, durationMs / 1000);
+          if (previewURL) URL.revokeObjectURL(previewURL);
+          previewURL = URL.createObjectURL(blob);
+          previewAudio.src = previewURL;
+          preview.hidden = false;
+          announce(peakLevel < 0.015
+            ? "Die Aufnahme ist sehr leise oder möglicherweise leer. Hören Sie sie vor dem Upload an und nehmen Sie sie bei Bedarf neu auf."
+            : "Aufnahme beendet. Bitte anhören und erst danach bewusst hochladen oder verwerfen.");
         }, { once: true });
         recorder.start(1000); segmentStartedAt = Date.now(); updateTimer(); interval = window.setInterval(updateTimer, 500);
         startButton.disabled = true; pauseButton.disabled = false; stopButton.disabled = false; cancelButton.disabled = false;
@@ -1537,18 +2854,41 @@ if (voiceCapture) {
     cancelButton.addEventListener("click", () => {
       cancelled = true;
       if (recorder?.state !== "inactive") recorder.stop();
-      chunks = []; stopTracks(); resetControls(); timer.textContent = "00:00"; announce("Aufnahme verworfen; nichts wurde hochgeladen.");
+      chunks = []; stopTracks(); resetControls(); timer.textContent = `Verbleibend: ${String(Math.floor(maxSeconds / 60)).padStart(2, "0")}:${String(maxSeconds % 60).padStart(2, "0")}`; clearPreview(); announce("Aufnahme verworfen; nichts wurde hochgeladen.");
     });
   }
+  sendButton?.addEventListener("click", submitPendingAudio);
+  retryButton?.addEventListener("click", submitPendingAudio);
+  discardButton?.addEventListener("click", () => { clearPreview(); announce("Aufnahme verworfen; nichts wurde hochgeladen."); });
   uploadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const audio = uploadForm.elements.audio.files[0];
     const seconds = Number(uploadForm.elements.duration_seconds.value);
     if (!audio || !Number.isFinite(seconds) || seconds <= 0 || seconds > maxSeconds) { announce("Bitte Datei und gültige Dauer innerhalb des Limits angeben."); return; }
+    resetUploadKey();
     uploadForm.querySelector("button[type='submit']").disabled = true;
-    try { await uploadAudio(audio, seconds * 1000); } catch (failure) { announce(`${failure.message} Bitte manuell erfassen oder eine andere Datei wählen.`); uploadForm.querySelector("button[type='submit']").disabled = false; }
+    pendingAudio = audio;
+    pendingDurationMs = seconds * 1000;
+    try {
+      const payload = await uploadAudio(audio, pendingDurationMs);
+      window.location.assign(payload.location);
+    } catch (failure) {
+      announce(failure.message);
+      if (previewURL) URL.revokeObjectURL(previewURL);
+      previewURL = URL.createObjectURL(audio);
+      if (previewAudio) previewAudio.src = previewURL;
+      preview.hidden = false;
+      retryButton.hidden = false;
+      uploadForm.querySelector("button[type='submit']").disabled = false;
+    }
   });
-  window.addEventListener("pagehide", stopTracks);
+  window.addEventListener("pagehide", () => {
+    cancelled = true;
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+    chunks = [];
+    clearPreview();
+    stopTracks();
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden && recorder?.state === "recording") {
       freezeElapsed(); recorder.pause(); pauseButton.textContent = "Fortsetzen"; updateTimer(); announce("Aufnahme beim Tabwechsel pausiert.");
@@ -1601,11 +2941,11 @@ function loadMapLibre() {
     script.async = true;
     script.dataset.maplibreScript = "true";
     script.addEventListener("load", () => {
-      if (!window.maplibregl) {
+      if (!window.maplibregl || typeof window.maplibregl.setWorkerUrl !== "function") {
         reject(new Error("Kartenbibliothek konnte nicht gestartet werden"));
         return;
       }
-      window.maplibregl.workerUrl = assets.worker;
+      window.maplibregl.setWorkerUrl(assets.worker);
       resolve(window.maplibregl);
     }, { once: true });
     script.addEventListener("error", () => reject(new Error("Kartenbibliothek konnte nicht geladen werden")), { once: true });
@@ -1671,8 +3011,10 @@ function createJobLocationMap(maplibregl, canvas, point, interactive) {
   const map = new maplibregl.Map({
     container: canvas,
     style: hackWerkRasterStyle(),
-    center: hasPoint ? [point.longitude, point.latitude] : [14.2, 48.2],
-    zoom: hasPoint ? 16 : 7,
+    ...(hasPoint ? { center: [point.longitude, point.latitude], zoom: 16 } : {
+      bounds: [[9.5, 46.3], [17.3, 49.2]],
+      fitBoundsOptions: { padding: 36, maxZoom: 7 },
+    }),
     interactive,
     dragRotate: false,
     pitchWithRotate: false,
@@ -1697,22 +3039,38 @@ function initializeJobLocationEditor(editor, maplibregl) {
   const committedSource = editor.querySelector("[data-location-committed-source]");
   const badge = editor.querySelector("[data-location-badge]");
   const message = editor.querySelector("[data-location-message]");
+  const mapsLink = editor.querySelector("[data-location-maps]");
   if (!canvas || !latitudeInput || !longitudeInput || !committedLatitude || !committedLongitude || !committedSource) return;
 
   let draftSource = editor.dataset.initialSource || "coordinates";
   let marker = null;
   const initialPoint = mapPoint(editor.dataset.initialLatitude, editor.dataset.initialLongitude);
-  const map = createJobLocationMap(maplibregl, canvas, initialPoint, true);
+  const map = maplibregl ? createJobLocationMap(maplibregl, canvas, initialPoint, true) : null;
 
   const announce = (text, status = "Ungespeichert") => {
     if (message) message.textContent = text;
     if (badge) badge.textContent = status;
   };
+  const updateMapsLink = (point) => {
+    if (!mapsLink) return;
+    if (!point) {
+      mapsLink.removeAttribute("href");
+      mapsLink.setAttribute("aria-disabled", "true");
+      return;
+    }
+    const url = new URL("https://www.google.com/maps/search/");
+    url.searchParams.set("api", "1");
+    url.searchParams.set("query", `${displayCoordinate(point.latitude)},${displayCoordinate(point.longitude)}`);
+    mapsLink.href = url.toString();
+    mapsLink.setAttribute("aria-disabled", "false");
+  };
   const setInputValidity = (valid) => {
     latitudeInput.setAttribute("aria-invalid", String(!valid));
     longitudeInput.setAttribute("aria-invalid", String(!valid));
+    updateMapsLink(valid ? mapPoint(latitudeInput.value, longitudeInput.value) : null);
   };
   const setMarker = (point, center = true) => {
+    if (!map || !maplibregl) return;
     if (!point) {
       marker?.remove();
       marker = null;
@@ -1745,8 +3103,140 @@ function initializeJobLocationEditor(editor, maplibregl) {
   };
   const readDraft = () => mapPoint(latitudeInput.value, longitudeInput.value);
 
+  const searchInput = editor.querySelector("[data-location-search-input]");
+  const searchSubmit = editor.querySelector("[data-location-search-submit]");
+  const searchStatus = editor.querySelector("[data-location-search-status]");
+  const searchResults = editor.querySelector("[data-location-search-results]");
+  const customerAddressLabel = editor.querySelector("[data-location-customer-address]");
+  const customerFields = editor.closest("form")?.querySelector("[data-customer-fields]");
+  const customerFieldValue = (name) => String(customerFields?.querySelector(`[name="${name}"]`)?.value || "").trim();
+  const currentCustomerAddress = () => {
+    if (!customerFields) return String(editor.dataset.customerAddress || "").trim();
+    const street = customerFieldValue("street");
+    const postalCode = customerFieldValue("postal_code");
+    const locality = customerFieldValue("locality");
+    const region = customerFieldValue("region");
+    const localityLine = [postalCode, locality].filter(Boolean).join(" ");
+    const structured = [street, localityLine, region].filter(Boolean);
+    if (structured.length > 0) return [...structured, "AT"].join(", ");
+    return customerFieldValue("address_freeform") || String(editor.dataset.customerAddress || "").trim();
+  };
+  const updateCustomerAddressLabel = () => {
+    if (!customerAddressLabel) return;
+    customerAddressLabel.textContent = currentCustomerAddress() || "Adresse aus den aktuellen Kundendaten verwenden";
+  };
+  customerFields?.querySelectorAll("[name='street'], [name='postal_code'], [name='locality'], [name='region'], [name='address_freeform']")
+    .forEach((input) => input.addEventListener("input", updateCustomerAddressLabel));
+  updateCustomerAddressLabel();
+  const clearSearchResults = () => {
+    searchResults?.replaceChildren();
+    if (searchResults) searchResults.hidden = true;
+  };
+  const showSearchStatus = (text) => {
+    if (searchStatus) searchStatus.textContent = text;
+  };
+  let searchSequence = 0;
+  let searchController;
+  const stopSearchBusy = () => {
+    if (!searchSubmit) return;
+    searchSubmit.disabled = false;
+    searchSubmit.removeAttribute("aria-busy");
+  };
+  const searchAddress = async (selectionMode = "map") => {
+    const sequence = ++searchSequence;
+    searchController?.abort();
+    searchController = new AbortController();
+    const query = String(searchInput?.value || "").trim();
+    if (query.length < 3) {
+      stopSearchBusy();
+      clearSearchResults();
+      showSearchStatus("Bitte mindestens drei Zeichen eingeben.");
+      searchInput?.focus();
+      return;
+    }
+    const csrf = editor.closest("form")?.querySelector("[name='csrf_token']")?.value;
+    if (!csrf) {
+      stopSearchBusy();
+      showSearchStatus("Die Sicherheitsprüfung ist abgelaufen. Bitte laden Sie die Seite neu.");
+      return;
+    }
+    clearSearchResults();
+    searchSubmit.disabled = true;
+    searchSubmit.setAttribute("aria-busy", "true");
+    showSearchStatus("Adresse wird gesucht …");
+    try {
+      const response = await fetch("/api/v1/geocoding/search", {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrf, "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body: new URLSearchParams({ query }),
+        credentials: "same-origin",
+        signal: searchController.signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (sequence !== searchSequence) return;
+      if (!response.ok) throw new Error(payload?.error?.message || "Die Adresssuche ist derzeit nicht verfügbar.");
+      const results = Array.isArray(payload.results) ? payload.results.slice(0, 10) : [];
+      if (results.length === 0) {
+        showSearchStatus("Keine passende Adresse gefunden. Versuchen Sie Ort, Straße und Hausnummer gemeinsam.");
+        return;
+      }
+      for (const result of results) {
+        const point = mapPoint(result?.latitude, result?.longitude);
+        const label = String(result?.label || "").trim();
+        if (!point || !label) continue;
+        const item = document.createElement("li");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "location-search__result";
+        button.textContent = label;
+        button.addEventListener("click", () => {
+          if (selectionMode === "customer") {
+            setDraft(point, "customer_address", `Kundenadresse „${label}“ gewählt. Bitte prüfen und anschließend „Standort übernehmen“ wählen.`);
+            showSearchStatus(`Kundenadresse „${label}“ als Standortentwurf gewählt.`);
+            latitudeInput.focus({ preventScroll: true });
+            return;
+          }
+          if (!map) {
+            setDraft(point, "coordinates", `Koordinaten aus „${label}“ vorbereitet. Mit „Standort übernehmen“ in das Formular übernehmen.`);
+            showSearchStatus(`Koordinaten aus „${label}“ vorbereitet.`);
+            latitudeInput.focus({ preventScroll: true });
+            return;
+          }
+          const bounds = Array.isArray(result.bounds) ? result.bounds.map(Number) : [];
+          const boundsValid = bounds.length === 4 && bounds.every(Number.isFinite) && bounds[0] <= bounds[1] && bounds[2] <= bounds[3];
+          if (boundsValid && (bounds[0] !== bounds[1] || bounds[2] !== bounds[3])) {
+            map.fitBounds([[bounds[2], bounds[0]], [bounds[3], bounds[1]]], { padding: 48, maxZoom: 16 });
+          } else {
+            map.easeTo({ center: [point.longitude, point.latitude], zoom: Math.max(map.getZoom(), 15) });
+          }
+          showSearchStatus(`Karte auf „${label}“ ausgerichtet.`);
+          announce("Karte zur gefundenen Adresse bewegt. Klicken Sie den tatsächlichen Haufenstandort an oder geben Sie die Koordinaten ein.", badge?.textContent || "Fehlt");
+        });
+        item.append(button);
+        searchResults.append(item);
+      }
+      searchResults.hidden = searchResults.children.length === 0;
+      showSearchStatus(searchResults.hidden ? "Keine nutzbaren Treffer erhalten." : `${searchResults.children.length} Treffer gefunden. Wählen Sie eine Adresse.`);
+    } catch (error) {
+      if (sequence !== searchSequence || error?.name === "AbortError") return;
+      clearSearchResults();
+      showSearchStatus(error instanceof Error ? error.message : "Die Adresssuche ist derzeit nicht verfügbar.");
+    } finally {
+      if (sequence !== searchSequence) return;
+      stopSearchBusy();
+    }
+  };
+
+  searchSubmit?.addEventListener("click", () => searchAddress());
+  searchInput?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    searchAddress();
+  });
+
+  updateMapsLink(initialPoint);
   if (initialPoint) setMarker(initialPoint, false);
-  map.on("click", (event) => setDraft(
+  map?.on("click", (event) => setDraft(
     { latitude: event.lngLat.lat, longitude: event.lngLat.lng },
     "map_pin",
     "Position auf der Karte gewählt. Mit „Standort übernehmen“ in das Formular übernehmen.",
@@ -1769,11 +3259,23 @@ function initializeJobLocationEditor(editor, maplibregl) {
 
   editor.querySelector("[data-location-customer]")?.addEventListener("click", () => {
     const point = mapPoint(editor.dataset.customerLatitude, editor.dataset.customerLongitude);
-    if (!point) {
-      announce("Für die Kundenadresse sind keine nutzbaren Koordinaten vorhanden.", badge?.textContent || "Fehlt");
+    if (point) {
+      setDraft(point, "customer_address", "Kundenadresse geladen. Bitte prüfen und anschließend übernehmen.");
       return;
     }
-    setDraft(point, "customer_address", "Kundenadresse geladen. Bitte prüfen und anschließend übernehmen.");
+    const address = currentCustomerAddress();
+    if (!address) {
+      announce("Bitte zuerst eine Kundenadresse erfassen oder den Haufenstandort auf der Karte wählen.", badge?.textContent || "Fehlt");
+      return;
+    }
+    if (!searchInput || searchInput.disabled) {
+      announce("Die Kundenadresse hat noch keine Koordinaten und die Adresssuche ist nicht konfiguriert. Setzen Sie den Marker oder geben Sie Koordinaten ein.", badge?.textContent || "Fehlt");
+      return;
+    }
+    searchInput.value = address;
+    showSearchStatus("Kundenadresse wird gesucht …");
+    announce("Kundenadresse wird zur Auswahl vorbereitet …", badge?.textContent || "Fehlt");
+    searchAddress("customer");
   });
 
   editor.querySelector("[data-location-device]")?.addEventListener("click", () => {
@@ -1822,6 +3324,135 @@ function initializeJobLocationEditor(editor, maplibregl) {
     setMarker(null);
     announce("Haufenstandort aus dem Formular entfernt. Speichern Sie den Auftrag, um die Änderung zu übernehmen.", "Entfernt");
   });
+
+  if (!map) markMapUnavailable(canvas);
+}
+
+document.querySelector("[data-appointment-assign]")?.addEventListener("click", async () => {
+  const dialog = document.querySelector("[data-appointment-dialog]");
+  const assignment = dialog?.querySelector("[data-appointment-assignment]");
+  const drivers = [...(assignment?.querySelectorAll("[data-appointment-driver]:checked") || [])].map((input) => input.value);
+  const primary = assignment?.querySelector("[data-appointment-primary-driver]");
+  const chipper = assignment?.querySelector("[data-appointment-chipper]");
+  const otherResources = [...(assignment?.querySelectorAll("[data-appointment-other-resource]:checked") || [])].map((input) => input.value);
+  if (!drivers.length || !primary?.value || !drivers.includes(primary.value)) {
+    showAppointmentError("Bitte wählen Sie mindestens einen Fahrer und daraus den Primärfahrer.", primary);
+    return;
+  }
+  if (!chipper?.value) {
+    showAppointmentError("Bitte wählen Sie eine Hackmaschine.", chipper);
+    return;
+  }
+  clearAppointmentError();
+  const fields = {
+    driver_id: drivers,
+    primary_driver_id: primary.value,
+    chipper_resource_id: chipper.value,
+    transport_resource_id: assignment.querySelector("[data-appointment-transport]")?.value || "",
+    trailer_resource_id: assignment.querySelector("[data-appointment-trailer]")?.value || "",
+    other_resource_id: otherResources,
+    override_reason: assignment.querySelector("[data-appointment-assignment-override]")?.value.trim() || "",
+  };
+  try {
+    await previewAppointmentMutation(dialog.dataset.appointmentId, dialog.dataset.version, "assign", fields, dialog.querySelector("[data-appointment-csrf]").value);
+    if (!window.confirm("Geprüfte Fahrer- und Ressourcenzuweisung speichern? Der Server prüft Belegungen erneut.")) return;
+    await appointmentAction("assign", fields);
+  } catch (failure) {
+    showAppointmentFailure(failure);
+  }
+});
+
+const voiceProcessing = document.querySelector("[data-voice-processing]");
+if (voiceProcessing) {
+  const message = voiceProcessing.querySelector("[data-voice-processing-message]");
+  const statusURL = voiceProcessing.dataset.statusUrl;
+  let stopped = false;
+  const poll = async () => {
+    if (stopped || !statusURL) return;
+    try {
+      const response = await fetch(statusURL, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
+      if ([401, 403, 404].includes(response.status)) {
+        stopped = true;
+        if (message) message.textContent = response.status === 404
+          ? "Der Entwurf ist nicht mehr verfügbar. Öffnen Sie die Spracheingabe erneut."
+          : "Ihre Sitzung ist abgelaufen. Laden Sie die Seite neu und melden Sie sich erneut an.";
+        return;
+      }
+      if (!response.ok) throw new Error("status unavailable");
+      const payload = await response.json();
+      if (["needs_review", "failed", "expired", "committed"].includes(payload.status)) {
+        window.location.reload();
+        return;
+      }
+      if (message) message.textContent = payload.status === "transcribing"
+        ? "Die Aufnahme wird gerade transkribiert. Sie können währenddessen weiterarbeiten."
+        : "Die Aufnahme wartet auf den lokalen Sprachdienst. Sie können währenddessen weiterarbeiten.";
+    } catch {
+      if (message) message.textContent = "Der Status konnte gerade nicht aktualisiert werden. Die Verarbeitung läuft im Hintergrund weiter; versuchen Sie es später erneut.";
+    }
+    window.setTimeout(poll, 3000);
+  };
+  window.addEventListener("pagehide", () => { stopped = true; }, { once: true });
+  window.setTimeout(poll, 1500);
+}
+
+function markRouteLocationMapUnavailable(canvas) {
+  if (!canvas) return;
+  const fallback = canvas.querySelector("[data-map-fallback]");
+  if (!fallback) return;
+  fallback.hidden = false;
+  fallback.textContent = "Die Straßenkarte ist derzeit nicht verfügbar. Koordinaten können weiterhin direkt eingegeben werden.";
+}
+
+function initializeRouteLocationCoordinateMap(canvas, maplibregl) {
+  const editor = canvas.closest("[data-route-location-editor]");
+  const latitudeInput = editor?.querySelector("[data-route-location-latitude]");
+  const longitudeInput = editor?.querySelector("[data-route-location-longitude]");
+  const confirmedInput = editor?.querySelector("[data-route-location-confirmed]");
+  const message = editor?.querySelector("[data-route-location-message]");
+  if (!editor || !latitudeInput || !longitudeInput || !confirmedInput) return;
+
+  const initialPoint = mapPoint(latitudeInput.value, longitudeInput.value);
+  const map = createJobLocationMap(maplibregl, canvas, initialPoint, true);
+  let marker = null;
+
+  const setMarker = (point, center = false) => {
+    if (!marker) {
+      marker = new maplibregl.Marker({ element: pileMarkerElement(), draggable: true, anchor: "bottom" })
+        .setLngLat([point.longitude, point.latitude])
+        .addTo(map);
+      marker.on("dragend", () => {
+        const next = marker.getLngLat();
+        setDraft({ latitude: next.lat, longitude: next.lng }, "Marker verschoben. Bitte Adresse prüfen und Standort übernehmen.");
+      });
+    } else {
+      marker.setLngLat([point.longitude, point.latitude]);
+    }
+    if (center) map.easeTo({ center: [point.longitude, point.latitude], zoom: Math.max(map.getZoom(), 14) });
+  };
+  const setDraft = (point, text) => {
+    latitudeInput.value = displayCoordinate(point.latitude);
+    longitudeInput.value = displayCoordinate(point.longitude);
+    confirmedInput.value = "";
+    latitudeInput.dispatchEvent(new Event("input", { bubbles: true }));
+    longitudeInput.dispatchEvent(new Event("input", { bubbles: true }));
+    setMarker(point);
+    if (message) message.textContent = text;
+  };
+  const syncInputsToMap = () => {
+    const point = mapPoint(latitudeInput.value, longitudeInput.value);
+    if (!point) return;
+    setMarker(point, true);
+  };
+
+  if (initialPoint) setMarker(initialPoint);
+  map.on("click", event => setDraft(
+    { latitude: event.lngLat.lat, longitude: event.lngLat.lng },
+    "Kartenposition vorbereitet. Bitte Adresse prüfen und Standort übernehmen.",
+  ));
+  latitudeInput.addEventListener("change", syncInputsToMap);
+  longitudeInput.addEventListener("change", syncInputsToMap);
+  canvas.dataset.mapSelectionEnabled = "true";
 }
 
 function initializeJobLocationPreview(canvas, maplibregl) {
@@ -1869,39 +3500,6 @@ function routeLineFeature(rawGeometry) {
   };
 }
 
-function routeDirectionFeatures(routeFeature) {
-  const coordinates = routeFeature?.geometry?.coordinates || [];
-  if (coordinates.length < 2) return { type: "FeatureCollection", features: [] };
-  const spacing = Math.max(1, Math.floor(coordinates.length / 7));
-  const features = [];
-  for (let index = spacing; index < coordinates.length; index += spacing) {
-    const tip = coordinates[index];
-    const previous = coordinates[Math.max(0, index - spacing)];
-    const dx = tip[0] - previous[0];
-    const dy = tip[1] - previous[1];
-    const length = Math.hypot(dx, dy);
-    if (!Number.isFinite(length) || length <= 0) continue;
-    const size = Math.min(.003, Math.max(.00035, length * .18));
-    const ux = dx / length;
-    const uy = dy / length;
-    const base = [tip[0] - ux * size, tip[1] - uy * size];
-    const wing = size * .55;
-    features.push({
-      type: "Feature",
-      properties: {},
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [base[0] + -uy * wing, base[1] + ux * wing],
-          tip,
-          [base[0] - -uy * wing, base[1] - ux * wing],
-        ],
-      },
-    });
-  }
-  return { type: "FeatureCollection", features };
-}
-
 function routeStops(context) {
   return Array.from(context.querySelectorAll("[data-route-stop]"))
     .map((element, index) => ({
@@ -1939,20 +3537,30 @@ function routeMarkerElement(stop, kind = "stop") {
   const marker = document.createElement("button");
   marker.type = "button";
   marker.className = `route-map-marker route-map-marker--${kind}`;
-  marker.textContent = String(stop.position);
+  marker.dataset.markerLabel = String(stop.position);
   marker.title = `${stop.position}. ${stop.label}`;
   marker.setAttribute("aria-label", `${stop.position}. ${stop.label} auf der Karte öffnen`);
   if (stop.jobID) marker.dataset.jobId = stop.jobID;
   return marker;
 }
 
-function depotMarkerElement() {
+function startMarkerElement() {
   const marker = document.createElement("button");
   marker.type = "button";
-  marker.className = "route-map-marker route-map-marker--depot";
-  marker.textContent = "H";
-  marker.title = "HackWerk Depot";
-  marker.setAttribute("aria-label", "HackWerk Depot auf der Karte öffnen");
+  marker.className = "route-map-marker route-map-marker--start";
+  marker.dataset.markerLabel = "S";
+  marker.title = "Startort";
+  marker.setAttribute("aria-label", "Startort auf der Karte öffnen");
+  return marker;
+}
+
+function endMarkerElement() {
+  const marker = document.createElement("button");
+  marker.type = "button";
+  marker.className = "route-map-marker route-map-marker--end";
+  marker.dataset.markerLabel = "E";
+  marker.title = "Endort";
+  marker.setAttribute("aria-label", "Endort auf der Karte öffnen");
   return marker;
 }
 
@@ -1995,8 +3603,23 @@ function routeMapNotice(context, message) {
   notice.textContent = message;
 }
 
-function markRouteMapUnavailable(canvas, message = "Die Routenkarte ist derzeit nicht verfügbar. Die geordnete Stoppliste bleibt vollständig nutzbar.") {
+function showRouteMapRetry(context) {
+  const retry = context?.querySelector("[data-route-map-retry]");
+  if (retry) retry.hidden = false;
+}
+
+function enableRouteMapReload(context) {
+  const retry = context?.querySelector("[data-route-map-retry]");
+  if (!retry || retry.dataset.routeMapReload === "true") return;
+  retry.dataset.routeMapReload = "true";
+  retry.addEventListener("click", () => window.location.reload());
+}
+
+function markRouteMapUnavailable(canvas, message = "Die Routenkarte ist derzeit nicht verfügbar. Die geordnete Stoppliste bleibt vollständig nutzbar.", reload = false) {
   if (!canvas) return;
+  const context = canvas.closest("[data-route-context]");
+  showRouteMapRetry(context);
+  if (reload) enableRouteMapReload(context);
   let fallback = canvas.querySelector("[data-map-fallback]");
   if (!fallback) {
     fallback = document.createElement("div");
@@ -2008,6 +3631,105 @@ function markRouteMapUnavailable(canvas, message = "Die Routenkarte ist derzeit 
   fallback.textContent = message;
 }
 
+function initializeRouteLineOverlay(container, map, geometry, routeSource, context) {
+  if (!geometry) return;
+  const lineCanvas = document.createElement("canvas");
+  lineCanvas.className = "route-map-line-overlay";
+  lineCanvas.dataset.routeLineOverlay = "true";
+  lineCanvas.setAttribute("aria-hidden", "true");
+  container.append(lineCanvas);
+  const drawing = lineCanvas.getContext("2d");
+  if (!drawing) {
+    container.dataset.routeLineState = "failed";
+    routeMapNotice(context, "Die berechnete Routenlinie konnte nicht gezeichnet werden. Start, Ende und Stopps bleiben als Punkte sichtbar.");
+    return;
+  }
+
+  let announced = false;
+  const draw = () => {
+    const width = Math.max(1, Math.round(container.clientWidth));
+    const height = Math.max(1, Math.round(container.clientHeight));
+    const pixelRatio = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    const pixelWidth = Math.round(width * pixelRatio);
+    const pixelHeight = Math.round(height * pixelRatio);
+    if (lineCanvas.width !== pixelWidth || lineCanvas.height !== pixelHeight) {
+      lineCanvas.width = pixelWidth;
+      lineCanvas.height = pixelHeight;
+    }
+    lineCanvas.style.width = `${width}px`;
+    lineCanvas.style.height = `${height}px`;
+    drawing.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    drawing.clearRect(0, 0, width, height);
+
+    const points = geometry.geometry.coordinates.map((coordinate) => map.project(coordinate));
+    if (points.length < 2 || points.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y))) {
+      container.dataset.routeLineState = "failed";
+      return;
+    }
+    drawing.beginPath();
+    drawing.moveTo(points[0].x, points[0].y);
+    points.slice(1).forEach((point) => drawing.lineTo(point.x, point.y));
+    drawing.setLineDash([]);
+    drawing.lineCap = "round";
+    drawing.lineJoin = "round";
+    drawing.strokeStyle = "#fffdf7";
+    drawing.lineWidth = 15;
+    drawing.globalAlpha = .97;
+    drawing.stroke();
+    drawing.setLineDash(routeSource === "osrm" ? [] : [12, 9]);
+    drawing.strokeStyle = "#a13f22";
+    drawing.lineWidth = 9;
+    drawing.globalAlpha = 1;
+    drawing.stroke();
+    drawing.setLineDash([]);
+    const arrowSpacing = Math.max(1, Math.floor(points.length / 7));
+    drawing.strokeStyle = "#fffdf7";
+    drawing.lineWidth = 3;
+    for (let index = arrowSpacing; index < points.length; index += arrowSpacing) {
+      const tip = points[index];
+      const previous = points[Math.max(0, index - arrowSpacing)];
+      const dx = tip.x - previous.x;
+      const dy = tip.y - previous.y;
+      const length = Math.hypot(dx, dy);
+      if (!Number.isFinite(length) || length < 12) continue;
+      const ux = dx / length;
+      const uy = dy / length;
+      const size = Math.min(12, Math.max(7, length * .15));
+      const baseX = tip.x - ux * size;
+      const baseY = tip.y - uy * size;
+      drawing.beginPath();
+      drawing.moveTo(baseX - uy * size * .55, baseY + ux * size * .55);
+      drawing.lineTo(tip.x, tip.y);
+      drawing.lineTo(baseX + uy * size * .55, baseY - ux * size * .55);
+      drawing.stroke();
+    }
+
+    const sample = points[Math.floor(points.length / 2)];
+    let paintedPixels = 0;
+    if (sample.x >= 0 && sample.y >= 0 && sample.x < width && sample.y < height) {
+      const sampleX = Math.max(0, Math.round(sample.x * pixelRatio) - 5);
+      const sampleY = Math.max(0, Math.round(sample.y * pixelRatio) - 5);
+      const sampleWidth = Math.min(11, pixelWidth - sampleX);
+      const sampleHeight = Math.min(11, pixelHeight - sampleY);
+      const pixels = drawing.getImageData(sampleX, sampleY, sampleWidth, sampleHeight).data;
+      for (let index = 3; index < pixels.length; index += 4) {
+        if (pixels[index] > 0) paintedPixels++;
+      }
+    }
+    container.dataset.routeLineRenderedPixels = String(paintedPixels);
+    if (paintedPixels > 0) container.dataset.routeLineState = "drawn";
+    else if (container.dataset.routeLineState !== "drawn") container.dataset.routeLineState = "pending";
+    if (paintedPixels > 0 && !announced) {
+      announced = true;
+      const lineKind = routeSource === "osrm" ? "Straßenroute" : "geschätzte Routenlinie";
+      routeMapNotice(context, `Die ${lineKind} ist sichtbar. Start, Stopps und Ende bleiben zusätzlich als beschriftete Punkte bedienbar.`);
+    }
+  };
+  map.on("render", draw);
+  map.on("remove", () => lineCanvas.remove());
+  window.requestAnimationFrame(draw);
+}
+
 function initializeRouteMap(canvas, maplibregl) {
   const context = canvas.closest("[data-route-context]");
   if (!context) {
@@ -2017,29 +3739,47 @@ function initializeRouteMap(canvas, maplibregl) {
   const stops = routeStops(context);
   const candidates = routeCandidates(context);
   const geometry = routeLineFeature(canvas.dataset.routeGeometry);
+  const routeSource = String(canvas.dataset.routeSource || "").trim().toLowerCase();
+  canvas.dataset.routeLineState = geometry ? "pending" : "missing";
+  canvas.dataset.routeLineRenderedPixels = "0";
   const geometryCoordinates = geometry?.geometry.coordinates || [];
-  const depot = mapPoint(canvas.dataset.depotLatitude, canvas.dataset.depotLongitude)
-    || { latitude: 48.2, longitude: 14.2 };
+  const selectedStart = context.querySelector('[data-route-location-prefix="start"] [data-route-location-choice]:checked');
+  const selectedEnd = context.querySelector('[data-route-location-prefix="end"] [data-route-location-choice]:checked');
+  const routeStart = mapPoint(canvas.dataset.routeStartLatitude, canvas.dataset.routeStartLongitude);
+  const routeEnd = mapPoint(canvas.dataset.routeEndLatitude, canvas.dataset.routeEndLongitude);
+  const start = routeStart || mapPoint(selectedStart?.dataset.routeLocationSavedLatitude, selectedStart?.dataset.routeLocationSavedLongitude);
+  const end = routeEnd || mapPoint(selectedEnd?.dataset.routeLocationSavedLatitude, selectedEnd?.dataset.routeLocationSavedLongitude);
+  let currentStart = start;
+  let currentEnd = end;
   const stopJobIDs = new Set(stops.map((stop) => stop.jobID).filter(Boolean));
   const visibleCandidates = candidates.filter((candidate) => !stopJobIDs.has(candidate.jobID));
+  const filteredCandidates = () => visibleCandidates.filter((candidate) => !candidate.element.hidden);
   candidates.forEach((candidate) => {
-    const syncRow = () => candidate.element.classList.toggle("route-candidate--selected", candidate.checkbox.checked);
+    const syncRow = () => {
+      candidate.element.classList.toggle("route-candidate--selected", candidate.checkbox.checked);
+    };
     candidate.checkbox.addEventListener("change", syncRow);
     syncRow();
   });
-  const allCoordinates = [
-    [depot.longitude, depot.latitude],
-    ...geometryCoordinates,
-    ...stops.map((stop) => [stop.point.longitude, stop.point.latitude]),
-    ...visibleCandidates.map((candidate) => [candidate.point.longitude, candidate.point.latitude]),
-  ];
+  const allCoordinates = () => {
+    const sameEndpoint = currentStart && currentEnd && Math.abs(currentStart.latitude - currentEnd.latitude) < 1e-7 && Math.abs(currentStart.longitude - currentEnd.longitude) < 1e-7;
+    return [
+      ...(currentStart ? [[currentStart.longitude, currentStart.latitude]] : []),
+      ...(currentEnd && !sameEndpoint ? [[currentEnd.longitude, currentEnd.latitude]] : []),
+      ...geometryCoordinates,
+      ...stops.map((stop) => [stop.point.longitude, stop.point.latitude]),
+      ...filteredCandidates().map((candidate) => [candidate.point.longitude, candidate.point.latitude]),
+    ];
+  };
 
-  const first = allCoordinates[0];
+  const first = allCoordinates()[0];
   const map = new maplibregl.Map({
     container: canvas,
     style: hackWerkRasterStyle(),
-    center: first,
-    zoom: 10,
+    ...(first ? { center: first, zoom: 10 } : {
+      bounds: [[9.5, 46.3], [17.3, 49.2]],
+      fitBoundsOptions: { padding: 36, maxZoom: 7 },
+    }),
     interactive: true,
     dragRotate: false,
     pitchWithRotate: false,
@@ -2047,12 +3787,17 @@ function initializeRouteMap(canvas, maplibregl) {
   });
   let ready = false;
   const fitAll = () => {
-    if (allCoordinates.length === 1) {
-      map.easeTo({ center: allCoordinates[0], zoom: 11, duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300 });
+    const coordinates = allCoordinates();
+    if (coordinates.length === 0) {
+      map.fitBounds([[9.5, 46.3], [17.3, 49.2]], { padding: 36, maxZoom: 7, duration: 0 });
+      return;
+    }
+    if (coordinates.length === 1) {
+      map.easeTo({ center: coordinates[0], zoom: 11, duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300 });
       return;
     }
     const bounds = new maplibregl.LngLatBounds();
-    allCoordinates.forEach((coordinate) => bounds.extend(coordinate));
+    coordinates.forEach((coordinate) => bounds.extend(coordinate));
     map.fitBounds(bounds, {
       padding: window.matchMedia("(max-width: 680px)").matches ? 36 : 56,
       maxZoom: 15,
@@ -2065,10 +3810,19 @@ function initializeRouteMap(canvas, maplibregl) {
     toolbar.className = "route-map-toolbar";
     toolbar.dataset.routeMapToolbar = "true";
     toolbar.setAttribute("aria-label", "Kartenwerkzeuge");
-    toolbar.innerHTML = '<button class="button button--quiet" type="button" data-route-map-depot>Depot</button><button class="button button--quiet" type="button" data-route-map-fit>Alle Punkte</button><button class="button button--quiet" type="button" data-route-map-labels aria-pressed="true">Beschriftungen</button><button class="button button--quiet" type="button" data-route-map-retry>Karte erneut laden</button><span class="status-badge" data-route-map-count></span>';
+    toolbar.innerHTML = '<button class="button button--quiet" type="button" data-route-map-start>Startort</button><button class="button button--quiet" type="button" data-route-map-fit>Alle Punkte</button><button class="button button--quiet" type="button" data-route-map-labels aria-pressed="true">Beschriftungen</button><button class="button button--quiet" type="button" data-route-map-retry hidden>Karte erneut laden</button><span class="status-badge" data-route-map-count></span>';
     canvas.insertAdjacentElement("beforebegin", toolbar);
   }
-  toolbar.querySelector("[data-route-map-depot]")?.addEventListener("click", () => map.easeTo({ center: [depot.longitude, depot.latitude], zoom: 13 }));
+  const startButton = toolbar.querySelector("[data-route-map-start]");
+  const updateStartButton = () => {
+    startButton?.toggleAttribute("disabled", !currentStart);
+    if (!currentStart) startButton?.setAttribute("title", "Wählen Sie zuerst einen Startort.");
+    else startButton?.removeAttribute("title");
+  };
+  startButton?.addEventListener("click", () => {
+    if (currentStart) map.easeTo({ center: [currentStart.longitude, currentStart.latitude], zoom: 13 });
+  });
+  updateStartButton();
   toolbar.querySelector("[data-route-map-fit]")?.addEventListener("click", fitAll);
   toolbar.querySelector("[data-route-map-labels]")?.addEventListener("click", (event) => {
     const visible = !context.classList.toggle("route-map-labels-hidden");
@@ -2076,7 +3830,8 @@ function initializeRouteMap(canvas, maplibregl) {
     event.currentTarget.setAttribute("aria-pressed", String(visible));
     announce(visible ? "Kartenbeschriftungen eingeblendet." : "Kartenbeschriftungen ausgeblendet.");
   });
-  toolbar.querySelector("[data-route-map-retry]")?.addEventListener("click", () => {
+  toolbar.querySelector("[data-route-map-retry]")?.addEventListener("click", (event) => {
+	event.currentTarget.hidden = true;
     routeMapNotice(context, "Kartenkacheln werden erneut geladen …");
     const streets = map.getSource("hackwerk-streets");
     if (typeof streets?.setTiles === "function") streets.setTiles([`${window.location.origin}/map/tiles/{z}/{x}/{y}`]);
@@ -2093,8 +3848,8 @@ function initializeRouteMap(canvas, maplibregl) {
       if (!locationMarker) {
         const marker = document.createElement("span");
         marker.className = "route-map-marker route-map-marker--location";
-        marker.textContent = "Ich";
-        locationMarker = new maplibregl.Marker({ element: marker, anchor: "center" }).setLngLat(point).addTo(map);
+        marker.dataset.markerLabel = "Ich";
+        locationMarker = new maplibregl.Marker({ element: marker, anchor: "bottom" }).setLngLat(point).addTo(map);
       } else locationMarker.setLngLat(point);
       map.easeTo({ center: point, zoom: 14 });
       routeMapNotice(context, "Ihr Browserstandort wird nur auf dieser Karte gezeigt und nicht gespeichert.");
@@ -2103,9 +3858,10 @@ function initializeRouteMap(canvas, maplibregl) {
   }
   const updateVisibleCount = () => {
     const bounds = map.getBounds();
-    const count = [...stops, ...visibleCandidates].filter((item) => bounds.contains([item.point.longitude, item.point.latitude])).length;
-    const label = toolbar.querySelector("[data-route-map-count]");
-    if (label) label.textContent = `${count}/${stops.length + visibleCandidates.length} Punkte sichtbar`;
+    const candidatesInFilter = filteredCandidates();
+    const count = [...stops, ...candidatesInFilter].filter((item) => bounds.contains([item.point.longitude, item.point.latitude])).length;
+    const label = context.querySelector("[data-route-map-count]");
+    if (label) label.textContent = `${count}/${stops.length + candidatesInFilter.length} Punkte sichtbar`;
   };
   map.on("moveend", updateVisibleCount);
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
@@ -2120,49 +3876,89 @@ function initializeRouteMap(canvas, maplibregl) {
     resizeObserver.observe(canvas);
     map.on("remove", () => resizeObserver.disconnect());
   }
+  const updateRouteMarkerScale = () => {
+    const zoom = map.getZoom();
+    context.dataset.routeMarkerScale = zoom < 10 ? "overview" : zoom >= 13 ? "detail" : "standard";
+  };
+  updateRouteMarkerScale();
+  map.on("zoomend", updateRouteMarkerScale);
   map.on("error", (event) => {
+    const mapError = String(event?.error?.message || event?.message || "Kartenfehler");
+    canvas.dataset.mapError = mapError;
+	showRouteMapRetry(context);
     if (event?.sourceId === "hackwerk-streets") {
-      routeMapNotice(context, "Die Kartenkacheln sind vorübergehend nicht verfügbar. Depot, Auftrags-Pins und Auswahl bleiben bedienbar.");
+      routeMapNotice(context, "Die Kartenkacheln sind vorübergehend nicht verfügbar. Startort, Auftrags-Pins und Auswahl bleiben bedienbar.");
       return;
     }
     if (!ready) markRouteMapUnavailable(canvas);
   });
-  const addRouteLayers = () => {
-    if (geometry) {
-      if (map.getSource("hackwerk-route")) return;
-      map.addSource("hackwerk-route", { type: "geojson", data: geometry });
-      map.addLayer({
-        id: "hackwerk-route-halo",
-        type: "line",
-        source: "hackwerk-route",
-        paint: { "line-color": "#fffdf7", "line-width": 9, "line-opacity": .88 },
-        layout: { "line-cap": "round", "line-join": "round" },
-      });
-      map.addLayer({
-        id: "hackwerk-route",
-        type: "line",
-        source: "hackwerk-route",
-        paint: { "line-color": "#9b4931", "line-width": 5, "line-opacity": .96 },
-        layout: { "line-cap": "round", "line-join": "round" },
-      });
-      const directions = routeDirectionFeatures(geometry);
-      if (directions.features.length) {
-        map.addSource("hackwerk-route-directions", { type: "geojson", data: directions });
-        map.addLayer({
-          id: "hackwerk-route-direction",
-          type: "line",
-          source: "hackwerk-route-directions",
-          paint: { "line-color": "#fffdf7", "line-width": 3 },
-          layout: { "line-cap": "round", "line-join": "round" },
-        });
-      }
+  let startMarker = null;
+  let endMarker = null;
+  let endpointSelectionChanged = false;
+  const selectedEndpoint = (prefix) => {
+    const picker = context.querySelector(`[data-route-location-prefix="${prefix}"]`);
+    const choice = picker?.querySelector("[data-route-location-choice]:checked");
+    if (!picker || !choice) return { point: null, label: prefix === "start" ? "Startort" : "Endort" };
+    if (choice.dataset.routeLocationKind === "saved") {
+      return {
+        point: mapPoint(choice.dataset.routeLocationSavedLatitude, choice.dataset.routeLocationSavedLongitude),
+        label: String(choice.dataset.routeLocationSavedLabel || (prefix === "start" ? "Startort" : "Endort")).trim(),
+      };
+    }
+    if (choice.dataset.routeLocationKind === "last-stop") {
+      const last = stops.at(-1);
+      return { point: last?.point || null, label: last?.label || "Letzter Stopp" };
+    }
+    return {
+      point: mapPoint(picker.querySelector("[data-route-location-latitude]")?.value, picker.querySelector("[data-route-location-longitude]")?.value),
+      label: String(picker.querySelector("[data-route-location-label]")?.value || picker.querySelector("[data-route-location-address]")?.value || (prefix === "start" ? "Startort" : "Endort")).trim(),
+    };
+  };
+  const renderEndpointMarkers = (fromPicker = false) => {
+    const startEndpoint = fromPicker
+      ? selectedEndpoint("start")
+      : { point: start, label: String(canvas.dataset.routeStartLabel || selectedStart?.dataset.routeLocationSavedLabel || "Startort").trim() };
+    const endEndpoint = fromPicker
+      ? selectedEndpoint("end")
+      : { point: end, label: String(canvas.dataset.routeEndLabel || selectedEnd?.dataset.routeLocationSavedLabel || "Endort").trim() };
+    currentStart = startEndpoint.point;
+    currentEnd = endEndpoint.point;
+    updateStartButton();
+    startMarker?.remove();
+    endMarker?.remove();
+    startMarker = null;
+    endMarker = null;
+    const sameEndpoint = currentStart && currentEnd && Math.abs(currentStart.latitude - currentEnd.latitude) < 1e-7 && Math.abs(currentStart.longitude - currentEnd.longitude) < 1e-7;
+    if (currentStart) {
+      const popup = routePopupContent({ label: startEndpoint.label || "Startort", customer: sameEndpoint ? "Start und Ende der Route" : "Start der Route" });
+      startMarker = new maplibregl.Marker({ element: startMarkerElement(), anchor: "bottom" })
+        .setLngLat([currentStart.longitude, currentStart.latitude])
+        .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(popup.content))
+        .addTo(map);
+    }
+    if (currentEnd && !sameEndpoint) {
+      const popup = routePopupContent({ label: endEndpoint.label || "Endort", customer: "Ende der Route" });
+      endMarker = new maplibregl.Marker({ element: endMarkerElement(), anchor: "bottom" })
+        .setLngLat([currentEnd.longitude, currentEnd.latitude])
+        .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(popup.content))
+        .addTo(map);
     }
   };
-  map.on("style.load", addRouteLayers);
+  context.addEventListener("route-location-status", () => {
+    endpointSelectionChanged = true;
+    if (!ready) return;
+    renderEndpointMarkers(true);
+    fitAll();
+    updateVisibleCount();
+  });
   map.once("style.load", () => {
-    if (!geometry && stops.length) {
+    if (geometry && canvas.dataset.routeLineState !== "failed") {
+      routeMapNotice(context, "Die berechnete Routenlinie wird geladen …");
+    } else if (geometry) {
+      routeMapNotice(context, "Die Route ist berechnet, aber die Routenlinie konnte nicht gezeichnet werden. Start, Ende und Stopps bleiben als Punkte sichtbar.");
+    } else if (stops.length) {
       routeMapNotice(context, "Die Routenlinie fehlt; die verfügbaren Stopps werden als Kartenpunkte gezeigt.");
-    } else if (candidates.some((candidate) => !candidate.checkbox.disabled)) {
+    } else if (visibleCandidates.some((candidate) => !candidate.checkbox.disabled)) {
       routeMapNotice(context, "Wählen Sie Aufträge direkt in der Liste oder über einen Karten-Pin aus. Die Route wird erst mit „Route berechnen“ erzeugt.");
     } else if (candidates.length) {
       routeMapNotice(context, "Alle sichtbaren Aufträge sind bereits eingeplant. Ihre Pins bleiben zur Übersicht geöffnet, können aber nicht erneut ausgewählt werden.");
@@ -2170,17 +3966,13 @@ function initializeRouteMap(canvas, maplibregl) {
       routeMapNotice(context, "Die Grundkarte ist aktiv. Noch kein offener Auftrag besitzt einen gespeicherten Haufenstandort.");
     }
 
-    const depotPopup = routePopupContent({ label: "HackWerk Depot", customer: "Start und Ziel der Route" });
-    new maplibregl.Marker({ element: depotMarkerElement(), anchor: "center" })
-      .setLngLat([depot.longitude, depot.latitude])
-      .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(depotPopup.content))
-      .addTo(map);
+    renderEndpointMarkers(endpointSelectionChanged);
 
     const stopMarkers = new Map();
     stops.forEach((stop) => {
       const markerElement = routeMarkerElement(stop);
       const popup = routePopupContent(stop);
-      new maplibregl.Marker({ element: markerElement, anchor: "center" })
+      new maplibregl.Marker({ element: markerElement, anchor: "bottom" })
         .setLngLat([stop.point.longitude, stop.point.latitude])
         .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(popup.content))
         .addTo(map);
@@ -2191,7 +3983,7 @@ function initializeRouteMap(canvas, maplibregl) {
     let clusteredSource;
     const clusteredData = () => ({
       type: "FeatureCollection",
-      features: visibleCandidates.map((candidate) => ({
+      features: filteredCandidates().map((candidate) => ({
         type: "Feature",
         geometry: { type: "Point", coordinates: [candidate.point.longitude, candidate.point.latitude] },
         properties: {
@@ -2264,7 +4056,7 @@ function initializeRouteMap(canvas, maplibregl) {
         });
       }
       syncSelection();
-      new maplibregl.Marker({ element: markerElement, anchor: "center" })
+      new maplibregl.Marker({ element: markerElement, anchor: "bottom" })
         .setLngLat([candidate.point.longitude, candidate.point.latitude])
         .setPopup(new maplibregl.Popup({ offset: 22 }).setDOMContent(popup.content))
         .addTo(map);
@@ -2283,6 +4075,18 @@ function initializeRouteMap(canvas, maplibregl) {
       candidate.element.addEventListener("focusout", () => focusPair(false));
     });
 
+    const applyPlanningFilterToMap = () => {
+      if (clusteredSource) clusteredSource.setData(clusteredData());
+      candidateMarkers.forEach((markerElement, jobID) => {
+        const candidate = visibleCandidates.find((item) => item.jobID === jobID);
+        markerElement.hidden = Boolean(candidate?.element.hidden);
+      });
+      updateVisibleCount();
+      fitAll();
+    };
+    (context.closest("[data-planning-workbench]") || context).addEventListener("planningfilterchange", applyPlanningFilterToMap);
+    applyPlanningFilterToMap();
+
     context.addEventListener("routecandidateorderchange", () => {
       routeCandidates(context).forEach((ordered, index) => {
         const candidate = visibleCandidates.find((item) => item.jobID === ordered.jobID);
@@ -2290,7 +4094,7 @@ function initializeRouteMap(canvas, maplibregl) {
         candidate.position = index + 1;
         const marker = candidateMarkers.get(candidate.jobID);
         if (marker) {
-          marker.textContent = String(candidate.position);
+          marker.dataset.markerLabel = String(candidate.position);
           marker.title = `${candidate.position}. ${candidate.label}`;
           marker.setAttribute("aria-label", `${candidate.position}. ${candidate.label} auf der Karte öffnen`);
         }
@@ -2310,7 +4114,7 @@ function initializeRouteMap(canvas, maplibregl) {
       routeMapNotice(context, "Die Reihenfolge wurde in der Liste geändert. Nach dem Speichern wird die Routenlinie neu berechnet.");
     });
 
-    fitAll();
+    initializeRouteLineOverlay(canvas, map, geometry, routeSource, context);
     updateVisibleCount();
     ready = true;
     markMapReady(canvas);
@@ -2409,6 +4213,12 @@ function initializeRouteOrder(order) {
     const stopIDs = updated
       .map((item) => item.querySelector('input[type="hidden"][name="stop_id"]')?.value)
       .filter(Boolean);
+    dirtyForms.add(order);
+    order.dataset.routeOrderDirty = "true";
+    const saveButton = order.querySelector("[data-route-order-save-button]");
+    const saveStatus = order.querySelector("[data-route-order-save-status]");
+    if (saveButton) saveButton.textContent = "Geänderte Fahrreihenfolge speichern";
+    if (saveStatus) saveStatus.textContent = "Die Reihenfolge ist nur in dieser Ansicht geändert. Speichern Sie sie, bevor Sie die Seite verlassen.";
     order.dispatchEvent(new CustomEvent("routeorderchange", { bubbles: true, detail: { stopIDs } }));
     const movedButton = stop.querySelector(`[data-route-move="${button.dataset.routeMove}"]`);
     const alternateDirection = button.dataset.routeMove === "up" ? "down" : "up";
@@ -2500,12 +4310,22 @@ document.querySelectorAll('[data-route-context][data-route-own="true"]').forEach
 const jobLocationEditors = Array.from(document.querySelectorAll("[data-job-location-editor]"));
 const jobLocationPreviews = Array.from(document.querySelectorAll("[data-map-preview]"));
 const routeMapCanvases = Array.from(document.querySelectorAll("[data-route-map]"));
-if (jobLocationEditors.length || jobLocationPreviews.length || routeMapCanvases.length) {
+const routeLocationMapCanvases = Array.from(document.querySelectorAll("[data-route-location-map]"));
+if (jobLocationEditors.length || jobLocationPreviews.length || routeMapCanvases.length || routeLocationMapCanvases.length) {
+  const initializeEditorFallback = (editor) => {
+    if (editor.dataset.mapInitialized) return;
+    editor.dataset.mapInitialized = "fallback";
+    try { initializeJobLocationEditor(editor, null); } catch { markMapUnavailable(editor.querySelector("[data-map-canvas]")); }
+  };
   loadMapLibre().then((maplibregl) => {
     const initializeEditor = (editor) => {
       if (editor.dataset.mapInitialized) return;
       editor.dataset.mapInitialized = "true";
-      try { initializeJobLocationEditor(editor, maplibregl); } catch { markMapUnavailable(editor.querySelector("[data-map-canvas]")); }
+      try {
+        initializeJobLocationEditor(editor, maplibregl);
+      } catch {
+        try { initializeJobLocationEditor(editor, null); } catch { markMapUnavailable(editor.querySelector("[data-map-canvas]")); }
+      }
     };
     jobLocationEditors.forEach((editor) => {
       const disclosure = editor.closest("details");
@@ -2520,7 +4340,12 @@ if (jobLocationEditors.length || jobLocationPreviews.length || routeMapCanvases.
     routeMapCanvases.forEach((canvas) => {
       if (canvas.dataset.mapInitialized) return;
       canvas.dataset.mapInitialized = "true";
-      try { initializeRouteMap(canvas, maplibregl); } catch { markRouteMapUnavailable(canvas); }
+      try { initializeRouteMap(canvas, maplibregl); } catch { markRouteMapUnavailable(canvas, undefined, true); }
+    });
+    routeLocationMapCanvases.forEach((canvas) => {
+      if (canvas.dataset.mapInitialized) return;
+      canvas.dataset.mapInitialized = "true";
+      try { initializeRouteLocationCoordinateMap(canvas, maplibregl); } catch { markRouteLocationMapUnavailable(canvas); }
     });
     const initializePreview = (preview) => {
       if (preview.dataset.mapInitialized) return;
@@ -2539,7 +4364,9 @@ if (jobLocationEditors.length || jobLocationPreviews.length || routeMapCanvases.
     }, { rootMargin: "240px" });
     jobLocationPreviews.forEach((preview) => observer.observe(preview));
   }).catch(() => {
+    jobLocationEditors.forEach(initializeEditorFallback);
     document.querySelectorAll("[data-map-canvas], [data-map-preview]").forEach(markMapUnavailable);
-    routeMapCanvases.forEach((canvas) => markRouteMapUnavailable(canvas));
+    routeMapCanvases.forEach((canvas) => markRouteMapUnavailable(canvas, undefined, true));
+    routeLocationMapCanvases.forEach((canvas) => markRouteLocationMapUnavailable(canvas));
   });
 }

@@ -5,10 +5,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"example.invalid/hackplan/internal/auth"
 	"example.invalid/hackplan/internal/planning"
+	"example.invalid/hackplan/internal/routelocation"
 	"example.invalid/hackplan/web/templates"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -17,7 +19,7 @@ import (
 func registerPlanningRoutes(router chi.Router, dependencies Dependencies, page templates.PageData) {
 	router.With(requirePermission(auth.PermissionPlanningView, page, dependencies.Logger)).Get(
 		"/planning",
-		planningPage(dependencies.Planning, dependencies.Routes, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger),
+		planningPage(dependencies.Planning, dependencies.Routes, dependencies.RouteLocations, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger),
 	)
 	router.Post("/planning/suggestions", createPlanningSuggestions(dependencies.Planning, dependencies.Logger, false))
 	router.Post("/planning/suggestions/{suggestionID}/adopt", adoptPlanningSuggestion(dependencies.Planning, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger, false))
@@ -25,7 +27,7 @@ func registerPlanningRoutes(router chi.Router, dependencies Dependencies, page t
 	router.Post("/api/v1/planning/suggestions/{suggestionID}/adopt", adoptPlanningSuggestion(dependencies.Planning, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger, true))
 }
 
-func planningPage(service *planning.Service, routes *planning.RouteService, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
+func planningPage(service *planning.Service, routes *planning.RouteService, routeLocations *routelocation.Service, page templates.PageData, csrfCookie string, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		data, err := planningViewData(
 			request,
@@ -40,6 +42,21 @@ func planningPage(service *planning.Service, routes *planning.RouteService, page
 			data.Candidates, err = routes.Candidates(request.Context(), session.Actor)
 			if err == nil {
 				data.MissingLocations, err = routes.MissingLocations(request.Context(), session.Actor)
+			}
+		}
+		if err == nil && routeLocations != nil {
+			session, _ := sessionFromContext(request.Context())
+			locations, locationErr := routeLocations.ListActive(request.Context(), session.Actor)
+			if locationErr != nil {
+				err = locationErr
+			} else {
+				for _, location := range locations {
+					if location.DefaultStart {
+						data.RadiusLatitude = strconv.FormatFloat(location.Latitude, 'f', 6, 64)
+						data.RadiusLongitude = strconv.FormatFloat(location.Longitude, 'f', 6, 64)
+						break
+					}
+				}
 			}
 		}
 		data.ReturnTo = safePlanningReturn(request.URL.Query().Get("return_to"))
@@ -155,6 +172,8 @@ func planningError(err error) (int, string) {
 	switch {
 	case errors.Is(err, auth.ErrForbidden):
 		return http.StatusForbidden, "Für diese Aktion fehlt die Berechtigung."
+	case errors.Is(err, planning.ErrConfiguration):
+		return http.StatusServiceUnavailable, "Bitte zuerst unter Verwaltung → Routenorte einen Standard-Startort festlegen."
 	case errors.Is(err, planning.ErrConflict):
 		return http.StatusConflict, "Der Datenstand hat sich geändert. Bitte Vorschläge neu berechnen."
 	case errors.Is(err, planning.ErrNoCapacity):
@@ -171,6 +190,8 @@ func planningErrorCode(err error) string {
 	switch {
 	case errors.Is(err, auth.ErrForbidden):
 		return "forbidden"
+	case errors.Is(err, planning.ErrConfiguration):
+		return "planning_configuration"
 	case errors.Is(err, planning.ErrConflict):
 		return "planning_stale"
 	case errors.Is(err, planning.ErrNoCapacity):

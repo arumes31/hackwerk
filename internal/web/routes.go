@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"example.invalid/hackplan/internal/auth"
+	"example.invalid/hackplan/internal/driver"
 	"example.invalid/hackplan/internal/planning"
+	"example.invalid/hackplan/internal/routelocation"
 	"example.invalid/hackplan/web/templates"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -45,8 +47,6 @@ func adminRouteViewData(request *http.Request, service *planning.RouteService, d
 	session, _ := sessionFromContext(request.Context())
 	data := templates.RoutePageData{
 		Shell: shell(request, page, csrfCookie), Departure: defaultRouteDeparture(dependencies.Config.Planning.BusinessOpen),
-		DepotLat: strconv.FormatFloat(dependencies.Config.Planning.DepotLatitude, 'f', 6, 64),
-		DepotLon: strconv.FormatFloat(dependencies.Config.Planning.DepotLongitude, 'f', 6, 64),
 	}
 	data.SelectedJobIDs = append([]string(nil), request.URL.Query()["job_id"]...)
 	data.SelectedDay = strings.TrimSpace(request.URL.Query().Get("date"))
@@ -66,6 +66,21 @@ func adminRouteViewData(request *http.Request, service *planning.RouteService, d
 	if err != nil {
 		return data, err
 	}
+	if dependencies.RouteLocations != nil {
+		locations, locationErr := dependencies.RouteLocations.ListActive(request.Context(), session.Actor)
+		if locationErr != nil {
+			return data, locationErr
+		}
+		for _, location := range locations {
+			data.RouteLocations = append(data.RouteLocations, routeLocationOption(location))
+			if location.DefaultStart {
+				data.DefaultStartID = location.ID
+			}
+			if location.DefaultEnd {
+				data.DefaultEndID = location.ID
+			}
+		}
+	}
 	data.ParallelRoutes, err = service.DraftsForDate(request.Context(), session.Actor, data.SelectedDay)
 	if err != nil {
 		return data, err
@@ -84,14 +99,14 @@ func adminRouteViewData(request *http.Request, service *planning.RouteService, d
 func moveDraftStop(service *planning.RouteService, logger *slog.Logger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
+		targetRouteID, targetVersion, targetErr := draftMoveTarget(request.Form)
 		sourceVersion, sourceErr := parseVersion(request.Form.Get("source_version"))
-		targetVersion, targetErr := parseVersion(request.Form.Get("target_version"))
 		var err error
 		if sourceErr != nil || targetErr != nil {
 			err = planning.ErrValidation
 		} else {
 			_, err = service.MoveDraftStop(request.Context(), session.Actor, planning.MoveDraftStopInput{
-				SourceRouteID: chi.URLParam(request, "routeID"), TargetRouteID: request.Form.Get("target_route_id"),
+				SourceRouteID: chi.URLParam(request, "routeID"), TargetRouteID: targetRouteID,
 				StopID: request.Form.Get("stop_id"), SourceVersion: sourceVersion, TargetVersion: targetVersion,
 				RequestID: middleware.GetReqID(request.Context()),
 			})
@@ -107,25 +122,45 @@ func moveDraftStop(service *planning.RouteService, logger *slog.Logger) http.Han
 	}
 }
 
+func draftMoveTarget(form url.Values) (string, int32, error) {
+	targetRouteID := strings.TrimSpace(form.Get("target_route_id"))
+	targetVersionValue := form.Get("target_version")
+	if combined := strings.TrimSpace(form.Get("target_route")); combined != "" {
+		var found bool
+		targetRouteID, targetVersionValue, found = strings.Cut(combined, "|")
+		if !found {
+			return "", 0, planning.ErrValidation
+		}
+	}
+	targetVersion, err := parseVersion(targetVersionValue)
+	if strings.TrimSpace(targetRouteID) == "" || err != nil {
+		return "", 0, planning.ErrValidation
+	}
+	return strings.TrimSpace(targetRouteID), targetVersion, nil
+}
+
 func planRoute(service *planning.RouteService, dependencies Dependencies, page templates.PageData, csrfCookie string) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
-		departureValue := strings.TrimSpace(request.Form.Get("departure"))
-		if departureValue == "" {
-			departureValue = strings.TrimSpace(request.Form.Get("departure_date")) + "T" + strings.TrimSpace(request.Form.Get("departure_time"))
-		}
-		departure, departureErr := time.ParseInLocation("2006-01-02T15:04", departureValue, routeLocation())
-		start, startErr := routePoint(request.Form.Get("start_latitude"), request.Form.Get("start_longitude"))
-		end, endErr := routePoint(request.Form.Get("end_latitude"), request.Form.Get("end_longitude"))
+		departure, departureErr := parseRouteDeparture(request)
+		start, startLabel, _, startErr := routeEndpoint(request, dependencies.RouteLocations, session.Actor, "start", false)
+		end, endLabel, endAtLastStop, endErr := routeEndpoint(request, dependencies.RouteLocations, session.Actor, "end", true)
 		if departureErr != nil || startErr != nil || endErr != nil {
-			renderRoutePlanError(response, request, service, dependencies, page, csrfCookie, planning.ErrValidation)
+			requestErr := startErr
+			if requestErr == nil {
+				requestErr = endErr
+			}
+			if requestErr == nil {
+				requestErr = planning.ErrValidation
+			}
+			renderRoutePlanError(response, request, service, dependencies, page, csrfCookie, requestErr)
 			return
 		}
 		route, err := service.Plan(request.Context(), session.Actor, planning.PlanRouteInput{
 			Departure: departure, DriverID: request.Form.Get("driver_id"), ChipperResourceID: request.Form.Get("chipper_resource_id"),
-			TransportResourceID: request.Form.Get("transport_resource_id"), Start: start, End: end,
+			TransportResourceID: request.Form.Get("transport_resource_id"), StartLabel: startLabel, EndLabel: endLabel, Start: start, End: end,
 			JobIDs: request.Form["job_id"], FixedJobIDs: request.Form["fixed_job_id"],
-			Optimize: request.Form.Get("optimize") == "true", EndAtLastStop: request.Form.Get("end_at_last_stop") == "true",
+			Optimize: request.Form.Get("optimize") == "true", EndAtLastStop: endAtLastStop,
 			RequestID: middleware.GetReqID(request.Context()),
 		})
 		if err != nil {
@@ -149,13 +184,95 @@ func renderRoutePlanError(response http.ResponseWriter, request *http.Request, s
 		dependencies.Logger.WarnContext(request.Context(), "route planning context unavailable", slog.String("error_code", planningErrorCode(viewErr)))
 	}
 	status, message := routeError(err)
+	if status == http.StatusUnprocessableEntity {
+		message = routePlanValidationMessage(request, message)
+	}
 	data.Error = message
+	data.Form = routeFormState(request)
+	data.SelectedJobIDs = append([]string(nil), request.Form["job_id"]...)
 	if value := strings.TrimSpace(request.Form.Get("departure")); value != "" {
 		data.Departure = value
 	} else if date, clock := strings.TrimSpace(request.Form.Get("departure_date")), strings.TrimSpace(request.Form.Get("departure_time")); date != "" && clock != "" {
 		data.Departure = date + "T" + clock
 	}
 	render(response, request, templates.Routes(data), status, dependencies.Logger)
+}
+
+func routeFormState(request *http.Request) templates.RouteFormState {
+	return templates.RouteFormState{
+		Submitted:         true,
+		DriverID:          strings.TrimSpace(request.Form.Get("driver_id")),
+		ChipperResourceID: strings.TrimSpace(request.Form.Get("chipper_resource_id")),
+		TransportID:       strings.TrimSpace(request.Form.Get("transport_resource_id")),
+		Start:             routeEndpointFormState(request, "start"),
+		End:               routeEndpointFormState(request, "end"),
+		Optimize:          request.Form.Get("optimize") == "true",
+	}
+}
+
+func routeEndpointFormState(request *http.Request, prefix string) templates.RouteEndpointFormState {
+	return templates.RouteEndpointFormState{
+		Selection: strings.TrimSpace(request.Form.Get(prefix + "_selection")),
+		Label:     strings.TrimSpace(request.Form.Get(prefix + "_custom_label")),
+		Address:   strings.TrimSpace(request.Form.Get(prefix + "_custom_address")),
+		Latitude:  strings.TrimSpace(request.Form.Get(prefix + "_latitude")),
+		Longitude: strings.TrimSpace(request.Form.Get(prefix + "_longitude")),
+		Confirmed: request.Form.Get(prefix+"_custom_confirmed") == "true" ||
+			request.Form.Get(prefix+"_custom_confirmed_native") == "true",
+	}
+}
+
+func routePlanValidationMessage(request *http.Request, fallback string) string {
+	missing := make([]string, 0, 8)
+	if len(request.Form["job_id"]) == 0 {
+		missing = append(missing, "mindestens einen Auftrag auswählen")
+	}
+	missing = append(missing, routeEndpointValidationProblems(request, "start", "Startort", false)...)
+	missing = append(missing, routeEndpointValidationProblems(request, "end", "Endort", true)...)
+	if strings.TrimSpace(request.Form.Get("driver_id")) == "" {
+		missing = append(missing, "Fahrer auswählen")
+	}
+	if _, err := parseRouteDeparture(request); err != nil {
+		missing = append(missing, "gültiges Abfahrtsdatum und gültige Abfahrtszeit eingeben")
+	}
+	if len(missing) == 0 {
+		return fallback
+	}
+	return "Bitte ergänzen: " + strings.Join(missing, "; ") + "."
+}
+
+func parseRouteDeparture(request *http.Request) (time.Time, error) {
+	value := strings.TrimSpace(request.Form.Get("departure"))
+	if value == "" {
+		value = strings.TrimSpace(request.Form.Get("departure_date")) + "T" + strings.TrimSpace(request.Form.Get("departure_time"))
+	}
+	return driver.ParseLocalDateTime(value, routeLocation())
+}
+
+func routeEndpointValidationProblems(request *http.Request, prefix, heading string, allowLastStop bool) []string {
+	selection := strings.TrimSpace(request.Form.Get(prefix + "_selection"))
+	if strings.HasPrefix(selection, "saved:") || (selection == "last_stop" && allowLastStop) {
+		return nil
+	}
+	if selection != "custom" {
+		return []string{heading + " auswählen"}
+	}
+	problems := make([]string, 0, 4)
+	confirmed := request.Form.Get(prefix+"_custom_confirmed") == "true" ||
+		request.Form.Get(prefix+"_custom_confirmed_native") == "true"
+	if !confirmed {
+		problems = append(problems, "individuellen "+heading+" ausdrücklich mit „Standort übernehmen“ bestätigen")
+	}
+	if strings.TrimSpace(request.Form.Get(prefix+"_custom_label")) == "" {
+		problems = append(problems, "Bezeichnung für den "+heading+" eingeben")
+	}
+	if strings.TrimSpace(request.Form.Get(prefix+"_custom_address")) == "" {
+		problems = append(problems, "geprüfte Adresse für den "+heading+" eingeben")
+	}
+	if _, err := routePoint(request.Form.Get(prefix+"_latitude"), request.Form.Get(prefix+"_longitude")); err != nil {
+		problems = append(problems, "gültige Koordinaten für den "+heading+" eingeben")
+	}
+	return problems
 }
 
 func assignRoute(service *planning.RouteService, logger *slog.Logger) http.HandlerFunc {
@@ -225,10 +342,14 @@ func reorderOwnRoute(service *planning.RouteService, logger *slog.Logger) http.H
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
 		version, err := parseVersion(request.Form.Get("version"))
+		stopIDs := append([]string(nil), request.Form["stop_id"]...)
+		if err == nil {
+			stopIDs, err = applyOwnRouteStep(stopIDs, request.Form.Get("move_up"), request.Form.Get("move_down"))
+		}
 		var route planning.RouteDraft
 		if err == nil {
 			route, err = service.ReorderOwn(request.Context(), session.Actor, planning.ReorderOwnRouteInput{
-				ID: chi.URLParam(request, "routeID"), ExpectedVersion: version, StopIDs: request.Form["stop_id"], RequestID: middleware.GetReqID(request.Context()),
+				ID: chi.URLParam(request, "routeID"), ExpectedVersion: version, StopIDs: stopIDs, RequestID: middleware.GetReqID(request.Context()),
 			})
 		}
 		if err != nil {
@@ -242,6 +363,36 @@ func reorderOwnRoute(service *planning.RouteService, logger *slog.Logger) http.H
 	}
 }
 
+func applyOwnRouteStep(stopIDs []string, moveUp, moveDown string) ([]string, error) {
+	moveUp = strings.TrimSpace(moveUp)
+	moveDown = strings.TrimSpace(moveDown)
+	if moveUp == "" && moveDown == "" {
+		return stopIDs, nil
+	}
+	if moveUp != "" && moveDown != "" {
+		return nil, planning.ErrValidation
+	}
+	targetID := moveUp
+	offset := -1
+	if moveDown != "" {
+		targetID = moveDown
+		offset = 1
+	}
+	for index, stopID := range stopIDs {
+		if strings.TrimSpace(stopID) != targetID {
+			continue
+		}
+		other := index + offset
+		if other < 0 || other >= len(stopIDs) {
+			return nil, planning.ErrValidation
+		}
+		result := append([]string(nil), stopIDs...)
+		result[index], result[other] = result[other], result[index]
+		return result, nil
+	}
+	return nil, planning.ErrValidation
+}
+
 func routePoint(latitude, longitude string) (planning.Point, error) {
 	lat, latErr := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(latitude), ",", "."), 64)
 	lon, lonErr := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(longitude), ",", "."), 64)
@@ -250,6 +401,57 @@ func routePoint(latitude, longitude string) (planning.Point, error) {
 		return planning.Point{}, planning.ErrValidation
 	}
 	return point, nil
+}
+
+func routeEndpoint(request *http.Request, service *routelocation.Service, actor auth.Actor, prefix string, allowLastStop bool) (planning.Point, string, bool, error) {
+	selection := strings.TrimSpace(request.Form.Get(prefix + "_selection"))
+	if selection == "last_stop" && allowLastStop {
+		return planning.Point{}, "Letzter Stopp", true, nil
+	}
+	if strings.HasPrefix(selection, "saved:") {
+		if service == nil {
+			return planning.Point{}, "", false, routelocation.ErrNotFound
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(selection, "saved:"))
+		id := value
+		embeddedVersion := ""
+		if separator := strings.LastIndex(value, ":"); separator > 0 {
+			id = strings.TrimSpace(value[:separator])
+			embeddedVersion = strings.TrimSpace(value[separator+1:])
+		}
+		versionValue := strings.TrimSpace(request.Form.Get(prefix + "_location_version"))
+		if versionValue == "" {
+			versionValue = embeddedVersion
+		} else if embeddedVersion != "" && versionValue != embeddedVersion {
+			return planning.Point{}, "", false, routelocation.ErrConflict
+		}
+		version, err := parseVersion(versionValue)
+		if err != nil || id == "" {
+			return planning.Point{}, "", false, routelocation.ErrValidation
+		}
+		if submittedID := strings.TrimSpace(request.Form.Get(prefix + "_location_id")); submittedID != "" && submittedID != id {
+			return planning.Point{}, "", false, routelocation.ErrConflict
+		}
+		location, err := service.Resolve(request.Context(), actor, id, version)
+		if err != nil {
+			return planning.Point{}, "", false, err
+		}
+		return planning.Point{Latitude: location.Latitude, Longitude: location.Longitude}, location.Label, false, nil
+	}
+	confirmed := request.Form.Get(prefix+"_custom_confirmed") == "true" || request.Form.Get(prefix+"_custom_confirmed_native") == "true"
+	if selection != "custom" || !confirmed {
+		return planning.Point{}, "", false, routelocation.ErrValidation
+	}
+	label := strings.TrimSpace(request.Form.Get(prefix + "_custom_label"))
+	address := strings.TrimSpace(request.Form.Get(prefix + "_custom_address"))
+	if label == "" || address == "" || len([]rune(label)) > 120 || len([]rune(address)) > 500 {
+		return planning.Point{}, "", false, routelocation.ErrValidation
+	}
+	point, err := routePoint(request.Form.Get(prefix+"_latitude"), request.Form.Get(prefix+"_longitude"))
+	if err != nil {
+		return planning.Point{}, "", false, routelocation.ErrValidation
+	}
+	return point, label, false, nil
 }
 
 func defaultRouteDeparture(open string) string {
@@ -285,6 +487,12 @@ func routeError(err error) (int, string) {
 		return http.StatusUnprocessableEntity, "Bitte Aufträge, Fahrer, Ressource und Abfahrtszeit vollständig prüfen."
 	case errors.Is(err, planning.ErrNotFound):
 		return http.StatusNotFound, "Die Route wurde nicht gefunden."
+	case errors.Is(err, routelocation.ErrConflict):
+		return http.StatusConflict, "Der gewählte Start- oder Endort wurde geändert. Bitte Auswahl neu laden."
+	case errors.Is(err, routelocation.ErrNotFound):
+		return http.StatusNotFound, "Der gewählte Start- oder Endort ist nicht mehr verfügbar."
+	case errors.Is(err, routelocation.ErrValidation):
+		return http.StatusUnprocessableEntity, "Bitte Start- und Endort auswählen und individuelle Orte ausdrücklich übernehmen."
 	default:
 		return http.StatusInternalServerError, "Die Route konnte derzeit nicht verarbeitet werden."
 	}

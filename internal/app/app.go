@@ -3,20 +3,24 @@ package app
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"example.invalid/hackplan/internal/adapters/postgres"
+	"example.invalid/hackplan/internal/auth"
 	"example.invalid/hackplan/internal/buildinfo"
 	"example.invalid/hackplan/internal/calendarfeed"
 	"example.invalid/hackplan/internal/config"
+	"example.invalid/hackplan/internal/geocode"
 	"example.invalid/hackplan/internal/maptile"
 	"example.invalid/hackplan/internal/notification"
 	"example.invalid/hackplan/internal/observability"
+	"example.invalid/hackplan/internal/routelocation"
+	"example.invalid/hackplan/internal/voice"
 	"example.invalid/hackplan/internal/web"
 )
 
@@ -34,13 +38,13 @@ func Serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	build := buildinfo.Current()
 	metrics := observability.New(operations, cfg.Metrics.CollectionTimeout, build.Version, build.Commit, map[string]bool{
 		"email": cfg.Mail.Enabled, "sms": cfg.SMS.Enabled, "voice": cfg.Voice.Enabled,
-		"routing_external": cfg.Planning.Router == "osrm", "ics": cfg.CalendarFeed.Enabled,
+		"routing_external": cfg.Planning.Router == "osrm", "geocoding": cfg.Geocoding.Enabled, "ics": cfg.CalendarFeed.Enabled,
 	})
 	identity, err := IdentityService(cfg, pool)
 	if err != nil {
 		return err
 	}
-	customerService, err := CustomerService(pool)
+	customerService, err := CustomerService(pool, cfg.Waitlist.DurationReviewMinMinutes, cfg.Waitlist.DurationReviewMaxMinutes)
 	if err != nil {
 		return err
 	}
@@ -49,6 +53,11 @@ func Serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return err
 	}
 	resourceService, err := ResourceService(pool)
+	if err != nil {
+		return err
+	}
+	routeLocationStore := postgres.NewRouteLocationStore(pool)
+	routeLocationService, err := routelocation.New(routeLocationStore)
 	if err != nil {
 		return err
 	}
@@ -82,7 +91,7 @@ func Serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			return err
 		}
 	}
-	planningService, err := PlanningService(cfg, pool, driverService, metrics)
+	planningService, err := PlanningService(cfg, pool, driverService, routeLocationStore, metrics)
 	if err != nil {
 		return err
 	}
@@ -102,26 +111,40 @@ func Serve(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	var geocoder geocode.Searcher
+	if cfg.Geocoding.Enabled {
+		geocoder, err = geocode.New(geocode.Config{
+			SearchURL: cfg.Geocoding.SearchURL, CountryCodes: cfg.Geocoding.CountryCodes, Timeout: cfg.Geocoding.Timeout,
+			MaxResponseSize: cfg.Geocoding.MaxResponseBytes, MaxResults: cfg.Geocoding.MaxResults, MinInterval: cfg.Geocoding.MinInterval,
+			CacheTTL: cfg.Geocoding.CacheTTL, CacheEntries: cfg.Geocoding.CacheEntries,
+			UserAgent: "HackWerk/" + build.Version + " (address search)",
+		})
+		if err != nil {
+			return err
+		}
+	}
 
 	router, err := web.NewRouter(web.Dependencies{
-		Config:        cfg,
-		Logger:        logger,
-		Database:      operations,
-		Build:         build,
-		Identity:      identity,
-		Customers:     customerService,
-		Drivers:       driverService,
-		Resources:     resourceService,
-		Appointments:  appointmentService,
-		Confirmations: confirmationService,
-		Notifications: notificationAdmin,
-		Dashboard:     dashboardService,
-		CalendarFeeds: calendarFeedService,
-		Planning:      planningService,
-		Routes:        routeService,
-		Voice:         voiceService,
-		Metrics:       metrics,
-		MapTiles:      mapTiles,
+		Config:         cfg,
+		Logger:         logger,
+		Database:       operations,
+		Build:          build,
+		Identity:       identity,
+		Customers:      customerService,
+		Drivers:        driverService,
+		Resources:      resourceService,
+		RouteLocations: routeLocationService,
+		Appointments:   appointmentService,
+		Confirmations:  confirmationService,
+		Notifications:  notificationAdmin,
+		Dashboard:      dashboardService,
+		CalendarFeeds:  calendarFeedService,
+		Planning:       planningService,
+		Routes:         routeService,
+		Voice:          voiceService,
+		Metrics:        metrics,
+		MapTiles:       mapTiles,
+		Geocoder:       geocoder,
 	})
 	if err != nil {
 		return err
@@ -171,7 +194,7 @@ func Worker(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err := operations.Ready(ctx, cfg.Database.ExpectedSchema); err != nil {
 		return err
 	}
-	workerID, err := newWorkerID()
+	workerID, err := workerIdentity(cfg.Worker.InstanceID, os.Hostname)
 	if err != nil {
 		return err
 	}
@@ -239,33 +262,52 @@ func Worker(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	securityKeys, err := auth.NewSecurityKeyRing(cfg.Auth.SecurityKeys, cfg.Auth.SecurityCurrentKeyID)
+	if err != nil {
+		return err
+	}
+	if err := processor.ConfigureIdentityEmail(postgres.NewNotificationWorkerStore(pool), securityKeys); err != nil {
+		return err
+	}
+	voiceService, err := VoiceService(cfg, pool)
+	if err != nil {
+		return err
+	}
 
 	logger.InfoContext(ctx, "worker started", slog.Int("batch_size", cfg.Worker.BatchSize))
 	ticker := time.NewTicker(cfg.Worker.PollInterval)
 	defer ticker.Stop()
-	voiceStore := postgres.NewVoiceStore(pool)
 	nextVoiceCleanup := time.Time{}
 	heartbeatInterval := min(cfg.Metrics.WorkerStaleAfter/3, 30*time.Second)
 	if heartbeatInterval < 5*time.Second {
 		heartbeatInterval = 5 * time.Second
 	}
-	nextHeartbeat := startedAt.Add(heartbeatInterval)
+	heartbeatTicker := time.NewTicker(heartbeatInterval)
+	heartbeatDone := make(chan struct{})
+	voiceDone := make(chan struct{})
+	go func() {
+		defer close(heartbeatDone)
+		runWorkerHeartbeat(ctx, operations, workerID, startedAt, heartbeatTicker.C, logger)
+	}()
+	go func() {
+		defer close(voiceDone)
+		runVoiceWorker(ctx, voiceService, workerID, cfg.Worker.PollInterval, cfg.Voice.ProviderTimeout+30*time.Second, logger)
+	}()
+	defer func() {
+		heartbeatTicker.Stop()
+		<-heartbeatDone
+		<-voiceDone
+	}()
 
 	for {
 		if _, processErr := processor.RunOnce(ctx); processErr != nil && ctx.Err() == nil {
 			logger.WarnContext(ctx, "notification batch failed", slog.String("error_code", "notification_batch_failed"))
 		}
 		if now := time.Now(); !now.Before(nextVoiceCleanup) {
-			if _, cleanupErr := voiceStore.Cleanup(ctx); cleanupErr != nil && ctx.Err() == nil {
-				logger.WarnContext(ctx, "voice draft cleanup failed", slog.String("error_code", "voice_cleanup_failed"))
+			if _, err := voiceService.Cleanup(ctx); err != nil && ctx.Err() == nil {
+				logger.WarnContext(ctx, "voice data cleanup failed", slog.String("error_code", "voice_cleanup_failed"))
 			}
-			nextVoiceCleanup = now.Add(time.Hour)
-		}
-		if now := time.Now().UTC(); !now.Before(nextHeartbeat) {
-			if heartbeatErr := operations.Heartbeat(ctx, workerID, startedAt, now, "running"); heartbeatErr != nil && ctx.Err() == nil {
-				logger.WarnContext(ctx, "worker heartbeat failed", slog.String("error_code", "worker_heartbeat_failed"))
-			}
-			nextHeartbeat = now.Add(heartbeatInterval)
+			nextVoiceCleanup = now.Add(time.Minute)
 		}
 		select {
 		case <-ctx.Done():
@@ -276,10 +318,93 @@ func Worker(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 }
 
-func newWorkerID() (string, error) {
-	var value [12]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		return "", errors.New("app: generating worker identity")
+func runVoiceWorker(ctx context.Context, service *voice.Service, workerID string, pollInterval, lease time.Duration, logger *slog.Logger) {
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		if _, err := service.ProcessNext(ctx, workerID, lease); err != nil && ctx.Err() == nil {
+			logger.WarnContext(ctx, "voice recording processing failed", slog.String("error_code", "voice_processing_failed"))
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
-	return "worker-" + hex.EncodeToString(value[:]), nil
+}
+
+type workerHeartbeatStore interface {
+	Heartbeat(context.Context, string, time.Time, time.Time, string) error
+}
+
+func runWorkerHeartbeat(ctx context.Context, operations workerHeartbeatStore, workerID string, startedAt time.Time, ticks <-chan time.Time, logger *slog.Logger) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now, ok := <-ticks:
+			if !ok {
+				return
+			}
+			if err := operations.Heartbeat(ctx, workerID, startedAt, now.UTC(), "running"); err != nil && ctx.Err() == nil {
+				logger.WarnContext(ctx, "worker heartbeat failed", slog.String("error_code", "worker_heartbeat_failed"))
+			}
+		}
+	}
+}
+
+// WorkerHealthcheck verifies the worker's database/schema contract and the
+// shared heartbeat without depending on the web container or reverse proxy.
+func WorkerHealthcheck(ctx context.Context, cfg config.Config) error {
+	checkCtx, cancel := context.WithTimeout(ctx, cfg.Database.ReadinessTimeout)
+	defer cancel()
+	databaseConfig := cfg.Database
+	databaseConfig.MinConnections = 0
+	databaseConfig.MaxConnections = 1
+	pool, err := postgres.Open(checkCtx, databaseConfig)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	operations := postgres.NewOperationsStore(pool, cfg.Metrics.WorkerStaleAfter)
+	workerID, err := workerIdentity(cfg.Worker.InstanceID, os.Hostname)
+	if err != nil {
+		return err
+	}
+	return checkWorkerHealth(checkCtx, operations, cfg.Database.ExpectedSchema, workerID, cfg.Metrics.WorkerStaleAfter)
+}
+
+type workerHealthStore interface {
+	Ready(context.Context, int64) error
+	WorkerHealthyByID(context.Context, string, time.Duration) (time.Time, bool, error)
+}
+
+func checkWorkerHealth(ctx context.Context, operations workerHealthStore, expectedSchema int64, workerID string, staleAfter time.Duration) error {
+	if err := operations.Ready(ctx, expectedSchema); err != nil {
+		return err
+	}
+	_, healthy, err := operations.WorkerHealthyByID(ctx, workerID, staleAfter)
+	if err != nil {
+		return err
+	}
+	if !healthy {
+		return errors.New("app: worker heartbeat is stale")
+	}
+	return nil
+}
+
+func workerIdentity(configured string, hostname func() (string, error)) (string, error) {
+	value := strings.TrimSpace(configured)
+	if value == "" {
+		var err error
+		value, err = hostname()
+		value = strings.TrimSpace(value)
+		if err != nil || value == "" {
+			return "", errors.New("app: resolving worker identity")
+		}
+	}
+	if len(value) > 128 || strings.ContainsAny(value, "\r\n\t") {
+		return "", errors.New("app: invalid worker identity")
+	}
+	return value, nil
 }

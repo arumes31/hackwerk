@@ -27,5 +27,18 @@ func IdentityService(cfg config.Config, pool *pgxpool.Pool) (*auth.Service, erro
 	if err != nil {
 		return nil, fmt.Errorf("app: creating identity service: %w", err)
 	}
+	securityKeys, err := auth.NewSecurityKeyRing(cfg.Auth.SecurityKeys, cfg.Auth.SecurityCurrentKeyID)
+	if err != nil {
+		return nil, fmt.Errorf("app: creating identity security keys: %w", err)
+	}
+	if err := service.ConfigureSecurity(auth.SecurityConfig{
+		Keys: securityKeys, AppName: cfg.AppName, BaseURL: cfg.BaseURL,
+		EmailVerificationTTL: cfg.Auth.EmailVerificationTTL, EmailResendInterval: cfg.Auth.EmailResendInterval,
+		MFAChallengeTTL: cfg.Auth.MFAChallengeTTL, WebAuthnChallengeTTL: cfg.Auth.WebAuthnChallengeTTL,
+		// #nosec G115 -- validated configuration restricts MAIL_MAX_ATTEMPTS to 1..50.
+		MailMaxAttempts: int32(cfg.Mail.MaxAttempts),
+	}); err != nil {
+		return nil, fmt.Errorf("app: configuring identity security: %w", err)
+	}
 	return service, nil
 }

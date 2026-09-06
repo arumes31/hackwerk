@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -15,7 +16,6 @@ func testConfig(t *testing.T) Config {
 		t.Fatal(err)
 	}
 	cfg := DefaultConfig(location)
-	cfg.Depot = Point{48.2, 14.2}
 	cfg.HorizonDays = 7
 	cfg.CandidateLimit = 1000
 	return cfg
@@ -153,6 +153,46 @@ func TestGenerationAcrossDSTKeepsLocalBusinessTime(t *testing.T) {
 			if local.Hour() < cfg.BusinessOpen/60 || local.Hour() >= cfg.BusinessClose/60 {
 				t.Fatalf("DST candidate outside business hours: %s", local)
 			}
+		}
+	}
+}
+
+func TestExplainExclusionsDistinguishesUnavailableFromUnusedCapacity(t *testing.T) {
+	t.Parallel()
+	from := time.Date(2026, 9, 1, 5, 0, 0, 0, time.UTC)
+	to := from.Add(8 * time.Hour)
+	snapshot := Snapshot{
+		Job: Job{Type: "chipping_with_transport", TransportMode: "internal"},
+		Drivers: []Driver{
+			{ID: "driver-free", Name: "Fahrer frei", Availability: []Interval{{StartsAt: from, EndsAt: to, Status: "available"}}},
+			{ID: "driver-away", Name: "Fahrer abwesend", Availability: []Interval{{StartsAt: from.Add(time.Hour), EndsAt: to, Status: "available"}}},
+		},
+		Resources: []Resource{
+			{ID: "chipper-free", Name: "Hackmaschine frei", Type: "chipper", Exclusive: true},
+			{ID: "chipper-busy", Name: "Hackmaschine belegt", Type: "chipper", Exclusive: true},
+			{ID: "vehicle-free", Name: "Transporter frei", Type: "transport_vehicle", Exclusive: true},
+			{ID: "vehicle-busy", Name: "Transporter belegt", Type: "transport_vehicle", Exclusive: true},
+		},
+		Reservations: []Reservation{
+			{StartsAt: from.Add(2 * time.Hour), EndsAt: from.Add(3 * time.Hour), ResourceIDs: []string{"chipper-busy", "vehicle-busy"}},
+		},
+	}
+	exclusions := ExplainExclusions(snapshot, nil, from, to)
+	reasons := make(map[string]string, len(exclusions))
+	for _, exclusion := range exclusions {
+		reasons[exclusion.Name] = exclusion.Reason
+		if exclusion.Name == "" || strings.Contains(exclusion.Reason, "driver-") || strings.Contains(exclusion.Reason, "chipper-") || strings.Contains(exclusion.Reason, "vehicle-") {
+			t.Fatalf("unsafe exclusion = %#v", exclusion)
+		}
+	}
+	for _, name := range []string{"Fahrer frei", "Hackmaschine frei", "Transporter frei"} {
+		if reasons[name] != "nicht in den drei bestbewerteten Vorschlägen enthalten" {
+			t.Errorf("available capacity %q reason = %q", name, reasons[name])
+		}
+	}
+	for _, name := range []string{"Fahrer abwesend", "Hackmaschine belegt", "Transporter belegt"} {
+		if reasons[name] != "im Planungszeitraum nicht durchgehend verfügbar" {
+			t.Errorf("unavailable capacity %q reason = %q", name, reasons[name])
 		}
 	}
 }

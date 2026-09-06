@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +65,7 @@ func TestTask05NotificationConfirmationBrowserJourney(t *testing.T) {
 		AppName: "HackWerk", BaseURL: "http://" + server.Listener.Addr().String(), Database: config.Database{ReadinessTimeout: 2 * time.Second},
 		Auth:         config.Auth{SessionCookieName: "hackplan_session", CSRFCookieName: "hackplan_csrf", SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour},
 		Confirmation: config.Confirmation{RateLimit: 30}, Mail: config.Mail{Enabled: true},
+		Planning: config.Planning{BusinessOpen: "07:00", BusinessClose: "17:00"},
 	}
 	router, err := web.NewRouter(web.Dependencies{
 		Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pool, Build: buildinfo.Info{Version: "e2e"},
@@ -173,8 +175,82 @@ func TestTask05NotificationConfirmationBrowserJourney(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	var confirmationAudit struct {
+		Overflow, HeadingTooLarge              bool
+		ChoiceCount, SubmitCount, SmallTargets int
+	}
+	if err := runBrowserStep(browserContext, "select confirmation without persistence",
+		chromedp.Click(`input[name='action'][value='confirmed']`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector("input[name='action'][value='confirmed']")?.checked`, nil),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	select {
+	case facts := <-submission:
+		t.Fatalf("selecting a confirmation choice persisted unexpectedly: %+v", facts)
+	default:
+	}
+	var confirmationScreenshot []byte
 	if err := chromedp.Run(browserContext,
-		chromedp.Click("form.confirmation-actions button[value='confirmed']", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const choices=[...document.querySelectorAll('.confirmation-choice')];
+			const submit=document.querySelector('[data-confirmation-submit]');
+			const targets=[...choices,submit].filter(Boolean);
+			return {Overflow:document.documentElement.scrollWidth>window.innerWidth,
+				HeadingTooLarge:parseFloat(getComputedStyle(document.querySelector('#confirmation-title')).fontSize)>46,
+				ChoiceCount:choices.length,SubmitCount:submit?1:0,
+				SmallTargets:targets.filter(target=>{const rect=target.getBoundingClientRect();return rect.width<44||rect.height<44}).length};
+		})()`, &confirmationAudit),
+		chromedp.FullScreenshot(&confirmationScreenshot, 90),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if confirmationAudit.Overflow || confirmationAudit.HeadingTooLarge || confirmationAudit.ChoiceCount != 3 ||
+		confirmationAudit.SubmitCount != 1 || confirmationAudit.SmallTargets != 0 {
+		t.Fatalf("mobile confirmation presentation audit = %+v", confirmationAudit)
+	}
+	confirmationArtifact := filepath.Join(t.ArtifactDir(), "task05-mobile-confirmation.png")
+	if err := os.WriteFile(confirmationArtifact, confirmationScreenshot, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("confirmation screenshot: %s", confirmationArtifact)
+	if screenshotDir := os.Getenv("E2E_SCREENSHOT_DIR"); screenshotDir != "" {
+		if err := os.MkdirAll(screenshotDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(screenshotDir, "task05-mobile-confirmation.png"), confirmationScreenshot, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var noteGuard struct {
+		Path     string `json:"path"`
+		Invalid  string `json:"invalid"`
+		Feedback string `json:"feedback"`
+		Live     string `json:"live"`
+	}
+	if err := runBrowserStep(browserContext, "customer confirmation note guard",
+		chromedp.SetValue("#confirmation-response-note", "Bitte vormittags", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('[data-confirmation-note-feedback]')?.textContent.includes('von 500 Zeichen')`, nil),
+		chromedp.Click("[data-confirmation-submit]", chromedp.ByQuery),
+		chromedp.Evaluate(`({
+			path: location.pathname,
+			invalid: document.querySelector('#confirmation-response-note')?.getAttribute('aria-invalid'),
+			feedback: document.querySelector('[data-confirmation-note-feedback]')?.textContent,
+			live: document.querySelector('[data-confirmation-note-feedback]')?.getAttribute('aria-live')
+		})`, &noteGuard),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if noteGuard.Path != mustURLPath(t, link) || noteGuard.Invalid != "true" || noteGuard.Live != "polite" || !strings.Contains(noteGuard.Feedback, "Ablehnung oder einem Rückrufwunsch") {
+		t.Fatalf("confirmation note guard = %#v", noteGuard)
+	}
+	if err := chromedp.Run(browserContext,
+		chromedp.Evaluate(`(()=>{const note=document.querySelector('#confirmation-response-note');note.value='';note.dispatchEvent(new Event('input',{bubbles:true}))})()`, nil),
+	); err != nil {
+		t.Fatalf("clear confirmation note: %s", browserDiagnostics(browserContext, err))
+	}
+	if err := chromedp.Run(browserContext,
+		chromedp.Click("[data-confirmation-submit]", chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("confirmation submit: %s", browserDiagnostics(browserContext, err))
 	}
@@ -226,7 +302,7 @@ func TestTask05NotificationConfirmationBrowserJourney(t *testing.T) {
 	if err := runBrowserStep(browserContext, "old link revoked", chromedp.Navigate(link), chromedp.WaitVisible("h1", chromedp.ByQuery), chromedp.Text("main", &invalidText, chromedp.ByQuery)); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(invalidText, "nicht mehr gültig") {
+	if !strings.Contains(invalidText, "Link nicht verfügbar") || strings.Contains(invalidText, "widerrufen") || strings.Contains(invalidText, "abgelaufen") {
 		t.Fatalf("old link result = %q", invalidText)
 	}
 
@@ -249,9 +325,12 @@ func TestTask05NotificationConfirmationBrowserJourney(t *testing.T) {
 		); err != nil {
 			t.Fatal(browserDiagnostics(browserContext, err))
 		}
-		if err := chromedp.Run(browserContext,
-			chromedp.Click("form.confirmation-actions button[value='"+action+"']", chromedp.ByQuery),
-		); err != nil {
+		actions := []chromedp.Action{chromedp.Click("form.confirmation-actions input[value='"+action+"']", chromedp.ByQuery)}
+		if action == "callback_requested" {
+			actions = append(actions, chromedp.SetValue("#confirmation-response-note", "Bitte vormittags zurückrufen", chromedp.ByQuery))
+		}
+		actions = append(actions, chromedp.Click("[data-confirmation-submit]", chromedp.ByQuery))
+		if err := chromedp.Run(browserContext, actions...); err != nil {
 			t.Fatalf("%s confirmation submit: %s", action, browserDiagnostics(browserContext, err))
 		}
 		select {
@@ -389,4 +468,13 @@ func confirmationLink(message string) string {
 		}
 	}
 	return ""
+}
+
+func mustURLPath(t *testing.T, rawURL string) string {
+	t.Helper()
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed.Path
 }

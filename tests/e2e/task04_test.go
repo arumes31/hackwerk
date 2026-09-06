@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -23,7 +24,9 @@ import (
 	"example.invalid/hackplan/internal/config"
 	"example.invalid/hackplan/internal/customers"
 	"example.invalid/hackplan/internal/driver"
+	"example.invalid/hackplan/internal/planning"
 	"example.invalid/hackplan/internal/resource"
+	"example.invalid/hackplan/internal/routelocation"
 	"example.invalid/hackplan/internal/web"
 	"github.com/chromedp/cdproto/emulation"
 	cdpinput "github.com/chromedp/cdproto/input"
@@ -44,8 +47,9 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	}
 	cfg := config.Config{
 		AppName: "HackWerk", BaseURL: "http://127.0.0.1:18533", Database: config.Database{ReadinessTimeout: 2 * time.Second},
-		Auth: config.Auth{SessionCookieName: "hackplan_session", CSRFCookieName: "hackplan_csrf", SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour},
-		Mail: config.Mail{Enabled: true},
+		Auth:     config.Auth{SessionCookieName: "hackplan_session", CSRFCookieName: "hackplan_csrf", SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 8 * time.Hour},
+		Mail:     config.Mail{Enabled: true},
+		Planning: config.Planning{BusinessOpen: "07:00", BusinessClose: "17:00"},
 	}
 	router, err := web.NewRouter(web.Dependencies{
 		Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Database: pool, Build: buildinfo.Info{Version: "e2e"},
@@ -127,6 +131,76 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	if calendarTimezone != "Europe/Vienna" || !dragReady || !strings.Contains(toolbarText, "Heute") || !strings.Contains(toolbarText, "Woche") || !strings.Contains(toolbarText, "Monat") || adminReadOnlyNotices != 0 || calendarFeedButtons != 1 {
 		t.Fatalf("calendar timezone/drag/toolbar/admin read-only/feed button = %q/%v/%q/%d/%d", calendarTimezone, dragReady, toolbarText, adminReadOnlyNotices, calendarFeedButtons)
 	}
+	var compactCalendarAudit struct {
+		PageWidth, HeadingHeight, BoardTop, ControlsHeight, CalendarOffset float64
+		RangeHeight, WarningHeight, LegendHeight, MessageHeight            float64
+		MinimumButtonGap, TallestWaitlistCard                              float64
+		SmallTargets, ControlRows                                          int
+		Overlap, PageOverflow, OptionsInitiallyOpen, SummaryHidden         bool
+		ControlsHiddenBeforeOpen, OptionsOpen, FirstControlFocused         bool
+	}
+	if err := chromedp.Run(browserContext,
+		chromedp.EmulateViewport(1440, 900),
+		chromedp.Poll(`document.querySelector('.calendar-page').getBoundingClientRect().width>1380`, nil),
+		chromedp.Evaluate(`(() => {
+		const page=document.querySelector('.calendar-page');
+		const heading=page.querySelector('.page-heading');
+		const options=page.querySelector('.calendar-options');
+		const summary=options.querySelector('summary');
+		const controls=page.querySelector('[data-calendar-controls]');
+		const optionsInitiallyOpen=options.open;
+		const summaryHidden=getComputedStyle(summary).display==='none';
+		const controlsHiddenBeforeOpen=getComputedStyle(controls).display==='none';
+		summary.click();
+		const firstControl=controls.querySelector('button');
+		firstControl.focus();
+		const groups=[...controls.querySelectorAll('.calendar-control-group')];
+		const targets=[...controls.querySelectorAll('button,input[type=date],label.check-label')];
+		const gaps=groups.flatMap(group=>{
+			const buttons=[...group.querySelectorAll('button')].map(node=>node.getBoundingClientRect());
+			return buttons.slice(1).map((rect,index)=>rect.left-buttons[index].right);
+		});
+		const rects=groups.map(node=>node.getBoundingClientRect());
+		const overlap=rects.some((left,index)=>rects.slice(index+1).some(right=>left.left<right.right&&left.right>right.left&&left.top<right.bottom&&left.bottom>right.top));
+		const cards=[...page.querySelectorAll('.calendar-waitlist-item')].map(node=>node.getBoundingClientRect().height);
+		const result={
+			PageWidth:page.getBoundingClientRect().width,
+			HeadingHeight:heading.getBoundingClientRect().height,
+			BoardTop:page.querySelector('.calendar-board').getBoundingClientRect().top,
+			ControlsHeight:controls.getBoundingClientRect().height,
+			CalendarOffset:page.querySelector('[data-calendar]').getBoundingClientRect().top-page.getBoundingClientRect().top,
+			RangeHeight:page.querySelector('.calendar-range-summary').getBoundingClientRect().height,
+			WarningHeight:page.querySelector('[data-calendar-timezone-warning]').getBoundingClientRect().height,
+			LegendHeight:page.querySelector('.calendar-legend').getBoundingClientRect().height,
+			MessageHeight:page.querySelector('[data-calendar-message]').getBoundingClientRect().height,
+			MinimumButtonGap:gaps.length?Math.min(...gaps):999,
+			TallestWaitlistCard:cards.length?Math.max(...cards):0,
+			SmallTargets:targets.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<44||rect.height<44}).length,
+			ControlRows:rects.reduce((rows,rect)=>{
+				const row=rows.find(item=>rect.top<item.bottom&&rect.bottom>item.top);
+				if(row){row.top=Math.min(row.top,rect.top);row.bottom=Math.max(row.bottom,rect.bottom);}else{rows.push({top:rect.top,bottom:rect.bottom});}
+				return rows;
+			},[]).length,
+			Overlap:overlap,
+			PageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth,
+			OptionsInitiallyOpen:optionsInitiallyOpen,
+			SummaryHidden:summaryHidden,
+			ControlsHiddenBeforeOpen:controlsHiddenBeforeOpen,
+			OptionsOpen:options.open,
+			FirstControlFocused:document.activeElement===firstControl
+		};
+		options.open=false;
+		return result;
+	})()`, &compactCalendarAudit)); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if compactCalendarAudit.PageWidth < 1380 || compactCalendarAudit.HeadingHeight > 115 || compactCalendarAudit.ControlsHeight > 130 ||
+		compactCalendarAudit.CalendarOffset > 425 || compactCalendarAudit.MinimumButtonGap < 6 || compactCalendarAudit.TallestWaitlistCard > 140 ||
+		compactCalendarAudit.SmallTargets != 0 || compactCalendarAudit.ControlRows > 2 || compactCalendarAudit.Overlap || compactCalendarAudit.PageOverflow ||
+		compactCalendarAudit.OptionsInitiallyOpen || compactCalendarAudit.SummaryHidden || !compactCalendarAudit.ControlsHiddenBeforeOpen ||
+		!compactCalendarAudit.OptionsOpen || !compactCalendarAudit.FirstControlFocused {
+		t.Fatalf("compact calendar desktop audit = %+v", compactCalendarAudit)
+	}
 	var calendarLoadMessage string
 	if err := runBrowserStep(browserContext, "calendar load failure is recoverable",
 		chromedp.Evaluate(`window.__hackWerkFetch=window.fetch;window.fetch=(input,...args)=>String(input).includes('/api/v1/calendar?')?Promise.resolve(new Response('',{status:503})):window.__hackWerkFetch(input,...args);window.hackWerkCalendar.refetchEvents()`, nil),
@@ -144,23 +218,64 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		t.Fatal(browserDiagnostics(browserContext, fmt.Errorf("external waitlist drag: %w", err)))
 	}
 	var draggedJob string
-	if err := chromedp.Run(browserContext,
+	if err := runBrowserStep(browserContext, "inspect and close drag proposal",
 		chromedp.WaitVisible("[data-planning-dialog]", chromedp.ByQuery),
 		chromedp.Value("[data-planning-form] input[name='job_id']", &draggedJob, chromedp.ByQuery),
-		chromedp.Click("[data-planning-dialog] [data-dialog-close]", chromedp.ByQuery),
+		chromedp.Evaluate(`(()=>{const dialog=document.querySelector('[data-planning-dialog]');dialog.querySelector('form').reset();dialog.close()})()`, nil),
+		chromedp.Poll(`!document.querySelector('[data-planning-dialog]').open`, nil),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
 	if draggedJob != dragJobID {
 		t.Fatalf("external drag opened job %q, want %q", draggedJob, dragJobID)
 	}
+	var mobileCalendarAudit struct {
+		HeadingHeight, OptionsHeight, CalendarTop, NavigationTop float64
+		SmallTargets                                             int
+		OptionsCollapsed, DragHintHidden, Overlap, PageOverflow  bool
+	}
 	if err := runBrowserStep(browserContext, "open mobile proposal form",
+		chromedp.Evaluate(`localStorage.setItem('hackwerk:install-dismissed','true');document.querySelector('[data-install-prompt]').hidden=true`, nil),
 		chromedp.EmulateViewport(360, 820),
 		chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetTimezoneOverride("UTC").Do(ctx) }),
-		chromedp.Click("[data-plan-job='"+jobID+"']", chromedp.ByQuery),
+		chromedp.Navigate(server.URL+"/calendar?date=2026-08-25"),
+		chromedp.WaitVisible("[data-calendar]", chromedp.ByQuery),
+		chromedp.Poll(`window.hackWerkCalendar.view.type==='timeGridDay'`, nil),
+		chromedp.Evaluate(`(() => {
+			const visible=node=>{const style=getComputedStyle(node),rect=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0};
+			const options=document.querySelector('.calendar-options');
+			const summary=options.querySelector('summary');
+			const controls=document.querySelector('[data-calendar-controls]');
+			const optionsCollapsed=!options.open&&!visible(controls);
+			const calendarTop=document.querySelector('[data-calendar]').getBoundingClientRect().top;
+			options.open=true;
+			const groups=[...controls.querySelectorAll('.calendar-control-group')];
+			const rects=groups.map(node=>node.getBoundingClientRect());
+			const targets=[...controls.querySelectorAll('button,input[type=date],label.check-label')].filter(visible);
+			const result={
+				HeadingHeight:document.querySelector('.calendar-page .page-heading').getBoundingClientRect().height,
+				OptionsHeight:summary.getBoundingClientRect().height,
+				CalendarTop:calendarTop,
+				NavigationTop:document.querySelector('.mobile-bottom-nav').getBoundingClientRect().top,
+				SmallTargets:targets.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<44||rect.height<44}).length,
+				OptionsCollapsed:optionsCollapsed,
+				DragHintHidden:!visible(document.querySelector('.calendar-edit-hint')),
+				Overlap:rects.some((left,index)=>rects.slice(index+1).some(right=>left.left<right.right&&left.right>right.left&&left.top<right.bottom&&left.bottom>right.top)),
+				PageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth
+			};
+			options.open=false;
+			return result;
+		})()`, &mobileCalendarAudit),
+		chromedp.Evaluate(fmt.Sprintf(`document.querySelector('[data-plan-job=%q]').click()`, jobID), nil),
 		chromedp.WaitVisible("[data-planning-dialog]", chromedp.ByQuery),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if mobileCalendarAudit.HeadingHeight > 96 || mobileCalendarAudit.OptionsHeight < 44 || mobileCalendarAudit.OptionsHeight > 56 ||
+		mobileCalendarAudit.CalendarTop > 640 || mobileCalendarAudit.CalendarTop > mobileCalendarAudit.NavigationTop-120 ||
+		mobileCalendarAudit.SmallTargets != 0 || !mobileCalendarAudit.OptionsCollapsed || !mobileCalendarAudit.DragHintHidden ||
+		mobileCalendarAudit.Overlap || mobileCalendarAudit.PageOverflow {
+		t.Fatalf("compact calendar mobile audit = %+v", mobileCalendarAudit)
 	}
 	var defaultPlanningStart string
 	if err := chromedp.Run(browserContext,
@@ -176,14 +291,67 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	if defaultPlanningStart != wantDefaultStart {
 		t.Fatalf("UTC-device Vienna default = %q, want %q", defaultPlanningStart, wantDefaultStart)
 	}
+	var dirtyDialogOpen, dirtyValuePreserved, dirtyFocusPreserved bool
+	if err := runBrowserStep(browserContext, "dirty planning dialog protects escape and close",
+		chromedp.SetValue("[data-planning-duration]", "195", chromedp.ByQuery),
+		chromedp.Focus("[data-planning-duration]", chromedp.ByQuery),
+		chromedp.Evaluate(`window.__nativeConfirm=window.confirm;window.confirm=()=>false`, nil),
+		chromedp.KeyEvent("\x1b"),
+		chromedp.Evaluate(`document.querySelector('[data-planning-dialog]').open`, &dirtyDialogOpen),
+		chromedp.Evaluate(`document.querySelector('[data-planning-duration]').value === '195'`, &dirtyValuePreserved),
+		chromedp.Evaluate(`document.activeElement === document.querySelector('[data-planning-duration]')`, &dirtyFocusPreserved),
+		chromedp.Evaluate(`window.confirm=()=>true`, nil),
+		chromedp.Click("[data-planning-dialog] [data-dialog-close]", chromedp.ByQuery),
+		chromedp.WaitNotVisible("[data-planning-dialog]", chromedp.ByQuery),
+		chromedp.Evaluate(`window.confirm=window.__nativeConfirm;delete window.__nativeConfirm`, nil),
+		chromedp.Click("[data-plan-job='"+jobID+"']", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-planning-dialog]", chromedp.ByQuery),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if !dirtyDialogOpen || !dirtyValuePreserved || !dirtyFocusPreserved {
+		t.Fatalf("dirty planning dialog open/value/focus = %v/%v/%v", dirtyDialogOpen, dirtyValuePreserved, dirtyFocusPreserved)
+	}
 	var submittedForm string
-	if err := runBrowserStep(browserContext, "submit mobile proposal form",
+	if err := runBrowserStep(browserContext, "fill mobile proposal form",
 		chromedp.SetValue("[data-planning-start]", "2026-08-25T08:00", chromedp.ByQuery),
 		chromedp.SetValue("[data-planning-duration]", "180", chromedp.ByQuery),
 		chromedp.Click("input[name='driver_id'][value='"+driverID+"']", chromedp.ByQuery),
 		chromedp.SetValue("select[name='primary_driver_id']", driverID, chromedp.ByQuery),
 		chromedp.SetValue("select[name='chipper_resource_id']", chipperID, chromedp.ByQuery),
 		chromedp.Evaluate(`JSON.stringify([...new FormData(document.querySelector('[data-planning-form]')).entries()])`, &submittedForm),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	var planningConflictFocus, planningConflictLink, planningConflictAssociation bool
+	if err := runBrowserStep(browserContext, "planning conflict focuses linked error summary",
+		chromedp.Evaluate(`window.__planningFetch=window.fetch;window.fetch=(input,...args)=>String(input).includes('/api/v1/calendar/plan')?Promise.resolve(new Response(JSON.stringify({error:{code:'reservation_conflict',message:'Dieser Slot ist bereits belegt.'}}),{status:409,headers:{'Content-Type':'application/json'}})):window.__planningFetch(input,...args)`, nil),
+		chromedp.Click("[data-planning-form] button[type='submit']", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('[data-planning-error]').textContent.includes('bereits belegt')`, nil),
+		chromedp.Evaluate(`document.activeElement === document.querySelector('[data-planning-error]')`, &planningConflictFocus),
+		chromedp.Evaluate(`document.querySelector('[data-planning-error] a')?.getAttribute('href') === '#planning-start'`, &planningConflictLink),
+		chromedp.Evaluate(`document.querySelector('#planning-start').getAttribute('aria-errormessage') === 'planning-error' && document.querySelector('#planning-start').getAttribute('aria-invalid') === 'true'`, &planningConflictAssociation),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if !planningConflictFocus || !planningConflictLink || !planningConflictAssociation {
+		t.Fatalf("planning conflict focus/link/association = %v/%v/%v", planningConflictFocus, planningConflictLink, planningConflictAssociation)
+	}
+	var planningServerFocus, planningServerFieldAssociation bool
+	if err := runBrowserStep(browserContext, "planning server error refocuses summary",
+		chromedp.Evaluate(`window.fetch=(input,...args)=>String(input).includes('/api/v1/calendar/plan')?Promise.resolve(new Response(JSON.stringify({error:{code:'internal_error',message:'Planung vorübergehend nicht verfügbar.'}}),{status:503,headers:{'Content-Type':'application/json'}})):window.__planningFetch(input,...args)`, nil),
+		chromedp.Click("[data-planning-form] button[type='submit']", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('[data-planning-error]').textContent.includes('vorübergehend')`, nil),
+		chromedp.Evaluate(`document.activeElement === document.querySelector('[data-planning-error]')`, &planningServerFocus),
+		chromedp.Evaluate(`Boolean(document.querySelector('[aria-errormessage="planning-error"]'))`, &planningServerFieldAssociation),
+		chromedp.Evaluate(`window.fetch=window.__planningFetch;delete window.__planningFetch`, nil),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if !planningServerFocus || planningServerFieldAssociation {
+		t.Fatalf("planning server error focus/field association = %v/%v", planningServerFocus, planningServerFieldAssociation)
+	}
+	if err := runBrowserStep(browserContext, "submit mobile proposal form",
 		chromedp.Click("[data-planning-form] button[type='submit']", chromedp.ByQuery),
 		chromedp.Poll(`!document.querySelector('[data-planning-dialog]').open || !document.querySelector('[data-planning-error]').hidden`, nil),
 	); err != nil {
@@ -299,12 +467,14 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		clickCurrent(appointmentEventSelector),
 		chromedp.WaitVisible("[data-appointment-reschedule]", chromedp.ByQuery),
 		chromedp.SetValue("[data-appointment-start]", "2026-08-25T08:30", chromedp.ByQuery),
-		chromedp.Evaluate(fmt.Sprintf(`window.__timeFetch=window.fetch;window.fetch=(input,...args)=>{const url=String(input);if(url.endsWith(%q))return Promise.resolve(new Response(JSON.stringify({error:{code:'reservation_conflict',message:'E2E conflict'}}),{status:409,headers:{'Content-Type':'application/json'}}));if(url.includes('/alternatives?')){window.__alternativeURL=url;return Promise.resolve(new Response(JSON.stringify({conflicts:[],alternatives:[]}),{status:200,headers:{'Content-Type':'application/json'}}));}return window.__timeFetch(input,...args)}`, "/api/v1/appointments/"+appointmentID+"/move"), nil),
+		chromedp.Evaluate(fmt.Sprintf(`window.__timeFetch=window.fetch;window.fetch=(input,...args)=>{const url=String(input);if(url.endsWith(%q))return Promise.resolve(new Response(JSON.stringify({checks:[],conflicts:[]}),{status:200,headers:{'Content-Type':'application/json'}}));if(url.endsWith(%q))return Promise.resolve(new Response(JSON.stringify({error:{code:'reservation_conflict',message:'E2E conflict'}}),{status:409,headers:{'Content-Type':'application/json'}}));if(url.includes('/alternatives?')){window.__alternativeURL=url;return Promise.resolve(new Response(JSON.stringify({conflicts:[],alternatives:[]}),{status:200,headers:{'Content-Type':'application/json'}}));}return window.__timeFetch(input,...args)}`, "/api/v1/appointments/"+appointmentID+"/preview", "/api/v1/appointments/"+appointmentID+"/move"), nil),
+		chromedp.Evaluate(`window.__conflictNativeConfirm=window.confirm;window.confirm=()=>true`, nil),
 		chromedp.Click("[data-appointment-reschedule-submit]", chromedp.ByQuery),
 		chromedp.Poll(`Boolean(window.__alternativeURL)`, nil),
 		chromedp.Evaluate(`new URL(window.__alternativeURL,location.origin).searchParams.get('starts_at')`, &alternativeStart),
 		chromedp.Evaluate(`window.fetch=window.__timeFetch;delete window.__timeFetch;delete window.__alternativeURL`, nil),
 		chromedp.Click("[data-appointment-close]", chromedp.ByQuery),
+		chromedp.Evaluate(`window.confirm=window.__conflictNativeConfirm;delete window.__conflictNativeConfirm`, nil),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
@@ -324,8 +494,10 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		t.Fatalf("calendar resize enabled/visible = %v/%v; handles=%s", resizeEnabled, resizeHandleVisible, resizeDebug)
 	}
 
+	var dirtyAppointmentOpen, dirtyAppointmentValue, dirtyAppointmentFocus bool
+	var dirtyAppointmentConfirmCalls, cleanAppointmentConfirmCalls int
 	var staleReasonValues []string
-	if err := runBrowserStep(browserContext, "appointment dialog clears prior reasons",
+	if err := runBrowserStep(browserContext, "appointment dialog protects and resets unsaved controls",
 		clickCurrent(appointmentEventSelector),
 		chromedp.WaitVisible("[data-appointment-dialog]", chromedp.ByQuery),
 		chromedp.SetValue("[data-appointment-move-override]", "Nur für Termin A", chromedp.ByQuery),
@@ -335,27 +507,62 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		chromedp.SetValue("[data-appointment-reopen-reason]", "Nicht wiederverwenden", chromedp.ByQuery),
 		chromedp.SetValue("[data-appointment-reopen-override]", "Nicht freigeben", chromedp.ByQuery),
 		chromedp.SetValue("[data-appointment-complete-override-reason]", "Nicht erledigen", chromedp.ByQuery),
+		chromedp.Focus("[data-appointment-cancel-reason]", chromedp.ByQuery),
+		chromedp.Evaluate(`window.__appointmentNativeConfirm=window.confirm;window.__appointmentConfirmCalls=0;window.confirm=()=>{window.__appointmentConfirmCalls++;return false}`, nil),
+		chromedp.KeyEvent("\x1b"),
+		chromedp.Evaluate(`document.querySelector('[data-appointment-dialog]').open`, &dirtyAppointmentOpen),
+		chromedp.Evaluate(`document.querySelector('[data-appointment-cancel-reason]').value === 'Nicht übernehmen'`, &dirtyAppointmentValue),
+		chromedp.Evaluate(`document.activeElement === document.querySelector('[data-appointment-cancel-reason]')`, &dirtyAppointmentFocus),
+		chromedp.Click("[data-appointment-close]", chromedp.ByQuery),
+		chromedp.Evaluate(`window.__appointmentConfirmCalls`, &dirtyAppointmentConfirmCalls),
+		chromedp.Evaluate(`window.confirm=()=>true`, nil),
 		chromedp.Click("[data-appointment-close]", chromedp.ByQuery),
 		chromedp.WaitNotVisible("[data-appointment-dialog]", chromedp.ByQuery),
 		clickCurrent(appointmentEventSelector),
 		chromedp.WaitVisible("[data-appointment-dialog]", chromedp.ByQuery),
 		chromedp.Evaluate(`['[data-appointment-move-override]','[data-without-notification-reason]','[data-confirmation-admin-reason]','[data-appointment-cancel-reason]','[data-appointment-reopen-reason]','[data-appointment-reopen-override]','[data-appointment-complete-override-reason]'].map(selector=>document.querySelector(selector).value)`, &staleReasonValues),
+		chromedp.Evaluate(`window.__cleanAppointmentConfirmCalls=0;window.confirm=()=>{window.__cleanAppointmentConfirmCalls++;return false}`, nil),
 		chromedp.Click("[data-appointment-close]", chromedp.ByQuery),
+		chromedp.WaitNotVisible("[data-appointment-dialog]", chromedp.ByQuery),
+		chromedp.Evaluate(`window.__cleanAppointmentConfirmCalls`, &cleanAppointmentConfirmCalls),
+		chromedp.Evaluate(`window.confirm=window.__appointmentNativeConfirm;delete window.__appointmentNativeConfirm;delete window.__appointmentConfirmCalls;delete window.__cleanAppointmentConfirmCalls`, nil),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if !dirtyAppointmentOpen || !dirtyAppointmentValue || !dirtyAppointmentFocus || dirtyAppointmentConfirmCalls != 2 {
+		t.Fatalf("dirty appointment dialog open/value/focus/prompts = %v/%v/%v/%d", dirtyAppointmentOpen, dirtyAppointmentValue, dirtyAppointmentFocus, dirtyAppointmentConfirmCalls)
 	}
 	if strings.Join(staleReasonValues, "") != "" {
 		t.Fatalf("appointment dialog retained reasons: %v", staleReasonValues)
 	}
-
+	if cleanAppointmentConfirmCalls != 0 {
+		t.Fatalf("clean reopened appointment dialog prompted %d times", cleanAppointmentConfirmCalls)
+	}
+	var preflightShown, preflightActive bool
+	var preflightOutlineStyle, preflightOutlineColor string
+	var preflightOutlineWidth float64
+	var visibleAppointmentActionGroups []string
 	if err := runBrowserStep(browserContext, "extend duration from appointment dialog",
 		clickCurrent(appointmentEventSelector),
 		chromedp.WaitVisible("[data-appointment-reschedule]", chromedp.ByQuery),
+		chromedp.Evaluate(`Array.from(document.querySelectorAll('[data-appointment-action-group]')).filter(group=>!group.hidden).map(group=>group.dataset.appointmentActionGroup).sort()`, &visibleAppointmentActionGroups),
 		chromedp.Click("[data-appointment-duration-adjust='15']", chromedp.ByQuery),
+		chromedp.Evaluate(`window.confirm=()=>{const preview=document.querySelector('[data-appointment-preflight]'),style=preview?getComputedStyle(preview):null;window.__preflightShown=Boolean(preview&&!preview.hidden&&preview.querySelectorAll('.preflight-check').length>=8);window.__preflightActive=Boolean(preview&&document.activeElement===preview);window.__preflightOutlineStyle=style?.outlineStyle||'';window.__preflightOutlineWidth=parseFloat(style?.outlineWidth||'0');window.__preflightOutlineColor=style?.outlineColor||'';return true}`, nil),
 		chromedp.Click("[data-appointment-reschedule-submit]", chromedp.ByQuery),
 		chromedp.WaitNotVisible("[data-appointment-dialog]", chromedp.ByQuery),
+		chromedp.Evaluate(`window.__preflightShown===true`, &preflightShown),
+		chromedp.Evaluate(`window.__preflightActive===true`, &preflightActive),
+		chromedp.Evaluate(`window.__preflightOutlineStyle||''`, &preflightOutlineStyle),
+		chromedp.Evaluate(`window.__preflightOutlineWidth||0`, &preflightOutlineWidth),
+		chromedp.Evaluate(`window.__preflightOutlineColor||''`, &preflightOutlineColor),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if !preflightShown || !preflightActive || preflightOutlineStyle == "none" || preflightOutlineWidth < 3 || preflightOutlineColor == "" || preflightOutlineColor == "rgba(0, 0, 0, 0)" {
+		t.Fatalf("appointment preflight shown/active/outline-style/outline-width/outline-color = %v/%v/%q/%.1f/%q", preflightShown, preflightActive, preflightOutlineStyle, preflightOutlineWidth, preflightOutlineColor)
+	}
+	if strings.Join(visibleAppointmentActionGroups, ",") != "assignment,danger,primary,time" {
+		t.Fatalf("visible proposal action groups = %v", visibleAppointmentActionGroups)
 	}
 	var extendedStart, extendedEnd time.Time
 	var extendedVersion int32
@@ -365,10 +572,15 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	if extendedEnd.Sub(extendedStart) != 195*time.Minute {
 		t.Fatalf("extended duration=%s want 195m", extendedEnd.Sub(extendedStart))
 	}
+	var dirtyAfterSuccessfulAppointmentAction bool
 	if err := chromedp.Run(browserContext,
 		chromedp.Poll(fmt.Sprintf(`Number(window.hackWerkCalendar.getEventById(%q)?.extendedProps.version) === %d && document.querySelector(%q) !== null`, appointmentID, extendedVersion, appointmentEventSelector), nil),
+		chromedp.Evaluate(`(()=>{const event=new Event('beforeunload',{cancelable:true});window.dispatchEvent(event);return event.defaultPrevented})()`, &dirtyAfterSuccessfulAppointmentAction),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if dirtyAfterSuccessfulAppointmentAction {
+		t.Fatal("successful appointment action left a stale dirty-dialog warning")
 	}
 
 	if err := runBrowserStep(browserContext, "local-time reschedule on UTC device",
@@ -398,6 +610,13 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
 
+	var pendingControlsLocked, pendingCancelBlocked bool
+	var staleMutationState struct {
+		ErrorHidden   bool   `json:"errorHidden"`
+		ErrorText     string `json:"errorText"`
+		DialogInert   bool   `json:"dialogInert"`
+		CloseDisabled bool   `json:"closeDisabled"`
+	}
 	if err := runBrowserStep(browserContext, "stale keyboard move stays in dialog",
 		clickCurrent("[data-calendar] .calendar-event-content"),
 		chromedp.WaitVisible("[data-appointment-reschedule]", chromedp.ByQuery),
@@ -405,10 +624,19 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 			_, err := pool.Exec(ctx, "UPDATE appointments SET version=version+1 WHERE id=$1", appointmentID)
 			return err
 		}),
+		chromedp.Evaluate(`window.__appointmentFetch=window.fetch.bind(window);window.fetch=(input,...args)=>{if(!String(input).endsWith('/resize'))return window.__appointmentFetch(input,...args);const dialog=document.querySelector('[data-appointment-dialog]');const event=new Event('cancel',{cancelable:true});window.__pendingAppointmentSnapshot={controlsLocked:dialog.inert&&Array.from(dialog.querySelectorAll('button,input,select,textarea')).every(control=>control.disabled),cancelBlocked:!dialog.dispatchEvent(event)&&dialog.open};return Promise.resolve(new Response(JSON.stringify({error:{code:'appointment_version_conflict',message:'Der Termin wurde zwischenzeitlich geändert.'}}),{status:409,headers:{'Content-Type':'application/json'}}))}`, nil),
 		chromedp.Click("[data-appointment-reschedule-submit]", chromedp.ByQuery),
-		chromedp.WaitVisible("[data-appointment-error]", chromedp.ByQuery),
+		chromedp.Poll(`window.__pendingAppointmentSnapshot`, nil),
+		chromedp.Poll(`document.querySelector('[data-appointment-dialog]')?.dataset.actionPending!=='true'`, nil),
+		chromedp.Evaluate(`window.__pendingAppointmentSnapshot.controlsLocked`, &pendingControlsLocked),
+		chromedp.Evaluate(`window.__pendingAppointmentSnapshot.cancelBlocked`, &pendingCancelBlocked),
+		chromedp.Evaluate(`(()=>{const dialog=document.querySelector('[data-appointment-dialog]');const error=dialog.querySelector('[data-appointment-error]');return {errorHidden:error.hidden,errorText:error.textContent,dialogInert:dialog.inert,closeDisabled:dialog.querySelector('[data-appointment-close]').disabled}})()`, &staleMutationState),
+		chromedp.Evaluate(`window.fetch=window.__appointmentFetch;delete window.__appointmentFetch;delete window.__pendingAppointmentSnapshot`, nil),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if staleMutationState.DialogInert || staleMutationState.CloseDisabled {
+		t.Fatalf("appointment dialog remained locked after request: %+v", staleMutationState)
 	}
 	var staleError string
 	var staleDialogOpen, errorFocused bool
@@ -416,14 +644,15 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		chromedp.Text("[data-appointment-error]", &staleError, chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector('[data-appointment-dialog]').open`, &staleDialogOpen),
 		chromedp.Evaluate(`document.activeElement === document.querySelector('[data-appointment-error]')`, &errorFocused),
+		chromedp.Evaluate(`window.confirm=()=>true`, nil),
 		chromedp.Click("[data-appointment-close]", chromedp.ByQuery),
 		chromedp.WaitNotVisible("[data-appointment-dialog]", chromedp.ByQuery),
 		chromedp.Evaluate(`window.hackWerkCalendar.refetchEvents()`, nil),
 	); err != nil {
 		t.Fatal(err)
 	}
-	if !staleDialogOpen || !errorFocused || staleError == "" {
-		t.Fatalf("stale move dialog/error/focus = %v/%q/%v", staleDialogOpen, staleError, errorFocused)
+	if !pendingControlsLocked || !pendingCancelBlocked || staleMutationState.ErrorHidden || staleMutationState.ErrorText == "" || !staleDialogOpen || !errorFocused || staleError == "" {
+		t.Fatalf("stale move pending controls/cancel/state/dialog/error/focus = %v/%v/%+v/%v/%q/%v", pendingControlsLocked, pendingCancelBlocked, staleMutationState, staleDialogOpen, staleError, errorFocused)
 	}
 
 	var horizontalOverflow bool
@@ -453,6 +682,14 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("mobile calendar screenshot: %s", artifact)
+	if screenshotDir := os.Getenv("E2E_SCREENSHOT_DIR"); screenshotDir != "" {
+		if err := os.MkdirAll(screenshotDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(screenshotDir, "task04-mobile-calendar.png"), screenshot, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	var confirmation, workflow string
 	var outbox int
@@ -690,18 +927,20 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 	var planningControls int
 	var forbiddenStatus int
 	var driverReadOnlyNotice string
+	var driverReadOnlyLabel string
 	var driverHorizontalOverflow bool
 	expression := fmt.Sprintf(`fetch(%q,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf_token:document.querySelector('[data-calendar]').dataset.csrf,version:'4',starts_at:'2026-09-02T06:00:00Z',ends_at:'2026-09-02T09:00:00Z'})}).then(r=>r.status)`, "/api/v1/appointments/"+appointmentID+"/move")
 	if err := chromedp.Run(browserContext,
 		chromedp.Evaluate(`document.querySelectorAll('[data-calendar-waitlist],[data-planning-dialog],[data-appointment-fix]').length`, &planningControls),
 		chromedp.Text("[data-calendar-read-only]", &driverReadOnlyNotice, chromedp.ByQuery),
+		chromedp.AttributeValue("[data-calendar-read-only]", "aria-label", &driverReadOnlyLabel, nil, chromedp.ByQuery),
 		chromedp.Evaluate(`document.documentElement.scrollWidth > window.innerWidth`, &driverHorizontalOverflow),
 		chromedp.Evaluate(expression, &forbiddenStatus, awaitPromise),
 	); err != nil {
 		t.Fatal(err)
 	}
-	if planningControls != 0 || forbiddenStatus != 403 || driverReadOnlyNotice != "Nur lesen – Planung nur durch Administration" || driverHorizontalOverflow {
-		t.Fatalf("driver planning controls/direct status/read-only/overflow = %d/%d/%q/%v", planningControls, forbiddenStatus, driverReadOnlyNotice, driverHorizontalOverflow)
+	if planningControls != 0 || forbiddenStatus != 403 || !strings.Contains(driverReadOnlyNotice, "Nur lesen") || driverReadOnlyLabel != "Nur lesen – Planung nur durch Administration" || driverHorizontalOverflow {
+		t.Fatalf("driver planning controls/direct status/read-only/label/overflow = %d/%d/%q/%q/%v", planningControls, forbiddenStatus, driverReadOnlyNotice, driverReadOnlyLabel, driverHorizontalOverflow)
 	}
 	if err := runBrowserStep(browserContext, "assigned driver completes started appointment",
 		clickCurrent(appointmentEventSelector),
@@ -754,7 +993,12 @@ func task04Application(t *testing.T, databaseURL string) (*pgxpool.Pool, *auth.S
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, "TRUNCATE outbox_events, appointments, waitlist_entries, jobs, customers, availability_exceptions, availability_rules, resources, audit_events, auth_rate_limits, sessions, drivers, users RESTART IDENTITY CASCADE"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE route_locations, outbox_events, appointments, waitlist_entries, jobs, customers, availability_exceptions, availability_rules, resources, audit_events, auth_rate_limits, sessions, drivers, users RESTART IDENTITY CASCADE"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO route_locations
+		(label,address,latitude,longitude,default_start,default_end)
+		VALUES ('E2E Betriebshof','Teststraße 1, 4710 Grieskirchen',48.200000,14.200000,true,true)`); err != nil {
 		t.Fatal(err)
 	}
 	hasher, err := auth.NewPasswordHasher(auth.PasswordParameters{MemoryKiB: 8, Iterations: 1, Parallelism: 1, SaltLength: 16, KeyLength: 16, MinLength: 14})
@@ -824,6 +1068,26 @@ func task04Application(t *testing.T, databaseURL string) (*pgxpool.Pool, *auth.S
 	return pool, identity, drivers, resources, appointments, driverID, chipperID, jobID, dragJobID, adminPassword, driverPassword
 }
 
+type e2eDefaultStart struct{ store *postgres.RouteLocationStore }
+
+func (provider e2eDefaultStart) DefaultStart(ctx context.Context) (planning.Point, error) {
+	location, err := provider.store.DefaultStart(ctx)
+	if err != nil {
+		return planning.Point{}, err
+	}
+	return planning.Point{Latitude: location.Latitude, Longitude: location.Longitude}, nil
+}
+
+func e2eRouteLocations(t *testing.T, pool *pgxpool.Pool) (*routelocation.Service, *postgres.RouteLocationStore) {
+	t.Helper()
+	store := postgres.NewRouteLocationStore(pool)
+	service, err := routelocation.New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service, store
+}
+
 type dragCoordinates struct {
 	SourceX float64 `json:"sourceX"`
 	SourceY float64 `json:"sourceY"`
@@ -832,8 +1096,12 @@ type dragCoordinates struct {
 }
 
 func dragWaitlistJob(ctx context.Context, jobID, date, localTime string) error {
-	var points dragCoordinates
-	expression := fmt.Sprintf(`(() => {
+	for attempt := 0; attempt < 3; attempt++ {
+		var points dragCoordinates
+		if err := chromedp.Run(ctx, chromedp.ScrollIntoView("[data-calendar-job='"+jobID+"']", chromedp.ByQuery)); err != nil {
+			return err
+		}
+		expression := fmt.Sprintf(`(() => {
 		const source = document.querySelector('[data-calendar-job=%q]');
 		const day = [...document.querySelectorAll('[data-date=%q]')].sort((a,b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height)[0];
 		const slot = document.querySelector('[data-time=%q]');
@@ -841,11 +1109,10 @@ func dragWaitlistJob(ctx context.Context, jobID, date, localTime string) error {
 		const s = source.getBoundingClientRect(), d = day.getBoundingClientRect(), t = slot.getBoundingClientRect();
 		return {sourceX:s.left+s.width/2, sourceY:s.top+s.height/2, targetX:d.left+d.width/2, targetY:t.top+Math.min(4,t.height/2)};
 	})()`, jobID, date, localTime)
-	if err := chromedp.Run(ctx, chromedp.Evaluate(expression, &points)); err != nil {
-		return err
-	}
-	return chromedp.Run(ctx,
-		chromedp.ActionFunc(func(ctx context.Context) error {
+		if err := chromedp.Run(ctx, chromedp.Evaluate(expression, &points)); err != nil {
+			return err
+		}
+		if err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 			if err := cdpinput.DispatchMouseEvent(cdpinput.MouseMoved, points.SourceX, points.SourceY).Do(ctx); err != nil {
 				return err
 			}
@@ -861,6 +1128,12 @@ func dragWaitlistJob(ctx context.Context, jobID, date, localTime string) error {
 				}
 			}
 			return cdpinput.DispatchMouseEvent(cdpinput.MouseReleased, points.TargetX, points.TargetY).WithButton(cdpinput.Left).WithClickCount(1).Do(ctx)
-		}),
-	)
+		})); err != nil {
+			return err
+		}
+		if err := chromedp.Run(ctx, chromedp.Poll(`document.querySelector('[data-planning-dialog]')?.open === true`, nil, chromedp.WithPollingTimeout(2*time.Second))); err == nil {
+			return nil
+		}
+	}
+	return errors.New("external waitlist drag did not open the planning dialog")
 }

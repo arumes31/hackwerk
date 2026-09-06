@@ -63,11 +63,11 @@ func TestFixCreatesHashOnlyConfirmationAndIdempotentResponses(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			first, err := confirmationService.Respond(fixture.ctx, material.Raw, view.FormNonce, wantedResponse, "public-first")
+			first, err := confirmationService.Respond(fixture.ctx, material.Raw, view.FormNonce, wantedResponse, "", "public-first")
 			if err != nil {
 				t.Fatal(err)
 			}
-			second, err := confirmationService.Respond(fixture.ctx, material.Raw, view.FormNonce, wantedResponse, "public-repeat")
+			second, err := confirmationService.Respond(fixture.ctx, material.Raw, view.FormNonce, wantedResponse, "", "public-repeat")
 			if err != nil || first.Response != wantedResponse || second.Response != wantedResponse {
 				t.Fatalf("idempotent response first=%+v second=%+v err=%v", first, second, err)
 			}
@@ -107,6 +107,33 @@ func TestFixCreatesHashOnlyConfirmationAndIdempotentResponses(t *testing.T) {
 	}
 }
 
+func TestQueuedNotificationUsesFixTimeJobSnapshot(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	start := time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC)
+	jobID := fixture.job(t, "HW-2026-NOTIFY-SNAPSHOT")
+	proposed := fixture.proposal(t, jobID, fixture.driver1, fixture.chipper1, start, 3*time.Hour)
+	fixed, err := fixture.service.FixAppointment(fixture.ctx, fixture.admin, appointment.FixInput{MutateInput: appointment.MutateInput{
+		ID: proposed.ID, ExpectedVersion: proposed.Version, RequestID: "fix-snapshot",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var notificationID string
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT id::text FROM notifications WHERE appointment_id=$1", fixed.ID).Scan(&notificationID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE jobs SET job_type='chipping_with_transport',volume_m3=99.00 WHERE id=$1", jobID); err != nil {
+		t.Fatal(err)
+	}
+	delivery, err := postgres.NewNotificationWorkerStore(fixture.pool).LoadDelivery(fixture.ctx, notificationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delivery.JobType != "chipping_only" || delivery.VolumeM3 != "30.00" || !delivery.StartsAt.Equal(start) || !delivery.EndsAt.Equal(start.Add(3*time.Hour)) {
+		t.Fatalf("notification snapshot drifted after job edit: %#v", delivery)
+	}
+}
+
 func TestMoveRevokesOldTokenAndPlansNewVersion(t *testing.T) {
 	fixture := newCalendarFixture(t)
 	start := time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC)
@@ -126,7 +153,7 @@ func TestMoveRevokesOldTokenAndPlansNewVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	confirmed, err := confirmationService.Respond(fixture.ctx, oldMaterial.Raw, view.FormNonce, notification.ResponseConfirmed, "confirm")
+	confirmed, err := confirmationService.Respond(fixture.ctx, oldMaterial.Raw, view.FormNonce, notification.ResponseDeclined, "Bitte vormittags zurückrufen", "confirm")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +167,7 @@ func TestMoveRevokesOldTokenAndPlansNewVersion(t *testing.T) {
 	if moved.Confirmation != appointment.ConfirmationPending {
 		t.Fatalf("moved confirmation = %s", moved.Confirmation)
 	}
-	if _, err := confirmationService.View(fixture.ctx, oldMaterial.Raw); !errors.Is(err, notification.ErrConfirmationUnavailable) {
+	if _, err := confirmationService.View(fixture.ctx, oldMaterial.Raw); !errors.Is(err, notification.ErrConfirmationRevoked) {
 		t.Fatalf("old token remains usable: %v", err)
 	}
 	var activeVersion int32
@@ -206,7 +233,7 @@ func TestAdminCanResetResponseAndReissueTokenWithReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	confirmed, err := confirmationService.Respond(fixture.ctx, oldMaterial.Raw, view.FormNonce, notification.ResponseConfirmed, "confirm")
+	confirmed, err := confirmationService.Respond(fixture.ctx, oldMaterial.Raw, view.FormNonce, notification.ResponseConfirmed, "", "confirm")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,28 +245,55 @@ func TestAdminCanResetResponseAndReissueTokenWithReason(t *testing.T) {
 	var confirmationStatus string
 	var version int32
 	var responseValue *string
-	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT a.confirmation_status, a.version, cr.response FROM appointments a JOIN confirmation_requests cr ON cr.appointment_id=a.id AND cr.status='active' WHERE a.id=$1", fixed.ID).Scan(&confirmationStatus, &version, &responseValue); err != nil {
+	var responseNote *string
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT a.confirmation_status, a.version, cr.response, cr.response_note FROM appointments a JOIN confirmation_requests cr ON cr.appointment_id=a.id AND cr.status='active' WHERE a.id=$1", fixed.ID).Scan(&confirmationStatus, &version, &responseValue, &responseNote); err != nil {
 		t.Fatal(err)
 	}
-	if confirmationStatus != "pending" || responseValue != nil {
-		t.Fatalf("reset status/response = %s/%v", confirmationStatus, responseValue)
+	if confirmationStatus != "pending" || responseValue != nil || responseNote != nil {
+		t.Fatalf("reset status/response/note = %s/%v/%v", confirmationStatus, responseValue, responseNote)
 	}
 	reissueReason := "Neuer Link für second-canary@example.test"
+	var requestsBefore, notificationsBefore, outboxBefore int
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM confirmation_requests WHERE appointment_id=$1", fixed.ID).Scan(&requestsBefore); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM notifications WHERE appointment_id=$1", fixed.ID).Scan(&notificationsBefore); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM outbox_events WHERE event_type='notification.requested' AND aggregate_id IN (SELECT id FROM notifications WHERE appointment_id=$1)", fixed.ID).Scan(&outboxBefore); err != nil {
+		t.Fatal(err)
+	}
 	if err := adminService.Reissue(fixture.ctx, fixture.admin, fixed.ID, version, reissueReason, "reissue"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := confirmationService.View(fixture.ctx, oldMaterial.Raw); !errors.Is(err, notification.ErrConfirmationUnavailable) {
+	if err := adminService.Reissue(fixture.ctx, fixture.admin, fixed.ID, version, reissueReason, "reissue-replay"); !errors.Is(err, notification.ErrAdminActionUnavailable) {
+		t.Fatalf("same-version reissue replay error = %v", err)
+	}
+	if _, err := confirmationService.View(fixture.ctx, oldMaterial.Raw); !errors.Is(err, notification.ErrConfirmationRevoked) {
 		t.Fatalf("reissued old token remains valid: %v", err)
 	}
-	var activeCount, revokedCount, auditCount int
+	var activeCount, revokedCount, auditCount, currentVersion, requestCount, notificationCount, outboxCount int
 	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FILTER (WHERE status='active'), count(*) FILTER (WHERE status='revoked') FROM confirmation_requests WHERE appointment_id=$1", fixed.ID).Scan(&activeCount, &revokedCount); err != nil {
 		t.Fatal(err)
 	}
 	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM audit_events WHERE object_id=$1 AND action IN ('confirmation.response_reset','confirmation.reissued')", fixed.ID).Scan(&auditCount); err != nil {
 		t.Fatal(err)
 	}
-	if activeCount != 1 || revokedCount != 1 || auditCount != 2 {
-		t.Fatalf("admin lifecycle active/revoked/audit = %d/%d/%d", activeCount, revokedCount, auditCount)
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT version FROM appointments WHERE id=$1", fixed.ID).Scan(&currentVersion); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM confirmation_requests WHERE appointment_id=$1", fixed.ID).Scan(&requestCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM notifications WHERE appointment_id=$1", fixed.ID).Scan(&notificationCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT count(*) FROM outbox_events WHERE event_type='notification.requested' AND aggregate_id IN (SELECT id FROM notifications WHERE appointment_id=$1)", fixed.ID).Scan(&outboxCount); err != nil {
+		t.Fatal(err)
+	}
+	if activeCount != 1 || revokedCount != 1 || auditCount != 2 || currentVersion != int(version)+1 ||
+		requestCount != requestsBefore+1 || notificationCount != notificationsBefore+1 || outboxCount != outboxBefore+1 {
+		t.Fatalf("admin lifecycle active/revoked/audit/version/requests/notifications/outbox = %d/%d/%d/%d/%d/%d/%d", activeCount, revokedCount, auditCount, currentVersion, requestCount, notificationCount, outboxCount)
 	}
 	var leakedReasons int
 	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT count(*) FROM audit_events
@@ -293,9 +347,13 @@ func TestParallelWorkerClaimsAndAdminRetry(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	const responseNote = "Bitte vormittags zurückrufen"
+	if _, err := fixture.pool.Exec(fixture.ctx, `UPDATE confirmation_requests SET response='declined', response_note=$1, responded_at=now() WHERE id IN (SELECT confirmation_request_id FROM notifications WHERE status='failed')`, responseNote); err != nil {
+		t.Fatal(err)
+	}
 	adminService, _ := notification.NewAdminService(postgres.NewNotificationStore(fixture.pool), time.Now)
 	failed, err := adminService.Failed(fixture.ctx, fixture.admin, notification.FailureAll, 100)
-	if err != nil || len(failed) != 2 || strings.Contains(failed[0].Recipient, "@") && !strings.Contains(failed[0].Recipient, "***@") {
+	if err != nil || len(failed) != 2 || strings.Contains(failed[0].Recipient, "@") && !strings.Contains(failed[0].Recipient, "***@") || failed[0].ResponseNote != responseNote || failed[1].ResponseNote != responseNote {
 		t.Fatalf("failed list = %+v, err=%v", failed, err)
 	}
 	if err := adminService.Review(fixture.ctx, fixture.admin, failed[0].ID, "admin-review"); err != nil {

@@ -26,6 +26,35 @@ func NewCustomerStore(pool *pgxpool.Pool) *CustomerStore {
 	return &CustomerStore{pool: pool, queries: dbgen.New(pool)}
 }
 
+func (store *CustomerStore) ListTransportPartners(ctx context.Context) ([]customers.TransportPartner, error) {
+	rows, err := store.queries.ListActiveTransportPartners(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]customers.TransportPartner, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, customers.TransportPartner{
+			ID: row.ID, Type: customers.TransportPartnerType(row.PartnerType), Name: row.Name,
+			Phone: row.Phone, Address: row.Address, InternalNote: row.InternalNote, Version: row.Version,
+		})
+	}
+	return result, nil
+}
+
+func (store *CustomerStore) CreateTransportPartner(ctx context.Context, actor auth.Actor, input customers.TransportPartnerInput, requestID string) (id string, resultErr error) {
+	resultErr = store.transaction(ctx, func(queries *dbgen.Queries) error {
+		var err error
+		id, err = queries.InsertTransportPartner(ctx, dbgen.InsertTransportPartnerParams{
+			PartnerType: string(input.Type), Name: input.Name, Phone: input.Phone, Address: input.Address, InternalNote: input.InternalNote,
+		})
+		if err != nil {
+			return err
+		}
+		return insertAudit(ctx, queries, actor, "transport_partner.created", "transport_partner", id, requestID, []string{"created"})
+	})
+	return id, resultErr
+}
+
 func (store *CustomerStore) FindDuplicates(ctx context.Context, input customers.CustomerInput) ([]customers.Duplicate, error) {
 	rows, err := store.queries.FindDuplicateCustomers(ctx, dbgen.FindDuplicateCustomersParams{
 		PhoneNormalized: customers.NormalizePhone(input.PhoneRaw), Email: input.Email,
@@ -44,6 +73,18 @@ func (store *CustomerStore) FindDuplicates(ctx context.Context, input customers.
 	return result, nil
 }
 
+func (store *CustomerStore) CreateCustomer(ctx context.Context, actor auth.Actor, input customers.CustomerInput, requestID string) (id string, resultErr error) {
+	resultErr = store.transaction(ctx, func(queries *dbgen.Queries) error {
+		var err error
+		id, err = queries.InsertCustomer(ctx, customerParams(input))
+		if err != nil {
+			return err
+		}
+		return insertAudit(ctx, queries, actor, "customer.created", "customer", id, requestID, []string{"created"})
+	})
+	return id, resultErr
+}
+
 func (store *CustomerStore) CreateIntake(ctx context.Context, actor auth.Actor, input customers.IntakeInput, requestID string) (created customers.CreatedIntake, resultErr error) {
 	resultErr = store.transaction(ctx, func(queries *dbgen.Queries) error {
 		customerID, err := queries.InsertCustomer(ctx, customerParams(input.Customer))
@@ -52,6 +93,9 @@ func (store *CustomerStore) CreateIntake(ctx context.Context, actor auth.Actor, 
 		}
 		jobNumber, err := nextJobNumber(ctx, queries)
 		if err != nil {
+			return err
+		}
+		if err := lockTransportPartner(ctx, queries, input.Job.TransportPartnerID); err != nil {
 			return err
 		}
 		jobParams, err := insertJobParams(customerID, jobNumber, input.Job)
@@ -108,6 +152,9 @@ func (store *CustomerStore) CreateJob(ctx context.Context, actor auth.Actor, inp
 		if err != nil {
 			return err
 		}
+		if err := lockTransportPartner(ctx, queries, input.Job.TransportPartnerID); err != nil {
+			return err
+		}
 		params, err := insertJobParams(input.CustomerID, jobNumber, input.Job)
 		if err != nil {
 			return err
@@ -151,6 +198,51 @@ func (store *CustomerStore) UpdateJob(ctx context.Context, actor auth.Actor, inp
 		if err != nil {
 			return customers.ErrNotFound
 		}
+		current, err := queries.LockJobForUpdate(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return customers.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if current.Version != input.ExpectedVersion || !editableJobWorkflow(current.WorkflowStatus) {
+			return customers.ErrConflict
+		}
+		if err := lockTransportPartner(ctx, queries, input.Job.TransportPartnerID); err != nil {
+			return err
+		}
+		var fixedAppointmentID string
+		if current.WorkflowStatus == "scheduled" {
+			fixedAppointment, lockErr := queries.LockFixedAppointmentForJobUpdate(ctx, id)
+			if errors.Is(lockErr, pgx.ErrNoRows) {
+				return customers.ErrConflict
+			}
+			if lockErr != nil {
+				return lockErr
+			}
+			fixedAppointmentID = fixedAppointment.ID
+			appointmentID, parseErr := uuid(fixedAppointmentID)
+			if parseErr != nil {
+				return parseErr
+			}
+			if _, lockErr = queries.LockAppointmentDrivers(ctx, appointmentID); lockErr != nil {
+				return lockErr
+			}
+			if _, lockErr = queries.LockAppointmentResources(ctx, appointmentID); lockErr != nil {
+				return lockErr
+			}
+			ready, readyErr := queries.AppointmentAssignmentsReady(ctx, dbgen.AppointmentAssignmentsReadyParams{
+				AppointmentID: appointmentID, JobType: string(input.Job.JobType), TransportMode: string(input.Job.TransportMode),
+				ExternalTransportConfirmed: input.Job.ExternalTransportConfirmed, AllowMissingChipper: false,
+			})
+			if readyErr != nil {
+				return readyErr
+			}
+			requiredDuration := time.Duration(input.Job.EstimatedHackMinutes+input.Job.EstimatedTransportMinutes) * time.Minute
+			if !ready || fixedAppointment.EndsAt.Time.Sub(fixedAppointment.StartsAt.Time) < requiredDuration {
+				return customers.ErrConflict
+			}
+		}
 		params, err := updateJobParams(id, input)
 		if err != nil {
 			return err
@@ -162,9 +254,32 @@ func (store *CustomerStore) UpdateJob(ctx context.Context, actor auth.Actor, inp
 		if rows == 0 {
 			return customers.ErrConflict
 		}
+		customerFacingChanged := current.JobType != string(input.Job.JobType) || current.VolumeM3 != input.Job.VolumeM3
+		if fixedAppointmentID != "" && customerFacingChanged {
+			appointmentID, _ := uuid(fixedAppointmentID)
+			reason := "job details changed"
+			if err := queries.RevokeActiveConfirmationRequests(ctx, dbgen.RevokeActiveConfirmationRequestsParams{
+				Reason: &reason, AppointmentID: appointmentID,
+			}); err != nil {
+				return err
+			}
+			if err := queries.SetAppointmentConfirmation(ctx, dbgen.SetAppointmentConfirmationParams{
+				ConfirmationStatus: "not_requested", AppointmentID: appointmentID,
+			}); err != nil {
+				return err
+			}
+			if err := insertAudit(ctx, queries, actor, "confirmation.invalidated", "appointment", fixedAppointmentID, input.RequestID,
+				[]string{"confirmation_status", "confirmation_request"}); err != nil {
+				return err
+			}
+		}
 		return insertAudit(ctx, queries, actor, "job.updated", "job", input.ID, input.RequestID,
 			[]string{"job_type", "volume_m3", "durations", "transport", "preferred_range", "urgency", "region", "source", "pile_location"})
 	})
+}
+
+func editableJobWorkflow(workflow string) bool {
+	return workflow == "waitlist" || workflow == "planning" || workflow == "scheduled"
 }
 
 func (store *CustomerStore) ArchiveJob(ctx context.Context, actor auth.Actor, id string, version int32, requestID string) error {
@@ -212,7 +327,10 @@ func (store *CustomerStore) ListCustomers(ctx context.Context, filter customers.
 	}
 	params := dbgen.ListCustomersParams{
 		IncludeArchived: filter.IncludeArchived, Search: filter.Search,
-		SearchPhone: customers.NormalizePhone(filter.Search), Sort: filter.Sort, Direction: filter.Direction,
+		SearchPhone: customers.NormalizePhone(filter.Search), MissingContact: filter.MissingContact,
+		IncompleteAddress: filter.IncompleteAddress, JobActivity: string(filter.JobActivity),
+		NotificationFilter: string(filter.NotificationPreference), LocalityFilter: filter.Locality,
+		RegionFilter: filter.Region, Sort: filter.Sort, Direction: filter.Direction,
 		PageOffset: pageOffset, PageSize: pageSize,
 	}
 	rows, err := store.queries.ListCustomers(ctx, params)
@@ -239,7 +357,11 @@ func (store *CustomerStore) ListCustomers(ctx context.Context, filter customers.
 		items = append(items, item)
 	}
 	total, err := store.queries.CountCustomers(ctx, dbgen.CountCustomersParams{
-		IncludeArchived: filter.IncludeArchived, Search: filter.Search, SearchPhone: customers.NormalizePhone(filter.Search),
+		IncludeArchived: filter.IncludeArchived, Search: filter.Search,
+		SearchPhone: customers.NormalizePhone(filter.Search), MissingContact: filter.MissingContact,
+		IncompleteAddress: filter.IncompleteAddress, JobActivity: string(filter.JobActivity),
+		NotificationFilter: string(filter.NotificationPreference), LocalityFilter: filter.Locality,
+		RegionFilter: filter.Region,
 	})
 	if err != nil {
 		return customers.Page[customers.CustomerSummary]{}, err
@@ -270,9 +392,11 @@ func (store *CustomerStore) DuplicateJobDraft(ctx context.Context, id string) (c
 			EstimatedHackMinutes: int(row.EstimatedHackMinutes), EstimatedTransportMinutes: int(row.EstimatedTransportMinutes),
 			TransportTripCount: int(row.TransportTripCount), TransportMode: customers.TransportMode(row.TransportMode),
 			ExternalTransportConfirmed: row.ExternalTransportConfirmed, PreferredStartDate: row.PreferredStartDate,
-			PreferredEndDate: row.PreferredEndDate, PreferenceText: row.PreferenceText, Urgency: customers.Urgency(row.Urgency),
+			PreferredEndDate: row.PreferredEndDate, PreferenceMode: customers.PreferenceMode(row.PreferenceMode),
+			PreferenceText: row.PreferenceText, Urgency: customers.Urgency(row.Urgency),
 			Region: row.Region, Source: customers.Source(row.Source), PileLatitude: parseFloat(row.PileLatitude),
 			PileLongitude: parseFloat(row.PileLongitude), PileLocationSource: customers.PileLocationSource(row.PileLocationSource),
+			TransportPartnerID: row.TransportPartnerID,
 		},
 	}, nil
 }
@@ -464,6 +588,8 @@ func (store *CustomerStore) ListWaitlistFilterFavorites(ctx context.Context, use
 		favorite := customers.WaitlistFilterFavorite{ID: row.ID, Name: row.Name, Filter: customers.WaitlistFilter{
 			JobType: row.JobType, Region: row.Region, Urgency: row.Urgency, PreferredMonth: row.PreferredMonth,
 			Workflow: row.Workflow, MissingLocation: row.MissingLocation, DurationIssue: row.DurationIssue,
+			DurationGroup: row.DurationGroup, Overdue: row.Overdue, Unassigned: row.Unassigned,
+			TransportPending: row.TransportPending, Incomplete: row.Incomplete,
 			Sort: row.SortKey, Direction: row.SortDirection,
 		}}
 		favorite.Filter.Normalize()
@@ -493,6 +619,8 @@ func (store *CustomerStore) SaveWaitlistFilterFavorite(ctx context.Context, user
 			UserID: parsedUserID, Name: name, JobType: filter.JobType, Region: filter.Region,
 			Urgency: filter.Urgency, PreferredMonth: filter.PreferredMonth, Workflow: filter.Workflow,
 			MissingLocation: filter.MissingLocation, DurationIssue: filter.DurationIssue,
+			DurationGroup: filter.DurationGroup, Overdue: filter.Overdue, Unassigned: filter.Unassigned,
+			TransportPending: filter.TransportPending, Incomplete: filter.Incomplete,
 			SortKey: filter.Sort, SortDirection: filter.Direction,
 		})
 	})
@@ -526,6 +654,10 @@ func (store *CustomerStore) ListWaitlist(ctx context.Context, filter customers.W
 		Search: filter.Query, JobTypeFilter: filter.JobType, RegionFilter: filter.Region,
 		UrgencyFilter: filter.Urgency, MonthFilter: filter.PreferredMonth, WorkflowFilter: filter.Workflow,
 		MissingLocation: filter.MissingLocation, DurationIssue: filter.DurationIssue,
+		Overdue: filter.Overdue, Unassigned: filter.Unassigned, TransportPending: filter.TransportPending,
+		Incomplete:        filter.Incomplete,
+		DurationGroup:     filter.DurationGroup,
+		DurationReviewMin: filter.DurationReviewMinMinutes, DurationReviewMax: filter.DurationReviewMaxMinutes,
 		Sort: filter.Sort, Direction: filter.Direction,
 		PageOffset: pageOffset, PageSize: pageSize,
 	}
@@ -538,15 +670,19 @@ func (store *CustomerStore) ListWaitlist(ctx context.Context, filter customers.W
 		item := customers.WaitlistItem{
 			WaitlistID: row.WaitlistID, JobID: row.WJobID, JobNumber: row.JobNumber, VolumeM3: row.JVolumeM3,
 			PreferredStartDate: row.PreferredStartDate, PreferredEndDate: row.PreferredEndDate,
-			PreferenceText: row.PreferenceText, Region: row.Region, CustomerID: row.CustomerID,
+			PreferenceText: row.PreferenceText, PreferenceMode: customers.PreferenceMode(row.PreferenceMode),
+			PriorityReason: row.PriorityReason, Region: row.Region, CustomerID: row.CustomerID,
 			FirstName: row.FirstName, LastName: row.LastName, CompanyName: row.CompanyName, Locality: row.Locality,
 			NoteExcerpt: row.NoteExcerpt, JobType: customers.JobType(row.JobType), TransportMode: customers.TransportMode(row.TransportMode),
 			Urgency: customers.Urgency(row.Urgency), EnteredAt: row.EnteredAt.Time, ManualPriority: row.ManualPriority,
-			WaitlistVersion: row.WaitlistVersion, EstimatedHackMinutes: row.EstimatedHackMinutes, AgeDays: row.AgeDays,
+			WaitlistVersion: row.WaitlistVersion, EstimatedHackMinutes: row.EstimatedHackMinutes,
+			EstimatedTransportMinutes: row.EstimatedTransportMinutes, TotalMinutes: row.TotalMinutes, AgeDays: row.AgeDays,
 			WorkflowStatus: row.WorkflowStatus, UpdatedAt: row.UpdatedAt.Time,
-			HasPileLocation: boolPointerValue(row.HasPileLocation), HasActiveAppointment: row.HasActiveAppointment,
+			HasPileLocation: boolPointerValue(row.HasPileLocation), HasPileSource: row.HasPileSource,
+			HasActiveAppointment: row.HasActiveAppointment, HasInternalAssignment: row.HasInternalAssignment,
+			ExternalTransportConfirmed: row.ExternalTransportConfirmed, Overdue: row.Overdue, HasContact: row.HasContact,
 		}
-		item.DurationIssue = customers.DurationNeedsReview(item.EstimatedHackMinutes)
+		item.DurationIssue = customers.DurationNeedsReviewWithin(item.TotalMinutes, filter.DurationReviewMinMinutes, filter.DurationReviewMaxMinutes)
 		item.NextStep = waitlistNextStep(item)
 		items = append(items, item)
 	}
@@ -554,21 +690,52 @@ func (store *CustomerStore) ListWaitlist(ctx context.Context, filter customers.W
 		Search: filter.Query, JobTypeFilter: filter.JobType, RegionFilter: filter.Region,
 		UrgencyFilter: filter.Urgency, MonthFilter: filter.PreferredMonth, WorkflowFilter: filter.Workflow,
 		MissingLocation: filter.MissingLocation, DurationIssue: filter.DurationIssue,
+		Overdue: filter.Overdue, Unassigned: filter.Unassigned, TransportPending: filter.TransportPending,
+		Incomplete:        filter.Incomplete,
+		DurationGroup:     filter.DurationGroup,
+		DurationReviewMin: filter.DurationReviewMinMinutes, DurationReviewMax: filter.DurationReviewMaxMinutes,
 	})
 	if err != nil {
 		return customers.Page[customers.WaitlistItem]{}, err
 	}
-	return pageOf(items, filter.Page, filter.PageSize, total), nil
+	unfilteredTotal, err := store.queries.CountActiveWaitlist(ctx)
+	if err != nil {
+		return customers.Page[customers.WaitlistItem]{}, err
+	}
+	page := pageOf(items, filter.Page, filter.PageSize, total)
+	page.UnfilteredTotal = unfilteredTotal
+	return page, nil
 }
 
-func (store *CustomerStore) UpdateWaitlistPriority(ctx context.Context, actor auth.Actor, id string, priority int32, version int32, requestID string) error {
+func (store *CustomerStore) UpdateWaitlistPriority(ctx context.Context, actor auth.Actor, id string, priority int32, reason string, version int32, requestID string) error {
 	waitlistID, err := uuid(id)
 	if err != nil {
 		return customers.ErrNotFound
 	}
-	return store.waitlistMutation(ctx, actor, id, requestID, "waitlist.priority_changed", []string{"manual_priority"}, func(queries *dbgen.Queries) (int64, error) {
-		return queries.UpdateWaitlistPriority(ctx, dbgen.UpdateWaitlistPriorityParams{Priority: priority, ID: waitlistID, ExpectedVersion: version})
+	return store.waitlistMutation(ctx, actor, id, requestID, "waitlist.priority_changed", []string{"manual_priority", "priority_reason"}, func(queries *dbgen.Queries) (int64, error) {
+		return queries.UpdateWaitlistPriority(ctx, dbgen.UpdateWaitlistPriorityParams{Priority: priority, Reason: reason, ID: waitlistID, ExpectedVersion: version})
 	})
+}
+
+func (store *CustomerStore) SearchWorkspace(ctx context.Context, query string) ([]customers.SearchResult, error) {
+	rows, err := store.queries.SearchWorkspace(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]customers.SearchResult, 0, len(rows))
+	for _, row := range rows {
+		item := customers.SearchResult{Kind: row.Kind, ID: row.ID, ParentID: row.ParentID, Title: row.Title, Subtitle: row.Subtitle}
+		switch row.Kind {
+		case "customer":
+			item.Href = "/customers/" + row.ID
+		case "job":
+			item.Href = "/customers/" + row.ParentID + "#job-" + row.ID
+		case "appointment":
+			item.Href = "/calendar?appointment=" + row.ID
+		}
+		results = append(results, item)
+	}
+	return results, nil
 }
 
 func (store *CustomerStore) RemoveWaitlist(ctx context.Context, actor auth.Actor, id string, version int32, reason string, requestID string) error {
@@ -663,14 +830,20 @@ func insertJobParams(customerID string, jobNumber string, input customers.JobInp
 	if err != nil {
 		return dbgen.InsertJobParams{}, err
 	}
+	preferenceMode := input.PreferenceMode
+	if preferenceMode == "" {
+		preferenceMode = customers.PreferenceWindow
+	}
 	return dbgen.InsertJobParams{
 		JobNumber: jobNumber, CustomerID: mustUUID(customerID), JobType: string(input.JobType), VolumeM3: volume,
 		EstimatedHackMinutes: hackMinutes, EstimatedTransportMinutes: transportMinutes,
 		TransportTripCount: transportTrips, TransportMode: string(input.TransportMode),
 		ExternalTransportConfirmed: input.ExternalTransportConfirmed, PreferredStartDate: input.PreferredStartDate,
 		PreferredEndDate: input.PreferredEndDate, PreferenceText: input.PreferenceText, Urgency: string(input.Urgency),
-		Region: input.Region, Source: string(input.Source), PileLatitude: floatString(input.PileLatitude),
+		PreferenceMode: string(preferenceMode),
+		Region:         input.Region, Source: string(input.Source), PileLatitude: floatString(input.PileLatitude),
 		PileLongitude: floatString(input.PileLongitude), PileLocationSource: string(input.PileLocationSource),
+		TransportPartnerID: input.TransportPartnerID,
 	}, nil
 }
 
@@ -683,6 +856,10 @@ func updateJobParams(id pgtype.UUID, input customers.UpdateJobInput) (dbgen.Upda
 	if err != nil {
 		return dbgen.UpdateJobParams{}, err
 	}
+	preferenceMode := input.Job.PreferenceMode
+	if preferenceMode == "" {
+		preferenceMode = customers.PreferenceWindow
+	}
 	return dbgen.UpdateJobParams{
 		JobType: string(input.Job.JobType), VolumeM3: volume,
 		EstimatedHackMinutes:      hackMinutes,
@@ -690,11 +867,28 @@ func updateJobParams(id pgtype.UUID, input customers.UpdateJobInput) (dbgen.Upda
 		TransportTripCount:        transportTrips, TransportMode: string(input.Job.TransportMode),
 		ExternalTransportConfirmed: input.Job.ExternalTransportConfirmed,
 		PreferredStartDate:         input.Job.PreferredStartDate, PreferredEndDate: input.Job.PreferredEndDate,
+		PreferenceMode: string(preferenceMode),
 		PreferenceText: input.Job.PreferenceText, Urgency: string(input.Job.Urgency),
 		Region: input.Job.Region, Source: string(input.Job.Source),
 		PileLatitude: floatString(input.Job.PileLatitude), PileLongitude: floatString(input.Job.PileLongitude),
 		PileLocationSource: string(input.Job.PileLocationSource), ID: id, ExpectedVersion: input.ExpectedVersion,
+		TransportPartnerID: input.Job.TransportPartnerID,
 	}, nil
+}
+
+func lockTransportPartner(ctx context.Context, queries *dbgen.Queries, id string) error {
+	if id == "" {
+		return nil
+	}
+	parsedID, err := uuid(id)
+	if err != nil {
+		return customers.ErrValidation
+	}
+	_, err = queries.LockActiveTransportPartner(ctx, parsedID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return customers.ErrValidation
+	}
+	return err
 }
 
 func pageValues(page, pageSize int) (int32, int32, error) {
@@ -773,10 +967,14 @@ func jobFromRow(row dbgen.ListCustomerJobsRow) customers.Job {
 		TransportTripCount: row.TransportTripCount, TransportMode: customers.TransportMode(row.TransportMode),
 		ExternalTransportConfirmed: row.ExternalTransportConfirmed, PreferredStartDate: row.PreferredStartDate,
 		PreferredEndDate: row.PreferredEndDate, PreferenceText: row.PreferenceText, Urgency: customers.Urgency(row.Urgency),
-		Region: row.Region, Source: customers.Source(row.Source), WorkflowStatus: row.WorkflowStatus,
+		PreferenceMode: customers.PreferenceMode(row.PreferenceMode),
+		Region:         row.Region, Source: customers.Source(row.Source), WorkflowStatus: row.WorkflowStatus,
 		ReceivedAt: row.ReceivedAt.Time, ArchivedAt: optionalTime(row.ArchivedAt), Version: row.Version,
 		PileLatitude: parseFloat(row.PileLatitude), PileLongitude: parseFloat(row.PileLongitude),
-		PileLocationSource: customers.PileLocationSource(row.PileLocationSource),
+		PileLocationSource:  customers.PileLocationSource(row.PileLocationSource),
+		ActiveAppointmentID: row.ActiveAppointmentID,
+		TransportPartnerID:  row.TransportPartnerID, TransportPartnerName: row.TransportPartnerName,
+		TransportPartnerType: customers.TransportPartnerType(row.TransportPartnerType),
 	}
 	job.PileMapsURL = customers.PointMapsURL(job.PileLatitude, job.PileLongitude)
 	return job

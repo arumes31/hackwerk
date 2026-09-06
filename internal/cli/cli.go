@@ -54,14 +54,6 @@ func Run(ctx context.Context, arguments []string, streams IO) int {
 		writeHelp(streams.Output)
 		return ExitSuccess
 	}
-	if arguments[0] == "version" {
-		if len(arguments) != 1 {
-			_, _ = fmt.Fprintln(streams.Error, "Verwendung: hackwerk version")
-			return ExitUsage
-		}
-		writeVersion(streams.Output)
-		return ExitSuccess
-	}
 	if len(arguments) == 2 {
 		// #nosec G602 -- the slice length is checked immediately above.
 		if isHelp(arguments[1]) {
@@ -70,13 +62,37 @@ func Run(ctx context.Context, arguments []string, streams IO) int {
 			}
 		}
 	}
+	if arguments[0] == "version" {
+		if len(arguments) != 1 {
+			_, _ = fmt.Fprintln(streams.Error, "Verwendung: hackwerk version")
+			return ExitUsage
+		}
+		writeVersion(streams.Output)
+		return ExitSuccess
+	}
+	if arguments[0] == "schema-version" {
+		if len(arguments) != 1 {
+			_, _ = fmt.Fprintln(streams.Error, "Verwendung: hackwerk schema-version")
+			return ExitUsage
+		}
+		_, _ = fmt.Fprintln(streams.Output, config.CurrentSchemaVersion)
+		return ExitSuccess
+	}
 	if !knownConfiguredCommand(arguments[0]) {
 		_, _ = fmt.Fprintf(streams.Error, "Unbekannter Befehl %q.\n", arguments[0])
 		writeHelp(streams.Error)
 		return ExitUsage
 	}
 
-	cfg, err := config.LoadForCommand(arguments[0])
+	configuredCommand := arguments[0]
+	if configuredCommand == "config-check" {
+		var ok bool
+		configuredCommand, ok = configCheckTarget(arguments[1:])
+		if !ok {
+			return usage(streams.Error, "Verwendung: hackwerk config-check [serve|worker]")
+		}
+	}
+	cfg, err := config.LoadForCommand(configuredCommand)
 	if err != nil {
 		_, _ = fmt.Fprintln(streams.Error, "Konfiguration ist ungültig:", err)
 		return ExitFailure
@@ -102,16 +118,20 @@ func Run(ctx context.Context, arguments []string, streams IO) int {
 	case "admin":
 		return runAdmin(ctx, arguments[1:], cfg, streams, logger)
 	case "healthcheck":
-		if len(arguments) != 1 {
-			return usage(streams.Error, "Verwendung: hackwerk healthcheck")
+		if len(arguments) > 2 {
+			return usage(streams.Error, "Verwendung: hackwerk healthcheck [worker]")
+		}
+		if len(arguments) == 2 {
+			// #nosec G602 -- the slice length is checked immediately above.
+			if arguments[1] != "worker" {
+				return usage(streams.Error, "Verwendung: hackwerk healthcheck [worker]")
+			}
+			return runProcess(streams.Error, logger, func() error { return app.WorkerHealthcheck(ctx, cfg) })
 		}
 		return runProcess(streams.Error, logger, func() error {
-			return web.Healthcheck(ctx, strings.TrimRight(cfg.BaseURL, "/"), 5*time.Second)
+			return web.Healthcheck(ctx, cfg.ListenAddr, strings.TrimRight(cfg.BaseURL, "/"), 5*time.Second)
 		})
 	case "config-check":
-		if len(arguments) != 1 {
-			return usage(streams.Error, "Verwendung: hackwerk config-check")
-		}
 		encoder := json.NewEncoder(streams.Output)
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(cfg.Diagnostic()); err != nil {
@@ -131,19 +151,30 @@ func knownConfiguredCommand(command string) bool {
 	}
 }
 
+func configCheckTarget(arguments []string) (string, bool) {
+	if len(arguments) == 0 {
+		return "serve", true
+	}
+	if len(arguments) == 1 && (arguments[0] == "serve" || arguments[0] == "worker") {
+		return arguments[0], true
+	}
+	return "", false
+}
+
 func isHelp(argument string) bool {
 	return argument == "help" || argument == "--help" || argument == "-h"
 }
 
 func writeCommandHelp(output io.Writer, command string) bool {
 	help := map[string]string{
-		"serve":        "Verwendung: hackwerk serve\nStartet den HTTP-Webdienst.",
-		"worker":       "Verwendung: hackwerk worker\nStartet Hintergrundprozesse.",
-		"migrate":      "Verwendung: hackwerk migrate up|down|status\nVerwaltet das Datenbankschema.",
-		"seed-dev":     "Verwendung: hackwerk seed-dev\nErzeugt ausschließlich lokale Entwicklungsdaten.",
-		"admin":        adminHelp,
-		"healthcheck":  "Verwendung: hackwerk healthcheck\nPrüft die Readiness des Webdienstes.",
-		"config-check": "Verwendung: hackwerk config-check\nValidiert die Startkonfiguration und zeigt nur redigierte Diagnosedaten.",
+		"serve":          "Verwendung: hackwerk serve\nStartet den HTTP-Webdienst.",
+		"worker":         "Verwendung: hackwerk worker\nStartet Hintergrundprozesse.",
+		"migrate":        "Verwendung: hackwerk migrate up|down|status\nVerwaltet das Datenbankschema.",
+		"seed-dev":       "Verwendung: hackwerk seed-dev\nErzeugt ausschließlich lokale Entwicklungsdaten.",
+		"admin":          adminHelp,
+		"healthcheck":    "Verwendung: hackwerk healthcheck [worker]\nPrüft lokal die Web-Readiness oder direkt Datenbank, Schema und Worker-Heartbeat.",
+		"config-check":   "Verwendung: hackwerk config-check [serve|worker]\nValidiert standardmäßig die Web- oder ausdrücklich die Worker-Konfiguration und zeigt nur redigierte Diagnosedaten.",
+		"schema-version": "Verwendung: hackwerk schema-version\nGibt die vom Binary erwartete Schemaversion aus.",
 	}
 	message, ok := help[command]
 	if ok {
@@ -605,7 +636,7 @@ func respondSeedConfirmation(ctx context.Context, pool *pgxpool.Pool, cfg config
 	if err != nil {
 		return err
 	}
-	_, err = confirmationService.Respond(ctx, material.Raw, view.FormNonce, response, "seed-dev")
+	_, err = confirmationService.Respond(ctx, material.Raw, view.FormNonce, response, "", "seed-dev")
 	return err
 }
 
@@ -652,11 +683,23 @@ func seedOperations(ctx context.Context, pool *pgxpool.Pool, identity *auth.Serv
 		}
 		profile, ok := byUserID[user.ID]
 		if !ok {
-			id, createErr := driverService.CreateProfile(ctx, actor, driver.ProfileInput{UserID: user.ID, DisplayName: account.displayName, CanCompleteJobs: true}, "seed-dev")
+			id, createErr := driverService.CreateProfile(ctx, actor, driver.ProfileInput{
+				UserID: user.ID, DisplayName: account.displayName, CanCompleteJobs: true,
+				AvailabilityPolicy: driver.PolicyLegacyRules,
+			}, "seed-dev")
 			if createErr != nil {
 				return createErr
 			}
 			profile = driver.Profile{ID: id, UserID: user.ID, DisplayName: account.displayName, IsActive: true}
+		} else if profile.AvailabilityPolicy != driver.PolicyLegacyRules {
+			updateErr := driverService.UpdateProfile(ctx, actor, profile.ID, profile.Version, driver.ProfileInput{
+				UserID: profile.UserID, DisplayName: profile.DisplayName, Phone: profile.Phone, Email: profile.Email,
+				CanCompleteJobs: profile.CanCompleteJobs, InternalNote: profile.InternalNote,
+				IsPrimary: profile.IsPrimary, AvailabilityPolicy: driver.PolicyLegacyRules,
+			}, "seed-dev")
+			if updateErr != nil {
+				return updateErr
+			}
 		}
 		schedule, scheduleErr := driverService.Schedule(ctx, actor, profile.ID)
 		if scheduleErr != nil {
@@ -842,7 +885,9 @@ Verwendung:
   hackwerk migrate up|down|status
   hackwerk seed-dev              Entwicklungsschema und Demodaten vorbereiten
   hackwerk admin --help          Benutzer-CLI
-  hackwerk healthcheck           Readiness des Webdienstes prüfen
-  hackwerk config-check          Konfiguration redigiert diagnostizieren
+  hackwerk healthcheck [worker]  Web- oder Worker-Readiness prüfen
+  hackwerk config-check [serve|worker]
+                                Web- oder Worker-Konfiguration redigiert diagnostizieren
+  hackwerk schema-version        Erwartete Schemaversion ausgeben
   hackwerk version               Buildversion anzeigen`)
 }

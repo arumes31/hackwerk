@@ -25,14 +25,32 @@ type CustomerSummary struct {
 	AddressComplete, HasContact                                             bool
 }
 
+type CustomerJobActivity string
+
+const (
+	CustomerJobsActive CustomerJobActivity = "active"
+	CustomerJobsNone   CustomerJobActivity = "none"
+)
+
 type CustomerListFilter struct {
-	Search, Sort, Direction string
-	IncludeArchived         bool
-	Page, PageSize          int
+	Search, Sort, Direction, Locality, Region string
+	NotificationPreference                    NotificationPreference
+	JobActivity                               CustomerJobActivity
+	IncludeArchived, MissingContact           bool
+	IncompleteAddress                         bool
+	Page, PageSize                            int
 }
 
 func (filter *CustomerListFilter) Normalize() {
 	filter.Search = strings.TrimSpace(filter.Search)
+	filter.Locality = strings.TrimSpace(filter.Locality)
+	filter.Region = strings.TrimSpace(filter.Region)
+	if filter.JobActivity != "" && !filter.JobActivity.Valid() {
+		filter.JobActivity = ""
+	}
+	if filter.NotificationPreference != "" && !filter.NotificationPreference.Valid() {
+		filter.NotificationPreference = ""
+	}
 	if filter.Sort != "name" && filter.Sort != "locality" && filter.Sort != "jobs" && filter.Sort != "recent" {
 		filter.Sort = "recent"
 	}
@@ -51,6 +69,10 @@ func (filter *CustomerListFilter) Normalize() {
 	}
 }
 
+func (value CustomerJobActivity) Valid() bool {
+	return value == CustomerJobsActive || value == CustomerJobsNone
+}
+
 type Customer struct {
 	ID, FirstName, LastName, CompanyName                               string
 	Street, PostalCode, Locality, Region, CountryCode, AddressFreeform string
@@ -63,20 +85,34 @@ type Customer struct {
 }
 
 type Job struct {
-	ID, JobNumber, VolumeM3, PreferredStartDate, PreferredEndDate       string
-	PreferenceText, Region, WorkflowStatus                              string
-	JobType                                                             JobType
-	TransportMode                                                       TransportMode
-	Urgency                                                             Urgency
-	Source                                                              Source
-	EstimatedHackMinutes, EstimatedTransportMinutes, TransportTripCount int32
-	ExternalTransportConfirmed                                          bool
-	ReceivedAt                                                          time.Time
-	ArchivedAt                                                          *time.Time
-	Version                                                             int32
-	PileLatitude, PileLongitude                                         *float64
-	PileLocationSource                                                  PileLocationSource
-	PileMapsURL                                                         string
+	ID, JobNumber, VolumeM3, PreferredStartDate, PreferredEndDate, ActiveAppointmentID string
+	PreferenceText, Region, WorkflowStatus                                             string
+	JobType                                                                            JobType
+	TransportMode                                                                      TransportMode
+	Urgency                                                                            Urgency
+	Source                                                                             Source
+	PreferenceMode                                                                     PreferenceMode
+	EstimatedHackMinutes, EstimatedTransportMinutes, TransportTripCount                int32
+	ExternalTransportConfirmed                                                         bool
+	ReceivedAt                                                                         time.Time
+	ArchivedAt                                                                         *time.Time
+	Version                                                                            int32
+	PileLatitude, PileLongitude                                                        *float64
+	PileLocationSource                                                                 PileLocationSource
+	PileMapsURL                                                                        string
+	TransportPartnerID, TransportPartnerName                                           string
+	TransportPartnerType                                                               TransportPartnerType
+}
+
+type TransportPartner struct {
+	ID, Name, Phone, Address, InternalNote string
+	Type                                   TransportPartnerType
+	Version                                int32
+}
+
+type TransportPartnerInput struct {
+	Name, Phone, Address, InternalNote string
+	Type                               TransportPartnerType
 }
 
 type Note struct {
@@ -102,17 +138,22 @@ type CustomerDetail struct {
 type Duplicate struct{ ID, FirstName, LastName, CompanyName, Locality string }
 
 type WaitlistItem struct {
-	WaitlistID, JobID, JobNumber, VolumeM3, PreferredStartDate, PreferredEndDate   string
-	PreferenceText, Region, CustomerID, FirstName, LastName, CompanyName, Locality string
-	NoteExcerpt                                                                    string
-	JobType                                                                        JobType
-	TransportMode                                                                  TransportMode
-	Urgency                                                                        Urgency
-	EnteredAt                                                                      time.Time
-	ManualPriority, WaitlistVersion, EstimatedHackMinutes, AgeDays                 int32
-	WorkflowStatus, NextStep                                                       string
-	UpdatedAt                                                                      time.Time
-	HasPileLocation, HasActiveAppointment, DurationIssue                           bool
+	WaitlistID, JobID, JobNumber, VolumeM3, PreferredStartDate, PreferredEndDate                                                    string
+	PreferenceText, Region, CustomerID, FirstName, LastName, CompanyName, Locality                                                  string
+	NoteExcerpt                                                                                                                     string
+	PriorityReason                                                                                                                  string
+	JobType                                                                                                                         JobType
+	TransportMode                                                                                                                   TransportMode
+	Urgency                                                                                                                         Urgency
+	PreferenceMode                                                                                                                  PreferenceMode
+	EnteredAt                                                                                                                       time.Time
+	ManualPriority, WaitlistVersion, EstimatedHackMinutes, EstimatedTransportMinutes, TotalMinutes, AgeDays                         int32
+	WorkflowStatus, NextStep                                                                                                        string
+	MissingFields                                                                                                                   []string
+	Completeness                                                                                                                    int
+	UpdatedAt                                                                                                                       time.Time
+	HasPileLocation, HasPileSource, HasActiveAppointment, HasInternalAssignment, ExternalTransportConfirmed, DurationIssue, Overdue bool
+	HasContact, PlanReady                                                                                                           bool
 }
 
 type JobDraft struct {
@@ -131,14 +172,24 @@ type WaitlistFilterFavorite struct {
 }
 
 type Page[T any] struct {
-	Items          []T
-	Page           int
-	PageSize       int
-	Total          int64
-	TotalPages     int
-	Recent         []RecentRecord
-	Favorites      []WaitlistFilterFavorite
-	CustomerFilter CustomerListFilter
+	Items           []T
+	Page            int
+	PageSize        int
+	Total           int64
+	UnfilteredTotal int64
+	TotalPages      int
+	Recent          []RecentRecord
+	Favorites       []WaitlistFilterFavorite
+	CustomerFilter  CustomerListFilter
+}
+
+type SearchResult struct {
+	Kind     string `json:"kind"`
+	ID       string `json:"id"`
+	ParentID string `json:"parent_id,omitempty"`
+	Title    string `json:"title"`
+	Subtitle string `json:"subtitle,omitempty"`
+	Href     string `json:"href"`
 }
 
 type CreatedIntake struct {
@@ -150,6 +201,16 @@ type UpdateCustomerInput struct {
 	ID, RequestID   string
 	ExpectedVersion int32
 	Customer        CustomerInput
+}
+
+type CreateCustomerInput struct {
+	Customer  CustomerInput
+	RequestID string
+}
+
+type CreatedCustomer struct {
+	CustomerID string
+	Duplicates []Duplicate
 }
 
 type CreateJobInput struct {
@@ -165,6 +226,9 @@ type UpdateJobInput struct {
 
 type Store interface {
 	FindDuplicates(context.Context, CustomerInput) ([]Duplicate, error)
+	ListTransportPartners(context.Context) ([]TransportPartner, error)
+	CreateTransportPartner(context.Context, auth.Actor, TransportPartnerInput, string) (string, error)
+	CreateCustomer(context.Context, auth.Actor, CustomerInput, string) (string, error)
 	CreateIntake(context.Context, auth.Actor, IntakeInput, string) (CreatedIntake, error)
 	CreateJob(context.Context, auth.Actor, CreateJobInput) (CreatedIntake, error)
 	UpdateJob(context.Context, auth.Actor, UpdateJobInput) error
@@ -178,12 +242,53 @@ type Store interface {
 	UpdateCustomer(context.Context, auth.Actor, UpdateCustomerInput) error
 	ArchiveCustomer(context.Context, auth.Actor, string, int32, string) error
 	ListWaitlist(context.Context, WaitlistFilter) (Page[WaitlistItem], error)
+	SearchWorkspace(context.Context, string) ([]SearchResult, error)
 	ListWaitlistFilterFavorites(context.Context, string) ([]WaitlistFilterFavorite, error)
 	SaveWaitlistFilterFavorite(context.Context, string, string, WaitlistFilter) error
 	DeleteWaitlistFilterFavorite(context.Context, string, string) error
-	UpdateWaitlistPriority(context.Context, auth.Actor, string, int32, int32, string) error
+	UpdateWaitlistPriority(context.Context, auth.Actor, string, int32, string, int32, string) error
 	RemoveWaitlist(context.Context, auth.Actor, string, int32, string, string) error
 	AddNote(context.Context, auth.Actor, string, string, string, string, string) (string, error)
+}
+
+func (service *Service) ListTransportPartners(ctx context.Context, actor auth.Actor) ([]TransportPartner, error) {
+	if err := actor.Require(auth.PermissionJobCreate); err != nil {
+		return nil, err
+	}
+	return service.store.ListTransportPartners(ctx)
+}
+
+func (service *Service) CreateTransportPartner(ctx context.Context, actor auth.Actor, input TransportPartnerInput, requestID string) (string, error) {
+	if err := actor.Require(auth.PermissionJobCreate); err != nil {
+		return "", err
+	}
+	input.Name = strings.TrimSpace(input.Name)
+	input.Phone = strings.TrimSpace(input.Phone)
+	input.Address = strings.TrimSpace(input.Address)
+	input.InternalNote = strings.TrimSpace(input.InternalNote)
+	if input.Name == "" || len([]rune(input.Name)) > 200 || len([]rune(input.Phone)) > 64 || len([]rune(input.Address)) > 500 || len([]rune(input.InternalNote)) > 1000 || !input.Type.Valid() || strings.ContainsAny(input.Phone, "\r\n") {
+		return "", ErrValidation
+	}
+	return service.store.CreateTransportPartner(ctx, actor, input, requestID)
+}
+
+func (service *Service) CreateCustomer(ctx context.Context, actor auth.Actor, input CreateCustomerInput) (CreatedCustomer, error) {
+	if err := actor.Require(auth.PermissionCustomerCreate); err != nil {
+		return CreatedCustomer{}, err
+	}
+	normalizeCustomer(&input.Customer)
+	if err := input.Customer.Validate(); err != nil {
+		return CreatedCustomer{}, err
+	}
+	duplicates, err := service.store.FindDuplicates(ctx, input.Customer)
+	if err != nil {
+		return CreatedCustomer{}, fmt.Errorf("customers: checking duplicates: %w", err)
+	}
+	id, err := service.store.CreateCustomer(ctx, actor, input.Customer, input.RequestID)
+	if err != nil {
+		return CreatedCustomer{}, fmt.Errorf("customers: creating customer: %w", err)
+	}
+	return CreatedCustomer{CustomerID: id, Duplicates: duplicates}, nil
 }
 
 func (service *Service) CreateJob(ctx context.Context, actor auth.Actor, input CreateJobInput) (CreatedIntake, error) {
@@ -196,7 +301,11 @@ func (service *Service) CreateJob(ctx context.Context, actor auth.Actor, input C
 	input.InitialNote = strings.TrimSpace(input.InitialNote)
 	input.Job.VolumeM3, _ = CanonicalVolume(input.Job.VolumeM3)
 	input.Job.PreferenceText = strings.TrimSpace(input.Job.PreferenceText)
+	if input.Job.PreferenceMode == "" {
+		input.Job.PreferenceMode = PreferenceWindow
+	}
 	input.Job.Region = strings.TrimSpace(input.Job.Region)
+	input.Job.TransportPartnerID = strings.TrimSpace(input.Job.TransportPartnerID)
 	if input.CustomerID == "" || len([]rune(input.InitialNote)) > 4000 {
 		return CreatedIntake{}, ErrValidation
 	}
@@ -217,7 +326,11 @@ func (service *Service) UpdateJob(ctx context.Context, actor auth.Actor, input U
 	input.ID = strings.TrimSpace(input.ID)
 	input.Job.VolumeM3, _ = CanonicalVolume(input.Job.VolumeM3)
 	input.Job.PreferenceText = strings.TrimSpace(input.Job.PreferenceText)
+	if input.Job.PreferenceMode == "" {
+		input.Job.PreferenceMode = PreferenceWindow
+	}
 	input.Job.Region = strings.TrimSpace(input.Job.Region)
+	input.Job.TransportPartnerID = strings.TrimSpace(input.Job.TransportPartnerID)
 	if input.ID == "" || input.ExpectedVersion < 1 {
 		return ErrValidation
 	}
@@ -237,13 +350,37 @@ func (service *Service) ArchiveJob(ctx context.Context, actor auth.Actor, id str
 	return service.store.ArchiveJob(ctx, actor, id, version, requestID)
 }
 
-type Service struct{ store Store }
+type Service struct {
+	store                                              Store
+	durationReviewMinMinutes, durationReviewMaxMinutes int32
+}
 
-func NewService(store Store) (*Service, error) {
+type ServiceOption func(*Service) error
+
+func WithDurationReviewThresholds(minimum, maximum int32) ServiceOption {
+	return func(service *Service) error {
+		if minimum < 1 || maximum <= minimum {
+			return errors.New("customers: invalid duration review thresholds")
+		}
+		service.durationReviewMinMinutes, service.durationReviewMaxMinutes = minimum, maximum
+		return nil
+	}
+}
+
+func NewService(store Store, options ...ServiceOption) (*Service, error) {
 	if store == nil {
 		return nil, errors.New("customers: store is required")
 	}
-	return &Service{store: store}, nil
+	service := &Service{store: store, durationReviewMinMinutes: 15, durationReviewMaxMinutes: 12 * 60}
+	for _, option := range options {
+		if option == nil {
+			return nil, errors.New("customers: service option is required")
+		}
+		if err := option(service); err != nil {
+			return nil, err
+		}
+	}
+	return service, nil
 }
 
 func (service *Service) CreateIntake(ctx context.Context, actor auth.Actor, input IntakeInput, requestID string) (CreatedIntake, error) {
@@ -409,6 +546,7 @@ func (service *Service) ArchiveCustomer(ctx context.Context, actor auth.Actor, i
 	if err := actor.Require(auth.PermissionCustomerArchive); err != nil {
 		return err
 	}
+	id = strings.TrimSpace(id)
 	if id == "" || version < 1 {
 		return ErrValidation
 	}
@@ -420,17 +558,38 @@ func (service *Service) ListWaitlist(ctx context.Context, actor auth.Actor, filt
 		return Page[WaitlistItem]{}, err
 	}
 	filter.Normalize()
-	return service.store.ListWaitlist(ctx, filter)
+	filter.DurationReviewMinMinutes = service.durationReviewMinMinutes
+	filter.DurationReviewMaxMinutes = service.durationReviewMaxMinutes
+	page, err := service.store.ListWaitlist(ctx, filter)
+	if err != nil {
+		return Page[WaitlistItem]{}, err
+	}
+	for index := range page.Items {
+		assessWaitlistItem(&page.Items[index])
+	}
+	return page, nil
 }
 
-func (service *Service) UpdateWaitlistPriority(ctx context.Context, actor auth.Actor, id string, priority int32, version int32, requestID string) error {
+func (service *Service) SearchWorkspace(ctx context.Context, actor auth.Actor, query string) ([]SearchResult, error) {
+	if err := actor.Require(auth.PermissionDashboardView); err != nil {
+		return nil, err
+	}
+	query = strings.TrimSpace(query)
+	if len([]rune(query)) < 2 || len([]rune(query)) > 120 {
+		return nil, ErrValidation
+	}
+	return service.store.SearchWorkspace(ctx, query)
+}
+
+func (service *Service) UpdateWaitlistPriority(ctx context.Context, actor auth.Actor, id string, priority int32, reason string, version int32, requestID string) error {
 	if err := actor.Require(auth.PermissionWaitlistPrioritize); err != nil {
 		return err
 	}
-	if id == "" || version < 1 || priority < -100 || priority > 100 {
+	reason = strings.TrimSpace(reason)
+	if id == "" || version < 1 || priority < -100 || priority > 100 || len([]rune(reason)) > 240 || (priority != 0 && reason == "") {
 		return ErrValidation
 	}
-	return service.store.UpdateWaitlistPriority(ctx, actor, id, priority, version, requestID)
+	return service.store.UpdateWaitlistPriority(ctx, actor, id, priority, reason, version, requestID)
 }
 
 func (service *Service) RemoveWaitlist(ctx context.Context, actor auth.Actor, id string, version int32, reason string, requestID string) error {
@@ -459,7 +618,11 @@ func normalizeIntake(input *IntakeInput) {
 	normalizeCustomer(&input.Customer)
 	input.Job.VolumeM3, _ = CanonicalVolume(input.Job.VolumeM3)
 	input.Job.PreferenceText = strings.TrimSpace(input.Job.PreferenceText)
+	if input.Job.PreferenceMode == "" {
+		input.Job.PreferenceMode = PreferenceWindow
+	}
 	input.Job.Region = strings.TrimSpace(input.Job.Region)
+	input.Job.TransportPartnerID = strings.TrimSpace(input.Job.TransportPartnerID)
 	input.InitialNote = strings.TrimSpace(input.InitialNote)
 }
 
@@ -478,6 +641,38 @@ func normalizeCustomer(input *CustomerInput) {
 	input.AddressFreeform = strings.TrimSpace(input.AddressFreeform)
 	input.PhoneRaw = strings.TrimSpace(input.PhoneRaw)
 	input.Email = strings.TrimSpace(input.Email)
+}
+
+func assessWaitlistItem(item *WaitlistItem) {
+	missing := make([]string, 0, 6)
+	if !item.HasPileSource || !item.HasPileLocation {
+		missing = append(missing, "Einsatzort vollständig erfassen")
+	}
+	if item.DurationIssue {
+		missing = append(missing, "Dauer plausibilisieren")
+	}
+	if strings.TrimSpace(item.Region) == "" {
+		missing = append(missing, "Region ergänzen")
+	}
+	if item.PreferenceMode == PreferenceWindow && (item.PreferredStartDate == "" || item.PreferredEndDate == "") {
+		missing = append(missing, "Wunschzeitraum vervollständigen")
+	}
+	transportPending := item.JobType == JobTypeChippingWithTransport &&
+		(item.TransportMode == TransportUndecided || (item.TransportMode == TransportExternal && !item.ExternalTransportConfirmed))
+	if transportPending {
+		missing = append(missing, "Transport klären")
+	}
+	if !item.HasContact {
+		missing = append(missing, "passenden Benachrichtigungskontakt ergänzen")
+	}
+	item.MissingFields = missing
+	item.Completeness = (6 - len(missing)) * 100 / 6
+	item.PlanReady = len(missing) == 0
+	if item.PlanReady {
+		item.NextStep = "Planungsbereit"
+		return
+	}
+	item.NextStep = missing[0]
 }
 
 func allowedRemovalReason(value string) bool {
