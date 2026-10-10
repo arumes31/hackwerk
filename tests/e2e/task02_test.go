@@ -307,19 +307,26 @@ func TestTask02BrowserJourney(t *testing.T) {
 	var transportVisible, externalConfirmationVisible, compactJobFormMobile bool
 	var customerAddressDrafted, customerAddressControlMobile bool
 	var pickerHorizontalOverflow, pickerTouchTargetTooSmall bool
-	if err := chromedp.Run(browserContext,
+	if err := runBrowserStep(browserContext, "open mobile job intake",
 		chromedp.AttributeValue("a[href^='https://www.google.com/maps/search/']", "href", &mapsURL, nil, chromedp.ByQuery),
 		chromedp.EmulateViewport(360, 800),
 		chromedp.Navigate(server.URL+"/customers/new"),
 		chromedp.WaitVisible("a[href='/customers/"+customerID+"/jobs/new']", chromedp.ByQuery),
 		chromedp.Evaluate(`document.documentElement.scrollWidth > document.documentElement.clientWidth + 1`, &pickerHorizontalOverflow),
 		chromedp.Evaluate(`(() => { const target=document.querySelector('[data-existing-customer-job]'); const box=target.getBoundingClientRect(); return box.width < 44 || box.height < 44; })()`, &pickerTouchTargetTooSmall),
-		chromedp.Click("a[href='/customers/"+customerID+"/jobs/new']", chromedp.ByQuery),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			_, err := chromedp.RunResponse(ctx, clickVisibleControl("a[href='/customers/"+customerID+"/jobs/new']"))
+			return err
+		}),
 		chromedp.WaitVisible("[data-job-type]", chromedp.ByQuery),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if err := runBrowserStep(browserContext, "draft mobile customer location",
 		chromedp.Evaluate(`document.querySelector('.job-location-disclosure').open=true`, nil),
-		chromedp.Click("[data-location-customer]", chromedp.ByQuery),
+		clickVisibleControl("[data-location-customer]"),
 		chromedp.WaitVisible("[data-location-search-results] .location-search__result", chromedp.ByQuery),
-		chromedp.Click("[data-location-search-results] .location-search__result", chromedp.ByQuery),
+		clickVisibleControl("[data-location-search-results] .location-search__result"),
 		chromedp.Evaluate(`(() => {
 			const editor=document.querySelector('[data-job-location-editor]');
 			return editor.querySelector('[data-location-latitude]').value==='46.710000'
@@ -333,8 +340,12 @@ func TestTask02BrowserJourney(t *testing.T) {
 			return box.width>=44 && box.height>=44
 				&& document.documentElement.scrollWidth<=document.documentElement.clientWidth+1;
 		})()`, &customerAddressControlMobile),
-		chromedp.Click("[data-location-clear]", chromedp.ByQuery),
+		clickVisibleControl("[data-location-clear]"),
 		chromedp.Evaluate(`document.querySelector('.job-location-disclosure').open=false`, nil),
+	); err != nil {
+		t.Fatal(browserDiagnostics(browserContext, err))
+	}
+	if err := runBrowserStep(browserContext, "submit mobile customer job",
 		chromedp.Evaluate(`(() => {
 			const form=document.querySelector('.customer-job-workbench');
 			const targets=Array.from(form.querySelectorAll('input,select,button,summary')).filter((element)=>element.getClientRects().length);
@@ -361,7 +372,7 @@ func TestTask02BrowserJourney(t *testing.T) {
 		chromedp.WaitVisible("details.compact-job-row:nth-of-type(2)", chromedp.ByQuery),
 		chromedp.EmulateViewport(1280, 900),
 	); err != nil {
-		t.Fatal(err)
+		t.Fatal(browserDiagnostics(browserContext, err))
 	}
 	if !strings.HasPrefix(mapsURL, "https://www.google.com/maps/search/") || !transportVisible || !externalConfirmationVisible || !compactJobFormMobile || !customerAddressDrafted || !customerAddressControlMobile || pickerHorizontalOverflow || pickerTouchTargetTooSmall {
 		t.Fatalf("maps=%q transport=%v external=%v compact form=%v customer address draft=%v customer address mobile=%v picker overflow=%v touch too small=%v", mapsURL, transportVisible, externalConfirmationVisible, compactJobFormMobile, customerAddressDrafted, customerAddressControlMobile, pickerHorizontalOverflow, pickerTouchTargetTooSmall)
