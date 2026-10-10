@@ -525,6 +525,7 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 	var driverMobileTourAudit struct {
 		Overflow, TourVisible, GroupedHidden, Chronological bool
 		SpineVisible, ConnectorVisible, StatusText          bool
+		NoSavedRoute, DirectNavigation                      bool
 		AppointmentCount, SmallTargets                      int
 		RouteHref                                           string
 		ScrollWidth, InnerWidth                             float64
@@ -534,6 +535,7 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 	if err := chromedp.Run(browserContext,
 		chromedp.EmulateViewport(360, 800),
 		chromedp.WaitVisible(`[data-dashboard-projection="driver-tour"]`, chromedp.ByQuery),
+		chromedp.Poll(`getComputedStyle(document.querySelector('.dashboard-date-nav div')).minWidth === '0px'`, nil, chromedp.WithPollingTimeout(5*time.Second)),
 		chromedp.Evaluate(`(() => {
 			const visible=node=>{const style=getComputedStyle(node),rect=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0};
 			const tour=document.querySelector('[data-dashboard-projection="driver-tour"]');
@@ -550,6 +552,8 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 				ConnectorVisible:items.every(item=>getComputedStyle(item,'::before').content!=='none'&&parseFloat(getComputedStyle(item,'::before').width)>=12),
 				StatusText:items.every(item=>(item.querySelector('.appointment-badge')?.textContent||'').trim()!==''),
 				AppointmentCount:items.length,SmallTargets:controls.filter(node=>{const rect=node.getBoundingClientRect();return rect.width<44||rect.height<44}).length,
+				NoSavedRoute:tour.querySelector('.driver-tour__route-status')?.textContent.includes('Keine gespeicherte Route'),
+				DirectNavigation:!!tour.querySelector('.driver-tour__navigate[href^="https://"]'),
 				RouteHref:tour.querySelector('.driver-tour__route')?.getAttribute('href')||''};
 		})()`, &driverMobileTourAudit),
 		chromedp.FullScreenshot(&driverTourScreenshot, 90),
@@ -558,7 +562,8 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 	}
 	if driverMobileTourAudit.Overflow || !driverMobileTourAudit.TourVisible || !driverMobileTourAudit.GroupedHidden ||
 		!driverMobileTourAudit.Chronological || !driverMobileTourAudit.SpineVisible || !driverMobileTourAudit.ConnectorVisible ||
-		!driverMobileTourAudit.StatusText || driverMobileTourAudit.AppointmentCount != 1 || driverMobileTourAudit.SmallTargets != 0 || driverMobileTourAudit.RouteHref != "/my-route?date=2026-08-25" {
+		!driverMobileTourAudit.StatusText || driverMobileTourAudit.AppointmentCount != 1 || driverMobileTourAudit.SmallTargets != 0 ||
+		!driverMobileTourAudit.NoSavedRoute || !driverMobileTourAudit.DirectNavigation || driverMobileTourAudit.RouteHref != "" {
 		t.Fatalf("driver mobile Touren-Kamm audit = %+v", driverMobileTourAudit)
 	}
 
@@ -566,6 +571,7 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 		TourHidden, GroupedVisible bool
 		AppointmentColumns         string
 	}
+	var driverDesktopScreenshot []byte
 	if err := chromedp.Run(browserContext,
 		chromedp.EmulateViewport(1280, 720),
 		chromedp.Evaluate(`(() => {
@@ -575,12 +581,18 @@ func TestTask06ResponsiveDashboardForAdminAndDriver(t *testing.T) {
 			return {TourHidden:!visible(tour),GroupedVisible:visible(grouped),
 				AppointmentColumns:getComputedStyle(grouped.querySelector('.dashboard-appointment')).gridTemplateColumns};
 		})()`, &driverDesktopProjectionAudit),
+		chromedp.FullScreenshot(&driverDesktopScreenshot, 90),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
 	if !driverDesktopProjectionAudit.TourHidden || !driverDesktopProjectionAudit.GroupedVisible || !strings.Contains(driverDesktopProjectionAudit.AppointmentColumns, " ") {
 		t.Fatalf("driver desktop projection changed = %+v", driverDesktopProjectionAudit)
 	}
+	driverDesktopArtifact := filepath.Join(t.ArtifactDir(), "task06-driver-desktop.png")
+	if err := os.WriteFile(driverDesktopArtifact, driverDesktopScreenshot, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("driver desktop screenshot: %s", driverDesktopArtifact)
 
 	driverTourArtifact := filepath.Join(t.ArtifactDir(), "task06-driver-tour-mobile.png")
 	if err := os.WriteFile(driverTourArtifact, driverTourScreenshot, 0o600); err != nil {

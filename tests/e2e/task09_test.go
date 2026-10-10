@@ -93,7 +93,7 @@ func TestTask09VoiceReviewMobileJourney(t *testing.T) {
 	browser, cancelTimeout := context.WithTimeout(browser, 180*time.Second)
 	t.Cleanup(cancelTimeout)
 	t.Cleanup(func() { _ = chromedp.Cancel(browser) })
-	if err = chromedp.Run(browser, chromedp.Navigate(server.URL+"/login"), chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery), chromedp.SetValue("#username", "driver-task04", chromedp.ByQuery), chromedp.SetValue("#password", driverPassword, chromedp.ByQuery), chromedp.Click("form[action='/login'] button[type='submit']", chromedp.ByQuery), chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery), chromedp.Navigate(server.URL+"/voice"), chromedp.WaitVisible("[data-voice-upload]", chromedp.ByQuery)); err != nil {
+	if err = chromedp.Run(browser, chromedp.Navigate(server.URL+"/login"), chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery), chromedp.SetValue("#username", "driver-task04", chromedp.ByQuery), chromedp.SetValue("#password", driverPassword, chromedp.ByQuery), clickVisibleControl("form[action='/login'] button[type='submit']"), chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery), chromedp.Navigate(server.URL+"/voice"), chromedp.WaitVisible("[data-voice-upload]", chromedp.ByQuery)); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
 	var nativeFallbackConfigured bool

@@ -194,6 +194,13 @@ func TestTask13AllMainPagesDesktopAndMobileUsability(t *testing.T) {
 		exceptionLock.Unlock()
 	})
 
+	// Geometry is measured on a Vienna device; Task04 separately covers the
+	// timezone warning and scheduling behavior on a UTC device.
+	if err := chromedp.Run(browser, chromedp.ActionFunc(func(ctx context.Context) error {
+		return emulation.SetTimezoneOverride("Europe/Vienna").Do(ctx)
+	})); err != nil {
+		t.Fatal(err)
+	}
 	if err := e2eLogin(browser, server.URL, "admin-task04", adminPassword); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
@@ -440,7 +447,22 @@ const pageAuditScript = `(() => {
 		tooTall('.customer-page .page-heading',145);
 		tooTall('.customer-page .customer-list-toolbar',190);
 		tooTall('.waitlist-page .selection-toolbar',112);
-		tooTall('.compact-filter-panel:not([open])',52);
+		tooTall('.compact-filter-panel:not(.availability-preview):not([open])',52);
+		// The availability preview deliberately wraps its full 14-day label.
+		// Keep that exception readable within two lines and a 44px target.
+		const preview=document.querySelector('.availability-preview:not([open]) > summary');
+		if(preview&&visible(preview)){
+			const style=getComputedStyle(preview),rect=preview.getBoundingClientRect();
+			const padding=parseFloat(style.paddingTop)+parseFloat(style.paddingBottom);
+			const borders=parseFloat(style.borderTopWidth)+parseFloat(style.borderBottomWidth);
+			const textRange=document.createRange();textRange.selectNodeContents(preview);
+			const lines=[...textRange.getClientRects()].filter(line=>line.width>0&&line.height>0);
+			const lineHeight=parseFloat(style.lineHeight)||Math.max(...lines.map(line=>line.height));
+			const twoLines=2*lineHeight+padding+borders;
+			const textClipped=lines.some(line=>line.left<rect.left-1||line.right>rect.right+1||line.top<rect.top-1||line.bottom>rect.bottom+1);
+			if(lines.length<1||lines.length>2||textClipped||!Number.isFinite(twoLines)||rect.height<44||rect.height>Math.max(44,twoLines)+1||preview.scrollHeight>preview.clientHeight+1||preview.scrollWidth>preview.clientWidth+1)
+				densityFailures.push('availability-preview-summary-clipped-or-outside-two-line-target: lines='+lines.length+', height='+rect.height+', max='+twoLines+', clipped='+textClipped);
+		}
 		tooTall('.admin-tour__date-nav',72);
 		const calendar=document.querySelector('.calendar-page [data-calendar]');
 		if(calendar&&visible(calendar)&&calendar.getBoundingClientRect().top>640)densityFailures.push('[data-calendar].top='+Math.round(calendar.getBoundingClientRect().top)+'>640');

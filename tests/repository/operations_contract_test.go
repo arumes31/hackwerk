@@ -104,7 +104,7 @@ func TestProductionComposeHealthAndProviderSecretContracts(t *testing.T) {
 
 func TestBuildAndPostgresImagesAreDigestPinned(t *testing.T) {
 	t.Parallel()
-	const goImage = "golang:1.27.0-bookworm@sha256:ded31c68586d2e49e760acc2e65a884b23d032e9bbbed0ae0c55abd3fcaf4452"
+	const goImage = "golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61"
 	const postgresImage = "postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2"
 
 	if !strings.Contains(repositoryFile(t, "Dockerfile"), goImage) {

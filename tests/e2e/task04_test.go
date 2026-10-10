@@ -97,7 +97,10 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		}
 	})
 
+	// The desktop geometry contract uses a Vienna device; the mobile journey
+	// below separately exercises a UTC device and Vienna scheduling semantics.
 	if err := chromedp.Run(browserContext,
+		chromedp.ActionFunc(func(ctx context.Context) error { return emulation.SetTimezoneOverride("Europe/Vienna").Do(ctx) }),
 		chromedp.Navigate(server.URL+"/login"), chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("open login: %s", browserDiagnostics(browserContext, err))
@@ -195,7 +198,7 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 		t.Fatal(browserDiagnostics(browserContext, err))
 	}
 	if compactCalendarAudit.PageWidth < 1380 || compactCalendarAudit.HeadingHeight > 115 || compactCalendarAudit.ControlsHeight > 130 ||
-		compactCalendarAudit.CalendarOffset > 425 || compactCalendarAudit.MinimumButtonGap < 6 || compactCalendarAudit.TallestWaitlistCard > 140 ||
+		compactCalendarAudit.CalendarOffset > 425 || compactCalendarAudit.WarningHeight != 0 || compactCalendarAudit.MinimumButtonGap < 6 || compactCalendarAudit.TallestWaitlistCard > 140 ||
 		compactCalendarAudit.SmallTargets != 0 || compactCalendarAudit.ControlRows > 2 || compactCalendarAudit.Overlap || compactCalendarAudit.PageOverflow ||
 		compactCalendarAudit.OptionsInitiallyOpen || compactCalendarAudit.SummaryHidden || !compactCalendarAudit.ControlsHiddenBeforeOpen ||
 		!compactCalendarAudit.OptionsOpen || !compactCalendarAudit.FirstControlFocused {
@@ -266,7 +269,11 @@ func TestTask04CalendarBrowserJourney(t *testing.T) {
 			options.open=false;
 			return result;
 		})()`, &mobileCalendarAudit),
-		chromedp.Evaluate(fmt.Sprintf(`document.querySelector('[data-plan-job=%q]').click()`, jobID), nil),
+		chromedp.ScrollIntoView(".calendar-waitlist > summary", chromedp.ByQuery),
+		chromedp.Click(".calendar-waitlist > summary", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.calendar-waitlist').open`, nil, chromedp.WithPollingTimeout(5*time.Second)),
+		chromedp.ScrollIntoView("[data-plan-job='"+jobID+"']", chromedp.ByQuery),
+		chromedp.Click("[data-plan-job='"+jobID+"']", chromedp.ByQuery),
 		chromedp.WaitVisible("[data-planning-dialog]", chromedp.ByQuery),
 	); err != nil {
 		t.Fatal(browserDiagnostics(browserContext, err))
@@ -1024,6 +1031,11 @@ func task04Application(t *testing.T, databaseURL string) (*pgxpool.Pool, *auth.S
 	}
 	var driverID string
 	if err := pool.QueryRow(ctx, "SELECT id::text FROM drivers WHERE display_name='Franz Fahrer'").Scan(&driverID); err != nil {
+		t.Fatal(err)
+	}
+	// These scheduling journeys seed recurring weekly availability. Select its
+	// policy explicitly rather than relying on the newer explicit-date default.
+	if _, err := pool.Exec(ctx, "UPDATE drivers SET availability_policy='legacy_rules' WHERE id=$1", driverID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, "INSERT INTO availability_rules (driver_id, iso_weekday, local_start, local_end, valid_from, status) VALUES ($1,2,'06:00','20:00','2026-01-01','available')", driverID); err != nil {

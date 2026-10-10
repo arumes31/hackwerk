@@ -84,7 +84,7 @@ func TestTask08PlanningSuggestionsMobileJourney(t *testing.T) {
 	t.Cleanup(func() { _ = chromedp.Cancel(browser) })
 	var text string
 	var overflow, smallTarget bool
-	if err := chromedp.Run(browser, chromedp.Navigate(server.URL+"/login"), chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery), chromedp.SetValue("#username", "admin-task04", chromedp.ByQuery), chromedp.SetValue("#password", adminPassword, chromedp.ByQuery), chromedp.Click("form[action='/login'] button[type='submit']", chromedp.ByQuery), chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery)); err != nil {
+	if err := chromedp.Run(browser, chromedp.Navigate(server.URL+"/login"), chromedp.WaitVisible("form[action='/login']", chromedp.ByQuery), chromedp.SetValue("#username", "admin-task04", chromedp.ByQuery), chromedp.SetValue("#password", adminPassword, chromedp.ByQuery), chromedp.Focus("form[action='/login'] button[type='submit']", chromedp.ByQuery), chromedp.KeyEvent("\r"), chromedp.WaitVisible("main.dashboard-page", chromedp.ByQuery)); err != nil {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
 	var desktopWorkbench bool
