@@ -691,7 +691,10 @@ func assertCommandPaletteJourney(t *testing.T, browser context.Context) {
 	if err := runBrowserStep(browser, "shortcut help",
 		chromedp.Click("[data-command-open]", chromedp.ByQuery),
 		chromedp.WaitVisible("[data-command-palette]", chromedp.ByQuery),
-		chromedp.Click("[data-shortcuts-open]", chromedp.ByQuery),
+		// Opening the palette focuses search on the next frame, which can scroll
+		// its contents. Wait for that focus before measuring the help button.
+		chromedp.Poll(`document.activeElement===document.querySelector('[data-global-search-input]')`, nil),
+		clickVisibleControl("[data-shortcuts-open]"),
 		chromedp.WaitVisible("[data-shortcuts-dialog]", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector('[data-shortcuts-dialog]').open`, &shortcutsVisible),
 		chromedp.Click("[data-shortcuts-close]", chromedp.ByQuery),
