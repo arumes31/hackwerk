@@ -346,15 +346,18 @@ func TestTask02BrowserJourney(t *testing.T) {
 		})()`, &compactJobFormMobile),
 		chromedp.Evaluate(`(() => { const e=document.querySelector('[data-job-type]'); e.value='chipping_with_transport'; e.dispatchEvent(new Event('change',{bubbles:true})); return !document.querySelector('[data-transport-field]').hidden; })()`, &transportVisible),
 		chromedp.Evaluate(`(() => { const e=document.querySelector('[data-transport-mode]'); e.value='external'; e.dispatchEvent(new Event('change',{bubbles:true})); return !document.querySelector('[data-external-confirmation]').hidden; })()`, &externalConfirmationVisible),
-		chromedp.SetValue("[name='volume_m3']", "120", chromedp.ByQuery),
-		chromedp.SetValue("[name='hack_duration']", "4:00", chromedp.ByQuery),
-		chromedp.SetValue("[name='transport_duration']", "1:00", chromedp.ByQuery),
-		chromedp.SetValue("[name='transport_trips']", "2", chromedp.ByQuery),
-		chromedp.Click("[name='external_confirmed']", chromedp.ByQuery),
-		chromedp.SetValue("[name='region']", "Unterneukirchen", chromedp.ByQuery),
+		chromedp.SetValue("form[data-transport-form] [name='volume_m3']", "120", chromedp.ByQuery),
+		chromedp.SetValue("form[data-transport-form] [name='hack_duration']", "4:00", chromedp.ByQuery),
+		chromedp.SetValue("form[data-transport-form] [name='transport_duration']", "1:00", chromedp.ByQuery),
+		chromedp.SetValue("form[data-transport-form] [name='transport_trips']", "2", chromedp.ByQuery),
+		clickVisibleControl("form[data-transport-form] [name='external_confirmed']"),
+		chromedp.SetValue("form[data-transport-form] [name='region']", "Unterneukirchen", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector('.job-additional-disclosure').open=true`, nil),
-		chromedp.SetValue("[name='preference_text']", "Oktober", chromedp.ByQuery),
-		chromedp.Click("form[data-transport-form] button[type='submit']", chromedp.ByQuery),
+		chromedp.SetValue("form[data-transport-form] [name='preference_text']", "Oktober", chromedp.ByQuery),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			_, err := chromedp.RunResponse(ctx, clickVisibleControl("form[data-transport-form] button[type='submit']"))
+			return err
+		}),
 		chromedp.WaitVisible("details.compact-job-row:nth-of-type(2)", chromedp.ByQuery),
 		chromedp.EmulateViewport(1280, 900),
 	); err != nil {
@@ -408,7 +411,10 @@ func TestTask02BrowserJourney(t *testing.T) {
 		chromedp.WaitVisible("a[href='/customers']", chromedp.ByQuery),
 		chromedp.Navigate(server.URL+"/customers"),
 		chromedp.SetValue("#customer-search", "Huber", chromedp.ByQuery),
-		chromedp.Click("form[action='/customers/search'] button[type='submit']", chromedp.ByQuery),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			_, err := chromedp.RunResponse(ctx, clickVisibleControl("form[action='/customers/search'] button[type='submit']"))
+			return err
+		}),
 	); err != nil {
 		t.Fatalf("submit customer search: %s", browserDiagnostics(browserContext, err))
 	}
