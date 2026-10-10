@@ -12,6 +12,17 @@
   display: none;
 }
 
+@media (min-width: 1051px) {
+  .driver-mobile-availability {
+    display: grid;
+    gap: .55rem;
+    padding: .8rem;
+    border: 1px solid var(--line);
+    border-radius: .85rem;
+    background: var(--surface);
+  }
+}
+
 @media (max-width: 1050px) {
   :root {
     --mobile-app-bar-height: 54px;
@@ -1381,6 +1392,12 @@
 
   .route-page .route-day-filter .button {
 	margin: 0;
+  }
+
+  @media (max-width: 400px) {
+    .route-page .route-day-filter {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 
   .route-day-shortcuts > summary {

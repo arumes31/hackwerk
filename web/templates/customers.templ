@@ -321,10 +321,14 @@ func formFieldInvalid(fieldErrors []FormFieldError, field string) string {
 }
 
 func formFieldDescription(fieldErrors []FormFieldError, field string) string {
+	return formFieldDescriptionForID(fieldErrors, field, field)
+}
+
+func formFieldDescriptionForID(fieldErrors []FormFieldError, field, id string) string {
 	if formFieldError(fieldErrors, field) == "" {
 		return ""
 	}
-	return field + "-error"
+	return id + "-error"
 }
 
 func customerPhoneURL(value string) string {
@@ -344,13 +348,17 @@ func customerEmailURL(value string) string {
 }
 
 templ formErrorSummary(message string, fieldErrors []FormFieldError) {
+	@formErrorSummaryForPrefix("", message, fieldErrors)
+}
+
+templ formErrorSummaryForPrefix(prefix, message string, fieldErrors []FormFieldError) {
 	if message != "" {
 		<div class="form-alert" role="alert" tabindex="-1" data-error-summary>
 			<strong>{ message }</strong>
 			if len(fieldErrors) > 0 {
 				<ul>
 					for _, item := range fieldErrors {
-						<li><a href={ "#" + item.Field }>{ item.Label }: { item.Message }</a></li>
+						<li><a href={ "#" + prefix + item.Field }>{ item.Label }: { item.Message }</a></li>
 					}
 				</ul>
 			}
@@ -359,8 +367,12 @@ templ formErrorSummary(message string, fieldErrors []FormFieldError) {
 }
 
 templ formFieldMessage(fieldErrors []FormFieldError, field string) {
+	@formFieldMessageForID(fieldErrors, field, field)
+}
+
+templ formFieldMessageForID(fieldErrors []FormFieldError, field, id string) {
 	if formFieldError(fieldErrors, field) != "" {
-		<small id={ field + "-error" } class="field-error">{ formFieldError(fieldErrors, field) }</small>
+		<small id={ id + "-error" } class="field-error">{ formFieldError(fieldErrors, field) }</small>
 	}
 }
 
@@ -390,13 +402,13 @@ func jobLocationOpen(values IntakeValues, fieldErrors []FormFieldError) bool {
 	return hasAnyText(values.PileLatitude, values.PileLongitude) || formHasAnyError(fieldErrors, "pile_latitude", "pile_longitude")
 }
 
-templ customerFormFields(values IntakeValues, fieldErrors []FormFieldError) {
+templ customerFormFields(prefix string, values IntakeValues, fieldErrors []FormFieldError) {
 	<div class="customer-form-sections" data-customer-fields>
 		<fieldset class="compact-form-section customer-form-section customer-form-section--identity">
 			<legend>Identität</legend>
 			<div class="customer-field-grid customer-identity-grid">
 				<label>
-					Vorname<input id="first_name" name="first_name" value={ values.FirstName } aria-invalid={ formFieldInvalid(fieldErrors, "first_name") } aria-describedby={ formFieldDescription(fieldErrors, "first_name") }/>@formFieldMessage(fieldErrors, "first_name")
+					Vorname<input id={ prefix + "first_name" } name="first_name" value={ values.FirstName } aria-invalid={ formFieldInvalid(fieldErrors, "first_name") } aria-describedby={ formFieldDescriptionForID(fieldErrors, "first_name", prefix+"first_name") }/>@formFieldMessageForID(fieldErrors, "first_name", prefix+"first_name")
 				</label>
 				<label>Nachname<input name="last_name" value={ values.LastName }/></label>
 				<label class="customer-field--wide">Firma<input name="company_name" value={ values.CompanyName }/></label>
@@ -415,13 +427,13 @@ templ customerFormFields(values IntakeValues, fieldErrors []FormFieldError) {
 			<legend>Kontakt</legend>
 			<div class="customer-field-grid customer-contact-grid">
 				<label>
-					Telefon<input id="phone" name="phone" type="tel" value={ values.Phone } aria-invalid={ formFieldInvalid(fieldErrors, "phone") } aria-describedby={ formFieldDescription(fieldErrors, "phone") }/>@formFieldMessage(fieldErrors, "phone")
+					Telefon<input id={ prefix + "phone" } name="phone" type="tel" value={ values.Phone } aria-invalid={ formFieldInvalid(fieldErrors, "phone") } aria-describedby={ formFieldDescriptionForID(fieldErrors, "phone", prefix+"phone") }/>@formFieldMessageForID(fieldErrors, "phone", prefix+"phone")
 				</label>
 				<label class="customer-field--wide">
-					E-Mail<input id="email" name="email" type="email" value={ values.Email } aria-invalid={ formFieldInvalid(fieldErrors, "email") } aria-describedby={ formFieldDescription(fieldErrors, "email") }/>@formFieldMessage(fieldErrors, "email")
+					E-Mail<input id={ prefix + "email" } name="email" type="email" value={ values.Email } aria-invalid={ formFieldInvalid(fieldErrors, "email") } aria-describedby={ formFieldDescriptionForID(fieldErrors, "email", prefix+"email") }/>@formFieldMessageForID(fieldErrors, "email", prefix+"email")
 				</label>
 				<label>
-					Benachrichtigung<select id="notification" name="notification" aria-invalid={ formFieldInvalid(fieldErrors, "notification") } aria-describedby={ formFieldDescription(fieldErrors, "notification") }><option value="none" selected?={ values.Notification == "none" }>Keine</option><option value="email" selected?={ values.Notification == "email" }>E-Mail</option><option value="sms" selected?={ values.Notification == "sms" }>SMS</option><option value="both" selected?={ values.Notification == "both" }>Beide</option></select>@formFieldMessage(fieldErrors, "notification")
+					Benachrichtigung<select id={ prefix + "notification" } name="notification" aria-invalid={ formFieldInvalid(fieldErrors, "notification") } aria-describedby={ formFieldDescriptionForID(fieldErrors, "notification", prefix+"notification") }><option value="none" selected?={ values.Notification == "none" }>Keine</option><option value="email" selected?={ values.Notification == "email" }>E-Mail</option><option value="sms" selected?={ values.Notification == "sms" }>SMS</option><option value="both" selected?={ values.Notification == "both" }>Beide</option></select>@formFieldMessageForID(fieldErrors, "notification", prefix+"notification")
 				</label>
 			</div>
 		</fieldset>
@@ -659,12 +671,16 @@ templ Intake(data IntakeData) {
 						<input id="intake-customer-search" class="intake-customer-search" name="q" type="search" size="1" value={ data.CustomerSearch } placeholder="Name, Firma, Ort, Telefon oder Auftragsnummer" autocomplete="off"/>
 						<button class="button button--quiet" type="submit">Suchen</button>
 					</form>
-					@formErrorSummary(data.Error, data.FieldErrors)
+					if data.Shell.ActivePath == "/customers/customer-only" {
+						@formErrorSummaryForPrefix("customer-only-", data.Error, data.FieldErrors)
+					} else {
+						@formErrorSummary(data.Error, data.FieldErrors)
+					}
 					<details class="compact-create-panel intake-new-customer" data-new-customer-panel>
 						<summary>+ Nur Kundenakte anlegen</summary>
 						<form method="post" action="/customers/customer-only" class="intake-form" data-sticky-actions>
 							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>
-							@customerFormFields(data.Values, data.FieldErrors)
+							@customerFormFields("customer-only-", data.Values, data.FieldErrors)
 							<div class="form-actions workbench-form-actions"><p>Ein Auftrag kann später in der Kundenakte ergänzt werden.</p><button class="button" type="submit">Kundenakte speichern</button></div>
 						</form>
 					</details>
@@ -672,7 +688,7 @@ templ Intake(data IntakeData) {
 						<summary>+ Neuer Kunde mit Auftrag</summary>
 						<form method="post" action="/customers" class="intake-form customer-job-workbench" data-transport-form data-sticky-actions>
 							<input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><input type="hidden" name="transport_mode" value="none" data-transport-default disabled/>
-							@customerFormFields(data.Values, data.FieldErrors)
+							@customerFormFields("", data.Values, data.FieldErrors)
 							@jobIntakeFields(data.Shell.Page, "new-intake-job", data.Values, data.FieldErrors, "", "", intakeCustomerAddress(data.Values), data.Values.Region, data.Partners)
 							<div class="form-actions workbench-form-actions"><p>Es wird noch kein Termin erzeugt.</p><button class="button" type="submit">Kunde &amp; Auftrag auf Warteliste setzen</button></div>
 						</form>
@@ -932,7 +948,7 @@ templ customerEditForm(data CustomerDetailData) {
 					}
 				</div>
 			}
-			@customerFormFields(customerEditValuesFor(data), data.CustomerFieldErrors)
+			@customerFormFields("", customerEditValuesFor(data), data.CustomerFieldErrors)
 			<div class="form-actions workbench-form-actions"><a class="button button--quiet" href={ "/customers/" + data.Detail.Customer.ID }>Abbrechen</a><button class="button" type="submit">Änderungen speichern</button></div>
 		</form>
 	</details>

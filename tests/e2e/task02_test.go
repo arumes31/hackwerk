@@ -114,8 +114,10 @@ func TestTask02BrowserJourney(t *testing.T) {
 	if err := runBrowserStep(browserContext, "open intake",
 		chromedp.WaitVisible("a[href='/customers']", chromedp.ByQuery),
 		chromedp.Navigate(server.URL+"/customers/new"),
-		chromedp.WaitVisible("[data-new-customer-panel] summary", chromedp.ByQuery),
-		chromedp.Click("[data-new-customer-panel] summary", chromedp.ByQuery),
+		chromedp.WaitVisible("[data-new-customer-panel]:has(form[action='/customers']) > summary", chromedp.ByQuery),
+		chromedp.ScrollIntoView("[data-new-customer-panel]:has(form[action='/customers']) > summary", chromedp.ByQuery),
+		chromedp.Click("[data-new-customer-panel]:has(form[action='/customers']) > summary", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('form[action="/customers"]').closest('details').open`, nil, chromedp.WithPollingTimeout(5*time.Second)),
 		chromedp.WaitVisible("form[action='/customers']", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector('[data-transport-field]').hidden`, &transportInitiallyHidden),
 		chromedp.Evaluate(`(() => {
@@ -219,14 +221,14 @@ func TestTask02BrowserJourney(t *testing.T) {
 		t.Fatalf("invalid form accessibility: focused=%v associated=%v retained=%v", invalidSummaryFocused, invalidFieldsAssociated, invalidValuesRetained)
 	}
 	if err := runBrowserStep(browserContext, "fill customer",
-		chromedp.SetValue("[name='first_name']", "Franz", chromedp.ByQuery),
-		chromedp.SetValue("[name='last_name']", "Huber", chromedp.ByQuery),
-		chromedp.SetValue("[name='street']", "Unterneukirchen 15", chromedp.ByQuery),
-		chromedp.SetValue("[name='postal_code']", "8458", chromedp.ByQuery),
-		chromedp.SetValue("[name='locality']", "Unterneukirchen", chromedp.ByQuery),
-		chromedp.SetValue("[name='region']", "Unterneukirchen", chromedp.ByQuery),
-		chromedp.SetValue("[name='phone']", "0664 1234567", chromedp.ByQuery),
-		chromedp.SetValue("[name='email']", "franz.huber@example.test", chromedp.ByQuery),
+		chromedp.SetValue("form[action='/customers'] [name='first_name']", "Franz", chromedp.ByQuery),
+		chromedp.SetValue("form[action='/customers'] [name='last_name']", "Huber", chromedp.ByQuery),
+		chromedp.SetValue("form[action='/customers'] [name='street']", "Unterneukirchen 15", chromedp.ByQuery),
+		chromedp.SetValue("form[action='/customers'] [name='postal_code']", "8458", chromedp.ByQuery),
+		chromedp.SetValue("form[action='/customers'] [name='locality']", "Unterneukirchen", chromedp.ByQuery),
+		chromedp.SetValue("form[action='/customers'] [name='region']", "Unterneukirchen", chromedp.ByQuery),
+		chromedp.SetValue("form[action='/customers'] [name='phone']", "0664 1234567", chromedp.ByQuery),
+		chromedp.SetValue("form[action='/customers'] [name='email']", "franz.huber@example.test", chromedp.ByQuery),
 	); err != nil {
 		t.Fatalf("fill customer fields: %s", browserDiagnostics(browserContext, err))
 	}
@@ -386,7 +388,7 @@ func TestTask02BrowserJourney(t *testing.T) {
 	var customerToolbarHeight, waitlistToolbarHeight float64
 	var waitlistCopyButtonValid, waitlistCopyFeedbackValid bool
 	var horizontalOverflow bool
-	var screenshot []byte
+	var screenshot, desktopScreenshot []byte
 	if err := runBrowserStep(browserContext, "logout driver",
 		chromedp.Click("[data-account-menu] summary", chromedp.ByQuery),
 		chromedp.WaitVisible("form[action='/logout'] button[type='submit']", chromedp.ByQuery),
@@ -457,6 +459,7 @@ func TestTask02BrowserJourney(t *testing.T) {
 		chromedp.Navigate(server.URL+"/waitlist"),
 		chromedp.WaitVisible("#waitlist-list-controls", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector(".waitlist-list-toolbar").getBoundingClientRect().height`, &waitlistToolbarHeight),
+		chromedp.FullScreenshot(&desktopScreenshot, 90),
 		chromedp.Evaluate(`(()=>{const button=document.querySelector(".waitlist-copy-button");if(!button)return false;const icon=button.querySelector("svg.copy-icon--default");if(!icon)return false;const buttonBox=button.getBoundingClientRect();const iconBox=icon.getBoundingClientRect();const style=getComputedStyle(button);return button.textContent.trim()===""&&(button.getAttribute("aria-label")||"").endsWith(" kopieren")&&buttonBox.width>=44&&buttonBox.height>=44&&iconBox.width<=16.1&&iconBox.height<=16.1&&parseFloat(style.borderTopWidth)===0&&style.backgroundColor==="rgba(0, 0, 0, 0)"})()`, &waitlistCopyButtonValid),
 		chromedp.Click(".waitlist-copy-button", chromedp.ByQuery),
 		chromedp.WaitVisible(".waitlist-copy-button.is-copied", chromedp.ByQuery),
@@ -466,7 +469,10 @@ func TestTask02BrowserJourney(t *testing.T) {
 	}
 	if err := runBrowserStep(browserContext, "search and sort compact waitlist",
 		chromedp.SetValue("#waitlist-search", "Huber", chromedp.ByQuery),
-		chromedp.Click("#waitlist-list-controls .customer-list-toolbar__search button[type='submit']", chromedp.ByQuery),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			_, err := chromedp.RunResponse(ctx, clickVisibleControl("#waitlist-list-controls .customer-list-toolbar__search button[type='submit']"))
+			return err
+		}),
 		chromedp.WaitVisible(".waitlist-table tbody tr", chromedp.ByQuery),
 		chromedp.Click(".waitlist-table thead th:nth-child(4) .customer-table-sort", chromedp.ByQuery),
 		chromedp.WaitVisible(".waitlist-table th[aria-sort='descending']", chromedp.ByQuery),
@@ -515,6 +521,11 @@ func TestTask02BrowserJourney(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("mobile browser screenshot: %s", artifact)
+	desktopArtifact := filepath.Join(t.ArtifactDir(), "task02-desktop-waitlist.png")
+	if err := os.WriteFile(desktopArtifact, desktopScreenshot, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("desktop browser screenshot: %s", desktopArtifact)
 
 	exceptionLock.Lock()
 	defer exceptionLock.Unlock()
