@@ -324,6 +324,8 @@ func TestTask02BrowserJourney(t *testing.T) {
 	}
 	if err := runBrowserStep(browserContext, "draft mobile customer location",
 		chromedp.Evaluate(`document.querySelector('.job-location-disclosure').open=true`, nil),
+		// The disclosure initializes its controls after MapLibre loads and a frame runs.
+		chromedp.Poll(`Boolean(document.querySelector('[data-job-location-editor]')?.dataset.mapInitialized)`, nil, chromedp.WithPollingTimeout(20*time.Second)),
 		clickVisibleControl("[data-location-customer]"),
 		chromedp.WaitVisible("[data-location-search-results] .location-search__result", chromedp.ByQuery),
 		clickVisibleControl("[data-location-search-results] .location-search__result"),
