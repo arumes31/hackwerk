@@ -305,6 +305,11 @@ func task03Application(t *testing.T, ctx context.Context, databaseURL string) (*
 	if err := pool.QueryRow(ctx, "INSERT INTO drivers (display_name) VALUES ('Maria ohne Login') RETURNING id::text").Scan(&otherID); err != nil {
 		t.Fatal(err)
 	}
+	// This journey covers the retained weekly-rule UI. New driver profiles now
+	// default to explicit dates, so select the legacy policy for these fixtures.
+	if _, err := pool.Exec(ctx, "UPDATE drivers SET availability_policy = 'legacy_rules' WHERE id = $1 OR id = $2", ownerID, otherID); err != nil {
+		t.Fatal(err)
+	}
 	location, err := time.LoadLocation("Europe/Vienna")
 	if err != nil {
 		t.Fatal(err)

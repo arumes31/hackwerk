@@ -1109,6 +1109,10 @@ html:not(.js) .waitlist-table :is(th, td):first-child { display: none; }
 .waitlist-list-toolbar { grid-template-columns: minmax(24rem, 1fr) auto auto; }
 .waitlist-search-field { min-width: 0; display: grid; gap: .15rem; color: var(--muted); font-size: .78rem; font-weight: 800; }
 .waitlist-search-field input { color: var(--ink); font-size: 1rem; font-weight: 400; }
+@media (min-width: 1061px) {
+  .waitlist-search-field { grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .4rem; }
+  .waitlist-search-field > span { white-space: nowrap; }
+}
 .waitlist-filter-menu__panel { width: min(68rem, calc(100vw - 2rem)); }
 .waitlist-filter-grid { grid-template-columns: repeat(4, minmax(10rem, 1fr)); }
 .waitlist-filter-chip-form { margin: 0; }
@@ -1769,6 +1773,10 @@ html:not(.command-dialog-ready) [data-command-open] { display: none; }
 .metric-card:focus-visible { outline-offset: -3px; }
 .metric-card strong { font: 800 1.4rem/1 Aptos, "Segoe UI", sans-serif; font-variant-numeric: tabular-nums; }
 .metric-card small { color: var(--muted); font-size: .75rem; line-height: 1.15; overflow-wrap: break-word; text-wrap: balance; }
+@media (min-width: 1051px) {
+  .dashboard-metrics { grid-auto-columns: minmax(0, 1fr); }
+  .metric-card { padding: .3rem .35rem; }
+}
 .dashboard-columns { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(17rem, .75fr); gap: .9rem; align-items: start; }
 .dashboard-page[data-dashboard-role="driver"] .dashboard-columns { grid-template-columns: minmax(0, 1fr); }
 .section-heading { justify-content: space-between; margin-bottom: .55rem; }

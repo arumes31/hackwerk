@@ -3,7 +3,10 @@
 package e2e_test
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/png"
 	"io"
 	"log/slog"
 	"net/http"
@@ -96,7 +99,20 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	// Supply local raster tiles so MapLibre can finish loading without an external
+	// tile service. The production tile client's outbound safeguards stay intact.
+	var tile bytes.Buffer
+	if err := png.Encode(&tile, image.NewRGBA(image.Rect(0, 0, 256, 256))); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if strings.HasPrefix(request.URL.Path, "/map/tiles/") {
+			response.Header().Set("Content-Type", "image/png")
+			_, _ = response.Write(tile.Bytes())
+			return
+		}
+		handler.ServeHTTP(response, request)
+	}))
 	t.Cleanup(server.Close)
 
 	options := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(browserExecutable(t)), chromedp.Headless, chromedp.DisableGPU, chromedp.NoSandbox, chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck, chromedp.UserDataDir(browserProfileDir(t)), chromedp.WindowSize(1440, 900))
@@ -125,7 +141,7 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		chromedp.Poll(`document.querySelector('[data-route-location-map]')?.dataset.mapSelectionEnabled==='true'&&document.querySelector('[data-route-location-map]')?.dataset.mapReady==='true'`, nil),
 		chromedp.SetValue("[data-route-location-label]", "Kartenort", chromedp.ByQuery),
 		chromedp.SetValue("[data-route-location-address]", "Geprüfte Adresse", chromedp.ByQuery),
-		chromedp.Click("[data-route-location-map]", chromedp.ByQuery),
+		clickVisibleControl("[data-route-location-map] canvas.maplibregl-canvas"),
 		chromedp.Poll(`Boolean(document.querySelector('[data-route-location-latitude]').value&&document.querySelector('[data-route-location-longitude]').value)`, nil),
 		chromedp.Evaluate(`document.querySelector('[data-route-location-map]').dataset.mapSelectionEnabled==='true'`, &routeLocationMapReady),
 		chromedp.Evaluate(`typeof window.maplibregl?.setWorkerUrl==='function'&&String(window.maplibregl?.getWorkerUrl?.()||'').startsWith(window.location.origin+'/assets/maplibre-gl-csp-worker.js?')`, &routeLocationWorkerReady),

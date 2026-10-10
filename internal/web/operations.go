@@ -412,22 +412,22 @@ func availabilityQueryRange(request *http.Request) (time.Time, time.Time, error)
 	query := request.URL.Query()
 	if at := strings.TrimSpace(query.Get("at")); at != "" {
 		if strings.TrimSpace(query.Get("from")) != "" || strings.TrimSpace(query.Get("to")) != "" {
-			return time.Time{}, time.Time{}, errors.New("at darf nicht gemeinsam mit from oder to verwendet werden.")
+			return time.Time{}, time.Time{}, errors.New("at darf nicht gemeinsam mit from oder to verwendet werden")
 		}
 		location, err := time.LoadLocation("Europe/Vienna")
 		if err != nil {
-			return time.Time{}, time.Time{}, errors.New("at muss ein gültiger Wiener Zeitpunkt sein.")
+			return time.Time{}, time.Time{}, errors.New("at muss ein gültiger Wiener Zeitpunkt sein")
 		}
 		from, err := driver.ParseLocalDateTime(at, location)
 		if err != nil {
-			return time.Time{}, time.Time{}, errors.New("at muss ein gültiger Wiener Zeitpunkt sein.")
+			return time.Time{}, time.Time{}, errors.New("at muss ein gültiger Wiener Zeitpunkt sein")
 		}
 		return from, from.Add(time.Minute), nil
 	}
 	from, fromErr := time.Parse(time.RFC3339, query.Get("from"))
 	to, toErr := time.Parse(time.RFC3339, query.Get("to"))
 	if fromErr != nil || toErr != nil {
-		return time.Time{}, time.Time{}, errors.New("from und to müssen RFC3339-Zeitpunkte sein.")
+		return time.Time{}, time.Time{}, errors.New("from und to müssen RFC3339-Zeitpunkte sein")
 	}
 	return from.UTC(), to.UTC(), nil
 }
