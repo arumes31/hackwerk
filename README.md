@@ -24,6 +24,8 @@ Danach sind verfügbar:
 | Liveness | <http://localhost:18533/health/live> | reine Prozessprüfung |
 | Readiness | <http://localhost:18533/health/ready> | prüft PostgreSQL |
 
+Die Weboberfläche wird lokal nur auf `127.0.0.1` veröffentlicht, weil die Entwicklungsumgebung öffentlich bekannte Schlüssel und unsichere Cookies verwendet. Wer bewusst aus dem LAN testen will, setzt `APP_BIND_ADDRESS`.
+
 PostgreSQL wird absichtlich nicht am Host veröffentlicht. Compose legt getrennte lokale Rollen für Migrationen und den eingeschränkten App-Betrieb an. Die Kennwörter sind klar als reine Entwicklungswerte markiert.
 
 E-Mail verwendet ausschließlich einen extern konfigurierten SMTP-Dienst für den Versand. Lokal ist Mailversand standardmäßig deaktiviert; automatisierte Tests verwenden einen injizierten Fake-SMTP-Adapter und benötigen weder einen Mail-Container noch echte Zugangsdaten. E-Mail-Empfang ist nicht vorgesehen.
@@ -65,6 +67,14 @@ printf '%s\n' 'ein-langes-temporäres-passwort' | hackwerk admin create --userna
 hackwerk admin reset-password --username neu --password-file /sicherer/pfad/passwort.txt
 hackwerk admin list
 ```
+
+## Sicherheitshinweise für den Betrieb
+
+- Passwortänderung, E-Mail-Änderung, Einrichten oder Entfernen von Authenticator-App und Passkeys sowie neue Recovery-Codes verlangen das aktuelle Passwort. Fehlversuche sind pro Konto begrenzt.
+- Anmeldeversuche werden pro Client (IPv6 je /64) und zusätzlich pro Konto über alle Adressen begrenzt. Gezielte Fehlversuche können ein bekanntes Konto dadurch vorübergehend sperren, jeweils bis zum Ende des laufenden Minutenfensters.
+- Mit `SESSION_COOKIE_SECURE=true` heißen die Cookies standardmäßig `__Host-hackwerk_session`, `__Host-hackwerk_csrf` und `__Secure-hackwerk_mfa`. Nach dem Update melden sich alle Nutzer einmal neu an. Explizit gesetzte `*_COOKIE_NAME`-Werte bleiben unverändert.
+- Produktion verwirft den Entwicklungs-Bestätigungsschlüssel auch unter neuer Schlüssel-ID; jeder Schlüssel in `CONFIRMATION_TOKEN_KEYS` braucht mindestens 32 Byte.
+- whisper-server (`compose.voice-host.example.yaml`) hat keine Authentifizierung. Eine Tailscale-ACL soll nur dem App-Host Zugriff auf Port 8080 erlauben, zum Beispiel `{"action": "accept", "src": ["tag:hackwerk-app"], "dst": ["tag:hackwerk-voice:8080"]}`.
 
 ## Fehlerbehebung
 

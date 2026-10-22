@@ -821,7 +821,7 @@ templ Profile(data ProfileData) {
 							<div class="profile-pending" role="status"><strong>Bestätigung ausstehend</strong><span>{ data.Profile.PendingEmail }</span><small>{ pendingEmailStatus(data.Profile) }</small></div>
 							<div class="action-row"><form method="post" action="/profile/email/resend"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Bestätigung erneut senden</button></form><form method="post" action="/profile/email/cancel"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit">Änderung abbrechen</button></form></div>
 						}
-						<form method="post" action="/profile/email" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label for="profile-email">Neue E-Mail-Adresse<input id="profile-email" name="email" type="email" maxlength="320" autocomplete="email" required/></label><p class="field-help">Die neue Adresse wird erst nach Klick auf den zeitlich begrenzten Bestätigungslink aktiv.</p><button class="button" type="submit">Bestätigung senden</button></form>
+						<form method="post" action="/profile/email" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@currentPasswordField()<label for="profile-email">Neue E-Mail-Adresse<input id="profile-email" name="email" type="email" maxlength="320" autocomplete="email" required/></label><p class="field-help">Die neue Adresse wird erst nach Klick auf den zeitlich begrenzten Bestätigungslink aktiv.</p><button class="button" type="submit">Bestätigung senden</button></form>
 					</section>
 					<section id="security" class="profile-card profile-card--wide" aria-labelledby="profile-security-heading">
 						<header><div><p class="eyebrow">Kontosicherheit</p><h2 id="profile-security-heading">Anmeldung schützen</h2></div><span class="profile-card__number" aria-hidden="true">03</span></header>
@@ -837,19 +837,19 @@ templ Profile(data ProfileData) {
 								<h3 id="totp-method-heading">Authenticator-App</h3>
 								if data.Profile.TOTPEnabledAt != nil {
 									<form method="post" action="/profile/security/totp/rename" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label>Name<input name="name" value={ data.Profile.TOTPName } maxlength="100" required/></label><button class="button button--quiet" type="submit">Namen speichern</button></form>
-									<form method="post" action="/profile/security/totp/delete"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--danger" type="submit" data-confirm-message="Authenticator-App wirklich entfernen? Prüfen Sie vorher, ob ein Passkey oder die Recovery-Codes verfügbar sind.">Authenticator-App entfernen</button></form>
+									<form method="post" action="/profile/security/totp/delete" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@currentPasswordField()<button class="button button--danger" type="submit" data-confirm-message="Authenticator-App wirklich entfernen? Prüfen Sie vorher, ob ein Passkey oder die Recovery-Codes verfügbar sind.">Authenticator-App entfernen</button></form>
 								} else {
-									<form method="post" action="/profile/security/totp/start" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label>Name<input name="name" value="Diensthandy" maxlength="100" required/></label><button class="button button--quiet" type="submit">Authenticator-App einrichten</button></form>
+									<form method="post" action="/profile/security/totp/start" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label>Name<input name="name" value="Diensthandy" maxlength="100" required/></label>@currentPasswordField()<button class="button button--quiet" type="submit">Authenticator-App einrichten</button></form>
 								}
 							</section>
 							<section aria-labelledby="passkey-method-heading">
 								<h3 id="passkey-method-heading">Passkeys</h3>
 								<p>Mit Geräte-PIN, Fingerabdruck oder Sicherheitsschlüssel als zweitem Faktor.</p>
-								<form class="form-stack" data-passkey-register><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label>Name<input name="name" value="Dieses Gerät" maxlength="100" required/></label><button class="button button--quiet" type="submit" data-passkey-register-button>Passkey hinzufügen</button><p class="field-help" data-passkey-support>Benötigt einen kompatiblen Browser und eine sichere Verbindung.</p></form>
+								<form class="form-stack" data-passkey-register><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label>Name<input name="name" value="Dieses Gerät" maxlength="100" required/></label>@currentPasswordField()<button class="button button--quiet" type="submit" data-passkey-register-button>Passkey hinzufügen</button><p class="field-help" data-passkey-support>Benötigt einen kompatiblen Browser und eine sichere Verbindung.</p></form>
 								if len(data.Profile.Passkeys) > 0 {
 									<ul class="security-method-list">
 										for _, passkey := range data.Profile.Passkeys {
-											<li><div><strong>{ passkey.Name }</strong><small>Hinzugefügt { profileDateTime(passkey.CreatedAt) }{ lastUsedLabel(passkey.LastUsedAt) }</small></div><div class="action-row"><form method="post" action={ "/profile/security/passkeys/" + passkey.EncodedID + "/rename" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label class="visually-hidden" for={ "passkey-rename-" + passkey.EncodedID }>Neuer Name für { passkey.Name }</label><input id={ "passkey-rename-" + passkey.EncodedID } name="name" value={ passkey.Name } maxlength="100" required/><button class="button button--quiet" type="submit">Umbenennen</button></form><form method="post" action={ "/profile/security/passkeys/" + passkey.EncodedID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--danger" type="submit" data-confirm-message="Diesen Passkey wirklich entfernen?">Entfernen</button></form></div></li>
+											<li><div><strong>{ passkey.Name }</strong><small>Hinzugefügt { profileDateTime(passkey.CreatedAt) }{ lastUsedLabel(passkey.LastUsedAt) }</small></div><div class="action-row"><form method="post" action={ "/profile/security/passkeys/" + passkey.EncodedID + "/rename" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label class="visually-hidden" for={ "passkey-rename-" + passkey.EncodedID }>Neuer Name für { passkey.Name }</label><input id={ "passkey-rename-" + passkey.EncodedID } name="name" value={ passkey.Name } maxlength="100" required/><button class="button button--quiet" type="submit">Umbenennen</button></form><form method="post" action={ "/profile/security/passkeys/" + passkey.EncodedID + "/delete" }><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@currentPasswordField()<button class="button button--danger" type="submit" data-confirm-message="Diesen Passkey wirklich entfernen?">Entfernen</button></form></div></li>
 										}
 									</ul>
 								}
@@ -872,7 +872,7 @@ templ Profile(data ProfileData) {
 									<div class="action-row recovery-actions"><button class="button button--quiet" type="button" data-copy-value={ strings.Join(data.RecoveryCodes, "\n") }>Codes kopieren</button><button class="button button--quiet" type="button" data-print-page>Codes drucken</button></div>
 								</div>
 							}
-							<form method="post" action="/profile/security/recovery-codes"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><button class="button button--quiet" type="submit" data-confirm-message="Neue Recovery-Codes erzeugen? Alle bisherigen Codes werden sofort ungültig.">Recovery-Codes neu erzeugen</button></form>
+							<form method="post" action="/profile/security/recovery-codes" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/>@currentPasswordField()<button class="button button--quiet" type="submit" data-confirm-message="Neue Recovery-Codes erzeugen? Alle bisherigen Codes werden sofort ungültig.">Recovery-Codes neu erzeugen</button></form>
 						</section>
 					</section>
 					<section id="sessions" class="profile-card profile-card--wide" aria-labelledby="sessions-heading">
@@ -915,6 +915,11 @@ templ securityCheck(label string, ready bool, detail string) {
 	<div class="security-check"><span class={ securityCheckClass(ready) } aria-hidden="true">{ securityCheckIcon(ready) }</span><span><strong>{ label }</strong><small>{ detail }</small></span></div>
 }
 
+// currentPasswordField re-authenticates sensitive account changes.
+templ currentPasswordField() {
+	<label>Aktuelles Passwort<input name="current_password" type="password" autocomplete="current-password" required/></label>
+}
+
 templ Password(data PasswordData) {
 	<!DOCTYPE html>
 	<html lang="de-AT">
@@ -929,7 +934,7 @@ templ Password(data PasswordData) {
 					if data.Error != "" {
 						<div class="form-alert" role="alert">{ data.Error }</div>
 					}
-					<form method="post" action="/password" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label for="new-password">Neues Passwort</label><input id="new-password" name="password" type="password" autocomplete="new-password" minlength="14" required data-password-strength/><div class="password-strength" data-password-strength-output role="status" aria-live="polite"><span></span><small>Mindestens 14 Zeichen verwenden.</small></div><label for="confirm-password">Passwort wiederholen</label><input id="confirm-password" name="confirmation" type="password" autocomplete="new-password" minlength="14" required/><button class="button" type="submit">Passwort speichern</button></form>
+					<form method="post" action="/password" class="form-stack"><input type="hidden" name="csrf_token" value={ data.Shell.CSRFToken }/><label for="current-password">Aktuelles Passwort</label><input id="current-password" name="current_password" type="password" autocomplete="current-password" required/><label for="new-password">Neues Passwort</label><input id="new-password" name="password" type="password" autocomplete="new-password" minlength="14" required data-password-strength/><div class="password-strength" data-password-strength-output role="status" aria-live="polite"><span></span><small>Mindestens 14 Zeichen verwenden.</small></div><label for="confirm-password">Passwort wiederholen</label><input id="confirm-password" name="confirmation" type="password" autocomplete="new-password" minlength="14" required/><button class="button" type="submit">Passwort speichern</button></form>
 				</section>
 			</main>@appFooter(data.Shell.Page)
 		</body>

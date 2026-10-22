@@ -142,12 +142,16 @@ type profileTestFixture struct {
 	now          time.Time
 }
 
+// #nosec G101 -- deterministic test-only password fixture.
+const profileTestPassword = "Aktuelles Testpasswort 2026"
+
 func newProfileTestFixture(t *testing.T) profileTestFixture {
 	t.Helper()
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 	user := auth.User{
 		ID: "user-id", Username: "maria", DisplayName: "Maria Muster", Email: "maria@example.at",
 		Role: auth.RoleDriver, Active: true, Version: 3, WebAuthnUserHandle: bytes.Repeat([]byte{0x44}, 32),
+		PasswordHash: testPasswordHash(t, profileTestPassword),
 	}
 	store := &profileTestStore{identityTestStore: &identityTestStore{user: user}}
 	store.profile = auth.Profile{User: user, Sessions: []auth.ActiveSession{{ID: "session-id", DeviceLabel: "Chrome auf Windows"}}}
@@ -242,6 +246,39 @@ func TestProfileHandlersRenderAndMutate(t *testing.T) {
 	}
 }
 
+func TestProfileSensitiveChangesRequireCurrentPassword(t *testing.T) {
+	fixture := newProfileTestFixture(t)
+	guarded := withCurrentPassword(fixture.identity, fixture.dependencies, fixture.page, func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusNoContent)
+	})
+	for _, test := range []struct {
+		name   string
+		form   url.Values
+		status int
+	}{
+		{name: "missing", form: url.Values{}, status: http.StatusUnprocessableEntity},
+		{name: "wrong", form: url.Values{"current_password": {"Falsches Testpasswort 2026"}}, status: http.StatusUnprocessableEntity},
+		{name: "valid", form: url.Values{"current_password": {profileTestPassword}}, status: http.StatusNoContent},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			guarded.ServeHTTP(response, fixture.request(t, http.MethodPost, "https://example.test/profile/security/totp/delete", test.form))
+			if response.Code != test.status {
+				t.Fatalf("status = %d, want %d", response.Code, test.status)
+			}
+			if test.status != http.StatusNoContent && !strings.Contains(response.Body.String(), "aktuelle Passwort ist falsch") {
+				t.Fatalf("missing re-authentication error: %q", response.Body.String())
+			}
+		})
+	}
+	if message, status := currentPasswordFailure(auth.ErrRateLimited); status != http.StatusTooManyRequests || message == "" {
+		t.Fatalf("rate-limited failure = %d %q", status, message)
+	}
+	if _, status := currentPasswordFailure(errors.New("database unavailable")); status != http.StatusServiceUnavailable {
+		t.Fatalf("store failure status = %d", status)
+	}
+}
+
 func TestProfileEmailVerificationTOTPAndRecoveryHandlers(t *testing.T) {
 	fixture := newProfileTestFixture(t)
 	fixture.store.pending = auth.EmailVerification{ID: "verification", UserID: "user-id", TokenVersion: 1}
@@ -296,6 +333,11 @@ func TestProfilePasskeySessionAndMFAHandlers(t *testing.T) {
 	fixture := newProfileTestFixture(t)
 	response := httptest.NewRecorder()
 	beginPasskeyRegistration(fixture.identity).ServeHTTP(response, fixture.request(t, http.MethodPost, "https://example.test/profile/passkeys/begin", nil))
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "current_password_invalid") {
+		t.Fatalf("begin passkey without current password = %d %q", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	beginPasskeyRegistration(fixture.identity).ServeHTTP(response, fixture.request(t, http.MethodPost, "https://example.test/profile/passkeys/begin", url.Values{"current_password": {profileTestPassword}}))
 	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("begin passkey = %d %q", response.Code, response.Body.String())
 	}
