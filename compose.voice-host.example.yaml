@@ -5,6 +5,8 @@ services:
     image: ${WHISPER_IMAGE:?WHISPER_IMAGE setzen}
     entrypoint: ["/app/build/bin/whisper-server"]
     command: ["--model", "/app/models/ggml-small.bin", "--host", "0.0.0.0", "--port", "8080", "--threads", "${WHISPER_THREADS:-2}", "--processors", "1", "--language", "de", "--convert", "--tmp-dir", "/tmp", "--no-gpu", "--suppress-nst"]
+    # whisper-server hat keine eigene Authentifizierung. Per Tailscale-ACL nur
+    # dem App-Host Zugriff auf tcp:8080 erlauben, siehe README.
     ports:
       - ${WHISPER_BIND_ADDRESS:?Numerische Tailscale-IP setzen}:8080:8080
     read_only: true
