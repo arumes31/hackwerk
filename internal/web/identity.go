@@ -56,18 +56,18 @@ func registerIdentityRoutes(router chi.Router, dependencies Dependencies, page t
 		protected.Get("/dashboard", dashboardPage(dependencies.Dashboard, dependencies.Notifications, dependencies.Routes, page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
 		protected.Get("/profile", profilePage(identity, dependencies, page))
 		protected.Post("/profile/details", updateOwnProfile(identity, dependencies, page))
-		protected.Post("/profile/email", requestProfileEmail(identity, dependencies, page))
+		protected.Post("/profile/email", withCurrentPassword(identity, dependencies, page, requestProfileEmail(identity, dependencies, page)))
 		protected.Post("/profile/email/resend", resendProfileEmail(identity, dependencies, page))
 		protected.Post("/profile/email/cancel", cancelProfileEmail(identity, dependencies, page))
-		protected.Post("/profile/security/totp/start", beginTOTPEnrollment(identity, dependencies, page))
+		protected.Post("/profile/security/totp/start", withCurrentPassword(identity, dependencies, page, beginTOTPEnrollment(identity, dependencies, page)))
 		protected.Post("/profile/security/totp/confirm", confirmTOTPEnrollment(identity, dependencies, page))
 		protected.Post("/profile/security/totp/rename", renameTOTP(identity, dependencies, page))
-		protected.Post("/profile/security/totp/delete", deleteTOTP(identity, dependencies, page))
-		protected.Post("/profile/security/recovery-codes", rotateRecoveryCodes(identity, dependencies, page))
+		protected.Post("/profile/security/totp/delete", withCurrentPassword(identity, dependencies, page, deleteTOTP(identity, dependencies, page)))
+		protected.Post("/profile/security/recovery-codes", withCurrentPassword(identity, dependencies, page, rotateRecoveryCodes(identity, dependencies, page)))
 		protected.Post("/profile/security/passkeys/options", beginPasskeyRegistration(identity))
 		protected.Post("/profile/security/passkeys/finish", finishPasskeyRegistration(identity))
 		protected.Post("/profile/security/passkeys/{credentialID}/rename", renamePasskey(identity, dependencies, page))
-		protected.Post("/profile/security/passkeys/{credentialID}/delete", deletePasskey(identity, dependencies, page))
+		protected.Post("/profile/security/passkeys/{credentialID}/delete", withCurrentPassword(identity, dependencies, page, deletePasskey(identity, dependencies, page)))
 		protected.Post("/profile/sessions/revoke-all", revokeAllProfileSessions(identity, dependencies, page))
 		protected.Post("/profile/sessions/{sessionID}/revoke", revokeProfileSession(identity, dependencies, page))
 		protected.Get("/hilfe/erste-schritte", onboardingPage(page, dependencies.Config.Auth.CSRFCookieName, dependencies.Logger))
@@ -262,7 +262,7 @@ func login(identity *auth.Service, dependencies Dependencies, page templates.Pag
 			return
 		}
 		username := strings.TrimSpace(request.Form.Get("username"))
-		tokens, err := identity.LoginWithDevice(request.Context(), username, request.Form.Get("password"), request.RemoteAddr, auth.DeviceLabel(request.UserAgent()), middleware.GetReqID(request.Context()))
+		tokens, err := identity.LoginWithDevice(request.Context(), username, request.Form.Get("password"), clientRateKey(request.RemoteAddr), auth.DeviceLabel(request.UserAgent()), middleware.GetReqID(request.Context()))
 		if err != nil {
 			status := http.StatusUnauthorized
 			if errors.Is(err, auth.ErrRateLimited) {
@@ -336,6 +336,11 @@ func passwordPage(page templates.PageData, csrfCookieName string, logger *slog.L
 func changePassword(identity *auth.Service, dependencies Dependencies, page templates.PageData) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
+		if err := requireCurrentPassword(identity, request); err != nil {
+			message, status := currentPasswordFailure(err)
+			render(response, request, templates.Password(templates.PasswordData{Shell: shell(request, page, dependencies.Config.Auth.CSRFCookieName), Error: message}), status, dependencies.Logger)
+			return
+		}
 		password := request.Form.Get("password")
 		if password != request.Form.Get("confirmation") {
 			render(response, request, templates.Password(templates.PasswordData{Shell: shell(request, page, dependencies.Config.Auth.CSRFCookieName), Error: "Die Passwörter stimmen nicht überein."}), http.StatusUnprocessableEntity, dependencies.Logger)

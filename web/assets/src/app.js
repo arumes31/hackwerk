@@ -424,8 +424,9 @@ document.querySelectorAll("[data-passkey-register]").forEach((form) => {
     if (status) status.textContent = "Passkey wird vorbereitet …";
     try {
       const csrf = form.elements.namedItem("csrf_token")?.value || "";
-      const optionsResponse = await fetch("/profile/security/passkeys/options", { method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": csrf } });
-      if (!optionsResponse.ok) throw new Error("options");
+      const currentPassword = form.elements.namedItem("current_password")?.value || "";
+      const optionsResponse = await fetch("/profile/security/passkeys/options", { method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": csrf }, body: new URLSearchParams({ current_password: currentPassword }) });
+      if (!optionsResponse.ok) throw new Error((await optionsResponse.json().catch(() => ({}))).error || "options");
       const credential = await navigator.credentials.create(credentialCreationOptions(await optionsResponse.json()));
       const passkeyName = encodeURIComponent(form.elements.namedItem("name")?.value || "Dieses Gerät");
       const finishResponse = await fetch(`/profile/security/passkeys/finish?name=${passkeyName}`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf }, body: JSON.stringify(publicKeyCredentialJSON(credential)) });
@@ -449,7 +450,13 @@ document.querySelectorAll("[data-passkey-register]").forEach((form) => {
         window.location.assign("/profile?status=passkey_added#security");
       }
     } catch (error) {
-      if (status) status.textContent = error?.name === "NotAllowedError" ? "Passkey-Einrichtung abgebrochen oder nicht erlaubt." : "Passkey konnte nicht eingerichtet werden. Bitte erneut versuchen.";
+      if (error?.message === "current_password_invalid") {
+        if (status) status.textContent = "Das aktuelle Passwort ist falsch.";
+      } else if (error?.message === "rate_limited") {
+        if (status) status.textContent = "Zu viele Versuche. Bitte eine Minute warten.";
+      } else if (status) {
+        status.textContent = error?.name === "NotAllowedError" ? "Passkey-Einrichtung abgebrochen oder nicht erlaubt." : "Passkey konnte nicht eingerichtet werden. Bitte erneut versuchen.";
+      }
     } finally {
       if (button) button.disabled = false;
     }

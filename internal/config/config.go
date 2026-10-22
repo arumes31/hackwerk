@@ -35,6 +35,7 @@ const (
 	businessTradeRulesPlaceholder            = "Anwendbare gewerbe- oder berufsrechtliche Vorschriften noch nicht hinterlegt"
 	businessDataProtectionOfficerPlaceholder = "Kein Datenschutzbeauftragter hinterlegt"
 	developmentAuthSecurityKeyMaterial       = "development-only-hackwerk-security-key"
+	developmentConfirmationKeyMaterial       = "development-only-hackwerk-token-key"
 )
 
 // Config contains the startup settings shared by serve, worker, and CLI modes.
@@ -499,6 +500,19 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 	if err := applyOverrides(&cfg, getenv); err != nil {
 		return Config{}, err
 	}
+	if cfg.Auth.CookieSecure {
+		// Secure deployments default to prefixed names so a sibling subdomain
+		// cannot plant colliding cookies. Explicit names are left untouched.
+		if strings.TrimSpace(getenv("SESSION_COOKIE_NAME")) == "" {
+			cfg.Auth.SessionCookieName = "__Host-hackwerk_session"
+		}
+		if strings.TrimSpace(getenv("CSRF_COOKIE_NAME")) == "" {
+			cfg.Auth.CSRFCookieName = "__Host-hackwerk_csrf"
+		}
+		if strings.TrimSpace(getenv("MFA_COOKIE_NAME")) == "" {
+			cfg.Auth.MFACookieName = "__Secure-hackwerk_mfa"
+		}
+	}
 	if (cfg.Voice.Transcriber == "whisper-local" || cfg.Voice.Transcriber == "whisper-tailscale") && strings.TrimSpace(getenv("VOICE_PROVIDER_TIMEOUT")) == "" {
 		cfg.Voice.ProviderTimeout = 10 * time.Minute
 	}
@@ -784,6 +798,14 @@ func (cfg Config) Validate() error {
 		cfg.Auth.SessionCookieName == cfg.Auth.CSRFCookieName || cfg.Auth.SessionCookieName == cfg.Auth.MFACookieName || cfg.Auth.CSRFCookieName == cfg.Auth.MFACookieName {
 		return errors.New("config: invalid auth cookie names")
 	}
+	for _, name := range []string{cfg.Auth.SessionCookieName, cfg.Auth.CSRFCookieName, cfg.Auth.MFACookieName} {
+		if (strings.HasPrefix(name, "__Host-") || strings.HasPrefix(name, "__Secure-")) && !cfg.Auth.CookieSecure {
+			return errors.New("config: prefixed auth cookie names require secure cookies")
+		}
+	}
+	if strings.HasPrefix(cfg.Auth.MFACookieName, "__Host-") {
+		return errors.New("config: the mfa cookie is path-scoped and cannot use the __Host- prefix")
+	}
 	if cfg.Auth.PasswordMinLength < 12 || cfg.Auth.PasswordMinLength > 256 {
 		return errors.New("config: password minimum length must be between 12 and 256")
 	}
@@ -965,6 +987,12 @@ func (cfg Config) Validate() error {
 		}
 		if cfg.Confirmation.CurrentKeyID == "development-v1" {
 			return errors.New("config: production confirmation token key is required")
+		}
+		for _, encoded := range cfg.Confirmation.TokenKeys {
+			decoded, err := base64.StdEncoding.DecodeString(encoded)
+			if err != nil || len(decoded) < 32 || string(decoded) == developmentConfirmationKeyMaterial {
+				return errors.New("config: production confirmation token key is required")
+			}
 		}
 		if cfg.Auth.SecurityCurrentKeyID == "development-v1" {
 			return errors.New("config: production auth security key is required")
