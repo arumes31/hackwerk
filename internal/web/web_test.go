@@ -132,7 +132,12 @@ func TestWebErrorsAndLocalHealthValidation(t *testing.T) {
 func TestHealthcheckUsesLocalListenerAndPublicHostHeader(t *testing.T) {
 	t.Parallel()
 	hosts := make(chan string, 1)
-	router := testRouter(t, pinger{})
+	cfg := testConfig()
+	cfg.BaseURL = "https://example.com"
+	router, err := NewRouter(Dependencies{Config: cfg, Logger: slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), Database: pinger{}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		hosts <- request.Host
 		router.ServeHTTP(response, request)

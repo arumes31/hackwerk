@@ -17,6 +17,7 @@ type networkBoundary struct {
 	allowedHosts map[string]struct{}
 	allowAnyHost bool
 	trusted      []*net.IPNet
+	httpsHost    string
 }
 
 func newNetworkBoundary(cfg config.Config) (*networkBoundary, error) {
@@ -29,6 +30,9 @@ func newNetworkBoundary(cfg config.Config) (*networkBoundary, error) {
 		}
 	}
 	boundary := &networkBoundary{allowedHosts: make(map[string]struct{}, len(allowedHosts))}
+	if base, err := url.Parse(cfg.BaseURL); err == nil && base.Scheme == "https" {
+		boundary.httpsHost = base.Host
+	}
 	for _, host := range allowedHosts {
 		normalized := strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
 		if normalized == "*" {
@@ -66,6 +70,18 @@ func (boundary *networkBoundary) Middleware(next http.Handler) http.Handler {
 				secure = true
 			}
 			client = boundary.forwardedClient(request.Header.Get("X-Forwarded-For"), source)
+		}
+		// Container probes use HTTP on the configured listener, including IP-bound listeners.
+		healthProbe := (request.Method == http.MethodGet || request.Method == http.MethodHead) &&
+			(request.URL.Path == "/health/live" || request.URL.Path == "/health/ready" || request.URL.Path == "/health/worker")
+		if boundary.httpsHost != "" && !secure && !healthProbe {
+			target := &url.URL{
+				Scheme: "https", Host: boundary.httpsHost,
+				Path: request.URL.Path, RawPath: request.URL.RawPath,
+				RawQuery: request.URL.RawQuery, ForceQuery: request.URL.ForceQuery,
+			}
+			http.Redirect(response, request, target.String(), http.StatusPermanentRedirect)
+			return
 		}
 		if client != nil {
 			request.RemoteAddr = client.String()
