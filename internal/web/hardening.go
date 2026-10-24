@@ -66,7 +66,8 @@ func (boundary *networkBoundary) Middleware(next http.Handler) http.Handler {
 		secure := request.TLS != nil
 		client := source
 		if source != nil && boundary.isTrusted(source) {
-			if proto := firstForwardedValue(request.Header.Get("X-Forwarded-Proto")); proto == "https" {
+			// The proxy contract requires one overwritten, authoritative protocol value.
+			if values := request.Header.Values("X-Forwarded-Proto"); len(values) == 1 && strings.EqualFold(strings.TrimSpace(values[0]), "https") {
 				secure = true
 			}
 			client = boundary.forwardedClient(request.Header.Get("X-Forwarded-For"), source)
@@ -124,10 +125,6 @@ func remoteIP(value string) net.IP {
 		value = host
 	}
 	return net.ParseIP(strings.Trim(strings.TrimSpace(value), "[]"))
-}
-
-func firstForwardedValue(value string) string {
-	return strings.ToLower(strings.TrimSpace(strings.SplitN(value, ",", 2)[0]))
 }
 
 func requestIsSecure(request *http.Request) bool {

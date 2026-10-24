@@ -67,8 +67,8 @@ func TestHostAllowlistAndTrustedProxyHeaders(t *testing.T) {
 func TestHTTPSBoundaryRedirectsBeforeServingContent(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name, method, target, remote, proto, location string
-		status                                        int
+		name, method, target, remote, proto, extraProto, location string
+		status                                                    int
 	}{
 		{name: "root", target: "http://hackwerk.example/", location: "https://hackwerk.example/", status: http.StatusPermanentRedirect},
 		{name: "login", target: "http://hackwerk.example/login", location: "https://hackwerk.example/login", status: http.StatusPermanentRedirect},
@@ -80,6 +80,8 @@ func TestHTTPSBoundaryRedirectsBeforeServingContent(t *testing.T) {
 		{name: "untrusted forged proto", target: "http://hackwerk.example/login", proto: "https", location: "https://hackwerk.example/login", status: http.StatusPermanentRedirect},
 		{name: "trusted HTTP proxy", target: "http://hackwerk.example/login", remote: "10.1.2.3:1234", proto: "http", location: "https://hackwerk.example/login", status: http.StatusPermanentRedirect},
 		{name: "trusted HTTPS proxy", target: "http://hackwerk.example/login", remote: "10.1.2.3:1234", proto: "https", status: http.StatusNoContent},
+		{name: "trusted ambiguous proto", target: "http://hackwerk.example/login", remote: "10.1.2.3:1234", proto: "https,http", location: "https://hackwerk.example/login", status: http.StatusPermanentRedirect},
+		{name: "trusted repeated proto", target: "http://hackwerk.example/login", remote: "10.1.2.3:1234", proto: "https", extraProto: "http", location: "https://hackwerk.example/login", status: http.StatusPermanentRedirect},
 		{name: "direct TLS", target: "https://hackwerk.example/login", status: http.StatusNoContent},
 		{name: "local readiness", target: "http://hackwerk.example/health/ready", remote: "127.0.0.1:1234", status: http.StatusNoContent},
 		{name: "local IPv6 liveness", target: "http://hackwerk.example/health/live", remote: "[::1]:1234", status: http.StatusNoContent},
@@ -110,6 +112,9 @@ func TestHTTPSBoundaryRedirectsBeforeServingContent(t *testing.T) {
 				request.RemoteAddr = test.remote
 			}
 			request.Header.Set("X-Forwarded-Proto", test.proto)
+			if test.extraProto != "" {
+				request.Header.Add("X-Forwarded-Proto", test.extraProto)
+			}
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
 			if response.Code != test.status || response.Header().Get("Location") != test.location || called != (test.status == http.StatusNoContent) {
