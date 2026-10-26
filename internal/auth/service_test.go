@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +13,8 @@ type fakeStore struct {
 	user             User
 	findUserError    error
 	rate             RateLimit
-	recordedFailures int
+	attempts         map[string]int
+	reservedAttempts int
 	rotated          NewSession
 	session          Session
 	touched          bool
@@ -59,9 +61,18 @@ func (store *fakeStore) RevokeSession(_ context.Context, token []byte) error {
 	store.revokedToken = append([]byte(nil), token...)
 	return store.revokeError
 }
-func (store *fakeStore) LoginRate(context.Context, []byte) (RateLimit, error) { return store.rate, nil }
-func (store *fakeStore) RecordLoginFailure(context.Context, []byte) error {
-	store.recordedFailures++
+func (store *fakeStore) ReserveLoginAttempt(_ context.Context, key []byte) (RateLimit, error) {
+	if store.attempts == nil {
+		store.attempts = make(map[string]int)
+	}
+	store.attempts[string(key)]++
+	store.reservedAttempts++
+	rate := store.rate
+	rate.FailureCount += store.attempts[string(key)]
+	return rate, nil
+}
+func (store *fakeStore) ClearLoginAttempts(_ context.Context, key []byte) error {
+	delete(store.attempts, string(key))
 	return nil
 }
 func (store *fakeStore) ListUsers(context.Context) ([]UserSummary, error) {
@@ -155,13 +166,68 @@ func TestLoginFailureIsGenericAndRateLimited(t *testing.T) {
 	store := &fakeStore{findUserError: ErrNotFound}
 	service, _ := testService(t, store, now)
 	_, err := service.Login(context.Background(), "unknown", "Falsches Testpasswort 2026", "client", "request")
-	if !errors.Is(err, ErrInvalidCredentials) || store.recordedFailures != 1 {
-		t.Fatalf("Login() error = %v, failures = %d", err, store.recordedFailures)
+	if !errors.Is(err, ErrInvalidCredentials) || store.reservedAttempts != 2 {
+		t.Fatalf("Login() error = %v, reserved attempts = %d", err, store.reservedAttempts)
 	}
 	store.rate = RateLimit{WindowStartedAt: now.Add(-10 * time.Second), FailureCount: 3}
 	_, err = service.Login(context.Background(), "unknown", "Falsches Testpasswort 2026", "client", "request")
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("Login() error = %v", err)
+	}
+}
+
+func TestLoginAccountBudgetAppliesAcrossClientAddresses(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	store := &fakeStore{findUserError: ErrNotFound, rate: RateLimit{WindowStartedAt: now}}
+	service, _ := testService(t, store, now)
+	for attempt := range 3 * accountLoginLimitFactor {
+		client := fmt.Sprintf("client-%d", attempt)
+		if _, err := service.Login(context.Background(), "Admin", "Falsches Testpasswort 2026", client, "request"); !errors.Is(err, ErrInvalidCredentials) {
+			t.Fatalf("attempt %d error = %v", attempt, err)
+		}
+	}
+	if _, err := service.Login(context.Background(), " admin ", "Falsches Testpasswort 2026", "fresh-client", "request"); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("account budget error = %v", err)
+	}
+	store.rate.WindowStartedAt = now.Add(-2 * time.Minute)
+	if _, err := service.Login(context.Background(), "admin", "Falsches Testpasswort 2026", "fresh-client", "request"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expired window error = %v", err)
+	}
+}
+
+func TestVerifyCurrentPasswordIsRateLimited(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	store := &fakeStore{rate: RateLimit{WindowStartedAt: now}}
+	service, hasher := testService(t, store, now)
+	// #nosec G101 -- deterministic test-only password fixture.
+	password := "Ein gutes Testpasswort 2026"
+	hash, err := hasher.Hash(password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.user = User{ID: "user", Username: "anna", Role: RoleAdmin, PasswordHash: hash, Active: true, Version: 1}
+	actor := Actor{UserID: "user", Role: RoleAdmin}
+	if err := service.VerifyCurrentPassword(t.Context(), Actor{}, password); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("anonymous error = %v", err)
+	}
+	if err := service.VerifyCurrentPassword(t.Context(), actor, password); err != nil {
+		t.Fatalf("valid password error = %v", err)
+	}
+	if err := service.VerifyCurrentPassword(t.Context(), actor, "Falsches Testpasswort 2026"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("wrong password error = %v", err)
+	}
+	store.user.Active = false
+	if err := service.VerifyCurrentPassword(t.Context(), actor, password); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("inactive user error = %v", err)
+	}
+	store.user.Active = true
+	if err := service.VerifyCurrentPassword(t.Context(), actor, "Falsches Testpasswort 2026"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("third failure error = %v", err)
+	}
+	if err := service.VerifyCurrentPassword(t.Context(), actor, password); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("rate limit error = %v", err)
 	}
 }
 

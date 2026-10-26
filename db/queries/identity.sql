@@ -98,16 +98,15 @@ UPDATE sessions SET revoked_at = COALESCE(revoked_at, now()) WHERE token_hash = 
 -- name: DeleteExpiredSessions :execrows
 DELETE FROM sessions WHERE revoked_at IS NOT NULL OR idle_expires_at <= now() OR absolute_expires_at <= now();
 
--- name: FindRateLimit :one
-SELECT window_started_at, failure_count FROM auth_rate_limits WHERE key_hash = sqlc.arg(key_hash);
-
--- name: RecordLoginFailure :exec
+-- name: ReserveLoginAttempt :one
 INSERT INTO auth_rate_limits (key_hash, window_started_at, failure_count)
 VALUES (sqlc.arg(key_hash), now(), 1)
 ON CONFLICT (key_hash) DO UPDATE
 SET failure_count = CASE WHEN auth_rate_limits.window_started_at < now() - interval '1 minute' THEN 1 ELSE auth_rate_limits.failure_count + 1 END,
     window_started_at = CASE WHEN auth_rate_limits.window_started_at < now() - interval '1 minute' THEN now() ELSE auth_rate_limits.window_started_at END,
-    updated_at = now();
+    updated_at = now()
+RETURNING window_started_at, failure_count;
+
 
 -- name: ClearLoginFailures :exec
 DELETE FROM auth_rate_limits WHERE key_hash = sqlc.arg(key_hash);

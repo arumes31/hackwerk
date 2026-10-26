@@ -177,6 +177,14 @@ func rotateRecoveryCodes(identity *auth.Service, dependencies Dependencies, page
 func beginPasskeyRegistration(identity *auth.Service) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
+		if err := requireCurrentPassword(identity, request); err != nil {
+			code, status := "current_password_invalid", http.StatusUnprocessableEntity
+			if errors.Is(err, auth.ErrRateLimited) {
+				code, status = "rate_limited", http.StatusTooManyRequests
+			}
+			writeJSON(response, status, map[string]string{"error": code})
+			return
+		}
 		options, err := identity.BeginPasskeyRegistration(request.Context(), session.Actor, session.ID)
 		if err != nil {
 			writeJSON(response, http.StatusUnprocessableEntity, map[string]string{"error": "passkey_registration_unavailable"})
@@ -238,6 +246,35 @@ func revokeAllProfileSessions(identity *auth.Service, dependencies Dependencies,
 		}
 		clearAuthCookies(response, dependencies)
 		http.Redirect(response, request, "/login", http.StatusSeeOther)
+	}
+}
+
+// requireCurrentPassword re-authenticates the signed-in user before an account
+// change that would otherwise turn a briefly stolen session into a takeover.
+func requireCurrentPassword(identity *auth.Service, request *http.Request) error {
+	session, _ := sessionFromContext(request.Context())
+	return identity.VerifyCurrentPassword(request.Context(), session.Actor, request.Form.Get("current_password"))
+}
+
+func currentPasswordFailure(err error) (string, int) {
+	switch {
+	case errors.Is(err, auth.ErrRateLimited):
+		return "Zu viele Versuche. Bitte warten Sie eine Minute und versuchen Sie es erneut.", http.StatusTooManyRequests
+	case errors.Is(err, auth.ErrInvalidCredentials), errors.Is(err, auth.ErrForbidden):
+		return "Das aktuelle Passwort ist falsch.", http.StatusUnprocessableEntity
+	default:
+		return "Das aktuelle Passwort kann derzeit nicht geprüft werden.", http.StatusServiceUnavailable
+	}
+}
+
+func withCurrentPassword(identity *auth.Service, dependencies Dependencies, page templates.PageData, next http.HandlerFunc) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		if err := requireCurrentPassword(identity, request); err != nil {
+			message, status := currentPasswordFailure(err)
+			renderProfile(response, request, identity, dependencies, page, profileRenderState{Error: message, Status: status})
+			return
+		}
+		next(response, request)
 	}
 }
 
