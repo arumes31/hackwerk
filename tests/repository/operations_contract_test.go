@@ -232,7 +232,7 @@ func TestOSRMRuntimeAndUpdaterAreIsolated(t *testing.T) {
 
 func TestOSRMBuildUsesPinnedToolchainAndCropBeforeMerge(t *testing.T) {
 	t.Parallel()
-	const osrmImage = "ghcr.io/project-osrm/osrm-backend:v26.7.3-debian@sha256:a7091038e39a73659767f34ef2d389909b42ea80b09bd2bdca482dce2991cbad"
+	const osrmImage = "ghcr.io/project-osrm/osrm-backend:26.10.0-debian@sha256:55dbfd47d984c2cacd64e32901b4321c86b5ec761438e69aa053dc78698a786f"
 	dockerfile := repositoryFile(t, "scripts", "ops", "osrm-tools.Dockerfile")
 	if !strings.Contains(dockerfile, osrmImage) {
 		t.Fatal("OSRM toolchain image is not pinned to the reviewed digest")
