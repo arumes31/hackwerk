@@ -1,4 +1,4 @@
-FROM ghcr.io/project-osrm/osrm-backend:v26.7.3-debian@sha256:a7091038e39a73659767f34ef2d389909b42ea80b09bd2bdca482dce2991cbad
+FROM ghcr.io/project-osrm/osrm-backend:26.10.0-debian@sha256:55dbfd47d984c2cacd64e32901b4321c86b5ec761438e69aa053dc78698a786f
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates curl osmium-tool socat util-linux \
