@@ -300,22 +300,6 @@ func (q *Queries) EnableTOTPCredential(ctx context.Context, userID pgtype.UUID) 
 	return result.RowsAffected(), nil
 }
 
-const findRateLimit = `-- name: FindRateLimit :one
-SELECT window_started_at, failure_count FROM auth_rate_limits WHERE key_hash = $1
-`
-
-type FindRateLimitRow struct {
-	WindowStartedAt pgtype.Timestamptz
-	FailureCount    int32
-}
-
-func (q *Queries) FindRateLimit(ctx context.Context, keyHash []byte) (FindRateLimitRow, error) {
-	row := q.db.QueryRow(ctx, findRateLimit, keyHash)
-	var i FindRateLimitRow
-	err := row.Scan(&i.WindowStartedAt, &i.FailureCount)
-	return i, err
-}
-
 const findSession = `-- name: FindSession :one
 SELECT s.id::text, s.user_id::text, s.csrf_token_hash, s.idle_expires_at,
        s.absolute_expires_at, s.revoked_at, s.created_at, s.last_used_at, s.device_label,
@@ -1200,20 +1184,6 @@ func (q *Queries) RecordLoginChallengeFailure(ctx context.Context, tokenHash []b
 	return result.RowsAffected(), nil
 }
 
-const recordLoginFailure = `-- name: RecordLoginFailure :exec
-INSERT INTO auth_rate_limits (key_hash, window_started_at, failure_count)
-VALUES ($1, now(), 1)
-ON CONFLICT (key_hash) DO UPDATE
-SET failure_count = CASE WHEN auth_rate_limits.window_started_at < now() - interval '1 minute' THEN 1 ELSE auth_rate_limits.failure_count + 1 END,
-    window_started_at = CASE WHEN auth_rate_limits.window_started_at < now() - interval '1 minute' THEN now() ELSE auth_rate_limits.window_started_at END,
-    updated_at = now()
-`
-
-func (q *Queries) RecordLoginFailure(ctx context.Context, keyHash []byte) error {
-	_, err := q.db.Exec(ctx, recordLoginFailure, keyHash)
-	return err
-}
-
 const recordTOTPStep = `-- name: RecordTOTPStep :execrows
 UPDATE user_totp_credentials SET last_used_step=$1, updated_at=now()
 WHERE user_id=$2::uuid AND enabled_at IS NOT NULL
@@ -1268,6 +1238,28 @@ func (q *Queries) RenameWebAuthnCredential(ctx context.Context, arg RenameWebAut
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const reserveLoginAttempt = `-- name: ReserveLoginAttempt :one
+INSERT INTO auth_rate_limits (key_hash, window_started_at, failure_count)
+VALUES ($1, now(), 1)
+ON CONFLICT (key_hash) DO UPDATE
+SET failure_count = CASE WHEN auth_rate_limits.window_started_at < now() - interval '1 minute' THEN 1 ELSE auth_rate_limits.failure_count + 1 END,
+    window_started_at = CASE WHEN auth_rate_limits.window_started_at < now() - interval '1 minute' THEN now() ELSE auth_rate_limits.window_started_at END,
+    updated_at = now()
+RETURNING window_started_at, failure_count
+`
+
+type ReserveLoginAttemptRow struct {
+	WindowStartedAt pgtype.Timestamptz
+	FailureCount    int32
+}
+
+func (q *Queries) ReserveLoginAttempt(ctx context.Context, keyHash []byte) (ReserveLoginAttemptRow, error) {
+	row := q.db.QueryRow(ctx, reserveLoginAttempt, keyHash)
+	var i ReserveLoginAttemptRow
+	err := row.Scan(&i.WindowStartedAt, &i.FailureCount)
+	return i, err
 }
 
 const revokeOwnedSessionByID = `-- name: RevokeOwnedSessionByID :execrows

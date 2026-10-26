@@ -321,6 +321,53 @@ func TestProductionRequiresTrustedProxyAndRejectsWildcardHost(t *testing.T) {
 	if _, err := load(get(base), func(string) ([]byte, error) { return nil, errors.New("unexpected read") }); err == nil || !strings.Contains(err.Error(), "production auth security key") {
 		t.Fatalf("renamed development auth key error=%v", err)
 	}
+	base["AUTH_SECURITY_KEY_ID"] = "production"
+	base["AUTH_SECURITY_KEYS"] = `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}`
+	for name, keys := range map[string]string{
+		"renamed development key": `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=","renamed":"ZGV2ZWxvcG1lbnQtb25seS1oYWNrd2Vyay10b2tlbi1rZXk="}`,
+		"short retired key":       `{"production":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=","retired":"c2hvcnQ="}`,
+	} {
+		base["CONFIRMATION_TOKEN_KEYS"] = keys
+		if _, err := load(get(base), func(string) ([]byte, error) { return nil, errors.New("unexpected read") }); err == nil || !strings.Contains(err.Error(), "production confirmation token key") {
+			t.Fatalf("%s confirmation key error=%v", name, err)
+		}
+	}
+	base["CONFIRMATION_TOKEN_KEY_ID"] = "renamed"
+	base["CONFIRMATION_TOKEN_KEYS"] = `{"renamed":"ZGV2ZWxvcG1lbnQtb25seS1oYWNrd2Vyay10b2tlbi1rZXk="}`
+	if _, err := load(get(base), func(string) ([]byte, error) { return nil, errors.New("unexpected read") }); err == nil || !strings.Contains(err.Error(), "production confirmation token key") {
+		t.Fatalf("renamed development confirmation key error=%v", err)
+	}
+}
+
+func TestSecureCookiesDefaultToPrefixedNames(t *testing.T) {
+	t.Parallel()
+	read := func(string) ([]byte, error) { return nil, errors.New("unexpected read") }
+	values := map[string]string{"SESSION_COOKIE_SECURE": "true"}
+	cfg, err := load(func(name string) string { return values[name] }, read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auth.SessionCookieName != "__Host-hackwerk_session" || cfg.Auth.CSRFCookieName != "__Host-hackwerk_csrf" || cfg.Auth.MFACookieName != "__Secure-hackwerk_mfa" {
+		t.Fatalf("secure cookie names = %q %q %q", cfg.Auth.SessionCookieName, cfg.Auth.CSRFCookieName, cfg.Auth.MFACookieName)
+	}
+	values["SESSION_COOKIE_NAME"] = "custom_session"
+	cfg, err = load(func(name string) string { return values[name] }, read)
+	if err != nil || cfg.Auth.SessionCookieName != "custom_session" {
+		t.Fatalf("explicit cookie name = %q, error %v", cfg.Auth.SessionCookieName, err)
+	}
+	cfg, err = load(func(string) string { return "" }, read)
+	if err != nil || cfg.Auth.SessionCookieName != "hackwerk_session" || cfg.Auth.MFACookieName != "hackwerk_mfa" {
+		t.Fatalf("insecure development cookie names = %q %q, error %v", cfg.Auth.SessionCookieName, cfg.Auth.MFACookieName, err)
+	}
+	for name, value := range map[string]string{"SESSION_COOKIE_NAME": "__Host-session", "MFA_COOKIE_NAME": "__Secure-mfa"} {
+		if _, err := load(func(key string) string { return map[string]string{name: value}[key] }, read); err == nil || !strings.Contains(err.Error(), "require secure cookies") {
+			t.Fatalf("%s=%s without secure cookies error = %v", name, value, err)
+		}
+	}
+	insecureMFA := map[string]string{"SESSION_COOKIE_SECURE": "true", "MFA_COOKIE_NAME": "__Host-mfa"}
+	if _, err := load(func(name string) string { return insecureMFA[name] }, read); err == nil || !strings.Contains(err.Error(), "mfa cookie") {
+		t.Fatalf("__Host- mfa cookie error = %v", err)
+	}
 }
 
 func TestProductionRejectsBusinessPlaceholders(t *testing.T) {

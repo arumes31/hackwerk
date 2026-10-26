@@ -1,0 +1,7 @@
+
+
+# Reviewed historical test fixtures, public reference vectors and content hashes.
+# Exact commit/path/rule/line fingerprints only; new occurrences still fail.
+03a4d62704b60fd4c289683e22f2b0ae77ba7961:internal/cli/cli_test.go:generic-api-key:200
+d55cf0d10acb1704347500bd96aa8799bf7d699b:internal/cli/cli_test.go:generic-api-key:133
+e9bb1afac378e1b88e2ae338c8408cdb4dc39961:graphify-out/cache/stat-index.json:generic-api-key:1

@@ -491,6 +491,7 @@ func TestTask01ForcedPasswordChangeBrowserJourney(t *testing.T) {
 		chromedp.WaitVisible("form[action='/password']", chromedp.ByQuery),
 		chromedp.Location(&forcedLocation),
 		chromedp.Evaluate(`(()=>{const visible=node=>{const box=node.getBoundingClientRect();const style=getComputedStyle(node);return box.width>0&&box.height>0&&style.display!=='none'&&style.visibility!=='hidden'};const targets=[...document.querySelectorAll('main input,main button')].filter(visible);return {overflow:document.documentElement.scrollWidth>window.innerWidth,smallTargets:targets.filter(node=>{const box=node.getBoundingClientRect();return box.width<44||box.height<44}).length}})()`, &mobileState),
+		chromedp.SetValue("#current-password", currentPassword, chromedp.ByQuery),
 		chromedp.SetValue("#new-password", newPassword, chromedp.ByQuery),
 		chromedp.SetValue("#confirm-password", newPassword+"x", chromedp.ByQuery),
 		chromedp.Click("form[action='/password'] button[type='submit']", chromedp.ByQuery),
@@ -504,6 +505,7 @@ func TestTask01ForcedPasswordChangeBrowserJourney(t *testing.T) {
 		t.Fatalf("forced password location/mobile/error = %q/%+v/%q", forcedLocation, mobileState, mismatchMessage)
 	}
 	if err := runBrowserStep(browserContext, "change forced password",
+		chromedp.SetValue("#current-password", currentPassword, chromedp.ByQuery),
 		chromedp.SetValue("#new-password", newPassword, chromedp.ByQuery),
 		chromedp.SetValue("#confirm-password", newPassword, chromedp.ByQuery),
 		chromedp.Click("form[action='/password'] button[type='submit']", chromedp.ByQuery),

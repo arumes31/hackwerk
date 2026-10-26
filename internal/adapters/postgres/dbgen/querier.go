@@ -71,7 +71,6 @@ type Querier interface {
 	FailVoiceDraft(ctx context.Context, arg FailVoiceDraftParams) (int64, error)
 	FindAppointmentConflicts(ctx context.Context, arg FindAppointmentConflictsParams) ([]FindAppointmentConflictsRow, error)
 	FindDuplicateCustomers(ctx context.Context, arg FindDuplicateCustomersParams) ([]FindDuplicateCustomersRow, error)
-	FindRateLimit(ctx context.Context, keyHash []byte) (FindRateLimitRow, error)
 	FindSession(ctx context.Context, tokenHash []byte) (FindSessionRow, error)
 	FindUserByID(ctx context.Context, id pgtype.UUID) (FindUserByIDRow, error)
 	FindUserByUsername(ctx context.Context, username string) (FindUserByUsernameRow, error)
@@ -241,7 +240,6 @@ type Querier interface {
 	PlanningDriverAvailable(ctx context.Context, arg PlanningDriverAvailableParams) (bool, error)
 	PrepareAppointmentSwap(ctx context.Context, arg PrepareAppointmentSwapParams) (int64, error)
 	RecordLoginChallengeFailure(ctx context.Context, tokenHash []byte) (int64, error)
-	RecordLoginFailure(ctx context.Context, keyHash []byte) error
 	RecordTOTPStep(ctx context.Context, arg RecordTOTPStepParams) (int64, error)
 	RefreshAppointmentReservations(ctx context.Context, appointmentID pgtype.UUID) error
 	RefreshAppointmentResourceReservations(ctx context.Context, appointmentID pgtype.UUID) error
@@ -254,6 +252,7 @@ type Querier interface {
 	ReopenCancelledAppointment(ctx context.Context, arg ReopenCancelledAppointmentParams) (int64, error)
 	RequeueNotification(ctx context.Context, id pgtype.UUID) (int64, error)
 	RequeueNotificationOutbox(ctx context.Context, notificationID pgtype.UUID) (int64, error)
+	ReserveLoginAttempt(ctx context.Context, keyHash []byte) (ReserveLoginAttemptRow, error)
 	ResetConfirmationResponse(ctx context.Context, id pgtype.UUID) (int64, error)
 	RestoreAppointmentSwapStatus(ctx context.Context, arg RestoreAppointmentSwapStatusParams) (int64, error)
 	RestoreWaitlistAfterCancellation(ctx context.Context, jobID pgtype.UUID) error

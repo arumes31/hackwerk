@@ -136,21 +136,19 @@ func (store *IdentityStore) RevokeSession(ctx context.Context, tokenHash []byte)
 	return store.queries.RevokeSession(ctx, tokenHash)
 }
 
-// LoginRate returns zero for a key without prior failures.
-func (store *IdentityStore) LoginRate(ctx context.Context, keyHash []byte) (auth.RateLimit, error) {
-	row, err := store.queries.FindRateLimit(ctx, keyHash)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return auth.RateLimit{}, nil
-	}
+// ReserveLoginAttempt atomically counts one attempt in a hashed one-minute
+// bucket and returns the updated window.
+func (store *IdentityStore) ReserveLoginAttempt(ctx context.Context, keyHash []byte) (auth.RateLimit, error) {
+	row, err := store.queries.ReserveLoginAttempt(ctx, keyHash)
 	if err != nil {
 		return auth.RateLimit{}, err
 	}
 	return auth.RateLimit{WindowStartedAt: row.WindowStartedAt.Time, FailureCount: int(row.FailureCount)}, nil
 }
 
-// RecordLoginFailure updates a hashed one-minute bucket.
-func (store *IdentityStore) RecordLoginFailure(ctx context.Context, keyHash []byte) error {
-	return store.queries.RecordLoginFailure(ctx, keyHash)
+// ClearLoginAttempts removes a hashed bucket after a successful verification.
+func (store *IdentityStore) ClearLoginAttempts(ctx context.Context, keyHash []byte) error {
+	return store.queries.ClearLoginFailures(ctx, keyHash)
 }
 
 // ListUsers returns only admin-list fields.

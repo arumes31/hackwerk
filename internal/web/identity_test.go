@@ -52,10 +52,10 @@ func (store *identityTestStore) RevokeSession(context.Context, []byte) error {
 	store.revoked = true
 	return nil
 }
-func (store *identityTestStore) LoginRate(context.Context, []byte) (auth.RateLimit, error) {
+func (store *identityTestStore) ReserveLoginAttempt(context.Context, []byte) (auth.RateLimit, error) {
 	return auth.RateLimit{}, nil
 }
-func (store *identityTestStore) RecordLoginFailure(context.Context, []byte) error { return nil }
+func (store *identityTestStore) ClearLoginAttempts(context.Context, []byte) error { return nil }
 func (store *identityTestStore) ListUsers(context.Context) ([]auth.UserSummary, error) {
 	if store.users != nil {
 		return store.users, nil
@@ -316,6 +316,9 @@ func TestIdentityHTTPLastAdminErrorIsVisible(t *testing.T) {
 func TestIdentityHTTPAccountMutationsClearSessionsAndCookies(t *testing.T) {
 	store := &identityTestStore{}
 	router := identityRouterForMutationTest(t, store, auth.RoleAdmin)
+	// #nosec G101 -- deterministic test-only password fixture.
+	const currentPassword = "Aktuelles Testpasswort 2026"
+	store.user = auth.User{ID: "actor", Username: "actor", Role: auth.RoleAdmin, Active: true, Version: 1, PasswordHash: testPasswordHash(t, currentPassword)}
 	request := func(path string, form url.Values) *http.Request {
 		value := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.test"+path, strings.NewReader(form.Encode()))
 		value.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -327,14 +330,20 @@ func TestIdentityHTTPAccountMutationsClearSessionsAndCookies(t *testing.T) {
 		return value
 	}
 
+	wrongCurrent := httptest.NewRecorder()
+	router.ServeHTTP(wrongCurrent, request("/password", url.Values{"csrf_token": {"csrf"}, "current_password": {"Falsches Testpasswort 2026"}, "password": {"Sicheres Passwort 2026"}, "confirmation": {"Sicheres Passwort 2026"}}))
+	if wrongCurrent.Code != http.StatusUnprocessableEntity || !strings.Contains(wrongCurrent.Body.String(), "aktuelle Passwort ist falsch") {
+		t.Fatalf("wrong current password=%d %s", wrongCurrent.Code, wrongCurrent.Body.String())
+	}
+
 	mismatch := httptest.NewRecorder()
-	router.ServeHTTP(mismatch, request("/password", url.Values{"csrf_token": {"csrf"}, "password": {"Sicheres Passwort 2026"}, "confirmation": {"anderes Passwort"}}))
+	router.ServeHTTP(mismatch, request("/password", url.Values{"csrf_token": {"csrf"}, "current_password": {currentPassword}, "password": {"Sicheres Passwort 2026"}, "confirmation": {"anderes Passwort"}}))
 	if mismatch.Code != http.StatusUnprocessableEntity || !strings.Contains(mismatch.Body.String(), "Passwörter stimmen nicht") {
 		t.Fatalf("mismatch=%d %s", mismatch.Code, mismatch.Body.String())
 	}
 
 	changed := httptest.NewRecorder()
-	router.ServeHTTP(changed, request("/password", url.Values{"csrf_token": {"csrf"}, "password": {"Sicheres Passwort 2026"}, "confirmation": {"Sicheres Passwort 2026"}}))
+	router.ServeHTTP(changed, request("/password", url.Values{"csrf_token": {"csrf"}, "current_password": {currentPassword}, "password": {"Sicheres Passwort 2026"}, "confirmation": {"Sicheres Passwort 2026"}}))
 	if changed.Code != http.StatusSeeOther || changed.Header().Get("Location") != "/login?password_changed=1" || len(changed.Result().Cookies()) != 2 {
 		t.Fatalf("changed=%d location=%q cookies=%#v", changed.Code, changed.Header().Get("Location"), changed.Result().Cookies())
 	}
@@ -375,6 +384,21 @@ func TestIdentityHTTPAdminCreateAndResetUser(t *testing.T) {
 			}
 		})
 	}
+}
+
+func testPasswordHash(t *testing.T, password string) string {
+	t.Helper()
+	hasher, err := auth.NewPasswordHasher(auth.PasswordParameters{
+		MemoryKiB: 8, Iterations: 1, Parallelism: 1, SaltLength: 16, KeyLength: 16, MinLength: 14,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := hasher.Hash(password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hash
 }
 
 func identityRouterForMutationTest(t *testing.T, store *identityTestStore, role auth.Role) http.Handler {

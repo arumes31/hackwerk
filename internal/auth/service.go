@@ -64,7 +64,7 @@ type NewSession struct {
 	DeviceLabel       string
 }
 
-// RateLimit is a privacy-minimized login failure window.
+// RateLimit is a privacy-minimized login attempt window.
 type RateLimit struct {
 	WindowStartedAt time.Time
 	FailureCount    int
@@ -130,8 +130,8 @@ type Store interface {
 	FindSession(context.Context, []byte) (Session, error)
 	TouchSession(context.Context, string, time.Time) error
 	RevokeSession(context.Context, []byte) error
-	LoginRate(context.Context, []byte) (RateLimit, error)
-	RecordLoginFailure(context.Context, []byte) error
+	ReserveLoginAttempt(context.Context, []byte) (RateLimit, error)
+	ClearLoginAttempts(context.Context, []byte) error
 	ListUsers(context.Context) ([]UserSummary, error)
 	CreateUser(context.Context, Actor, CreateUserInput, string) (string, error)
 	UpdateUserDetails(context.Context, Actor, UpdateUserDetailsInput) error
@@ -139,6 +139,10 @@ type Store interface {
 	ResetPassword(context.Context, Actor, ResetPasswordInput, string) error
 	ChangeOwnPassword(context.Context, Actor, string, int32) error
 }
+
+// accountLoginLimitFactor scales the per-client login limit into the shared
+// per-account budget, which applies across all source addresses.
+const accountLoginLimitFactor = 3
 
 // Service applies authentication, password, session, and RBAC invariants.
 type Service struct {
@@ -177,13 +181,17 @@ func (service *Service) Login(ctx context.Context, username string, password str
 // LoginWithDevice verifies the password and either creates a session or starts the required second-factor step.
 func (service *Service) LoginWithDevice(ctx context.Context, username string, password string, clientKey string, deviceLabel string, requestID string) (SessionTokens, error) {
 	now := service.now()
-	rateKey := TokenHash("login\x00" + strings.ToLower(strings.TrimSpace(username)) + "\x00" + clientKey)
-	rate, err := service.store.LoginRate(ctx, rateKey)
-	if err != nil {
-		return SessionTokens{}, fmt.Errorf("auth: reading login rate: %w", err)
+	normalizedUsername := strings.ToLower(strings.TrimSpace(username))
+	rateKey := TokenHash("login\x00" + normalizedUsername + "\x00" + clientKey)
+	// Attempts are counted atomically before the password is verified, so
+	// parallel requests cannot all pass the check with the same stale count.
+	if err := service.reserveAttempt(ctx, rateKey, service.loginLimit); err != nil {
+		return SessionTokens{}, err
 	}
-	if rate.FailureCount >= service.loginLimit && now.Sub(rate.WindowStartedAt) < time.Minute {
-		return SessionTokens{}, ErrRateLimited
+	// A second per-account budget caps guessing that rotates source addresses.
+	accountKey := TokenHash("login-account\x00" + normalizedUsername)
+	if err := service.reserveAttempt(ctx, accountKey, service.loginLimit*accountLoginLimitFactor); err != nil {
+		return SessionTokens{}, err
 	}
 
 	user, findErr := service.store.FindUserByUsername(ctx, strings.TrimSpace(username))
@@ -196,10 +204,10 @@ func (service *Service) LoginWithDevice(ctx context.Context, username string, pa
 		valid = false
 	}
 	if findErr != nil || !valid || !user.Active {
-		if recordErr := service.store.RecordLoginFailure(ctx, rateKey); recordErr != nil {
-			return SessionTokens{}, fmt.Errorf("auth: recording login failure: %w", recordErr)
-		}
 		return SessionTokens{}, ErrInvalidCredentials
+	}
+	if err := service.store.ClearLoginAttempts(ctx, accountKey); err != nil {
+		return SessionTokens{}, fmt.Errorf("auth: clearing login attempts: %w", err)
 	}
 
 	if user.TOTPEnabled || user.PasskeyEnabled {
@@ -249,6 +257,45 @@ func (service *Service) LoginWithDevice(ctx context.Context, username string, pa
 		return SessionTokens{}, fmt.Errorf("auth: rotating login: %w", err)
 	}
 	return SessionTokens{SessionToken: sessionToken, CSRFToken: csrfToken, Actor: actorFromUser(user)}, nil
+}
+
+// VerifyCurrentPassword re-authenticates a signed-in user before a sensitive
+// account change. Attempts share a per-account budget so a stolen session
+// cannot be used as an unlimited password oracle.
+func (service *Service) VerifyCurrentPassword(ctx context.Context, actor Actor, password string) error {
+	if actor.UserID == "" {
+		return ErrForbidden
+	}
+	rateKey := TokenHash("reauth\x00" + actor.UserID)
+	if err := service.reserveAttempt(ctx, rateKey, service.loginLimit); err != nil {
+		return err
+	}
+	user, findErr := service.store.FindUserByID(ctx, actor.UserID)
+	hash := service.dummyHash
+	if findErr == nil {
+		hash = user.PasswordHash
+	}
+	valid, _, verifyErr := service.hasher.Verify(password, hash)
+	if findErr != nil || verifyErr != nil || !valid || !user.Active {
+		return ErrInvalidCredentials
+	}
+	if err := service.store.ClearLoginAttempts(ctx, rateKey); err != nil {
+		return fmt.Errorf("auth: clearing re-authentication attempts: %w", err)
+	}
+	return nil
+}
+
+// reserveAttempt counts one attempt before any password work and rejects it
+// once the one-minute window holds more than limit attempts.
+func (service *Service) reserveAttempt(ctx context.Context, key []byte, limit int) error {
+	rate, err := service.store.ReserveLoginAttempt(ctx, key)
+	if err != nil {
+		return fmt.Errorf("auth: reserving login attempt: %w", err)
+	}
+	if rate.FailureCount > limit && service.now().Sub(rate.WindowStartedAt) < time.Minute {
+		return ErrRateLimited
+	}
+	return nil
 }
 
 // Authenticate resolves a raw opaque token and enforces idle/absolute expiry and user state.
