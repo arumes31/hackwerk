@@ -11,6 +11,7 @@ import (
 
 // TestPGCredentialsKeepPasswordsOffArgv runs the shared ops helper against a
 // stub libpq client that records its argv and the passfile it was given.
+//
 //nolint:gosec // Fake test-only passwords; the stub client must be executable.
 func TestPGCredentialsKeepPasswordsOffArgv(t *testing.T) {
 	t.Parallel()
