@@ -28,6 +28,11 @@ import (
 const (
 	recoveryCodeCount = 8
 	totpPeriodSeconds = 30
+	// A pending TOTP enrollment must be confirmed promptly and with a small
+	// per-account guess budget before it can release recovery codes.
+	totpEnrollmentTTL          = 10 * time.Minute
+	totpEnrollmentAttemptLimit = 5
+	totpEnrollmentWindow       = 15 * time.Minute
 )
 
 var digitsOnly = regexp.MustCompile(`^[0-9]{6}$`)
@@ -215,6 +220,10 @@ type TOTPCredential struct {
 	SecretCiphertext []byte
 	EnabledAt        *time.Time
 	LastUsedStep     *int64
+	// EnrollmentSessionID is the session that re-entered the password to
+	// start a pending enrollment; only that session may confirm it.
+	EnrollmentSessionID string
+	UpdatedAt           time.Time
 }
 
 type StoredWebAuthnCredential struct {
@@ -243,6 +252,9 @@ type CompleteLoginInput struct {
 	RecoveryCodeHash   []byte
 	Credential         *StoredWebAuthnCredential
 	RequestID          string
+	// ClearRateKeys are login and second-factor budgets reset only once the
+	// complete login has succeeded.
+	ClearRateKeys [][]byte
 }
 
 type SecurityStore interface {
@@ -256,7 +268,7 @@ type SecurityStore interface {
 
 	UpsertTOTPEnrollment(context.Context, Actor, TOTPCredential, string) error
 	TOTPCredential(context.Context, string) (TOTPCredential, error)
-	EnableTOTP(context.Context, Actor, [][]byte, string) error
+	EnableTOTP(context.Context, Actor, string, time.Time, [][]byte, string) error
 	RenameTOTP(context.Context, Actor, string, string) error
 	DeleteTOTP(context.Context, Actor, string) error
 
@@ -268,7 +280,7 @@ type SecurityStore interface {
 	DeleteWebAuthnCredential(context.Context, Actor, []byte, string) error
 
 	ReplaceRecoveryCodes(context.Context, Actor, [][]byte, string) error
-	StartLoginChallenge(context.Context, User, []byte, time.Time, []byte, []byte, string) error
+	StartLoginChallenge(context.Context, User, []byte, time.Time, []byte, string) error
 	LoginChallenge(context.Context, []byte) (LoginChallenge, error)
 	SetLoginWebAuthnSession(context.Context, []byte, []byte) error
 	RecordLoginChallengeFailure(context.Context, []byte) error
@@ -414,8 +426,10 @@ type TOTPEnrollment struct {
 	QRCodeDataURI   string
 }
 
-func (service *Service) BeginTOTPEnrollment(ctx context.Context, actor Actor, name, requestID string) (TOTPEnrollment, error) {
-	if actor.UserID == "" || service.securityConfig == nil {
+// BeginTOTPEnrollment starts a pending enrollment bound to sessionID, the
+// session that has just re-entered the account password.
+func (service *Service) BeginTOTPEnrollment(ctx context.Context, actor Actor, sessionID, name, requestID string) (TOTPEnrollment, error) {
+	if actor.UserID == "" || sessionID == "" || service.securityConfig == nil {
 		return TOTPEnrollment{}, ErrForbidden
 	}
 	name, err := normalizeSecurityMethodName(name, "Authenticator-App")
@@ -441,7 +455,8 @@ func (service *Service) BeginTOTPEnrollment(ctx context.Context, actor Actor, na
 	if err != nil {
 		return TOTPEnrollment{}, err
 	}
-	if err := service.security.UpsertTOTPEnrollment(ctx, actor, TOTPCredential{Name: name, SecretKeyID: keyID, SecretCiphertext: ciphertext}, requestID); err != nil {
+	credential := TOTPCredential{Name: name, SecretKeyID: keyID, SecretCiphertext: ciphertext, EnrollmentSessionID: sessionID}
+	if err := service.security.UpsertTOTPEnrollment(ctx, actor, credential, requestID); err != nil {
 		return TOTPEnrollment{}, err
 	}
 	image, err := key.Image(220, 220)
@@ -459,19 +474,27 @@ func (service *Service) BeginTOTPEnrollment(ctx context.Context, actor Actor, na
 	return TOTPEnrollment{Name: name, Secret: key.Secret(), ProvisioningURI: key.URL(), QRCodeDataURI: "data:image/png;base64," + encoded.String()}, nil
 }
 
-func (service *Service) ConfirmTOTPEnrollment(ctx context.Context, actor Actor, code, requestID string) ([]string, error) {
-	if actor.UserID == "" || service.securityConfig == nil {
+// ConfirmTOTPEnrollment activates a fresh pending enrollment from the session
+// that started it. Guesses count against a per-account budget.
+func (service *Service) ConfirmTOTPEnrollment(ctx context.Context, actor Actor, sessionID, code, requestID string) ([]string, error) {
+	if actor.UserID == "" || sessionID == "" || service.securityConfig == nil {
 		return nil, ErrForbidden
 	}
+	now := service.now().UTC()
+	pendingSince := now.Add(-totpEnrollmentTTL)
 	credential, err := service.security.TOTPCredential(ctx, actor.UserID)
-	if err != nil || credential.EnabledAt != nil {
+	if err != nil || credential.EnabledAt != nil || credential.EnrollmentSessionID != sessionID || !credential.UpdatedAt.After(pendingSince) {
 		return nil, ErrInvalidInput
+	}
+	attemptKey := TokenHash("totp-enrollment\x00" + actor.UserID)
+	if err := service.reserveAttempt(ctx, attemptKey, totpEnrollmentAttemptLimit, totpEnrollmentWindow); err != nil {
+		return nil, err
 	}
 	secret, err := service.securityConfig.Keys.decrypt(credential.SecretKeyID, "totp:"+actor.UserID, credential.SecretCiphertext)
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := validateTOTP(string(secret), code, service.now().UTC()); !ok {
+	if _, ok := validateTOTP(string(secret), code, now); !ok {
 		return nil, ErrInvalidMFA
 	}
 	profile, err := service.security.LoadProfile(ctx, actor.UserID, service.now().UTC())
@@ -486,8 +509,11 @@ func (service *Service) ConfirmTOTPEnrollment(ctx context.Context, actor Actor, 
 			return nil, err
 		}
 	}
-	if err := service.security.EnableTOTP(ctx, actor, hashes, requestID); err != nil {
+	if err := service.security.EnableTOTP(ctx, actor, sessionID, pendingSince, hashes, requestID); err != nil {
 		return nil, err
+	}
+	if err := service.store.ClearLoginAttempts(ctx, attemptKey); err != nil {
+		return nil, fmt.Errorf("auth: clearing TOTP enrollment attempts: %w", err)
 	}
 	return codes, nil
 }
@@ -536,6 +562,9 @@ func (service *Service) CompleteTOTPLogin(ctx context.Context, rawChallenge, cod
 	if err != nil || !challenge.User.TOTPEnabled {
 		return SessionTokens{}, ErrInvalidMFA
 	}
+	if err := service.reserveSecondFactorAttempt(ctx, challenge.User.ID); err != nil {
+		return SessionTokens{}, err
+	}
 	credential, err := service.security.TOTPCredential(ctx, challenge.User.ID)
 	if err != nil {
 		return SessionTokens{}, ErrInvalidMFA
@@ -556,6 +585,9 @@ func (service *Service) CompleteRecoveryLogin(ctx context.Context, rawChallenge,
 	challenge, err := service.loginChallenge(ctx, rawChallenge)
 	if err != nil {
 		return SessionTokens{}, ErrInvalidMFA
+	}
+	if err := service.reserveSecondFactorAttempt(ctx, challenge.User.ID); err != nil {
+		return SessionTokens{}, err
 	}
 	normalized := normalizeRecoveryCode(code)
 	if len(normalized) != 12 {
@@ -598,6 +630,12 @@ func (service *Service) loginChallenge(ctx context.Context, raw string) (LoginCh
 	return challenge, nil
 }
 
+// reserveSecondFactorAttempt counts a guessable second-factor attempt against
+// the account, independent of the challenge and the client it came from.
+func (service *Service) reserveSecondFactorAttempt(ctx context.Context, userID string) error {
+	return service.reserveAttempt(ctx, secondFactorAccountKey(userID), secondFactorAttemptLimit, secondFactorAttemptWindow)
+}
+
 func (service *Service) completeLogin(ctx context.Context, rawChallenge string, user User, deviceLabel string, input CompleteLoginInput) (SessionTokens, error) {
 	tokens, session, err := service.newSessionForUser(user, deviceLabel)
 	if err != nil {
@@ -606,6 +644,7 @@ func (service *Service) completeLogin(ctx context.Context, rawChallenge string, 
 	input.ChallengeTokenHash = TokenHash(rawChallenge)
 	input.Now = service.now().UTC()
 	input.NewSession = session
+	input.ClearRateKeys = [][]byte{loginAccountKey(user.Username), secondFactorAccountKey(user.ID)}
 	if err := service.security.CompleteLogin(ctx, input); err != nil {
 		_ = service.security.RecordLoginChallengeFailure(ctx, input.ChallengeTokenHash)
 		return SessionTokens{}, ErrInvalidMFA

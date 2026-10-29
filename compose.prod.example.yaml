@@ -13,6 +13,9 @@ x-runtime-environment: &runtime-environment
   HTTP_WRITE_TIMEOUT: ${HTTP_WRITE_TIMEOUT:-11m}
   SESSION_COOKIE_SECURE: "true"
   DATABASE_URL_FILE: /run/secrets/database_url
+  # PostgreSQL im internen backend-Netz spricht kein TLS; ausdrücklicher Opt-in nur für diesen Dienstnamen.
+  # Bei externer Datenbank leer setzen und sslmode=verify-full verwenden.
+  DATABASE_PLAINTEXT_HOSTS: ${DATABASE_PLAINTEXT_HOSTS-postgres}
   CONFIRMATION_TOKEN_KEY_ID: ${CONFIRMATION_TOKEN_KEY_ID:?Token-Key-ID setzen}
   CONFIRMATION_TOKEN_KEYS_FILE: /run/secrets/confirmation_token_keys
   AUTH_SECURITY_KEY_ID: ${AUTH_SECURITY_KEY_ID:?Auth-Security-Key-ID setzen}

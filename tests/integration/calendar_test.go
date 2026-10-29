@@ -627,6 +627,52 @@ type calendarFixture struct {
 	chipper1, chipper2 string
 }
 
+func TestAppointmentStoreRevalidatesCompletionInsideTransaction(t *testing.T) {
+	fixture := newCalendarFixture(t)
+	start := time.Date(2026, 9, 1, 6, 0, 0, 0, time.UTC)
+	proposed := fixture.proposal(t, fixture.job(t, "HW-2026-0304"), fixture.driver1, fixture.chipper1, start, 3*time.Hour)
+	fixed, err := fixture.service.FixAppointment(fixture.ctx, fixture.admin, appointment.FixInput{MutateInput: appointment.MutateInput{ID: proposed.ID, ExpectedVersion: proposed.Version, RequestID: "fix-before-complete"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := postgres.NewAppointmentStore(fixture.pool)
+	driverActor := auth.Actor{UserID: fixture.admin.UserID, Role: auth.RoleDriver, DriverID: fixture.driver1}
+	complete := func(actor auth.Actor, guard appointment.CompletionGuard, reason string) error {
+		_, completeErr := store.Complete(fixture.ctx, actor, appointment.CompleteInput{
+			MutateInput: appointment.MutateInput{ID: fixed.ID, ExpectedVersion: fixed.Version, RequestID: "complete"}, OverrideReason: reason, Guard: guard,
+		})
+		return completeErr
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE drivers SET can_complete_jobs=false WHERE id=$1", fixture.driver1); err != nil {
+		t.Fatal(err)
+	}
+	if err := complete(driverActor, appointment.CompletionGuard{EligibleAt: start.Add(time.Hour), DriverID: fixture.driver1}, ""); !errors.Is(err, auth.ErrForbidden) {
+		t.Fatalf("driver without completion permission error = %v, want forbidden", err)
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE drivers SET can_complete_jobs=true WHERE id=$1", fixture.driver1); err != nil {
+		t.Fatal(err)
+	}
+	if err := complete(driverActor, appointment.CompletionGuard{EligibleAt: start.Add(time.Hour), DriverID: fixture.driver2}, ""); !errors.Is(err, auth.ErrForbidden) {
+		t.Fatalf("unassigned driver completion error = %v, want forbidden", err)
+	}
+	if err := complete(driverActor, appointment.CompletionGuard{EligibleAt: start.Add(-time.Minute), DriverID: fixture.driver1}, ""); !errors.Is(err, auth.ErrForbidden) {
+		t.Fatalf("driver completion before locked start error = %v, want forbidden", err)
+	}
+	if err := complete(fixture.admin, appointment.CompletionGuard{EligibleAt: start.Add(-time.Minute)}, ""); !errors.Is(err, appointment.ErrValidation) {
+		t.Fatalf("early admin completion without reason error = %v, want validation", err)
+	}
+	if err := complete(fixture.admin, appointment.CompletionGuard{}, "Grund"); !errors.Is(err, appointment.ErrValidation) {
+		t.Fatalf("completion without guard error = %v, want validation", err)
+	}
+	var lifecycle string
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT lifecycle_status FROM appointments WHERE id=$1", fixed.ID).Scan(&lifecycle); err != nil || lifecycle != "fixed" {
+		t.Fatalf("rejected completions changed lifecycle to %q (%v)", lifecycle, err)
+	}
+	if err := complete(driverActor, appointment.CompletionGuard{EligibleAt: start.Add(time.Hour), DriverID: fixture.driver1}, ""); err != nil {
+		t.Fatalf("eligible driver completion error = %v", err)
+	}
+}
+
 func newCalendarFixture(t *testing.T) calendarFixture {
 	t.Helper()
 	databaseURL := os.Getenv("TEST_DATABASE_URL")

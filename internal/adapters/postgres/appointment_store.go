@@ -729,6 +729,9 @@ func (s *AppointmentStore) Complete(ctx context.Context, actor auth.Actor, input
 		return appointment.Appointment{}, appointment.ErrValidation
 	}
 	err = s.mutate(ctx, input.ID, input.ExpectedVersion, func(queries *dbgen.Queries, id pgtype.UUID, current dbgen.GetAppointmentForUpdateRow) error {
+		if err := checkCompletionEligibility(ctx, queries, id, current, input); err != nil {
+			return err
+		}
 		rows, updateErr := queries.SetAppointmentCompleted(ctx, dbgen.SetAppointmentCompletedParams{
 			ActorUserID: actorID, OverrideReason: input.OverrideReason, ID: id, ExpectedVersion: input.ExpectedVersion,
 		})
@@ -979,6 +982,39 @@ func swapLifecycle(value string) bool {
 	return value == string(appointment.LifecycleDraft) || value == string(appointment.LifecycleProposal)
 }
 
+// checkCompletionEligibility re-validates the authorized completion guard on
+// the appointment row locked FOR UPDATE, closing the window between the
+// service's snapshot check and the mutation. Driver authority is re-read with
+// FOR SHARE so concurrent unassignment or permission changes serialize.
+func checkCompletionEligibility(ctx context.Context, queries *dbgen.Queries, id pgtype.UUID, current dbgen.GetAppointmentForUpdateRow, input appointment.CompleteInput) error {
+	if current.LifecycleStatus != string(appointment.LifecycleFixed) {
+		return appointment.ErrTransition
+	}
+	if !current.StartsAt.Valid {
+		return appointment.ErrValidation
+	}
+	if err := input.Guard.Check(current.StartsAt.Time, input.OverrideReason); err != nil {
+		return err
+	}
+	if input.Guard.DriverID == "" {
+		return nil
+	}
+	driverID, err := uuid(input.Guard.DriverID)
+	if err != nil {
+		return auth.ErrForbidden
+	}
+	eligible, err := queries.LockDriverCompletionEligibility(ctx, dbgen.LockDriverCompletionEligibilityParams{
+		AppointmentID: id, DriverID: driverID,
+	})
+	if err != nil {
+		return err
+	}
+	if len(eligible) == 0 {
+		return auth.ErrForbidden
+	}
+	return nil
+}
+
 func (s *AppointmentStore) DriverCanComplete(ctx context.Context, appointmentID, driverID string) (bool, error) {
 	parsedAppointmentID, err := uuid(appointmentID)
 	if err != nil {
@@ -1097,7 +1133,7 @@ func ensureAssignmentsReady(
 		if loadErr != nil {
 			return loadErr
 		}
-		status, _, evaluateErr := driver.EvaluateAvailability(availability, fromUTC, toUTC, location)
+		status, _, evaluateErr := driver.EvaluateAvailabilityContext(ctx, availability, fromUTC, toUTC, location)
 		if evaluateErr != nil {
 			return evaluateErr
 		}

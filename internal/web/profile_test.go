@@ -64,6 +64,7 @@ func (store *profileTestStore) VerifyEmail(context.Context, []byte, time.Time, s
 	return store.mutationError
 }
 func (store *profileTestStore) UpsertTOTPEnrollment(_ context.Context, _ auth.Actor, credential auth.TOTPCredential, _ string) error {
+	credential.UpdatedAt = time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 	store.totp = credential
 	return store.mutationError
 }
@@ -73,7 +74,7 @@ func (store *profileTestStore) TOTPCredential(context.Context, string) (auth.TOT
 	}
 	return store.totp, nil
 }
-func (store *profileTestStore) EnableTOTP(context.Context, auth.Actor, [][]byte, string) error {
+func (store *profileTestStore) EnableTOTP(context.Context, auth.Actor, string, time.Time, [][]byte, string) error {
 	return store.mutationError
 }
 func (store *profileTestStore) RenameTOTP(context.Context, auth.Actor, string, string) error {
@@ -104,7 +105,7 @@ func (store *profileTestStore) DeleteWebAuthnCredential(context.Context, auth.Ac
 func (store *profileTestStore) ReplaceRecoveryCodes(context.Context, auth.Actor, [][]byte, string) error {
 	return store.mutationError
 }
-func (store *profileTestStore) StartLoginChallenge(_ context.Context, user auth.User, _ []byte, expiresAt time.Time, _, _ []byte, _ string) error {
+func (store *profileTestStore) StartLoginChallenge(_ context.Context, user auth.User, _ []byte, expiresAt time.Time, _ []byte, _ string) error {
 	store.login = auth.LoginChallenge{User: user, ExpiresAt: expiresAt}
 	return store.mutationError
 }
@@ -307,7 +308,7 @@ func TestProfileEmailVerificationTOTPAndRecoveryHandlers(t *testing.T) {
 	if response.Code != http.StatusOK || fixture.store.totp.Name != "Telefon" {
 		t.Fatalf("begin TOTP = %d, %#v", response.Code, fixture.store.totp)
 	}
-	enrollment, err := fixture.identity.BeginTOTPEnrollment(t.Context(), fixture.session.Actor, "Telefon", "request")
+	enrollment, err := fixture.identity.BeginTOTPEnrollment(t.Context(), fixture.session.Actor, fixture.session.ID, "Telefon", "request")
 	if err != nil {
 		t.Fatal(err)
 	}

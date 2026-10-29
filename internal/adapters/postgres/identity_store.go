@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,6 +68,9 @@ func (store *IdentityStore) RotateLogin(ctx context.Context, user auth.User, ses
 	return store.transaction(ctx, pgx.TxOptions{}, func(queries *dbgen.Queries, _ pgx.Tx) error {
 		userID, err := uuid(user.ID)
 		if err != nil {
+			return err
+		}
+		if err := lockVerifiedCredential(ctx, queries, userID, user); err != nil {
 			return err
 		}
 		if len(replacementHash) > 0 {
@@ -136,10 +140,10 @@ func (store *IdentityStore) RevokeSession(ctx context.Context, tokenHash []byte)
 	return store.queries.RevokeSession(ctx, tokenHash)
 }
 
-// ReserveLoginAttempt atomically counts one attempt in a hashed one-minute
-// bucket and returns the updated window.
-func (store *IdentityStore) ReserveLoginAttempt(ctx context.Context, keyHash []byte) (auth.RateLimit, error) {
-	row, err := store.queries.ReserveLoginAttempt(ctx, keyHash)
+// ReserveLoginAttempt atomically counts one attempt in a hashed bucket whose
+// window restarts after the given duration and returns the updated window.
+func (store *IdentityStore) ReserveLoginAttempt(ctx context.Context, keyHash []byte, window time.Duration) (auth.RateLimit, error) {
+	row, err := store.queries.ReserveLoginAttempt(ctx, dbgen.ReserveLoginAttemptParams{KeyHash: keyHash, WindowSeconds: window.Seconds()})
 	if err != nil {
 		return auth.RateLimit{}, err
 	}
@@ -301,7 +305,12 @@ func (store *IdentityStore) updatePassword(ctx context.Context, actor auth.Actor
 		if err := queries.RevokeUserSessions(ctx, id); err != nil {
 			return err
 		}
-		return insertAudit(ctx, queries, actor, action, "user", userID, requestID, []string{"password_hash", "must_change_password", "sessions"})
+		// Pending second-factor challenges were earned with the replaced
+		// password and must not outlive it.
+		if err := queries.DeleteLoginChallengesForUser(ctx, id); err != nil {
+			return err
+		}
+		return insertAudit(ctx, queries, actor, action, "user", userID, requestID, []string{"password_hash", "must_change_password", "sessions", "login_challenges"})
 	})
 }
 
@@ -320,6 +329,22 @@ func (store *IdentityStore) transaction(ctx context.Context, options pgx.TxOptio
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// lockVerifiedCredential serializes login finalization with password changes
+// and rejects a login whose verified password hash has since been replaced.
+func lockVerifiedCredential(ctx context.Context, queries *dbgen.Queries, id pgtype.UUID, user auth.User) error {
+	row, err := queries.LockUserCredential(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return auth.ErrInvalidCredentials
+		}
+		return err
+	}
+	if !row.Active || subtle.ConstantTimeCompare([]byte(row.PasswordHash), []byte(user.PasswordHash)) != 1 {
+		return auth.ErrInvalidCredentials
+	}
+	return nil
 }
 
 func findUserByID(ctx context.Context, queries *dbgen.Queries, id string) (auth.User, error) {

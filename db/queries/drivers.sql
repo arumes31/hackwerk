@@ -145,6 +145,17 @@ WHERE driver_id = sqlc.arg(driver_id)::uuid AND (
 )
 ORDER BY COALESCE(local_date::timestamp AT TIME ZONE 'Europe/Vienna', starts_at), id;
 
+-- name: CountAvailabilityExceptionsInWindow :one
+SELECT count(*)::bigint
+FROM availability_exceptions
+WHERE driver_id = sqlc.arg(driver_id)::uuid
+  AND id IS DISTINCT FROM sqlc.narg(exclude_id)::uuid
+  AND (
+    (all_day AND local_date BETWEEN sqlc.arg(local_from)::date AND sqlc.arg(local_to)::date)
+    OR
+    (NOT all_day AND starts_at < sqlc.arg(to_utc)::timestamptz AND ends_at > sqlc.arg(from_utc)::timestamptz)
+  );
+
 -- name: InsertAvailabilityException :one
 INSERT INTO availability_exceptions (
     driver_id, exception_type, all_day, local_date, starts_at, ends_at, internal_note
