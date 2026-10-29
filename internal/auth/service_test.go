@@ -61,7 +61,7 @@ func (store *fakeStore) RevokeSession(_ context.Context, token []byte) error {
 	store.revokedToken = append([]byte(nil), token...)
 	return store.revokeError
 }
-func (store *fakeStore) ReserveLoginAttempt(_ context.Context, key []byte) (RateLimit, error) {
+func (store *fakeStore) ReserveLoginAttempt(_ context.Context, key []byte, _ time.Duration) (RateLimit, error) {
 	if store.attempts == nil {
 		store.attempts = make(map[string]int)
 	}

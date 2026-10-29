@@ -75,6 +75,7 @@ func (store *fakeSecurityStore) VerifyEmail(_ context.Context, hash []byte, _ ti
 }
 
 func (store *fakeSecurityStore) UpsertTOTPEnrollment(_ context.Context, _ Actor, credential TOTPCredential, _ string) error {
+	credential.UpdatedAt = time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 	store.totp = credential
 	return nil
 }
@@ -86,7 +87,7 @@ func (store *fakeSecurityStore) TOTPCredential(context.Context, string) (TOTPCre
 	return store.totp, nil
 }
 
-func (store *fakeSecurityStore) EnableTOTP(_ context.Context, _ Actor, hashes [][]byte, _ string) error {
+func (store *fakeSecurityStore) EnableTOTP(_ context.Context, _ Actor, _ string, _ time.Time, hashes [][]byte, _ string) error {
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 	store.totp.EnabledAt = &now
 	if len(hashes) > 0 {
@@ -149,7 +150,7 @@ func (store *fakeSecurityStore) ReplaceRecoveryCodes(_ context.Context, _ Actor,
 	return nil
 }
 
-func (store *fakeSecurityStore) StartLoginChallenge(_ context.Context, user User, hash []byte, expiresAt time.Time, _, _ []byte, _ string) error {
+func (store *fakeSecurityStore) StartLoginChallenge(_ context.Context, user User, hash []byte, expiresAt time.Time, _ []byte, _ string) error {
 	store.login = LoginChallenge{ID: base64.RawURLEncoding.EncodeToString(hash), User: user, ExpiresAt: expiresAt}
 	return nil
 }
@@ -290,7 +291,7 @@ func TestSecurityTOTPRecoveryAndLoginWorkflows(t *testing.T) {
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 	service, store := newSecurityService(t, now)
 	actor := Actor{UserID: "user-1", Role: RoleDriver}
-	enrollment, err := service.BeginTOTPEnrollment(t.Context(), actor, "Telefon", "request-1")
+	enrollment, err := service.BeginTOTPEnrollment(t.Context(), actor, "session-1", "Telefon", "request-1")
 	if err != nil || enrollment.Secret == "" || store.totp.SecretKeyID != "test-v1" || !bytes.HasPrefix([]byte(enrollment.QRCodeDataURI), []byte("data:image/png;base64,")) {
 		t.Fatalf("enrollment = %#v, %v", enrollment, err)
 	}
@@ -300,7 +301,7 @@ func TestSecurityTOTPRecoveryAndLoginWorkflows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	codes, err := service.ConfirmTOTPEnrollment(t.Context(), actor, code, "request-2")
+	codes, err := service.ConfirmTOTPEnrollment(t.Context(), actor, "session-1", code, "request-2")
 	if err != nil || len(codes) != recoveryCodeCount || len(store.recoveryHashes) != recoveryCodeCount {
 		t.Fatalf("confirm TOTP = %d codes, %v", len(codes), err)
 	}
@@ -344,7 +345,7 @@ func TestConfirmTOTPEnrollmentPreservesExistingRecoveryCodes(t *testing.T) {
 	store.profile.RecoveryCodeCount = 1
 	existingHash := []byte("existing-recovery-hash")
 	store.recoveryHashes = [][]byte{append([]byte(nil), existingHash...)}
-	enrollment, err := service.BeginTOTPEnrollment(t.Context(), actor, "Telefon", "request-1")
+	enrollment, err := service.BeginTOTPEnrollment(t.Context(), actor, "session-1", "Telefon", "request-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +355,7 @@ func TestConfirmTOTPEnrollmentPreservesExistingRecoveryCodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	codes, err := service.ConfirmTOTPEnrollment(t.Context(), actor, code, "request-2")
+	codes, err := service.ConfirmTOTPEnrollment(t.Context(), actor, "session-1", code, "request-2")
 	if err != nil {
 		t.Fatal(err)
 	}

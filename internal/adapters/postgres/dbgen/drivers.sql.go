@@ -29,6 +29,41 @@ func (q *Queries) ClearAvailabilityRulesForDay(ctx context.Context, arg ClearAva
 	return result.RowsAffected(), nil
 }
 
+const countAvailabilityExceptionsInWindow = `-- name: CountAvailabilityExceptionsInWindow :one
+SELECT count(*)::bigint
+FROM availability_exceptions
+WHERE driver_id = $1::uuid
+  AND id IS DISTINCT FROM $2::uuid
+  AND (
+    (all_day AND local_date BETWEEN $3::date AND $4::date)
+    OR
+    (NOT all_day AND starts_at < $5::timestamptz AND ends_at > $6::timestamptz)
+  )
+`
+
+type CountAvailabilityExceptionsInWindowParams struct {
+	DriverID  pgtype.UUID
+	ExcludeID pgtype.UUID
+	LocalFrom pgtype.Date
+	LocalTo   pgtype.Date
+	ToUtc     pgtype.Timestamptz
+	FromUtc   pgtype.Timestamptz
+}
+
+func (q *Queries) CountAvailabilityExceptionsInWindow(ctx context.Context, arg CountAvailabilityExceptionsInWindowParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAvailabilityExceptionsInWindow,
+		arg.DriverID,
+		arg.ExcludeID,
+		arg.LocalFrom,
+		arg.LocalTo,
+		arg.ToUtc,
+		arg.FromUtc,
+	)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const deactivateDriverProfile = `-- name: DeactivateDriverProfile :execrows
 UPDATE drivers SET active = false, is_primary = false,
     availability_policy = CASE WHEN availability_policy = 'assumed_available' THEN 'explicit_dates' ELSE availability_policy END,

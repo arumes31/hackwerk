@@ -327,6 +327,9 @@ func (s *DriverStore) CreateException(ctx context.Context, actor auth.Actor, dri
 		if err := lockDriverAvailability(ctx, queries, parsedDriverID); err != nil {
 			return err
 		}
+		if err := enforceExceptionDensity(ctx, queries, parsedDriverID, pgtype.UUID{}, input); err != nil {
+			return err
+		}
 		var insertErr error
 		id, insertErr = queries.InsertAvailabilityException(ctx, params)
 		if insertErr != nil {
@@ -349,6 +352,9 @@ func (s *DriverStore) CreateExceptions(ctx context.Context, actor auth.Actor, dr
 			return err
 		}
 		for _, input := range inputs {
+			if err := enforceExceptionDensity(ctx, queries, parsedDriverID, pgtype.UUID{}, input); err != nil {
+				return err
+			}
 			if _, err := queries.InsertAvailabilityException(ctx, exceptionInsertParams(parsedDriverID, input)); err != nil {
 				return mapDriverConflict(err)
 			}
@@ -370,6 +376,9 @@ func (s *DriverStore) UpdateException(ctx context.Context, actor auth.Actor, dri
 	params := exceptionInsertParams(parsedDriverID, input)
 	return withQueries(ctx, s.pool, func(queries *dbgen.Queries) error {
 		if err := lockDriverAvailability(ctx, queries, parsedDriverID); err != nil {
+			return err
+		}
+		if err := enforceExceptionDensity(ctx, queries, parsedDriverID, exceptionID, input); err != nil {
 			return err
 		}
 		rows, updateErr := queries.UpdateAvailabilityException(ctx, dbgen.UpdateAvailabilityExceptionParams{
@@ -416,6 +425,45 @@ func (s *DriverStore) deleteAvailability(ctx context.Context, actor auth.Actor, 
 		}
 		return insertAudit(ctx, queries, actor, action, "availability", id, requestID, []string{"deleted"})
 	})
+}
+
+// enforceExceptionDensity rejects storing input when the driver already has
+// MaxExceptionsPerWindow other exceptions near its range. Callers must hold the
+// driver availability lock so concurrent writers cannot both pass the check.
+func enforceExceptionDensity(ctx context.Context, queries *dbgen.Queries, driverID pgtype.UUID, excludeID pgtype.UUID, input driver.ExceptionInput) error {
+	location, err := time.LoadLocation("Europe/Vienna")
+	if err != nil {
+		return err
+	}
+	fromUTC, toUTC, localFrom, localTo, err := driver.ExceptionDensityWindow(input, location)
+	if err != nil {
+		return err
+	}
+	fromDate, err := dateValue(localFrom)
+	if err != nil {
+		return driver.ErrValidation
+	}
+	toDate, err := dateValue(localTo)
+	if err != nil {
+		return driver.ErrValidation
+	}
+	count, err := queries.CountAvailabilityExceptionsInWindow(ctx, dbgen.CountAvailabilityExceptionsInWindowParams{
+		DriverID: driverID, ExcludeID: excludeID, LocalFrom: fromDate, LocalTo: toDate,
+		FromUtc: timestamp(fromUTC), ToUtc: timestamp(toUTC),
+	})
+	if err != nil {
+		return err
+	}
+	return exceptionDensityError(count)
+}
+
+// exceptionDensityError reports whether one more exception would exceed the
+// per-window limit given the existing count.
+func exceptionDensityError(existing int64) error {
+	if existing >= driver.MaxExceptionsPerWindow {
+		return driver.ErrExceptionLimit
+	}
+	return nil
 }
 
 func lockDriverAvailability(ctx context.Context, queries *dbgen.Queries, driverID pgtype.UUID) error {

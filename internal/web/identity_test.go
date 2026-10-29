@@ -52,7 +52,7 @@ func (store *identityTestStore) RevokeSession(context.Context, []byte) error {
 	store.revoked = true
 	return nil
 }
-func (store *identityTestStore) ReserveLoginAttempt(context.Context, []byte) (auth.RateLimit, error) {
+func (store *identityTestStore) ReserveLoginAttempt(context.Context, []byte, time.Duration) (auth.RateLimit, error) {
 	return auth.RateLimit{}, nil
 }
 func (store *identityTestStore) ClearLoginAttempts(context.Context, []byte) error { return nil }

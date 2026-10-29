@@ -220,6 +220,15 @@ SELECT EXISTS (
       AND d.active AND d.can_complete_jobs
 )::boolean;
 
+-- name: LockDriverCompletionEligibility :many
+SELECT ad.driver_id::text
+FROM appointment_drivers ad
+JOIN drivers d ON d.id = ad.driver_id
+WHERE ad.appointment_id = sqlc.arg(appointment_id)::uuid
+  AND ad.driver_id = sqlc.arg(driver_id)::uuid
+  AND d.active AND d.can_complete_jobs
+FOR SHARE OF ad, d;
+
 -- name: AppointmentAssignmentsReady :one
 SELECT (
     EXISTS (

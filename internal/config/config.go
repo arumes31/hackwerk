@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	// Register the embedded timezone database for the scratch runtime image.
 	_ "time/tzdata"
 )
@@ -22,7 +24,7 @@ const (
 	EnvironmentDevelopment = "development"
 	EnvironmentTest        = "test"
 	EnvironmentProduction  = "production"
-	CurrentSchemaVersion   = int64(22)
+	CurrentSchemaVersion   = int64(23)
 
 	businessNamePlaceholder                  = "HackWerk – Betreiber noch nicht hinterlegt"
 	businessAddressPlaceholder               = "Ladungsfähige Anschrift noch nicht hinterlegt"
@@ -83,7 +85,11 @@ type HTTP struct {
 
 // Database contains connection details. URL must never be logged.
 type Database struct {
-	URL              string
+	URL string
+	// PlaintextHosts is an explicit production opt-in for private-network hosts
+	// (single-label service names or private IP literals) reached without
+	// verified TLS, such as the bundled Compose PostgreSQL container.
+	PlaintextHosts   []string
 	MaxConnections   int32
 	MinConnections   int32
 	ConnectTimeout   time.Duration
@@ -400,6 +406,7 @@ func loadConfig(getenv func(string) string, readFile readFileFunc, validate bool
 		},
 		Database: Database{
 			URL:              databaseURL,
+			PlaintextHosts:   splitCSV(getenv("DATABASE_PLAINTEXT_HOSTS")),
 			MaxConnections:   20,
 			MinConnections:   2,
 			ConnectTimeout:   5 * time.Second,
@@ -979,8 +986,11 @@ func (cfg Config) Validate() error {
 		if baseURL.Scheme != "https" {
 			return errors.New("config: production app base url must use https")
 		}
-		if strings.Contains(cfg.Database.URL, "development-only") || strings.Contains(cfg.Database.URL, "sslmode=disable") {
+		if strings.Contains(cfg.Database.URL, "development-only") {
 			return errors.New("config: production database configuration is insecure")
+		}
+		if err := validateProductionDatabaseTLS(cfg.Database.URL, cfg.Database.PlaintextHosts); err != nil {
+			return err
 		}
 		if !cfg.Auth.CookieSecure {
 			return errors.New("config: production session cookie must be secure")
@@ -1106,6 +1116,61 @@ func isLoopbackHost(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
+}
+
+// validateProductionDatabaseTLS checks the effective pgx connection policy
+// rather than the URL text: every TCP target, including libpq fallbacks such
+// as the plaintext retry implied by the default sslmode=prefer, must verify the
+// server certificate and host name (sslmode=verify-full). Unix sockets carry no
+// TLS and are accepted. Hosts listed in plaintextHosts are an explicit opt-in
+// and must be private-network names.
+func validateProductionDatabaseTLS(databaseURL string, plaintextHosts []string) error {
+	for _, host := range plaintextHosts {
+		if !privateNetworkHost(host) {
+			return errors.New("config: DATABASE_PLAINTEXT_HOSTS only accepts single-label service names or private IP addresses")
+		}
+	}
+	// The parse error is not wrapped because it can echo parts of the URL.
+	parsed, err := pgconn.ParseConfig(databaseURL)
+	if err != nil {
+		return errors.New("config: production database url is invalid")
+	}
+	targets := make([]*pgconn.FallbackConfig, 0, len(parsed.Fallbacks)+1)
+	targets = append(targets, &pgconn.FallbackConfig{Host: parsed.Host, Port: parsed.Port, TLSConfig: parsed.TLSConfig})
+	targets = append(targets, parsed.Fallbacks...)
+	for _, target := range targets {
+		if network, _ := pgconn.NetworkAddress(target.Host, target.Port); network == "unix" {
+			continue
+		}
+		if hostAllowed(target.Host, plaintextHosts) {
+			continue
+		}
+		if target.TLSConfig == nil || target.TLSConfig.InsecureSkipVerify || target.TLSConfig.ServerName == "" {
+			return errors.New("config: production database connections must use sslmode=verify-full or a unix socket")
+		}
+	}
+	return nil
+}
+
+// privateNetworkHost accepts names that cannot resolve through public DNS
+// (single-label container or service names) and private or loopback IPs.
+func privateNetworkHost(host string) bool {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if host == "" || host == "*" {
+		return false
+	}
+	if address, err := netip.ParseAddr(host); err == nil {
+		return address.IsPrivate() || address.IsLoopback()
+	}
+	if strings.Contains(host, ".") {
+		return false
+	}
+	for _, char := range host {
+		if char != '-' && char != '_' && (char < '0' || char > '9') && (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') {
+			return false
+		}
+	}
+	return true
 }
 
 func validTailscaleRoutingURL(raw string) bool {
@@ -1287,7 +1352,7 @@ func (cfg Config) Diagnostic() map[string]any {
 	return map[string]any{
 		"app_env": cfg.Environment, "app_name": cfg.AppName, "listen_addr": cfg.ListenAddr,
 		"allowed_hosts": append([]string(nil), cfg.HTTP.AllowedHosts...), "trusted_proxy_cidrs": append([]string(nil), cfg.HTTP.TrustedProxyCIDRs...),
-		"database_url": configured(cfg.Database.URL), "schema_version": cfg.Database.ExpectedSchema,
+		"database_url": configured(cfg.Database.URL), "database_plaintext_hosts": append([]string(nil), cfg.Database.PlaintextHosts...), "schema_version": cfg.Database.ExpectedSchema,
 		"metrics_enabled": cfg.Metrics.Enabled, "metrics_listen_addr": cfg.Metrics.ListenAddr,
 		"mail_enabled": cfg.Mail.Enabled, "mail_username": configured(cfg.Mail.Username), "mail_password": configured(cfg.Mail.Password),
 		"sms_enabled": cfg.SMS.Enabled, "sms_provider": cfg.SMS.Provider, "sendberry_api_url": configured(cfg.SMS.SendberryURL),

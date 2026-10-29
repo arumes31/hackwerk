@@ -5,12 +5,21 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
+)
+
+// Diagnostic retention is bounded so a tree with many matches cannot exhaust
+// CI memory; suppressed findings are still counted and still fail the audit.
+const (
+	maxFindingsPerFile = 5
+	maxFindings        = 200
 )
 
 var secretAssignment = regexp.MustCompile(`(?i)(api[_-]?key|access[_-]?(?:password|pw)|password|passwd|secret|token)[^:=\r\n]{0,32}[:=]\s*["']?([^\s"'#},]+)`)
@@ -21,8 +30,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "repo-audit: scan failed (%T)\n", err)
 		os.Exit(2)
 	}
-	if len(findings) > 0 {
-		for _, finding := range findings {
+	if findings.failed() {
+		for _, finding := range findings.lines() {
 			fmt.Fprintln(os.Stderr, finding)
 		}
 		os.Exit(1)
@@ -30,8 +39,35 @@ func main() {
 	fmt.Println("repo-audit: no Node artifacts or committed secret candidates")
 }
 
-func auditRepository() (findings []string, resultErr error) {
-	findings = make([]string, 0)
+// report retains at most maxFindings diagnostics and counts the remainder.
+type report struct {
+	entries    []string
+	suppressed int
+}
+
+// add records count findings; describe only runs while the cap has room, so
+// suppressed findings never allocate a diagnostic.
+func (r *report) add(count int, describe func() string) {
+	if len(r.entries) >= maxFindings {
+		r.suppressed += count
+		return
+	}
+	r.entries = append(r.entries, describe())
+}
+
+func (r *report) failed() bool {
+	return len(r.entries) > 0 || r.suppressed > 0
+}
+
+func (r *report) lines() []string {
+	if r.suppressed == 0 {
+		return r.entries
+	}
+	return append(r.entries[:len(r.entries):len(r.entries)], fmt.Sprintf("repo-audit: %d further findings suppressed", r.suppressed))
+}
+
+func auditRepository() (findings *report, resultErr error) {
+	findings = &report{}
 	repository, err := os.OpenRoot(".")
 	if err != nil {
 		return nil, errors.New("repository root unavailable")
@@ -40,14 +76,14 @@ func auditRepository() (findings []string, resultErr error) {
 		resultErr = errors.Join(resultErr, repository.Close())
 	}()
 	for _, root := range []string{"cmd", "db", "internal", "scripts", "web", "tests", "reference", ".github", "Dockerfile", "compose.yaml", "compose.prod.example.yaml", ".env.example", "Makefile", "go.mod", "go.sum"} {
-		if err := scanRoot(repository, root, &findings); err != nil {
+		if err := scanRoot(repository, root, findings); err != nil {
 			return nil, err
 		}
 	}
 	return findings, nil
 }
 
-func scanRoot(repository *os.Root, root string, findings *[]string) error {
+func scanRoot(repository *os.Root, root string, findings *report) error {
 	if _, err := repository.Stat(root); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
@@ -64,13 +100,13 @@ func scanRoot(repository *os.Root, root string, findings *[]string) error {
 				return filepath.SkipDir
 			}
 			if entry.Name() == "node_modules" {
-				*findings = append(*findings, clean+": forbidden Node directory")
+				findings.add(1, func() string { return strconv.Quote(clean) + ": forbidden Node directory" })
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		if forbiddenNodeFile(entry.Name()) {
-			*findings = append(*findings, clean+": forbidden Node manifest or lockfile")
+			findings.add(1, func() string { return strconv.Quote(clean) + ": forbidden Node manifest or lockfile" })
 		}
 		if !scannable(entry.Name()) {
 			return nil
@@ -79,26 +115,45 @@ func scanRoot(repository *os.Root, root string, findings *[]string) error {
 		if err != nil {
 			return err
 		}
-		scanner := bufio.NewScanner(file)
-		scanner.Buffer(make([]byte, 4096), 16<<20)
-		line := 0
-		for scanner.Scan() {
-			line++
-			value := scanner.Text()
-			if strings.Contains(value, "-----BEGIN ") && strings.Contains(value, "PRIVATE KEY-----") {
-				if clean == "cmd/repo-audit/main.go" {
-					continue
-				}
-				*findings = append(*findings, fmt.Sprintf("%s:%d: private key material", clean, line))
+		return errors.Join(scanFile(file, clean, findings), file.Close())
+	})
+}
+
+// scanFile reports up to maxFindingsPerFile line diagnostics for one file and
+// folds any further matches into a single per-file summary.
+func scanFile(file io.Reader, clean string, findings *report) error {
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 4096), 16<<20)
+	line, fileFindings := 0, 0
+	record := func(kind string) {
+		fileFindings++
+		if fileFindings > maxFindingsPerFile {
+			return
+		}
+		number := line
+		findings.add(1, func() string { return fmt.Sprintf("%q:%d: %s", clean, number, kind) })
+	}
+	for scanner.Scan() {
+		line++
+		value := scanner.Text()
+		if strings.Contains(value, "-----BEGIN ") && strings.Contains(value, "PRIVATE KEY-----") {
+			if clean == "cmd/repo-audit/main.go" {
 				continue
 			}
-			match := secretAssignment.FindStringSubmatch(value)
-			if len(match) == 3 && secretCandidate(match[2]) {
-				*findings = append(*findings, fmt.Sprintf("%s:%d: possible committed secret", clean, line))
-			}
+			record("private key material")
+			continue
 		}
-		return errors.Join(scanner.Err(), file.Close())
-	})
+		match := secretAssignment.FindStringSubmatch(value)
+		if len(match) == 3 && secretCandidate(match[2]) {
+			record("possible committed secret")
+		}
+	}
+	if extra := fileFindings - maxFindingsPerFile; extra > 0 {
+		findings.add(extra, func() string {
+			return fmt.Sprintf("%q: %d further findings in this file suppressed", clean, extra)
+		})
+	}
+	return scanner.Err()
 }
 
 func ignoredDirectory(name string) bool {
