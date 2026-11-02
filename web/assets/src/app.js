@@ -2411,12 +2411,12 @@ document.querySelectorAll("[data-route-date-preset]").forEach((button) => {
   button.addEventListener("click", () => {
     const input = document.querySelector(button.dataset.routeDateTarget || "[data-route-day-filter]");
     if (!input) return;
-    const date = new Date();
-    if (button.dataset.routeDatePreset === "tomorrow") date.setDate(date.getDate() + 1);
+    const today = new Date();
+    let offset = button.dataset.routeDatePreset === "tomorrow" ? 1 : 0;
     if (button.dataset.routeDatePreset === "business-day") {
-      do { date.setDate(date.getDate() + 1); } while ([0, 6].includes(date.getDay()));
+      do { offset += 1; } while ([0, 6].includes(new Date(`${viennaDateWithOffset(today, offset)}T12:00:00Z`).getUTCDay()));
     }
-    input.value = localDateValue(date);
+    input.value = viennaDateWithOffset(today, offset);
     input.dispatchEvent(new Event("change", { bubbles: true }));
   });
 });

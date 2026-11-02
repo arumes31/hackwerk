@@ -286,10 +286,11 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		chromedp.Evaluate(`document.querySelectorAll('[data-route-date-preset]').length === 3`, &routeDatePresets),
 		chromedp.Evaluate(`(() => {
 			const input=document.querySelector('[data-route-day-filter]');
-			const format=date=>[date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0')].join('-');
-			const today=new Date(), tomorrow=new Date(today), business=new Date(today);
-			tomorrow.setDate(tomorrow.getDate()+1);
-			do { business.setDate(business.getDate()+1); } while ([0,6].includes(business.getDay()));
+			const format=date=>date.toISOString().slice(0,10);
+			const viennaDay=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Vienna',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+			const today=new Date(viennaDay+'T12:00:00Z'), tomorrow=new Date(today), business=new Date(today);
+			tomorrow.setUTCDate(tomorrow.getUTCDate()+1);
+			do { business.setUTCDate(business.getUTCDate()+1); } while ([0,6].includes(business.getUTCDay()));
 			const actual=['today','tomorrow','business-day'].map(preset=>{document.querySelector('[data-route-date-preset="'+preset+'"]').click();return input.value});
 			return {Actual:actual,Expected:[format(today),format(tomorrow),format(business)]};
 		})()`, &routePresetAudit),
@@ -386,6 +387,9 @@ func TestTask12RoutePlannerDesktopAndDriverMobileJourney(t *testing.T) {
 		t.Fatal(browserDiagnostics(browser, err))
 	}
 	cancelDesktopRouteResult()
+	if strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") {
+		t.Fatalf("route date presets=%v, want Vienna calendar %v", routePresetAudit.Actual, routePresetAudit.Expected)
+	}
 	if !mapReady || !adminRouteContext || !mapToolbar || !routeDatePresets || strings.Join(routePresetAudit.Actual, ",") != strings.Join(routePresetAudit.Expected, ",") || candidateMarkerCount != 2 || startMarkerCount != 1 || !markerPresentation.TouchTarget || !markerPresentation.CompactHead || !markerPresentation.Pointed || markerPresentation.Scale == "" || !selectedByCard || !selectionFeedbackSpecific || !selectedMarkerState || !deselectedByKeyboard || !candidateSemantics || !selectedByMap || !driverAvailabilityShown || desktopOverflow || smallDesktopTarget || !desktopLayout.TwoColumns || !desktopLayout.MapAboveFold || !desktopLayout.CompactCandidate || !desktopLayout.BuilderWide || !desktopLayout.EndpointCardsReadable || !routeGeometryPresent || !routeStreetSource || !routeLineDrawn || !routeLineRendered || !routeLineAnnounced {
 		t.Fatalf("desktop route map-ready/admin/toolbar/presets/candidates/start/marker/card/selected/keyboard/semantics/map/availability/overflow/small-target/layout/geometry/street/line/rendered/notice=%v/%v/%v/%v/%d/%d/%+v/%v/%v/%v/%v/%v/%v/%v/%v/%+v/%v/%v/%v/%v/%v state=%q map-error=%q targets=%v", mapReady, adminRouteContext, mapToolbar, routeDatePresets, candidateMarkerCount, startMarkerCount, markerPresentation, selectedByCard, selectedMarkerState, deselectedByKeyboard, candidateSemantics, selectedByMap, driverAvailabilityShown, desktopOverflow, smallDesktopTarget, desktopLayout, routeGeometryPresent, routeStreetSource, routeLineDrawn, routeLineRendered, routeLineAnnounced, routeLineState, mapError, smallDesktopTargets)
 	}

@@ -502,7 +502,10 @@ func TestTask02BrowserJourney(t *testing.T) {
 		chromedp.Click(".waitlist-filter-menu > summary", chromedp.ByQuery),
 		chromedp.WaitVisible(".waitlist-filter-menu__panel", chromedp.ByQuery),
 		chromedp.Evaluate(`document.querySelector("#waitlist-list-controls [name='incomplete']").checked=true`, nil),
-		chromedp.Click(".waitlist-filter-menu .customer-filter-actions button[type='submit']", chromedp.ByQuery),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			_, err := chromedp.RunResponse(ctx, chromedp.Click(".waitlist-filter-menu .customer-filter-actions button[type='submit']", chromedp.ByQuery))
+			return err
+		}),
 		chromedp.WaitVisible(".waitlist-filter-chips", chromedp.ByQuery),
 		chromedp.Location(&waitlistLocation),
 	); err != nil {
