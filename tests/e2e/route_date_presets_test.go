@@ -38,6 +38,7 @@ func TestRouteDatePresetsUseViennaCalendar(t *testing.T) {
 	t.Cleanup(cancelBrowser)
 	browser, cancelTimeout := context.WithTimeout(browser, 60*time.Second)
 	t.Cleanup(cancelTimeout)
+	t.Cleanup(func() { _ = chromedp.Cancel(browser) })
 	for _, tc := range []struct {
 		name, now string
 		want      []string
