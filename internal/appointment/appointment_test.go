@@ -184,6 +184,83 @@ func TestCompleteAppointmentEnforcesRoleTimeAssignmentAndReason(t *testing.T) {
 	}
 }
 
+func TestCompleteAppointmentRejectsVersionOtherThanAuthorizedSnapshot(t *testing.T) {
+	now := testStart().Add(time.Hour)
+	value := assignedAppointment(LifecycleFixed, 3)
+	value.StartsAt = testStart()
+	value.EndsAt = testStart().Add(3 * time.Hour)
+	driverActor := auth.Actor{UserID: "driver-user", Role: auth.RoleDriver, DriverID: "driver-1"}
+	for _, version := range []int32{value.Version - 1, value.Version + 1} {
+		store := &fakeStore{current: value, driverCanComplete: true}
+		service, err := New(store, fakeAvailability{status: driver.StatusAvailable}, func() time.Time { return now })
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = service.CompleteAppointment(t.Context(), driverActor, CompleteInput{MutateInput: MutateInput{ID: value.ID, ExpectedVersion: version}})
+		if !errors.Is(err, ErrVersionConflict) || store.completeCalled {
+			t.Fatalf("CompleteAppointment(version %d) error = %v, persisted = %v", version, err, store.completeCalled)
+		}
+	}
+}
+
+func TestCompleteAppointmentForwardsAuthorizedGuardToStore(t *testing.T) {
+	now := testStart().Add(time.Hour)
+	value := assignedAppointment(LifecycleFixed, 3)
+	value.StartsAt = testStart()
+	value.EndsAt = testStart().Add(3 * time.Hour)
+	tests := []struct {
+		name  string
+		actor auth.Actor
+		guard CompletionGuard
+	}{
+		{name: "driver", actor: auth.Actor{UserID: "driver-user", Role: auth.RoleDriver, DriverID: "driver-1"}, guard: CompletionGuard{EligibleAt: now, DriverID: "driver-1"}},
+		{name: "admin", actor: testAdmin(), guard: CompletionGuard{EligibleAt: now}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeStore{current: value, driverCanComplete: true}
+			service, err := New(store, fakeAvailability{status: driver.StatusAvailable}, func() time.Time { return now })
+			if err != nil {
+				t.Fatal(err)
+			}
+			// A caller-supplied guard must be replaced by the authorized one.
+			input := CompleteInput{MutateInput: MutateInput{ID: value.ID, ExpectedVersion: value.Version}, Guard: CompletionGuard{EligibleAt: now.Add(48 * time.Hour)}}
+			if _, err := service.CompleteAppointment(t.Context(), test.actor, input); err != nil {
+				t.Fatal(err)
+			}
+			if store.lastComplete.Guard != test.guard {
+				t.Fatalf("forwarded guard = %#v, want %#v", store.lastComplete.Guard, test.guard)
+			}
+		})
+	}
+}
+
+func TestCompletionGuardCheck(t *testing.T) {
+	start := testStart()
+	tests := []struct {
+		name    string
+		guard   CompletionGuard
+		startAt time.Time
+		reason  string
+		wantErr error
+	}{
+		{name: "driver after start", guard: CompletionGuard{EligibleAt: start, DriverID: "driver-1"}, startAt: start},
+		{name: "driver before start", guard: CompletionGuard{EligibleAt: start.Add(-time.Minute), DriverID: "driver-1"}, startAt: start, reason: "override", wantErr: auth.ErrForbidden},
+		{name: "admin after start", guard: CompletionGuard{EligibleAt: start.Add(time.Minute)}, startAt: start},
+		{name: "admin early without reason", guard: CompletionGuard{EligibleAt: start.Add(-time.Minute)}, startAt: start, reason: "  ", wantErr: ErrValidation},
+		{name: "admin early with reason", guard: CompletionGuard{EligibleAt: start.Add(-time.Minute)}, startAt: start, reason: "Rückmeldung"},
+		{name: "missing guard", guard: CompletionGuard{}, startAt: start, wantErr: ErrValidation},
+		{name: "missing start", guard: CompletionGuard{EligibleAt: start}, wantErr: ErrValidation},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.guard.Check(test.startAt, test.reason); !errors.Is(err, test.wantErr) || (test.wantErr == nil && err != nil) {
+				t.Fatalf("Check() error = %v, want %v", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestReopenAppointmentRequiresAdminReasonAndCancelledVersion(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -748,6 +825,7 @@ type fakeStore struct {
 	lastReopen        ReopenInput
 	driverCanComplete bool
 	completeCalled    bool
+	lastComplete      CompleteInput
 }
 
 func (fake *fakeStore) Plan(_ context.Context, _ auth.Actor, input PlanInput, _ string) (Appointment, error) {
@@ -800,8 +878,9 @@ func (fake *fakeStore) Reopen(_ context.Context, _ auth.Actor, input ReopenInput
 	return fake.current, nil
 }
 
-func (fake *fakeStore) Complete(context.Context, auth.Actor, CompleteInput) (Appointment, error) {
+func (fake *fakeStore) Complete(_ context.Context, _ auth.Actor, input CompleteInput) (Appointment, error) {
 	fake.completeCalled = true
+	fake.lastComplete = input
 	return fake.current, nil
 }
 func (fake *fakeStore) Detail(context.Context, string) (Detail, error) {

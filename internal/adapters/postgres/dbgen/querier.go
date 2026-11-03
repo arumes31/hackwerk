@@ -36,6 +36,7 @@ type Querier interface {
 	ConsumeRecoveryCode(ctx context.Context, arg ConsumeRecoveryCodeParams) (int64, error)
 	CountActiveAdmins(ctx context.Context) (int64, error)
 	CountActiveWaitlist(ctx context.Context) (int64, error)
+	CountAvailabilityExceptionsInWindow(ctx context.Context, arg CountAvailabilityExceptionsInWindowParams) (int64, error)
 	CountCustomers(ctx context.Context, arg CountCustomersParams) (int64, error)
 	CountEnabledSecurityFactors(ctx context.Context, userID pgtype.UUID) (int32, error)
 	CountRecoveryCodes(ctx context.Context, userID pgtype.UUID) (int32, error)
@@ -65,7 +66,9 @@ type Querier interface {
 	DemoteOtherPrimaryDrivers(ctx context.Context, arg DemoteOtherPrimaryDriversParams) ([]string, error)
 	DiscardOtherPlanningSuggestions(ctx context.Context, arg DiscardOtherPlanningSuggestionsParams) error
 	DriverCanCompleteAppointment(ctx context.Context, arg DriverCanCompleteAppointmentParams) (bool, error)
-	EnableTOTPCredential(ctx context.Context, userID pgtype.UUID) (int64, error)
+	// Only the session that passed the password check may activate a pending
+	// enrollment, and only while that enrollment is still fresh.
+	EnableTOTPCredential(ctx context.Context, arg EnableTOTPCredentialParams) (int64, error)
 	ExpireVoiceDraft(ctx context.Context, arg ExpireVoiceDraftParams) (int64, error)
 	FailClaimedVoiceRecording(ctx context.Context, arg FailClaimedVoiceRecordingParams) (string, error)
 	FailVoiceDraft(ctx context.Context, arg FailVoiceDraftParams) (int64, error)
@@ -204,6 +207,7 @@ type Querier interface {
 	LockAppointmentResources(ctx context.Context, appointmentID pgtype.UUID) ([]string, error)
 	LockAvailabilityRulesForDay(ctx context.Context, arg LockAvailabilityRulesForDayParams) ([]LockAvailabilityRulesForDayRow, error)
 	LockCustomerForArchive(ctx context.Context, id pgtype.UUID) (int32, error)
+	LockDriverCompletionEligibility(ctx context.Context, arg LockDriverCompletionEligibilityParams) ([]string, error)
 	LockDriverForAvailability(ctx context.Context, id pgtype.UUID) (string, error)
 	LockDriverProfile(ctx context.Context, id pgtype.UUID) (LockDriverProfileRow, error)
 	LockFixedAppointmentForJobUpdate(ctx context.Context, jobID pgtype.UUID) (LockFixedAppointmentForJobUpdateRow, error)
@@ -217,6 +221,7 @@ type Querier interface {
 	// Serialize changes that can invalidate routing/travel-time suggestions. Row
 	// locks alone cannot protect against newly inserted or non-overlapping moves.
 	LockSchedulingMutation(ctx context.Context) error
+	LockUserCredential(ctx context.Context, id pgtype.UUID) (LockUserCredentialRow, error)
 	LockVoiceDraftForOwner(ctx context.Context, arg LockVoiceDraftForOwnerParams) (LockVoiceDraftForOwnerRow, error)
 	LockVoiceUploadKey(ctx context.Context, arg LockVoiceUploadKeyParams) error
 	MarkEmailVerificationExpired(ctx context.Context, id pgtype.UUID) error
@@ -252,7 +257,7 @@ type Querier interface {
 	ReopenCancelledAppointment(ctx context.Context, arg ReopenCancelledAppointmentParams) (int64, error)
 	RequeueNotification(ctx context.Context, id pgtype.UUID) (int64, error)
 	RequeueNotificationOutbox(ctx context.Context, notificationID pgtype.UUID) (int64, error)
-	ReserveLoginAttempt(ctx context.Context, keyHash []byte) (ReserveLoginAttemptRow, error)
+	ReserveLoginAttempt(ctx context.Context, arg ReserveLoginAttemptParams) (ReserveLoginAttemptRow, error)
 	ResetConfirmationResponse(ctx context.Context, id pgtype.UUID) (int64, error)
 	RestoreAppointmentSwapStatus(ctx context.Context, arg RestoreAppointmentSwapStatusParams) (int64, error)
 	RestoreWaitlistAfterCancellation(ctx context.Context, jobID pgtype.UUID) error

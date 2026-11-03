@@ -2,6 +2,7 @@
 package driver
 
 import (
+	"container/heap"
 	"context"
 	"errors"
 	"fmt"
@@ -15,11 +16,24 @@ import (
 
 const MaxResolveDays = 90
 
+// MaxExceptionsPerWindow bounds how many availability exceptions a driver may
+// have within MaxResolveDays before or after any stored exception. Because a
+// resolve range never exceeds MaxResolveDays, this also bounds the exceptions a
+// single availability resolution has to process.
+const MaxExceptionsPerWindow = 1000
+
+// resolveCancelCheckInterval controls how often the resolver polls ctx while
+// processing schedule layers.
+const resolveCancelCheckInterval = 256
+
 var (
 	ErrConflict   = errors.New("driver: version conflict")
 	ErrLocalTime  = errors.New("driver: ambiguous or nonexistent local time")
 	ErrNotFound   = errors.New("driver: not found")
 	ErrValidation = errors.New("driver: validation failed")
+	// ErrExceptionLimit is a validation error returned when a driver would
+	// exceed MaxExceptionsPerWindow availability exceptions.
+	ErrExceptionLimit = fmt.Errorf("%w: availability exception limit reached", ErrValidation)
 )
 
 type RuleStatus string
@@ -430,7 +444,7 @@ func (s *Service) ResolveAvailability(ctx context.Context, actor auth.Actor, dri
 	if err != nil {
 		return nil, err
 	}
-	return s.resolve(data, fromUTC.UTC(), toUTC.UTC())
+	return s.resolve(ctx, data, fromUTC.UTC(), toUTC.UTC())
 }
 
 func (s *Service) IsAvailable(ctx context.Context, actor auth.Actor, driverID string, fromUTC time.Time, toUTC time.Time) (Status, []string, error) {
@@ -446,11 +460,16 @@ func (s *Service) IsAvailable(ctx context.Context, actor auth.Actor, driverID st
 // It is used at persistence boundaries that must revalidate a schedule while
 // holding the same driver locks as the appointment mutation.
 func EvaluateAvailability(data Availability, fromUTC, toUTC time.Time, location *time.Location) (Status, []string, error) {
+	return EvaluateAvailabilityContext(context.Background(), data, fromUTC, toUTC, location)
+}
+
+// EvaluateAvailabilityContext is EvaluateAvailability with cancellation support.
+func EvaluateAvailabilityContext(ctx context.Context, data Availability, fromUTC, toUTC time.Time, location *time.Location) (Status, []string, error) {
 	if location == nil || location.String() != "Europe/Vienna" || validateRange(fromUTC, toUTC) != nil {
 		return StatusUnavailable, nil, ErrValidation
 	}
 	service := Service{location: location}
-	intervals, err := service.resolve(data, fromUTC, toUTC)
+	intervals, err := service.resolve(ctx, data, fromUTC, toUTC)
 	if err != nil {
 		return StatusUnavailable, nil, err
 	}
@@ -522,6 +541,33 @@ func (i ExceptionInput) Validate() error {
 		return ErrValidation
 	}
 	return nil
+}
+
+// ExceptionDensityWindow returns the range that must hold fewer than
+// MaxExceptionsPerWindow other exceptions before input may be stored: the
+// exception's own range widened by MaxResolveDays on both sides. Any resolve
+// range (at most MaxResolveDays long) that overlaps the exception lies within
+// this window, so enforcing the limit here bounds every resolution.
+func ExceptionDensityWindow(input ExceptionInput, location *time.Location) (fromUTC, toUTC time.Time, localFrom, localTo string, err error) {
+	if location == nil {
+		return time.Time{}, time.Time{}, "", "", ErrValidation
+	}
+	start, end := input.StartsAt.UTC(), input.EndsAt.UTC()
+	if input.IsAllDay {
+		date, parseErr := time.ParseInLocation(time.DateOnly, input.LocalDate, location)
+		if parseErr != nil {
+			return time.Time{}, time.Time{}, "", "", ErrValidation
+		}
+		start, end = date.UTC(), date.AddDate(0, 0, 1).UTC()
+	}
+	if !end.After(start) {
+		return time.Time{}, time.Time{}, "", "", ErrValidation
+	}
+	margin := MaxResolveDays * 24 * time.Hour
+	fromUTC, toUTC = start.Add(-margin), end.Add(margin)
+	localFrom = fromUTC.In(location).Format(time.DateOnly)
+	localTo = toUTC.Add(-time.Nanosecond).In(location).Format(time.DateOnly)
+	return fromUTC, toUTC, localFrom, localTo, nil
 }
 
 func (s RuleStatus) Valid() bool { return s == RuleAvailable || s == RuleLimited }
@@ -622,7 +668,10 @@ func normalizeException(input *ExceptionInput) {
 	input.EndsAt = input.EndsAt.UTC()
 }
 
-func (s *Service) resolve(data Availability, fromUTC time.Time, toUTC time.Time) ([]Interval, error) {
+// resolve paints the schedule layers onto the base interval. Layers are applied
+// in order (rules by date and rule order, then exceptions by priority and ID);
+// at every instant the last applied layer covering it wins.
+func (s *Service) resolve(ctx context.Context, data Availability, fromUTC time.Time, toUTC time.Time) ([]Interval, error) {
 	base := Interval{StartsAt: fromUTC, EndsAt: toUTC, Status: StatusUnavailable, Source: SourceNone, Reason: "keine gepflegte Verfügbarkeit"}
 	if !data.Profile.IsActive {
 		base.Source = SourceInactive
@@ -639,12 +688,18 @@ func (s *Service) resolve(data Availability, fromUTC time.Time, toUTC time.Time)
 			SourceType: string(policy), Reason: "Hauptfahrer standardmäßig verfügbar",
 		}}, nil
 	}
-	intervals := []Interval{base}
+	layers := make([]Interval, 0, len(data.Exceptions))
+	steps := 0
 	fromDate := localMidnight(fromUTC.In(s.location), s.location)
 	toDate := localMidnight(toUTC.Add(-time.Nanosecond).In(s.location), s.location)
 	for date := fromDate; policy != PolicyExplicitDates && !date.After(toDate); date = date.AddDate(0, 0, 1) {
 		dateText := date.Format(time.DateOnly)
 		for _, rule := range data.Rules {
+			if steps++; steps%resolveCancelCheckInterval == 0 {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+			}
 			if rule.Weekday != isoWeekday(date.Weekday()) || dateText < rule.ValidFrom || (rule.ValidUntil != "" && dateText > rule.ValidUntil) {
 				continue
 			}
@@ -660,7 +715,7 @@ func (s *Service) resolve(data Availability, fromUTC time.Time, toUTC time.Time)
 			if rule.Status == RuleLimited {
 				status = StatusLimited
 			}
-			intervals = overlay(intervals, clipped(Interval{
+			layers = appendLayer(layers, clipped(Interval{
 				StartsAt: start.UTC(), EndsAt: end.UTC(), Status: status, Source: SourceRule,
 				SourceType: string(rule.Status), Reason: ruleReason(rule.Status), InternalNote: rule.InternalNote,
 			}, fromUTC, toUTC))
@@ -674,6 +729,11 @@ func (s *Service) resolve(data Availability, fromUTC time.Time, toUTC time.Time)
 		return data.Exceptions[i].ID < data.Exceptions[j].ID
 	})
 	for _, exception := range data.Exceptions {
+		if steps++; steps%resolveCancelCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		if policy == PolicyExplicitDates && exception.Type != ExceptionAvailableOverride {
 			continue
 		}
@@ -685,10 +745,14 @@ func (s *Service) resolve(data Availability, fromUTC time.Time, toUTC time.Time)
 		if exception.Type == ExceptionAvailableOverride {
 			status = StatusAvailable
 		}
-		intervals = overlay(intervals, clipped(Interval{
+		layers = appendLayer(layers, clipped(Interval{
 			StartsAt: start, EndsAt: end, Status: status, Source: SourceException,
 			SourceType: string(exception.Type), Reason: exceptionReason(exception.Type), InternalNote: exception.InternalNote,
 		}, fromUTC, toUTC))
+	}
+	intervals, err := paint(ctx, base, layers)
+	if err != nil {
+		return nil, err
 	}
 	return merge(intervals), nil
 }
@@ -727,36 +791,85 @@ func (s *Service) exceptionRange(exception Exception) (time.Time, time.Time, err
 	return date.UTC(), date.AddDate(0, 0, 1).UTC(), nil
 }
 
-func overlay(intervals []Interval, applied Interval) []Interval {
-	if !applied.EndsAt.After(applied.StartsAt) {
-		return intervals
+func appendLayer(layers []Interval, layer Interval) []Interval {
+	if !layer.EndsAt.After(layer.StartsAt) {
+		return layers
 	}
-	result := make([]Interval, 0, len(intervals)+2)
-	for _, current := range intervals {
-		if !current.EndsAt.After(applied.StartsAt) || !applied.EndsAt.After(current.StartsAt) {
-			result = append(result, current)
+	return append(layers, layer)
+}
+
+// paint returns the disjoint fragments of base after applying layers in order,
+// where a later layer overrides earlier ones wherever they overlap. Every layer
+// must lie within base. It runs in O(n log n) using a boundary sweep: on each
+// elementary segment between consecutive boundaries the winner is the active
+// layer with the highest index, tracked in a max-heap with lazy removal.
+func paint(ctx context.Context, base Interval, layers []Interval) ([]Interval, error) {
+	if !base.EndsAt.After(base.StartsAt) {
+		return nil, nil
+	}
+	byStart := make([]int, len(layers))
+	boundaries := make([]time.Time, 0, 2*len(layers)+2)
+	boundaries = append(boundaries, base.StartsAt, base.EndsAt)
+	for index, layer := range layers {
+		byStart[index] = index
+		boundaries = append(boundaries, layer.StartsAt, layer.EndsAt)
+	}
+	sort.Slice(byStart, func(i int, j int) bool { return layers[byStart[i]].StartsAt.Before(layers[byStart[j]].StartsAt) })
+	sort.Slice(boundaries, func(i int, j int) bool { return boundaries[i].Before(boundaries[j]) })
+	unique := boundaries[:1]
+	for _, boundary := range boundaries[1:] {
+		if !boundary.Equal(unique[len(unique)-1]) {
+			unique = append(unique, boundary)
+		}
+	}
+	active := make(layerHeap, 0)
+	result := make([]Interval, 0, len(unique))
+	next := 0
+	lastWinner := -2
+	for index := 0; index+1 < len(unique); index++ {
+		if index%resolveCancelCheckInterval == resolveCancelCheckInterval-1 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		at := unique[index]
+		for next < len(byStart) && !layers[byStart[next]].StartsAt.After(at) {
+			heap.Push(&active, byStart[next])
+			next++
+		}
+		for len(active) > 0 && !layers[active[0]].EndsAt.After(at) {
+			heap.Pop(&active)
+		}
+		winner := -1
+		segment := base
+		if len(active) > 0 {
+			winner = active[0]
+			segment = layers[winner]
+		}
+		if winner == lastWinner {
+			result[len(result)-1].EndsAt = unique[index+1]
 			continue
 		}
-		if current.StartsAt.Before(applied.StartsAt) {
-			left := current
-			left.EndsAt = applied.StartsAt
-			result = append(result, left)
-		}
-		middle := applied
-		if middle.StartsAt.Before(current.StartsAt) {
-			middle.StartsAt = current.StartsAt
-		}
-		if middle.EndsAt.After(current.EndsAt) {
-			middle.EndsAt = current.EndsAt
-		}
-		result = append(result, middle)
-		if current.EndsAt.After(applied.EndsAt) {
-			right := current
-			right.StartsAt = applied.EndsAt
-			result = append(result, right)
-		}
+		segment.StartsAt = at
+		segment.EndsAt = unique[index+1]
+		result = append(result, segment)
+		lastWinner = winner
 	}
-	return result
+	return result, nil
+}
+
+// layerHeap is a max-heap of layer indices; a higher index was applied later.
+type layerHeap []int
+
+func (h layerHeap) Len() int           { return len(h) }
+func (h layerHeap) Less(i, j int) bool { return h[i] > h[j] }
+func (h layerHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *layerHeap) Push(value any)    { *h = append(*h, value.(int)) }
+func (h *layerHeap) Pop() any {
+	old := *h
+	value := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return value
 }
 
 func clipped(interval Interval, fromUTC time.Time, toUTC time.Time) Interval {

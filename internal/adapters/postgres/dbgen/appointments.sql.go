@@ -916,6 +916,41 @@ func (q *Queries) LockAppointmentResources(ctx context.Context, appointmentID pg
 	return items, nil
 }
 
+const lockDriverCompletionEligibility = `-- name: LockDriverCompletionEligibility :many
+SELECT ad.driver_id::text
+FROM appointment_drivers ad
+JOIN drivers d ON d.id = ad.driver_id
+WHERE ad.appointment_id = $1::uuid
+  AND ad.driver_id = $2::uuid
+  AND d.active AND d.can_complete_jobs
+FOR SHARE OF ad, d
+`
+
+type LockDriverCompletionEligibilityParams struct {
+	AppointmentID pgtype.UUID
+	DriverID      pgtype.UUID
+}
+
+func (q *Queries) LockDriverCompletionEligibility(ctx context.Context, arg LockDriverCompletionEligibilityParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, lockDriverCompletionEligibility, arg.AppointmentID, arg.DriverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var ad_driver_id string
+		if err := rows.Scan(&ad_driver_id); err != nil {
+			return nil, err
+		}
+		items = append(items, ad_driver_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockSchedulingMutation = `-- name: LockSchedulingMutation :exec
 SELECT pg_advisory_xact_lock(1214342235, 1396919884)
 `

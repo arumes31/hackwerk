@@ -288,12 +288,22 @@ func (q *Queries) DeleteWebAuthnRegistrationChallengesForUser(ctx context.Contex
 }
 
 const enableTOTPCredential = `-- name: EnableTOTPCredential :execrows
-UPDATE user_totp_credentials SET enabled_at=now(), updated_at=now()
+UPDATE user_totp_credentials SET enabled_at=now(), enrollment_session_id=NULL, updated_at=now()
 WHERE user_id=$1::uuid AND enabled_at IS NULL
+  AND enrollment_session_id=$2::uuid
+  AND updated_at > $3::timestamptz
 `
 
-func (q *Queries) EnableTOTPCredential(ctx context.Context, userID pgtype.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, enableTOTPCredential, userID)
+type EnableTOTPCredentialParams struct {
+	UserID              pgtype.UUID
+	EnrollmentSessionID pgtype.UUID
+	PendingSince        pgtype.Timestamptz
+}
+
+// Only the session that passed the password check may activate a pending
+// enrollment, and only while that enrollment is still fresh.
+func (q *Queries) EnableTOTPCredential(ctx context.Context, arg EnableTOTPCredentialParams) (int64, error) {
+	result, err := q.db.Exec(ctx, enableTOTPCredential, arg.UserID, arg.EnrollmentSessionID, arg.PendingSince)
 	if err != nil {
 		return 0, err
 	}
@@ -717,16 +727,19 @@ func (q *Queries) GetPendingEmailVerification(ctx context.Context, userID pgtype
 }
 
 const getTOTPCredential = `-- name: GetTOTPCredential :one
-SELECT name, secret_key_id, secret_ciphertext, enabled_at, last_used_step
+SELECT name, secret_key_id, secret_ciphertext, enabled_at, last_used_step,
+       COALESCE(enrollment_session_id::text, '')::text AS enrollment_session_id, updated_at
 FROM user_totp_credentials WHERE user_id=$1::uuid
 `
 
 type GetTOTPCredentialRow struct {
-	Name             string
-	SecretKeyID      string
-	SecretCiphertext []byte
-	EnabledAt        pgtype.Timestamptz
-	LastUsedStep     *int64
+	Name                string
+	SecretKeyID         string
+	SecretCiphertext    []byte
+	EnabledAt           pgtype.Timestamptz
+	LastUsedStep        *int64
+	EnrollmentSessionID string
+	UpdatedAt           pgtype.Timestamptz
 }
 
 func (q *Queries) GetTOTPCredential(ctx context.Context, userID pgtype.UUID) (GetTOTPCredentialRow, error) {
@@ -738,6 +751,8 @@ func (q *Queries) GetTOTPCredential(ctx context.Context, userID pgtype.UUID) (Ge
 		&i.SecretCiphertext,
 		&i.EnabledAt,
 		&i.LastUsedStep,
+		&i.EnrollmentSessionID,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1127,6 +1142,22 @@ func (q *Queries) ListWebAuthnCredentials(ctx context.Context, userID pgtype.UUI
 	return items, nil
 }
 
+const lockUserCredential = `-- name: LockUserCredential :one
+SELECT password_hash, active FROM users WHERE id = $1::uuid FOR UPDATE
+`
+
+type LockUserCredentialRow struct {
+	PasswordHash string
+	Active       bool
+}
+
+func (q *Queries) LockUserCredential(ctx context.Context, id pgtype.UUID) (LockUserCredentialRow, error) {
+	row := q.db.QueryRow(ctx, lockUserCredential, id)
+	var i LockUserCredentialRow
+	err := row.Scan(&i.PasswordHash, &i.Active)
+	return i, err
+}
+
 const markEmailVerificationExpired = `-- name: MarkEmailVerificationExpired :exec
 UPDATE user_email_verifications SET status='expired', updated_at=now()
 WHERE id=$1::uuid AND status='pending'
@@ -1244,19 +1275,24 @@ const reserveLoginAttempt = `-- name: ReserveLoginAttempt :one
 INSERT INTO auth_rate_limits (key_hash, window_started_at, failure_count)
 VALUES ($1, now(), 1)
 ON CONFLICT (key_hash) DO UPDATE
-SET failure_count = CASE WHEN auth_rate_limits.window_started_at < now() - interval '1 minute' THEN 1 ELSE auth_rate_limits.failure_count + 1 END,
-    window_started_at = CASE WHEN auth_rate_limits.window_started_at < now() - interval '1 minute' THEN now() ELSE auth_rate_limits.window_started_at END,
+SET failure_count = CASE WHEN auth_rate_limits.window_started_at < now() - make_interval(secs => $2::double precision) THEN 1 ELSE auth_rate_limits.failure_count + 1 END,
+    window_started_at = CASE WHEN auth_rate_limits.window_started_at < now() - make_interval(secs => $2::double precision) THEN now() ELSE auth_rate_limits.window_started_at END,
     updated_at = now()
 RETURNING window_started_at, failure_count
 `
+
+type ReserveLoginAttemptParams struct {
+	KeyHash       []byte
+	WindowSeconds float64
+}
 
 type ReserveLoginAttemptRow struct {
 	WindowStartedAt pgtype.Timestamptz
 	FailureCount    int32
 }
 
-func (q *Queries) ReserveLoginAttempt(ctx context.Context, keyHash []byte) (ReserveLoginAttemptRow, error) {
-	row := q.db.QueryRow(ctx, reserveLoginAttempt, keyHash)
+func (q *Queries) ReserveLoginAttempt(ctx context.Context, arg ReserveLoginAttemptParams) (ReserveLoginAttemptRow, error) {
+	row := q.db.QueryRow(ctx, reserveLoginAttempt, arg.KeyHash, arg.WindowSeconds)
 	var i ReserveLoginAttemptRow
 	err := row.Scan(&i.WindowStartedAt, &i.FailureCount)
 	return i, err
@@ -1512,19 +1548,21 @@ func (q *Queries) UpdateWebAuthnCredential(ctx context.Context, arg UpdateWebAut
 }
 
 const upsertTOTPEnrollment = `-- name: UpsertTOTPEnrollment :execrows
-INSERT INTO user_totp_credentials (user_id, name, secret_key_id, secret_ciphertext)
-VALUES ($1::uuid, $2, $3, $4)
+INSERT INTO user_totp_credentials (user_id, name, secret_key_id, secret_ciphertext, enrollment_session_id)
+VALUES ($1::uuid, $2, $3, $4, $5::uuid)
 ON CONFLICT (user_id) DO UPDATE
 SET name=EXCLUDED.name, secret_key_id=EXCLUDED.secret_key_id,
-    secret_ciphertext=EXCLUDED.secret_ciphertext, enabled_at=NULL, last_used_step=NULL, updated_at=now()
+    secret_ciphertext=EXCLUDED.secret_ciphertext, enrollment_session_id=EXCLUDED.enrollment_session_id,
+    enabled_at=NULL, last_used_step=NULL, updated_at=now()
 WHERE user_totp_credentials.enabled_at IS NULL
 `
 
 type UpsertTOTPEnrollmentParams struct {
-	UserID           pgtype.UUID
-	Name             string
-	SecretKeyID      string
-	SecretCiphertext []byte
+	UserID              pgtype.UUID
+	Name                string
+	SecretKeyID         string
+	SecretCiphertext    []byte
+	EnrollmentSessionID pgtype.UUID
 }
 
 func (q *Queries) UpsertTOTPEnrollment(ctx context.Context, arg UpsertTOTPEnrollmentParams) (int64, error) {
@@ -1533,6 +1571,7 @@ func (q *Queries) UpsertTOTPEnrollment(ctx context.Context, arg UpsertTOTPEnroll
 		arg.Name,
 		arg.SecretKeyID,
 		arg.SecretCiphertext,
+		arg.EnrollmentSessionID,
 	)
 	if err != nil {
 		return 0, err

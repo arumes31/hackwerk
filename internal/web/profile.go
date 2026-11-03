@@ -129,7 +129,7 @@ func verifyProfileEmail(identity *auth.Service, dependencies Dependencies, page 
 func beginTOTPEnrollment(identity *auth.Service, dependencies Dependencies, page templates.PageData) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
-		enrollment, err := identity.BeginTOTPEnrollment(request.Context(), session.Actor, request.Form.Get("name"), middleware.GetReqID(request.Context()))
+		enrollment, err := identity.BeginTOTPEnrollment(request.Context(), session.Actor, session.ID, request.Form.Get("name"), middleware.GetReqID(request.Context()))
 		if err != nil {
 			renderProfile(response, request, identity, dependencies, page, profileRenderState{Error: "Die Authenticator-App konnte nicht vorbereitet werden.", Status: http.StatusUnprocessableEntity})
 			return
@@ -141,7 +141,7 @@ func beginTOTPEnrollment(identity *auth.Service, dependencies Dependencies, page
 func confirmTOTPEnrollment(identity *auth.Service, dependencies Dependencies, page templates.PageData) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		session, _ := sessionFromContext(request.Context())
-		codes, err := identity.ConfirmTOTPEnrollment(request.Context(), session.Actor, request.Form.Get("code"), middleware.GetReqID(request.Context()))
+		codes, err := identity.ConfirmTOTPEnrollment(request.Context(), session.Actor, session.ID, request.Form.Get("code"), middleware.GetReqID(request.Context()))
 		if err != nil {
 			renderProfile(response, request, identity, dependencies, page, profileRenderState{Error: "Der sechsstellige Code ist ungültig oder abgelaufen. Starten Sie die Einrichtung bei Bedarf neu.", Status: http.StatusUnprocessableEntity})
 			return
@@ -333,7 +333,11 @@ func completeMFALogin(identity *auth.Service, dependencies Dependencies, page te
 			err = auth.ErrInvalidMFA
 		}
 		if err != nil {
-			renderMFAError(response, request, identity, dependencies, page, http.StatusUnauthorized)
+			status := http.StatusUnauthorized
+			if errors.Is(err, auth.ErrRateLimited) {
+				status = http.StatusTooManyRequests
+			}
+			renderMFAError(response, request, identity, dependencies, page, status)
 			return
 		}
 		finishMFAResponse(response, request, dependencies, tokens)
