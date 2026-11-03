@@ -344,7 +344,31 @@ func customerEmailURL(value string) string {
 	if err != nil || address.Address != value || strings.ContainsAny(value, "\r\n") {
 		return ""
 	}
-	return (&url.URL{Scheme: "mailto", Opaque: address.Address}).String()
+	return "mailto:" + mailtoAddressEscape(address.Address)
+}
+
+// mailtoAddressEscape percent-encodes an addr-spec for the RFC 6068 "to" part.
+// Only unreserved characters and the delimiters that cannot start a header,
+// recipient list or fragment stay literal; everything else, including UTF-8
+// bytes, is encoded so a stored address cannot inject mailto fields.
+func mailtoAddressEscape(address string) string {
+	const hex = "0123456789ABCDEF"
+	var builder strings.Builder
+	builder.Grow(len(address))
+	for index := 0; index < len(address); index++ {
+		char := address[index]
+		switch {
+		case 'a' <= char && char <= 'z', 'A' <= char && char <= 'Z', '0' <= char && char <= '9':
+			builder.WriteByte(char)
+		case strings.IndexByte("-._~!$*+@", char) >= 0:
+			builder.WriteByte(char)
+		default:
+			builder.WriteByte('%')
+			builder.WriteByte(hex[char>>4])
+			builder.WriteByte(hex[char&0x0F])
+		}
+	}
+	return builder.String()
 }
 
 templ formErrorSummary(message string, fieldErrors []FormFieldError) {

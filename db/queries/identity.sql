@@ -49,6 +49,9 @@ SET password_hash = sqlc.arg(password_hash), must_change_password = sqlc.arg(mus
     version = version + 1, updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND version = sqlc.arg(expected_version);
 
+-- name: LockUserCredential :one
+SELECT password_hash, active FROM users WHERE id = sqlc.arg(id)::uuid FOR UPDATE;
+
 -- name: MarkLogin :exec
 UPDATE users SET last_login_at = now(), updated_at = now() WHERE id = sqlc.arg(id)::uuid;
 
@@ -102,8 +105,8 @@ DELETE FROM sessions WHERE revoked_at IS NOT NULL OR idle_expires_at <= now() OR
 INSERT INTO auth_rate_limits (key_hash, window_started_at, failure_count)
 VALUES (sqlc.arg(key_hash), now(), 1)
 ON CONFLICT (key_hash) DO UPDATE
-SET failure_count = CASE WHEN auth_rate_limits.window_started_at < now() - interval '1 minute' THEN 1 ELSE auth_rate_limits.failure_count + 1 END,
-    window_started_at = CASE WHEN auth_rate_limits.window_started_at < now() - interval '1 minute' THEN now() ELSE auth_rate_limits.window_started_at END,
+SET failure_count = CASE WHEN auth_rate_limits.window_started_at < now() - make_interval(secs => sqlc.arg(window_seconds)::double precision) THEN 1 ELSE auth_rate_limits.failure_count + 1 END,
+    window_started_at = CASE WHEN auth_rate_limits.window_started_at < now() - make_interval(secs => sqlc.arg(window_seconds)::double precision) THEN now() ELSE auth_rate_limits.window_started_at END,
     updated_at = now()
 RETURNING window_started_at, failure_count;
 
@@ -238,20 +241,26 @@ JOIN users u ON u.id=ev.user_id AND u.active
 WHERE ev.id=sqlc.arg(id)::uuid;
 
 -- name: UpsertTOTPEnrollment :execrows
-INSERT INTO user_totp_credentials (user_id, name, secret_key_id, secret_ciphertext)
-VALUES (sqlc.arg(user_id)::uuid, sqlc.arg(name), sqlc.arg(secret_key_id), sqlc.arg(secret_ciphertext))
+INSERT INTO user_totp_credentials (user_id, name, secret_key_id, secret_ciphertext, enrollment_session_id)
+VALUES (sqlc.arg(user_id)::uuid, sqlc.arg(name), sqlc.arg(secret_key_id), sqlc.arg(secret_ciphertext), sqlc.arg(enrollment_session_id)::uuid)
 ON CONFLICT (user_id) DO UPDATE
 SET name=EXCLUDED.name, secret_key_id=EXCLUDED.secret_key_id,
-    secret_ciphertext=EXCLUDED.secret_ciphertext, enabled_at=NULL, last_used_step=NULL, updated_at=now()
+    secret_ciphertext=EXCLUDED.secret_ciphertext, enrollment_session_id=EXCLUDED.enrollment_session_id,
+    enabled_at=NULL, last_used_step=NULL, updated_at=now()
 WHERE user_totp_credentials.enabled_at IS NULL;
 
 -- name: GetTOTPCredential :one
-SELECT name, secret_key_id, secret_ciphertext, enabled_at, last_used_step
+SELECT name, secret_key_id, secret_ciphertext, enabled_at, last_used_step,
+       COALESCE(enrollment_session_id::text, '')::text AS enrollment_session_id, updated_at
 FROM user_totp_credentials WHERE user_id=sqlc.arg(user_id)::uuid;
 
 -- name: EnableTOTPCredential :execrows
-UPDATE user_totp_credentials SET enabled_at=now(), updated_at=now()
-WHERE user_id=sqlc.arg(user_id)::uuid AND enabled_at IS NULL;
+-- Only the session that passed the password check may activate a pending
+-- enrollment, and only while that enrollment is still fresh.
+UPDATE user_totp_credentials SET enabled_at=now(), enrollment_session_id=NULL, updated_at=now()
+WHERE user_id=sqlc.arg(user_id)::uuid AND enabled_at IS NULL
+  AND enrollment_session_id=sqlc.arg(enrollment_session_id)::uuid
+  AND updated_at > sqlc.arg(pending_since)::timestamptz;
 
 -- name: RecordTOTPStep :execrows
 UPDATE user_totp_credentials SET last_used_step=sqlc.arg(step), updated_at=now()

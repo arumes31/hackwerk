@@ -463,14 +463,15 @@ type UserRecoveryCode struct {
 }
 
 type UserTotpCredential struct {
-	UserID           pgtype.UUID
-	Name             string
-	SecretKeyID      string
-	SecretCiphertext []byte
-	EnabledAt        pgtype.Timestamptz
-	LastUsedStep     *int64
-	CreatedAt        pgtype.Timestamptz
-	UpdatedAt        pgtype.Timestamptz
+	UserID              pgtype.UUID
+	Name                string
+	SecretKeyID         string
+	SecretCiphertext    []byte
+	EnabledAt           pgtype.Timestamptz
+	LastUsedStep        *int64
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+	EnrollmentSessionID pgtype.UUID
 }
 
 type UserWebauthnCredential struct {

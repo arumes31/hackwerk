@@ -206,9 +206,14 @@ func (store *IdentityStore) UpsertTOTPEnrollment(ctx context.Context, actor auth
 	if err != nil {
 		return auth.ErrNotFound
 	}
+	sessionID, err := uuid(credential.EnrollmentSessionID)
+	if err != nil {
+		return auth.ErrForbidden
+	}
 	return store.transaction(ctx, pgx.TxOptions{}, func(queries *dbgen.Queries, _ pgx.Tx) error {
 		rows, err := queries.UpsertTOTPEnrollment(ctx, dbgen.UpsertTOTPEnrollmentParams{
 			UserID: id, Name: credential.Name, SecretKeyID: credential.SecretKeyID, SecretCiphertext: credential.SecretCiphertext,
+			EnrollmentSessionID: sessionID,
 		})
 		if err != nil {
 			return err
@@ -232,16 +237,23 @@ func (store *IdentityStore) TOTPCredential(ctx context.Context, userID string) (
 	return auth.TOTPCredential{
 		Name: row.Name, SecretKeyID: row.SecretKeyID, SecretCiphertext: append([]byte(nil), row.SecretCiphertext...),
 		EnabledAt: optionalTime(row.EnabledAt), LastUsedStep: row.LastUsedStep,
+		EnrollmentSessionID: row.EnrollmentSessionID, UpdatedAt: row.UpdatedAt.Time,
 	}, nil
 }
 
-func (store *IdentityStore) EnableTOTP(ctx context.Context, actor auth.Actor, recoveryHashes [][]byte, requestID string) error {
+func (store *IdentityStore) EnableTOTP(ctx context.Context, actor auth.Actor, sessionID string, pendingSince time.Time, recoveryHashes [][]byte, requestID string) error {
 	return store.transaction(ctx, pgx.TxOptions{}, func(queries *dbgen.Queries, _ pgx.Tx) error {
 		id, err := uuid(actor.UserID)
 		if err != nil {
 			return auth.ErrNotFound
 		}
-		rows, err := queries.EnableTOTPCredential(ctx, id)
+		enrollmentSessionID, err := uuid(sessionID)
+		if err != nil {
+			return auth.ErrInvalidInput
+		}
+		rows, err := queries.EnableTOTPCredential(ctx, dbgen.EnableTOTPCredentialParams{
+			UserID: id, EnrollmentSessionID: enrollmentSessionID, PendingSince: timestamp(pendingSince),
+		})
 		if err != nil {
 			return err
 		}
@@ -405,11 +417,16 @@ func (store *IdentityStore) ReplaceRecoveryCodes(ctx context.Context, actor auth
 	})
 }
 
-func (store *IdentityStore) StartLoginChallenge(ctx context.Context, user auth.User, tokenHash []byte, expiresAt time.Time, replacementHash, rateKey []byte, requestID string) error {
+// StartLoginChallenge records a password-verified login that still needs a
+// second factor. Login failure budgets stay intact until that factor succeeds.
+func (store *IdentityStore) StartLoginChallenge(ctx context.Context, user auth.User, tokenHash []byte, expiresAt time.Time, replacementHash []byte, requestID string) error {
 	return store.transaction(ctx, pgx.TxOptions{}, func(queries *dbgen.Queries, _ pgx.Tx) error {
 		id, err := uuid(user.ID)
 		if err != nil {
 			return auth.ErrNotFound
+		}
+		if err := lockVerifiedCredential(ctx, queries, id, user); err != nil {
+			return err
 		}
 		if len(replacementHash) > 0 {
 			rows, err := queries.UpdatePassword(ctx, dbgen.UpdatePasswordParams{PasswordHash: string(replacementHash), MustChangePassword: user.MustChangePassword, ID: id, ExpectedVersion: user.Version})
@@ -421,9 +438,6 @@ func (store *IdentityStore) StartLoginChallenge(ctx context.Context, user auth.U
 			}
 		}
 		if err := queries.InsertLoginChallenge(ctx, dbgen.InsertLoginChallengeParams{UserID: id, TokenHash: tokenHash, ExpiresAt: timestamp(expiresAt)}); err != nil {
-			return err
-		}
-		if err := queries.ClearLoginFailures(ctx, rateKey); err != nil {
 			return err
 		}
 		return insertAudit(ctx, queries, actorForUser(user), "auth.second_factor_started", "user", user.ID, requestID, []string{"login_challenge"})
@@ -464,6 +478,16 @@ func (store *IdentityStore) RecordLoginChallengeFailure(ctx context.Context, tok
 
 func (store *IdentityStore) CompleteLogin(ctx context.Context, input auth.CompleteLoginInput) error {
 	return store.transaction(ctx, pgx.TxOptions{}, func(queries *dbgen.Queries, _ pgx.Tx) error {
+		userID, err := uuid(input.NewSession.UserID)
+		if err != nil {
+			return auth.ErrInvalidMFA
+		}
+		// Locking the account first serializes completion with password
+		// changes, which delete pending challenges under the same lock.
+		credential, err := queries.LockUserCredential(ctx, userID)
+		if err != nil || !credential.Active {
+			return auth.ErrInvalidMFA
+		}
 		challenge, err := queries.GetLoginChallenge(ctx, input.ChallengeTokenHash)
 		if err != nil || challenge.CUserID != input.NewSession.UserID || !challenge.Active {
 			return auth.ErrInvalidMFA
@@ -473,10 +497,6 @@ func (store *IdentityStore) CompleteLogin(ctx context.Context, input auth.Comple
 			return err
 		}
 		if rows != 1 {
-			return auth.ErrInvalidMFA
-		}
-		userID, err := uuid(input.NewSession.UserID)
-		if err != nil {
 			return auth.ErrInvalidMFA
 		}
 		switch input.Factor {
@@ -512,6 +532,11 @@ func (store *IdentityStore) CompleteLogin(ctx context.Context, input auth.Comple
 		}
 		if err := queries.MarkLogin(ctx, userID); err != nil {
 			return err
+		}
+		for _, key := range input.ClearRateKeys {
+			if err := queries.ClearLoginFailures(ctx, key); err != nil {
+				return err
+			}
 		}
 		return insertAudit(ctx, queries, actorForUser(auth.User{ID: input.NewSession.UserID, Username: challenge.UUsername, DisplayName: challenge.DisplayName, Role: auth.Role(challenge.Role)}), "auth.login", "user", input.NewSession.UserID, input.RequestID, []string{"last_login_at", "session", "second_factor"})
 	})

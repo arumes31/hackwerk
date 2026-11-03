@@ -371,6 +371,37 @@ type ReopenInput struct {
 type CompleteInput struct {
 	MutateInput
 	OverrideReason string
+	// Guard is set by Service.CompleteAppointment from the authorized actor;
+	// stores re-check it against the row locked for the mutation.
+	Guard CompletionGuard
+}
+
+// CompletionGuard captures the completion eligibility that was authorized so
+// the store can re-validate it inside the mutation transaction.
+type CompletionGuard struct {
+	// EligibleAt is the instant used for the start-time check.
+	EligibleAt time.Time
+	// DriverID is the completing driver; empty means an administrator.
+	DriverID string
+}
+
+// Check validates completion eligibility against the appointment start. The
+// store must additionally confirm driver authority for a non-empty DriverID.
+func (g CompletionGuard) Check(startsAt time.Time, overrideReason string) error {
+	if g.EligibleAt.IsZero() || startsAt.IsZero() {
+		return ErrValidation
+	}
+	early := g.EligibleAt.Before(startsAt)
+	if g.DriverID != "" {
+		if early {
+			return auth.ErrForbidden
+		}
+		return nil
+	}
+	if early && strings.TrimSpace(overrideReason) == "" {
+		return ErrValidation
+	}
+	return nil
 }
 
 type FixInput struct {
@@ -830,6 +861,11 @@ func (s *Service) CompleteAppointment(ctx context.Context, actor auth.Actor, inp
 	if err != nil {
 		return Appointment{}, err
 	}
+	// Authorization below is evaluated on this snapshot, so only its exact
+	// version may be mutated; a newer anticipated version must not slip past.
+	if current.Version != input.ExpectedVersion {
+		return Appointment{}, ErrVersionConflict
+	}
 	if current.Lifecycle != LifecycleFixed {
 		return Appointment{}, ErrTransition
 	}
@@ -837,14 +873,17 @@ func (s *Service) CompleteAppointment(ctx context.Context, actor auth.Actor, inp
 	if len([]rune(input.OverrideReason)) > 1000 {
 		return Appointment{}, ErrValidation
 	}
-	if actor.Role == auth.RoleAdmin {
-		if s.now().Before(current.StartsAt) && input.OverrideReason == "" {
-			return Appointment{}, ErrValidation
-		}
-	} else {
-		if actor.DriverID == "" || s.now().Before(current.StartsAt) {
+	input.Guard = CompletionGuard{EligibleAt: s.now()}
+	if actor.Role != auth.RoleAdmin {
+		if actor.DriverID == "" {
 			return Appointment{}, auth.ErrForbidden
 		}
+		input.Guard.DriverID = actor.DriverID
+	}
+	if err := input.Guard.Check(current.StartsAt, input.OverrideReason); err != nil {
+		return Appointment{}, err
+	}
+	if input.Guard.DriverID != "" {
 		allowed, canErr := s.store.DriverCanComplete(ctx, input.ID, actor.DriverID)
 		if canErr != nil {
 			return Appointment{}, canErr

@@ -271,7 +271,15 @@ func TestPersonalProfileSecurityLifecycle(t *testing.T) {
 		t.Fatalf("stored email = %q, %v", storedEmail, err)
 	}
 
-	enrollment, err := service.BeginTOTPEnrollment(ctx, first.Actor, "Diensthandy", "totp-start")
+	firstSession, err := service.Authenticate(ctx, first.SessionToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondSession, err := service.Authenticate(ctx, second.SessionToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrollment, err := service.BeginTOTPEnrollment(ctx, first.Actor, firstSession.ID, "Diensthandy", "totp-start")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +287,11 @@ func TestPersonalProfileSecurityLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recoveryCodes, err := service.ConfirmTOTPEnrollment(ctx, first.Actor, code, "totp-confirm")
+	// Another session of the same account must not confirm the pending enrollment.
+	if _, err := service.ConfirmTOTPEnrollment(ctx, second.Actor, secondSession.ID, code, "totp-confirm-other"); !errors.Is(err, auth.ErrInvalidInput) {
+		t.Fatalf("TOTP confirm from other session error = %v", err)
+	}
+	recoveryCodes, err := service.ConfirmTOTPEnrollment(ctx, first.Actor, firstSession.ID, code, "totp-confirm")
 	if err != nil || len(recoveryCodes) != 8 {
 		t.Fatalf("TOTP confirm codes=%d err=%v", len(recoveryCodes), err)
 	}
@@ -311,6 +323,25 @@ func TestPersonalProfileSecurityLifecycle(t *testing.T) {
 	}
 	if _, err := service.CompleteRecoveryLogin(ctx, recoveryReplay.MFAChallengeToken, recoveryCodes[0], "Edge auf Windows", "recovery-replay"); !errors.Is(err, auth.ErrInvalidMFA) {
 		t.Fatalf("recovery replay error = %v", err)
+	}
+	staleChallenge, err := service.LoginWithDevice(ctx, "profile-driver", password, "client-g", "Edge auf Windows", "stale-start")
+	if err != nil || !staleChallenge.MFARequired {
+		t.Fatalf("stale challenge = %#v, %v", staleChallenge, err)
+	}
+	var passwordVersion int32
+	if err := pool.QueryRow(ctx, "SELECT version FROM users WHERE id=$1", userID).Scan(&passwordVersion); err != nil {
+		t.Fatal(err)
+	}
+	newPassword := "Ein neues sicheres Fahrerpasswort 2026"
+	if err := service.ChangeOwnPassword(ctx, first.Actor, newPassword, passwordVersion); err != nil {
+		t.Fatal(err)
+	}
+	// A challenge earned with the replaced password must not create a session.
+	if _, err := service.CompleteRecoveryLogin(ctx, staleChallenge.MFAChallengeToken, recoveryCodes[1], "Edge auf Windows", "stale-complete"); !errors.Is(err, auth.ErrInvalidMFA) {
+		t.Fatalf("stale challenge completion error = %v", err)
+	}
+	if _, err := service.LoginWithDevice(ctx, "profile-driver", password, "client-h", "Edge auf Windows", "old-password"); !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("old password login error = %v", err)
 	}
 
 	otherID, err := service.CreateUser(ctx, system, auth.CreateUserInput{Username: "other-driver", DisplayName: "Other", Role: auth.RoleDriver, Password: "Ein anderes sicheres Passwort 2026"})

@@ -86,6 +86,35 @@ func TestOperationsPersistence(t *testing.T) {
 		}
 	})
 
+	t.Run("availability exception density is bounded per window", func(t *testing.T) {
+		ctx, pool, drivers, _, _, owner, _ := operationsFixture(t)
+		if _, err := pool.Exec(ctx, `INSERT INTO availability_exceptions (driver_id, exception_type, all_day, starts_at, ends_at)
+			SELECT $1::uuid, 'unavailable', false, timestamptz '2026-09-01 00:00:00Z' + n * interval '10 minutes',
+			       timestamptz '2026-09-01 00:05:00Z' + n * interval '10 minutes'
+			FROM generate_series(0, $2::int - 1) AS n`, owner.DriverID, driver.MaxExceptionsPerWindow); err != nil {
+			t.Fatal(err)
+		}
+		near := driver.ExceptionInput{Type: driver.ExceptionSick, IsAllDay: true, LocalDate: "2026-10-15"}
+		if _, err := drivers.CreateException(ctx, owner, owner.DriverID, near, "exception-over-limit"); !errors.Is(err, driver.ErrExceptionLimit) {
+			t.Fatalf("CreateException() over limit error = %v, want %v", err, driver.ErrExceptionLimit)
+		}
+		if err := drivers.CreateVacationPreset(ctx, owner, owner.DriverID, "2026-10-15", false, "", "preset-over-limit"); !errors.Is(err, driver.ErrExceptionLimit) {
+			t.Fatalf("CreateVacationPreset() over limit error = %v, want %v", err, driver.ErrExceptionLimit)
+		}
+		far := driver.ExceptionInput{Type: driver.ExceptionSick, IsAllDay: true, LocalDate: "2027-06-01"}
+		if _, err := drivers.CreateException(ctx, owner, owner.DriverID, far, "exception-far"); err != nil {
+			t.Fatalf("CreateException() outside window error = %v", err)
+		}
+		var existingID string
+		if err := pool.QueryRow(ctx, "SELECT id::text FROM availability_exceptions WHERE driver_id=$1::uuid AND NOT all_day ORDER BY starts_at LIMIT 1", owner.DriverID).Scan(&existingID); err != nil {
+			t.Fatal(err)
+		}
+		moved := driver.ExceptionInput{Type: driver.ExceptionUnavailable, StartsAt: time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC), EndsAt: time.Date(2026, 9, 2, 13, 0, 0, 0, time.UTC)}
+		if err := drivers.UpdateException(ctx, owner, owner.DriverID, existingID, 1, moved, "exception-update-within-limit"); err != nil {
+			t.Fatalf("UpdateException() of an existing exception error = %v", err)
+		}
+	})
+
 	t.Run("stale rule edit and private exception note stay protected", func(t *testing.T) {
 		ctx, pool, drivers, _, _, owner, _ := operationsFixture(t)
 		ruleID, err := drivers.CreateRule(ctx, owner, owner.DriverID, standardRule(2, "08:00", "17:00"), "rule-create")
