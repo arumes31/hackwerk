@@ -143,7 +143,7 @@ jobs:
           - name: voice
             pattern: ^TestTask09VoiceReviewMobileJourney$
           - name: routes
-            pattern: ^TestTask12RoutePlannerDesktopAndDriverMobileJourney$
+            pattern: ^Test(Task12RoutePlannerDesktopAndDriverMobileJourney|RouteDatePresetsUseViennaCalendar)$
           - name: all-pages
             pattern: ^TestTask13AllMainPagesDesktopAndMobileUsability$
     services:
