@@ -512,9 +512,9 @@ func (service *Service) ConfirmTOTPEnrollment(ctx context.Context, actor Actor, 
 	if err := service.security.EnableTOTP(ctx, actor, sessionID, pendingSince, hashes, requestID); err != nil {
 		return nil, err
 	}
-	if err := service.store.ClearLoginAttempts(ctx, attemptKey); err != nil {
-		return nil, fmt.Errorf("auth: clearing TOTP enrollment attempts: %w", err)
-	}
+	// Best effort: TOTP is already enabled and the plaintext recovery codes
+	// exist only here. The budget expires on its own after totpEnrollmentWindow.
+	_ = service.store.ClearLoginAttempts(ctx, attemptKey)
 	return codes, nil
 }
 

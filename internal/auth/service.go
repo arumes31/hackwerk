@@ -272,9 +272,9 @@ func (service *Service) LoginWithDevice(ctx context.Context, username string, pa
 	if err := service.store.RotateLogin(ctx, user, newSession, replacementHash, rateKey, requestID); err != nil {
 		return SessionTokens{}, fmt.Errorf("auth: rotating login: %w", err)
 	}
-	if err := service.store.ClearLoginAttempts(ctx, accountKey); err != nil {
-		return SessionTokens{}, fmt.Errorf("auth: clearing login attempts: %w", err)
-	}
+	// Best effort: the session is already committed and must reach the user.
+	// The account budget expires on its own after loginAttemptWindow.
+	_ = service.store.ClearLoginAttempts(ctx, accountKey)
 	return SessionTokens{SessionToken: sessionToken, CSRFToken: csrfToken, Actor: actorFromUser(user)}, nil
 }
 

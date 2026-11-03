@@ -102,31 +102,56 @@ func main() {
 	if len(os.Args) > 1 {
 		dir = os.Args[1]
 	}
-	for _, name := range []string{"maplibre-gl-csp.js", "maplibre-gl-csp-worker.js"} {
-		if err := apply(filepath.Join(dir, name), patches[name]); err != nil {
+	// Patch every bundle in memory first, so a missing site in one bundle
+	// never leaves the other one written.
+	names := []string{"maplibre-gl-csp.js", "maplibre-gl-csp-worker.js"}
+	patched := make([]string, len(names))
+	for i, name := range names {
+		content, err := patchFile(filepath.Join(dir, name), patches[name])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		patched[i] = content
+	}
+	for i, name := range names {
+		//nolint:gosec // Paths are the fixed vendored bundle names; written assets stay world-readable.
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(patched[i]), 0o644); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 	}
 }
 
-//nolint:gosec // Paths are the fixed vendored bundle names; written assets stay world-readable.
-func apply(path string, list []patch) error {
+//nolint:gosec // Paths are the fixed vendored bundle names.
+func patchFile(path string, list []patch) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return "", err
 	}
-	content := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	return applyPatches(filepath.Base(path), strings.ReplaceAll(string(raw), "
+", "
+"), list)
+}
+
+// applyPatches replaces every patch site exactly once. A patch counts as
+// already applied only when its replacement is present once and no original
+// site remains outside it (the header replacement contains the original).
+func applyPatches(name, content string, list []patch) (string, error) {
 	for _, p := range list {
-		if strings.Count(content, p.new) == 1 {
-			fmt.Printf("%s: already applied: %s\n", filepath.Base(path), p.name)
+		applied := strings.Count(content, p.new)
+		remaining := strings.Count(content, p.old) - applied*strings.Count(p.new, p.old)
+		if applied == 1 && remaining == 0 {
+			fmt.Printf("%s: already applied: %s
+", name, p.name)
 			continue
 		}
-		if n := strings.Count(content, p.old); n != 1 {
-			return fmt.Errorf("%s: patch site for %q found %d times, want exactly 1", path, p.name, n)
+		if applied != 0 || remaining != 1 {
+			return "", fmt.Errorf("%s: patch site for %q found %d times (%d already patched), want exactly 1", name, p.name, remaining, applied)
 		}
 		content = strings.Replace(content, p.old, p.new, 1)
-		fmt.Printf("%s: applied: %s\n", filepath.Base(path), p.name)
+		fmt.Printf("%s: applied: %s
+", name, p.name)
 	}
-	return os.WriteFile(path, []byte(content), 0o644)
+	return content, nil
 }
