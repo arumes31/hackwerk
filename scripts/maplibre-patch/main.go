@@ -129,9 +129,7 @@ func patchFile(path string, list []patch) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return applyPatches(filepath.Base(path), strings.ReplaceAll(string(raw), "
-", "
-"), list)
+	return applyPatches(filepath.Base(path), strings.ReplaceAll(string(raw), "\r\n", "\n"), list)
 }
 
 // applyPatches replaces every patch site exactly once. A patch counts as
@@ -142,16 +140,14 @@ func applyPatches(name, content string, list []patch) (string, error) {
 		applied := strings.Count(content, p.new)
 		remaining := strings.Count(content, p.old) - applied*strings.Count(p.new, p.old)
 		if applied == 1 && remaining == 0 {
-			fmt.Printf("%s: already applied: %s
-", name, p.name)
+			fmt.Printf("%s: already applied: %s\n", name, p.name)
 			continue
 		}
 		if applied != 0 || remaining != 1 {
 			return "", fmt.Errorf("%s: patch site for %q found %d times (%d already patched), want exactly 1", name, p.name, remaining, applied)
 		}
 		content = strings.Replace(content, p.old, p.new, 1)
-		fmt.Printf("%s: applied: %s
-", name, p.name)
+		fmt.Printf("%s: applied: %s\n", name, p.name)
 	}
 	return content, nil
 }
