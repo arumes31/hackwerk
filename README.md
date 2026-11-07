@@ -56,6 +56,7 @@ hackwerk seed-dev
 hackwerk admin --help
 hackwerk healthcheck
 hackwerk healthcheck worker
+hackwerk config-check [serve|worker]
 hackwerk schema-version
 hackwerk version
 ```
@@ -65,6 +66,7 @@ Nach der ersten Migration erzeugt `hackwerk seed-dev` in `development` sechs lok
 ```bash
 printf '%s\n' 'ein-langes-temporäres-passwort' | hackwerk admin create --username neu --display-name 'Neuer Fahrer' --role driver --driver
 hackwerk admin reset-password --username neu --password-file /sicherer/pfad/passwort.txt
+hackwerk admin disable-user --username alt
 hackwerk admin list
 ```
 
@@ -83,34 +85,28 @@ hackwerk admin list
 - Ein bereits initialisiertes lokales Volume behält seine Rollen. Bei bewusst gewünschtem, vollständigem Entwicklungsreset kann das Compose-Volume nach vorheriger Sicherung entfernt werden.
 - Produktionskonfigurationen benötigen HTTPS und eine sichere Datenbankverbindung; unsichere Entwicklungsdefaults werden bei `APP_ENV=production` abgewiesen.
 
-## Was dieses Paket enthält
+## Repository-Struktur
 
-- ein kompaktes, dauerhaftes `AGENTS.md` für Codex;
-- eine `PLANS.md`-Vorlage für längere Ausführungspläne;
-- drei repository-lokale Codex Skills unter `.agents/skills/`;
-- normalisierte Produkt-, Architektur-, Sicherheits- und UX-Spezifikationen;
-- elf sequenzielle Implementierungsaufträge;
-- vier unabhängige Review-Aufträge;
-- Gherkin-Akzeptanzszenarien;
-- Referenzdateien für Repository-Struktur, Umgebungsvariablen, Status und Rechte;
-- einen One-Shot-Masterprompt als Alternative zur empfohlenen schrittweisen Umsetzung.
-
-## Empfohlene Arbeitsweise mit Codex
-
-1. Paket in das leere Repository entpacken und committen.
-2. Codex im Repository-Root starten, damit `AGENTS.md` und `.agents/skills` erkannt werden.
-3. Für jeden Auftrag einen eigenen Branch oder Git-Worktree und einen eigenen Codex-Thread verwenden.
-4. Zuerst ausführen:
-
-   ```text
-   $hackplan-implement Implementiere codex/tasks/00-repository-bootstrap.md vollständig.
-   ```
-
-5. Danach die Aufgaben `01` bis `11` in Reihenfolge abarbeiten.
-6. Nach größeren Meilensteinen die Review-Aufträge `90` bis `93` in separaten Threads ausführen.
-7. Jede Codex-Ausgabe anhand des Diffs, der Tests und der Akzeptanzkriterien prüfen, bevor der nächste Auftrag beginnt.
-
-Die Tasks sind bewusst als vertikale, reviewbare Scheiben geschrieben. Der One-Shot-Prompt unter `codex/MASTER_PROMPT.md` ist für einen langen autonomen Lauf gedacht, ist aber weniger gut kontrollierbar als einzelne Aufgaben.
+```text
+cmd/hackwerk/          Haupteinstiegspunkt für CLI, Server, Worker und Migrationen
+internal/
+  adapters/postgres/   PostgreSQL-Stores (pgx/v5) und Datenbank-Adapter
+  app/                 Applikations- und Business-Logik
+  cli/                 Kommandozeilen-Befehle und Admin-Werkzeuge
+  config/              Typisierte Konfiguration und Validierung
+  logging/             Strukturiertes Logging
+  notification/        Benachrichtigungen (SMTP, SMS-Webhook / Sendberry)
+  planning/            Planungs- und Routenoptimierungslogik
+  voice/               Spracheingabe-Verarbeitung und Entwurfsextraktion
+  web/                 HTTP-Routing (chi/v5), Middleware und Handler
+web/
+  static/              Statisches CSS, JavaScript und Assets (Node-frei)
+  templates/           Typsichere HTML-Templates (a-h/templ)
+db/                    SQL-Schemata und sqlc-Konfiguration
+scripts/               Betriebs- und Automationsskripte
+tests/                 E2E- (chromedp) und Integrationstests
+reference/             Namensideen, Schemata und Referenztabellen
+```
 
 ## Produktumfang der Zielversion 1.0
 
@@ -141,82 +137,10 @@ Die Zielversion umfasst:
 - **Die Datenstruktur ist nicht auf eine einzelne Maschine fest verdrahtet.** Ressourcen und Zuweisungen sind generisch modelliert.
 - **ICS ist in Version 1.0 eine einseitige Veröffentlichung.** Direkte bidirektionale Google-/Microsoft-Synchronisierung ist nicht Teil des Kernumfangs.
 
-## Meilensteine
+## Architektur und Sicherheit
 
-| Meilenstein | Tasks | Ergebnis |
-|---|---:|---|
-| M0 – Fundament | 00–01 | Repository, Docker, Datenbank, Authentifizierung, Rollen |
-| M1 – Kerndaten | 02–03 | Kunden, Aufträge, Warteliste, Ressourcen, Fahrer-Verfügbarkeit |
-| M2 – Planungskern | 04–05 | Kalender, Konflikte, Fixierung, Benachrichtigung, Kundenantwort |
-| M3 – Bedienung | 06–07 | Dashboard, responsive UX, ICS-Feeds |
-| M4 – Assistenz | 08–09 | Vorschlagslogik, Routenbewertung, Spracheingabe |
-| M5 – Betrieb | 10–11 | Security Hardening, Monitoring, Backup, E2E, Release Candidate |
-
-
-## Auftragslandkarte
-
-| Datei | Ergebnis |
-|---|---|
-| `00-repository-bootstrap.md` | Go-/Docker-/PostgreSQL-Fundament, CI, Healthchecks |
-| `01-foundation-auth-rbac.md` | Login, Sessions, Benutzer/Fahrer, RBAC, Audit |
-| `02-customers-orders-waitlist.md` | Kundenakten, Aufträge, Notizen, Warteliste |
-| `03-resources-drivers-availability.md` | generische Maschinen/Transportressourcen, Verfügbarkeit |
-| `04-calendar-scheduling.md` | Tag/Woche, Drag + mobile Alternative, DB-Konfliktschutz |
-| `05-notifications-confirmation.md` | Outbox, externes SMTP, SMS-Webhook, Kundenbestätigung |
-| `06-dashboard-mobile.md` | Tagesdashboard und durchgängige responsive UX |
-| `07-ics-calendar-feed.md` | ICS-Export und private read-only Feeds |
-| `08-planning-suggestions-routing.md` | erklärbare Top-3-Planung und Routenbewertung |
-| `09-voice-intake.md` | kontrollierter Sprachentwurf mit Review |
-| `10-hardening-observability-backup.md` | Security, Metrics, Backup/Restore, Produktionsbetrieb |
-| `11-e2e-release-candidate.md` | vollständige Abnahme und Release Candidate |
-| `90`–`93` | unabhängige Security-, Concurrency-, UX- und Betriebsreviews |
-
-## Direkt verwendbare Startprompts
-
-Schrittweise, empfohlen:
-
-```text
-$hackplan-implement Implementiere codex/tasks/00-repository-bootstrap.md vollständig.
-```
-
-Gesamter Build in einem langen Lauf:
-
-```text
-Lies codex/MASTER_PROMPT.md und führe den darin beschriebenen Auftrag vollständig aus.
-```
-
-Die detaillierten Standardentscheidungen stehen in `docs/13-decisions-and-assumptions.md`. Produktideen nach V1 stehen in `reference/product-brainstorm.md` und `docs/16-backlog-and-future-ideas.md`.
-
-## Voraussetzungen
-
-- Docker Engine mit Docker Compose;
-- Git;
-- für lokale Entwicklung optional Go, wenn nicht ausschließlich im Dev-Container gearbeitet wird; Node und npm werden nicht verwendet;
-- Codex CLI, IDE-Erweiterung oder Codex in der Desktop-App.
-
-## Verzeichnisübersicht
-
-```text
-AGENTS.md                         Dauerhafte Projektregeln für Codex
-PLANS.md                          Vorlage für lange Ausführungspläne
-.agents/skills/                   Repository-lokale Codex Skills
-codex/MASTER_PROMPT.md            Gesamter Build in einem Auftrag
-codex/tasks/                      Sequenzielle Implementierungs- und Review-Aufträge
-docs/                             Produkt- und Technik-Spezifikationen
-acceptance/                       Gherkin-Akzeptanzszenarien
-reference/                        Strukturen, Konfigurationen und Tabellen
-```
-
-## Definition von „fertig“
-
-Eine Aufgabe ist erst abgeschlossen, wenn:
-
-- Implementierung und Migrationen vollständig sind;
-- relevante Unit-, Integrations- und Browsertests vorhanden sind;
-- `make check` erfolgreich läuft;
-- Dokumentation und OpenAPI-Vertrag aktualisiert wurden;
-- keine ungeprüften TODO-Platzhalter im vereinbarten Scope verbleiben;
-- Codex den Diff selbst gegen die Akzeptanzkriterien geprüft hat;
-- Sicherheits- und Berechtigungsregeln serverseitig getestet sind.
-
-Die vollständige Definition steht in `docs/15-definition-of-done.md`.
+- **Typsichere Templates & Komponenten**: Alle HTML-Seiten werden mit `a-h/templ` zur Compile-Zeit generiert; statische Assets (CSS, JS) sind direkt im Binary eingebettet (kein Node/npm erforderlich).
+- **Sichere Session- und Cookie-Verwaltung**: `__Host-` und `__Secure-` Cookies mit `SameSite=Lax`, CSRF-Schutz und servergespeicherten Sessions in PostgreSQL.
+- **Transaktionale Outbox**: E-Mail- und SMS-Benachrichtigungen werden atomar über eine relationale Outbox gespeichert und asynchron vom Worker verarbeitet.
+- **Resiliente Auditierung**: Alle administrativen Aktionen und Statusänderungen werden unveränderlich auditiert.
+- **Healthchecks & Monitoring**: Integrierte Liveness- (`/health/live`), Readiness- (`/health/ready`) und Worker-Healthchecks (`hackwerk healthcheck worker`).
