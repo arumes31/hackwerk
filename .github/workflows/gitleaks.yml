@@ -1,12 +1,13 @@
 name: Secret scanning
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: secret-scan-${{ github.ref }}
+  group: secret-scan-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   scan:
