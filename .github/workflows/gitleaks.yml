@@ -8,7 +8,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: secret-scan-${{ github.event.pull_request.number || github.ref }}
+  # one group per push run: a later push must never replace a pending push scan
+  group: secret-scan-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   scan:
