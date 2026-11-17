@@ -32,7 +32,7 @@ tools_image_id=$(docker image inspect --format '{{.Id}}' "$tools_image")
 network_id=$(docker network create --label "hackwerk.audit=$audit_label" "$network")
 postgres_id=$(docker run -d --name "$postgres" --label "hackwerk.audit=$audit_label" --network "$network" \
   -e POSTGRES_DB=postgres -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=restore-test-only \
-  postgres:18.6-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5)
+  postgres:18.6-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395)
 
 attempt=0
 until docker exec "$postgres" pg_isready -U postgres -d postgres >/dev/null 2>&1; do
