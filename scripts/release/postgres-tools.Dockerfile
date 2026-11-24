@@ -1,6 +1,6 @@
 ARG HACKWERK_RELEASE_IMAGE=hackwerk-scan:local
 FROM ${HACKWERK_RELEASE_IMAGE} AS hackwerk
-FROM postgres:18.6-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
+FROM postgres:18.7-alpine@sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71
 COPY --from=hackwerk /hackwerk /hackwerk
 COPY scripts/ops /ops
 COPY scripts/release/restore-smoke-runner.sh /restore-smoke-runner.sh
