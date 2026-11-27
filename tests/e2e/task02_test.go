@@ -64,8 +64,9 @@ func TestTask02BrowserJourney(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	browserPath := browserExecutable(t)
+	var startupOutput chromeStartupOutput
 	options := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.ExecPath(browserPath), chromedp.Headless, chromedp.DisableGPU,
+		chromedp.ExecPath(browserPath), chromedp.CombinedOutput(&startupOutput), chromedp.Headless, chromedp.DisableGPU,
 		chromedp.NoSandbox, chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck,
 		chromedp.UserDataDir(browserProfileDir(t)), chromedp.WindowSize(1280, 900),
 	)
@@ -93,6 +94,9 @@ func TestTask02BrowserJourney(t *testing.T) {
 		Today string `json:"today"`
 		Start string `json:"start"`
 		End   string `json:"end"`
+	}
+	if err := startChrome(browserContext, browserPath, &startupOutput); err != nil {
+		t.Fatal(err)
 	}
 	if err := chromedp.Run(browserContext,
 		chromedp.Navigate(server.URL+"/"),

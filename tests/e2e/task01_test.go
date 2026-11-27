@@ -452,8 +452,10 @@ func TestTask01ForcedPasswordChangeBrowserJourney(t *testing.T) {
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 
+	browserPath := browserExecutable(t)
+	var startupOutput chromeStartupOutput
 	options := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.ExecPath(browserExecutable(t)), chromedp.Headless, chromedp.DisableGPU,
+		chromedp.ExecPath(browserPath), chromedp.CombinedOutput(&startupOutput), chromedp.Headless, chromedp.DisableGPU,
 		chromedp.NoSandbox, chromedp.NoFirstRun, chromedp.NoDefaultBrowserCheck,
 		chromedp.UserDataDir(browserProfileDir(t)), chromedp.WindowSize(390, 844),
 	)
@@ -468,6 +470,9 @@ func TestTask01ForcedPasswordChangeBrowserJourney(t *testing.T) {
 	newPassword := randomE2EPassword(t)
 	if newPassword == currentPassword {
 		t.Fatal("generated passwords unexpectedly equal")
+	}
+	if err := startChrome(browserContext, browserPath, &startupOutput); err != nil {
+		t.Fatal(err)
 	}
 	if err := chromedp.Run(browserContext,
 		chromedp.EmulateViewport(390, 844),
